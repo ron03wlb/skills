@@ -1,6 +1,6 @@
 # Matt-first Issue Delivery Workflow Spec
 
-**Status:** Core seven-skill Ron flow and Canonical Wiki v1 are locally implemented. `/wiki`, shared contracts, reconciliation-ledger enforcement, bounded clean-path delegation, and the exact pre-implementation baseline commit have focused and temporary-repository evidence. Codex-native packaging review passed; Claude CLI is not a validation dependency. The implementation is not installed, staged, committed, pushed, or published.
+**Status:** The eight-skill Ron flow and Canonical Wiki v1 implementation is locally committed. The local commit containing this status is the bounded Closeout authority repair proof; before that commit exists, the repair is only an authorized, locally verified candidate. Codex-native packaging review passed for the implementation; Claude CLI is not a validation dependency. Nothing is installed, pushed, or published.
 
 ## Purpose
 
@@ -329,7 +329,7 @@ delegation:
   clean_path: denied | bounded
   derive_exact_grants:
     - <named-local-capability>
-  target_refresh: denied | same-branch-fast-forward-revalidate
+  target_refresh: denied
   read_only_subagents: allowed_when_independent
   writable_subagent: one_worker_with_exclusive_worktree
   nested_clean_path: denied
@@ -361,10 +361,11 @@ Direct skill invocation counts as approval when either its exact scope is alread
 - `close_leaf` is a separate capability that must be directly named or pre-recorded;
 - a Lane batch first presents one exact Grant preview per Leaf, then one human approval may record all named Grants;
 - direct `/wiki` invocation may authorize exactly one clean bounded initialization or sync whose exact Preview or ledger, paths, validators, and exclusions are derived before external mutation;
-- when that operation needs a new Issue, the exact ceiling is first written as a mode-`0600`, hash-verified pre-Issue delegation under repository-local Git metadata; only its one named publish capability may create/reuse the Issue, and no Lane starts until the Change Spec and execution contract both read back and a derived Issue Authorization Record binds them plus the local delegation hash;
-- Parent or Standalone complete closeout creates one exact Closeout Preview containing Lane SHA, target SHA, Wiki ledger and write sets, verification commands, capabilities, exclusions, and the bounded candidate-creation/repair envelope; a valid clean-path delegation derives its exact Grant, otherwise the workflow asks only for compact human authorization;
+- when that operation needs a new Issue, its human root ceiling is first written as a mode-`0600`, hash-verified pre-Issue delegation under repository-local Git metadata; only its one named immediate publish capability may create/reuse the Issue, and no Lane starts until the Change Spec and execution contract both read back and a sibling derived Issue Authorization Record binds them plus the root delegation read-back hash;
+- Parent or Standalone complete closeout creates one exact Closeout Preview containing Lane SHA, target SHA, Wiki ledger and write sets, staging artifact path, verification commands, capabilities, exclusions, and the bounded candidate-creation/repair envelope; the Parent binds its ordered child-contract aggregate because it has no executable contract. A valid human root delegation derives the sibling exact Closeout Grant, otherwise the workflow asks only for compact human authorization;
 - the Grant binds those exact inputs and permitted mutations, while review and completion evidence bind the resulting `integration_candidate_sha`;
-- a changed contract hash, target SHA, write set, code scope, or new Repair Leaf invalidates the exact Grant. The workflow may rebuild and derive a replacement only when the original clean-path delegation still covers every input and revalidation passes; otherwise it stops for human decision. A candidate SHA changed only by an approved Wiki repair wave invalidates prior review evidence, not the Grant.
+- every derived Grant is non-delegating. Issue and Closeout Grants may share one human root, but a derived Issue Grant never derives the Closeout Grant;
+- a changed target SHA invalidates the human root, Preview, and every derived Grant, and requires a new human decision/root. A changed contract hash, write set, code scope, or new Repair Leaf invalidates the exact Grant; only while the target identity is unchanged may the workflow rebuild and derive a replacement when every updated input remains inside all applicable current ceilings and revalidation passes. Standalone closeout must satisfy the human root, current execution contract, and Issue Grant ceilings; replacement records must first be authorized, published, and read back. Otherwise the workflow stops for human decision. A candidate SHA changed only by an approved Wiki repair wave invalidates prior review evidence, not the Grant.
 
 ### Authorization is not readiness
 
@@ -406,7 +407,7 @@ The `execute` capability never closes the Issue by itself. It does not include t
 
 ### Parent Closeout Grant
 
-After the final Leaf, the workflow creates an exact Closeout Preview from aggregate evidence, hashes, target, and baseline state. A valid bounded clean-path delegation may derive the exact Parent Closeout Grant; without one, the workflow stops for compact human authorization. One Parent Closeout Grant may include:
+After the final Leaf, the workflow creates an exact Closeout Preview from aggregate evidence, ordered child-contract hash, target, and baseline state. A Parent has no executable contract, so its Preview records `contract: null`. A valid human root delegation may derive the exact sibling Parent Closeout Grant; without one, the workflow stops for compact human authorization. One Parent Closeout Grant may include:
 
 - the exact Closeout Preview hash, Lane SHA, and target SHA;
 - required Wiki baseline reconciliation;
@@ -543,8 +544,8 @@ Issue closure is allowed only after final Wiki reconciliation and integration re
 1. verify every Leaf is closed with `implemented_on_lane` evidence and present in the Lane history;
 2. build a Wiki reconciliation ledger from the prior Wiki, current Change Spec dispositions, code and test evidence, and reviewer judgement; stop on `deviation` or `unverified`;
 3. derive `wiki_semantic_write_set` and `wiki_support_write_set` from the fully `aligned` ledger;
-4. create one Closeout Preview containing the Lane SHA, target SHA, ledger hash, both exact Wiki sets, verification commands, capabilities, exclusions, and bounded repair envelope; derive and read back its exact Grant only when a valid clean-path delegation covers every input, otherwise stop for compact human authorization;
-5. synchronize the latest target into the Lane; a conflict stops, while an allowed same-branch fast-forward refresh triggers complete recalculation and revalidation;
+4. create one Closeout Preview containing the Lane SHA, target SHA, ledger hash, both exact Wiki sets, staging artifact path, verification commands, capabilities, exclusions, and bounded repair envelope; Standalone binds its executable contract and Issue Grant, while Parent binds `contract: null`, the ordered child-contract hash, and aggregate evidence; derive and read back its exact sibling Grant only when the human root covers every input, otherwise stop for compact human authorization;
+5. verify that the target still matches the Preview identity; any drift invalidates the human root, Preview, and derived Grant, then stops for a new human decision;
 6. update only approved pages according to the ledger, or record an explicit no-semantic-change reconciliation;
 7. verify the page contract, source-locator resolution, claim mappings, internal links, navigation, configured Wiki build, and tracked-tree cleanliness;
 8. confirm no unresolved `pending-baseline-update`, stale citation, or unapproved Spec/Wiki conflict remains;
@@ -555,7 +556,7 @@ Issue closure is allowed only after final Wiki reconciliation and integration re
 13. verify target HEAD identity, tests, Wiki build, citations, and absence of task intermediates;
 14. close the Issue and remove the worktree only after target verification.
 
-If the target moves after the Closeout Preview, the exact Grant is invalid. A valid clean-path delegation may authorize a same-branch, fast-forward-only, conflict-free refresh followed by a rebuilt Preview, derived Grant, and complete revalidation; otherwise Ron stops for human decision. A merge conflict always stops. Rebase is never automatic because it would rewrite completed Leaf commit identities.
+If the target moves after the human root or Closeout Preview, the human root, Preview, and every derived Grant are invalid. Ron stops for a new human decision and must rebuild the root and downstream records from the new fixed target identity. A merge conflict always stops. Rebase is never automatic because it would rewrite completed Leaf commit identities.
 
 The Wiki stores the reliable current business baseline. The Issue tracker retains historical Change Specs and decisions. Neither substitutes for the other.
 
@@ -722,7 +723,7 @@ Stop and preserve recoverable state when:
 6. Focused and full review profiles preserve separate logical axes, and every applicable reviewer receives the same fixed candidate SHA.
 7. A repair creates a new candidate SHA and invalidates prior review evidence.
 8. A reviewer disagreement remains unresolved until the Coordinator checks evidence; two approvals do not outvote one supported defect.
-9. Parent closeout creates one exact Closeout Preview; a valid bounded clean-path delegation derives and records its exact Grant without another prompt, while a missing or exceeded delegation stops for compact human authorization.
+9. Parent closeout creates one exact Closeout Preview with no executable contract and with ordered child-contract plus aggregate-evidence hashes; a valid human root delegation derives and records its non-delegating sibling exact Grant without another prompt, while a missing or exceeded root stops for compact human authorization.
 10. A target-verification failure leaves the Parent open and the Lane worktree recoverable.
 11. Separately approved Standalone execution and closeout capabilities can complete through local target integration without a second prompt when every binding remains valid.
 12. `explain-decision` receives only the current decision packet and returns a bounded card without changing durable state.
@@ -740,7 +741,7 @@ Stop and preserve recoverable state when:
 24. An unexpected Wiki semantic page or support file invalidates the Closeout Grant before target advancement.
 25. GitHub comment edits, missing comment IDs, or payload-hash mismatch invalidate dependent authorization.
 26. The complete Wiki flow works with human- or agent-authored Markdown when no executable Wiki engine is installed.
-27. Direct `/wiki` invocation may publish exactly one clean bounded initialization or repair Change Spec and complete the local flow; any finding or changed scope stops for human decision.
+27. Direct `/wiki` invocation may publish exactly one clean bounded initialization or repair Change Spec and complete the local flow; any finding, ceiling expansion, or new capability stops for human decision. An exact input change inside every applicable current ceiling invalidates stale Preview/Grant evidence and requires complete revalidation, but not a new human decision.
 28. Wiki reconciliation requires an `aligned` ledger before mutation; `deviation` or `unverified` blocks closeout.
 29. Deterministic CI proves only mechanical validity; an independent read-only Wiki reviewer proves semantic correctness.
 30. Clean human-facing results omit technical identities by default while durable evidence retains them.
@@ -750,6 +751,10 @@ Stop and preserve recoverable state when:
 34. `/wiki` and `to-spec-ron` use byte-identical Change Spec construction and verification for identical input.
 35. Unsupported or ambiguous source resolvers stop with `not-verifiable` instead of weakening the locator contract.
 36. A Bootstrap or Wiki-repair derived Grant cannot create a Lane until both its Change Spec and execution contract have stable IDs, verified bytes, and matching hashes.
+37. Derived Issue and Closeout Grants are non-delegating siblings that each bind the same human root read-back hash.
+38. Parent closeout rejects any executable-contract identity and instead requires the ordered child-contract plus aggregate-evidence hashes.
+39. Task staging outside the human root artifact ceiling invalidates the Closeout Grant.
+40. A downstream Preview or Grant may add exclusions but may not remove any human-root exclusion.
 
 ## Core implementation record
 
@@ -766,17 +771,17 @@ The previously authorized core implementation scope was:
 - adapt `docs/agents/codex-subagent-protocol.md` as the shared runtime policy;
 - validate manifests and forward-test the seven skills against a temporary repository, fake durable Issue tracker, and fake Wiki engine;
 - leave installation pending until separately authorized; the approved installation path is the existing maintainer symlink workflow after checking exact destination conflicts;
-- leave release-version bumping, commit, push, marketplace publication, and a separate Ron plugin identity outside this implementation.
+- at that point, leave release-version bumping, commit, push, marketplace publication, and a separate Ron plugin identity pending later authorization.
 
 No existing Matt skill should be behaviorally rewritten merely to hide these extensions under an upstream name.
 
-The Canonical Wiki v1 extension, `/wiki`, shared Change Spec and execution-contract builders, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. The new focused and temporary-repository forward tests now prove the local implementation contracts. Final implementation commit, installation, push, release bump, marketplace publication, and deployment remain outside this authorization.
+The Canonical Wiki v1 extension, `/wiki`, shared Change Spec and execution-contract builders, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. The final implementation commit was separately authorized and exists locally. The local commit containing this statement is the bounded repair proof; before that commit exists, the repair is only an authorized, locally verified candidate. Installation, push, release bump, marketplace publication, and deployment remain excluded.
 
 The repository currently reports `.claude-plugin/plugin.json` version `1.2.0` and `package.json` version `1.1.0`. This pre-existing drift does not block local symlink implementation or forward tests, but it must be resolved under separate release authorization before any managed plugin publication.
 
 ## Local validation record
 
-- Promoted-skill parity passed across 29 skill directories, `.claude-plugin/plugin.json`, top-level and bucket READMEs, docs pages, and invocation metadata.
+- Promoted-skill parity passed across 30 skill directories, `.claude-plugin/plugin.json`, top-level and bucket READMEs, docs pages, and invocation metadata.
 - Historical provider-native validation covered the earlier seven-skill manifest; it does not validate the current `/wiki` manifest change.
 - Ron frontmatter, `agents/openai.yaml`, default prompts, docs links, final newlines, trailing whitespace, and `git diff --check` passed.
 - A disposable `/private/tmp` Git repository, fake durable tracker, and fake Wiki verified comment hashing, real target/Lane SHAs, target drift, stale Grant rejection, first/non-first Leaf readiness, and exact Wiki sets.
@@ -785,7 +790,7 @@ The repository currently reports `.claude-plugin/plugin.json` version `1.2.0` an
 
 Canonical Wiki v1 local validation on 2026-07-26:
 
-- 26 focused, contract, CLI, Git zero-mutation, fake-tracker Bootstrap, and documentation-structure forward tests passed.
+- 29 focused, contract, CLI, Git zero-mutation, fake-tracker Bootstrap/Closeout, and documentation-structure forward tests passed.
 - Shared-core syntax, promoted-skill parity, current docs routing, invocation metadata, and `git diff --check` passed.
 - The system quick validator cannot validate this repository's user-invoked frontmatter contract because it does not accept the project-required `disable-model-invocation` key; the project contract test verifies that key together with `policy.allow_implicit_invocation: false`.
 - The current manifest uses the repository's deterministic packaging contract test plus scoped read-only Codex CLI review; no Claude CLI validation is required.

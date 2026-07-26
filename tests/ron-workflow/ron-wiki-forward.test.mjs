@@ -17,7 +17,6 @@ import {
   buildChangeSpecEnvelope,
   buildExecutionContractEnvelope,
   createEnvelope,
-  deriveIssueGrant,
   extractWorkflowConfig,
   hashCanonicalJson,
   resolveSourceLocator,
@@ -313,17 +312,35 @@ test("one fake-tracker Bootstrap flow advances only a complete reviewed baseline
     preview: { kind: "bootstrap", id: "bootstrap-1", payload_sha256: previewHash },
     repository: "ron/example",
     target: { branch: "main", identity: targetIdentity },
+    target_refresh: "denied",
     scope: {
       code_paths: [],
-      artifact_paths: [],
+      artifact_paths: [".worktrees/bootstrap-1/.wiki-staging"],
       wiki_paths: ["wiki/index.md", "wiki/orders.md"],
       config_paths: ["docs/agents/ron-workflow.md"],
     },
     grants: ["publish_bootstrap_spec"],
+    downstream_capabilities: ["execute", "close_standalone"],
     validators: ["ron-wiki page-validate", "ron-wiki source-resolve"],
+    review_axes: ["standards", "spec", "wiki"],
     excludes: preview.excludes,
   };
   validatePreIssueDelegation(delegation);
+  const rootDelegationProcess = run(
+    "delegation-envelope-create",
+    { delegation },
+    { cwd: root },
+  );
+  assert.equal(
+    rootDelegationProcess.status,
+    0,
+    rootDelegationProcess.stdout,
+  );
+  const rootDelegationEnvelope = JSON.parse(rootDelegationProcess.stdout);
+  const rootDelegationHash = verifyEnvelope(
+    rootDelegationEnvelope.envelope,
+    "workflow-clean-path-delegation:v1",
+  ).payload_sha256;
 
   const tracker = new FakeTracker();
   const issue = tracker.createIssue("ron/example", "Bootstrap Canonical Wiki");
@@ -382,6 +399,7 @@ test("one fake-tracker Bootstrap flow advances only a complete reviewed baseline
     lane_predecessor: null,
     blocked_by: [],
     owned_paths: [
+      ".worktrees/bootstrap-1/.wiki-staging",
       "wiki/index.md",
       "wiki/orders.md",
       "docs/agents/ron-workflow.md",
@@ -407,56 +425,62 @@ test("one fake-tracker Bootstrap flow advances only a complete reviewed baseline
     contract.payload_sha256,
   );
 
-  const grant = deriveIssueGrant({
-    delegation,
-    record_id: "grant-1",
-    issue,
-    spec: {
-      id: "spec-1",
-      comment_id: specComment,
-      payload_sha256: spec.payload_sha256,
-      preview_id: "bootstrap-1",
-      preview_payload_sha256: previewHash,
-    },
-    contract: {
-      id: "contract-1",
-      comment_id: contractComment,
-      payload_sha256: contract.payload_sha256,
+  const grantProcess = run(
+    "grant-derive",
+    {
+      delegation,
+      delegation_payload_sha256: rootDelegationHash,
+      record_id: "grant-1",
       issue,
-      issue_type: "standalone",
-      spec_id: "spec-1",
-      spec_comment_id: specComment,
-      spec_payload_sha256: spec.payload_sha256,
-      wiki_operation: "bootstrap",
-      wiki_baseline_requirement: "missing-with-bootstrap-preview",
-      wiki_preview_id: "bootstrap-1",
-      wiki_preview_payload_sha256: previewHash,
-      owned_paths_sha256: hashCanonicalJson([
+      spec: {
+        id: "spec-1",
+        comment_id: specComment,
+        payload_sha256: spec.payload_sha256,
+        preview_id: "bootstrap-1",
+        preview_payload_sha256: previewHash,
+      },
+      contract: {
+        id: "contract-1",
+        comment_id: contractComment,
+        payload_sha256: contract.payload_sha256,
+        issue,
+        issue_type: "standalone",
+        spec_id: "spec-1",
+        spec_comment_id: specComment,
+        spec_payload_sha256: spec.payload_sha256,
+        wiki_operation: "bootstrap",
+        wiki_baseline_requirement: "missing-with-bootstrap-preview",
+        wiki_preview_id: "bootstrap-1",
+        wiki_preview_payload_sha256: previewHash,
+        owned_paths_sha256: hashCanonicalJson([
+          ".worktrees/bootstrap-1/.wiki-staging",
+          "wiki/index.md",
+          "wiki/orders.md",
+          "docs/agents/ron-workflow.md",
+        ]),
+      },
+      coordinator: "codex",
+      derived_at: "2026-07-26T11:03:00.000Z",
+      capabilities: ["execute", "close_standalone"],
+      exact_paths: [
+        ".worktrees/bootstrap-1/.wiki-staging",
         "wiki/index.md",
         "wiki/orders.md",
         "docs/agents/ron-workflow.md",
-      ]),
+      ],
+      wiki_operation: "bootstrap",
+      wiki_baseline_requirement: "missing-with-bootstrap-preview",
     },
-    coordinator: "codex",
-    derived_at: "2026-07-26T11:03:00.000Z",
-    capabilities: ["execute", "close_standalone"],
-    exact_paths: [
-      "wiki/index.md",
-      "wiki/orders.md",
-      "docs/agents/ron-workflow.md",
-    ],
-    wiki_operation: "bootstrap",
-    wiki_baseline_requirement: "missing-with-bootstrap-preview",
-  });
-  const grantEnvelope = createEnvelope(
-    "workflow-authorization:v1",
-    JSON.stringify(grant),
+    { cwd: root },
   );
-  const grantComment = tracker.postComment(issue, grantEnvelope);
-  verifyEnvelope(
+  assert.equal(grantProcess.status, 0, grantProcess.stdout);
+  const grantResult = JSON.parse(grantProcess.stdout);
+  const grant = grantResult.grant;
+  const grantComment = tracker.postComment(issue, grantResult.envelope);
+  const grantPayloadHash = verifyEnvelope(
     tracker.readComment(issue, grantComment),
     "workflow-authorization:v1",
-  );
+  ).payload_sha256;
 
   git(root, ["switch", "-qc", "lane/wiki-bootstrap"]);
   mkdirSync(join(root, "wiki"), { recursive: true });
@@ -472,6 +496,119 @@ test("one fake-tracker Bootstrap flow advances only a complete reviewed baseline
   git(root, ["add", "wiki", "docs/agents/ron-workflow.md"]);
   git(root, ["commit", "-qm", "bootstrap canonical wiki"]);
   const candidate = git(root, ["rev-parse", "HEAD"]);
+
+  const closeoutPreviewProcess = run(
+    "closeout-preview-create",
+    {
+      preview_id: "closeout-preview-1",
+      created_at: "2026-07-26T11:04:00.000Z",
+      mode: "standalone",
+      issue,
+      spec: {
+        id: "spec-1",
+        comment_id: specComment,
+        payload_sha256: spec.payload_sha256,
+      },
+      contract: {
+        id: "contract-1",
+        comment_id: contractComment,
+        payload_sha256: contract.payload_sha256,
+      },
+      child_contracts_payload_sha256: null,
+      root_delegation: {
+        delegation_id: "delegation-1",
+        payload_sha256: rootDelegationHash,
+      },
+      source_authorization: {
+        record_id: "grant-1",
+        payload_sha256: grantPayloadHash,
+      },
+      evidence_payload_sha256: "8".repeat(64),
+      lane: { id: "bootstrap-1", identity: candidate },
+      target: { branch: "main", identity: targetIdentity },
+      wiki_impact: "semantic",
+      wiki_operation: "bootstrap",
+      wiki_baseline_requirement: "missing-with-bootstrap-preview",
+      wiki_preview_id: "bootstrap-1",
+      wiki_preview_payload_sha256: previewHash,
+      ledger: {
+        schema: "workflow-wiki-reconciliation-ledger:v1",
+        rows: [
+          {
+            id: "orders-baseline",
+            topic: "orders",
+            claim: "Current order behavior is documented.",
+            prior_state: "absent",
+            disposition: "add",
+            source_locators: [
+              {
+                path: "src/orders.js",
+                kind: "symbol",
+                value: "createOrder",
+              },
+            ],
+            conformance: "aligned",
+            wiki_action: "add",
+            wiki_path: "wiki/orders.md",
+          },
+        ],
+      },
+      semantic_write_set: ["wiki/orders.md"],
+      support_write_set: [
+        "wiki/index.md",
+        "docs/agents/ron-workflow.md",
+      ],
+      protocol: {
+        name: "ron-wiki-protocol",
+        commit: "a".repeat(40),
+        hash: "b".repeat(64),
+      },
+      staging_path: ".worktrees/bootstrap-1/.wiki-staging",
+      verification_commands: [
+        "ron-wiki page-validate",
+        "ron-wiki source-resolve",
+      ],
+      review_axes: ["standards", "spec", "wiki"],
+      capability: "close_standalone",
+      target_refresh: "denied",
+      repair: {
+        wiki_waves: 2,
+        wiki_authority: "human-grant-required",
+        code_findings: "repair-leaf-only",
+      },
+      excludes: preview.excludes,
+    },
+    { cwd: root },
+  );
+  assert.equal(
+    closeoutPreviewProcess.status,
+    0,
+    closeoutPreviewProcess.stdout,
+  );
+  const closeoutPreviewResult = JSON.parse(closeoutPreviewProcess.stdout);
+  const closeoutGrantProcess = run(
+    "closeout-grant-derive",
+    {
+      root_delegation: delegation,
+      root_delegation_payload_sha256: rootDelegationHash,
+      source_authorization: grant,
+      source_authorization_payload_sha256: grantPayloadHash,
+      preview: closeoutPreviewResult.preview,
+      preview_payload_sha256: closeoutPreviewResult.payload_sha256,
+      record_id: "closeout-grant-1",
+      coordinator: "codex",
+      derived_at: "2026-07-26T11:05:00.000Z",
+    },
+    { cwd: root },
+  );
+  assert.equal(
+    closeoutGrantProcess.status,
+    0,
+    closeoutGrantProcess.stdout,
+  );
+  const closeoutGrant = JSON.parse(closeoutGrantProcess.stdout).grant;
+  assert.deepEqual(closeoutGrant.grants, ["close_standalone"]);
+  assert.equal(closeoutGrant.binds.lane_sha, candidate);
 
   git(root, ["switch", "-q", "main"]);
   git(root, ["merge", "--ff-only", "-q", "lane/wiki-bootstrap"]);

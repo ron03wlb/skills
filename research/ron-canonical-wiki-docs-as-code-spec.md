@@ -1,6 +1,6 @@
 # Ron Canonical Wiki Docs-as-Code 完整方案
 
-狀態：本機實作、專用測試與 Codex-native packaging review 已完成；未安裝、未提交實作、未推送或發布
+狀態：本機實作已提交；只有包含本狀態列的本機 commit 存在時，bounded repair 才算已提交，否則仍是已授權且通過本機驗證的 candidate；未安裝、未推送或發布
 日期：2026-07-26
 
 ## 目標
@@ -161,7 +161,7 @@ wiki_preview_payload_sha256: <hash-or-null>
 
 ### Bounded clean-path delegation
 
-一份human-originated `workflow-authorization:v1` record，允許Coordinator在不再次打擾使用者的情況下，為clean且in-scope的本機流程推導並寫入exact downstream Grant。它至少綁定：
+一份human-originated root delegation，允許Coordinator在不再次打擾使用者的情況下，為clean且in-scope的本機流程推導並寫入exact downstream Grant。Direct `/wiki`在Issue建立前使用`workflow-clean-path-delegation:v1`；既有Parent可使用綁定該Issue的human-originated root Authorization Record。root至少綁定：
 
 - direct human invocation或exact Issue
 - current Bootstrap Preview或Change Spec lineage及hash
@@ -169,12 +169,12 @@ wiki_preview_payload_sha256: <hash-or-null>
 - exact code、artifact與Wiki scope ceilings
 - named local capabilities
 - required validators與review axes
-- target refresh僅限same-branch、fast-forward-only、conflict-free並重跑驗證
+- `target_refresh: denied`；starting target identity固定，任何drift使root、Preview與derived Grants全部失效
 - exclusions
 
 只有全部record／hash verified、exact paths皆為ceiling subset、mechanical與required independent reviews通過，且沒有finding、ambiguity、unverified claim、silent deletion或new capability時，Coordinator才可derive exact Grant。
 
-Derived Grant必須記錄human delegation source、Coordinator identity、exact Preview／evidence hashes、exact paths、capabilities與derivation time；不得再delegation或擴張ceiling。任一precondition失敗、scope change、new path、target conflict或missing capability都停止並回報problem與trade-off。
+Derived Grant必須記錄human root source的read-back payload hash、Coordinator identity、exact Preview／evidence hashes、exact paths、capabilities與derivation time；不得再delegation或擴張ceiling。Issue Grant與Closeout Grant只能是同一human root的non-delegating siblings，不能把derived Issue Grant當成下一層delegation。Target drift、conflict、超出human root或任何applicable current record ceiling的scope／path、missing或new capability都停止並回報problem與trade-off。Target未變且updated exact inputs仍在全部applicable ceilings內時，只作廢舊Preview／Grant並要求complete revalidation。
 
 Push、remote merge、deploy、branch deletion、live-provider action及legacy-data deletion永遠不在clean-path delegation內。
 
@@ -197,12 +197,12 @@ Ready-state sync沒有active change-owning Issue時，唯一額外publish capabi
    git rev-parse --git-path ron-workflow/delegations/<delegation-id>.md
    ```
 
-3. 檔案mode為`0600`，marker為`workflow-clean-path-delegation:v1`，綁定direct invocation lineage、Preview ID／hash、repository、target、scope ceilings、publish capability、validators與exclusions。
+3. 檔案mode為`0600`，marker為`workflow-clean-path-delegation:v1`，綁定direct invocation lineage、Preview ID／hash、repository、target、code／artifact／Wiki scope ceilings、exactly one immediate publish capability、named downstream sibling capabilities、validators、review axes與exclusions。task staging path必須在artifact ceiling內。
 4. Shared core驗證delegation只涵蓋exactly one `publish_bootstrap_spec`或`publish_wiki_repair_spec`，才允許tracker adapter建立／reuse Issue並publish matching Change Spec。
 5. Change Spec成功以stable comment ID read back後，使用shared core建立、publish並read back一份exact `workflow-execution-contract:v1`。
-6. 立即在該Issue寫入並read back一份`workflow-authorization:v1` record；execution contract的Issue、type、Spec IDs／hashes、Wiki／Preview binding與owned-paths hash必須逐欄相符。Record使用`origin: derived-clean-path`，並綁定pre-Issue delegation ID／payload hash、Issue、Spec、execution contract與exact downstream capabilities。
+6. 立即在該Issue寫入並read back一份`workflow-authorization:v1` Issue Grant；execution contract的Issue、type、Spec IDs／hashes、Wiki／Preview binding與owned-paths hash必須逐欄相符。Record使用`origin: derived-clean-path`，綁定human root delegation ID／read-back payload hash、Issue、Spec、execution contract與exact downstream capabilities，且其delegation policy固定為`denied`。
 7. Issue Grant read-back成功前不得建立Lane或執行；失敗時保留Preview與pre-Issue delegation供recovery。
-8. Exact Issue Grant成功read back後，pre-Issue delegation已被durable Issue record完整承接，才可刪除local copy；Preview仍依其各自規則保留到matching Spec publish成功。
+8. Exact Issue Grant成功read back後仍保留human root delegation，供後續Closeout Grant直接從同一root派生；不得改由Issue Grant再委派。只有exact Closeout Grant read back且Issue完成closeout後才刪除root local copy。Preview仍依其各自規則保留到matching Spec publish成功。
 
 有active change-owning Issue時不使用pre-Issue delegation；human-originated delegation直接作為該Issue的append-only Authorization Record，並遵守相同scope ceiling與read-back規則。
 
@@ -380,7 +380,7 @@ Normal Parent或Standalone closeout自動呼叫同一sync primitive；因此使�
 
 人類預設只收到「檢驗通過」；fixed candidate identity與兩軸詳細結果保留在durable evidence，只有使用者要求或需要解釋finding／missing proof時才顯示。不得從頭重述流程或傾倒完整evidence history。
 
-採exception-only interaction：valid bounded clean-path delegation讓clean且in-scope的工作直接繼續；只有finding、ambiguity、scope change、missing capability或新的authorization boundary才停止，說明問題與trade-off後請人類決斷。發現問題時可附evidence-backed Change Issue proposal；不得auto-fix或自行擴張授權。
+採exception-only interaction：valid bounded clean-path delegation讓clean且in-scope的工作直接繼續；只有finding、ambiguity、ceiling expansion、missing capability或新的authorization boundary才停止，說明問題與trade-off後請人類決斷。Ceiling內的exact input變更只作廢舊Preview／Grant並要求complete revalidation。發現問題時可附evidence-backed Change Issue proposal；不得auto-fix或自行擴張授權。
 
 Overall result：
 
@@ -471,9 +471,9 @@ target branch不接受未完成的partial baseline，也不持久保存`bootstra
    - exact `wiki_semantic_write_set`
    - exact `wiki_support_write_set`
 5. 空semantic set必須附evidence-backed `wiki_impact: none`。
-6. 產生一次Closeout Preview，綁定target SHA、lane SHA、ledger及hash、兩個sets及hashes、protocol pin、staging path、commands、exclusions與repair envelope。
-7. 若valid clean-path delegation涵蓋全部exact inputs與capabilities，Coordinator derive、寫入並read back exact Closeout Grant後直接繼續；否則才顯示compact human authorization stop。
-8. 同步最新local target；任何drift、conflict、ledger或set變更使exact Grant失效。只有same-branch、fast-forward-only、conflict-free refresh仍落在原delegation ceiling且complete revalidation通過時，才可重建Preview與derived Grant；否則停止請人類決斷。
+6. 產生一次Closeout Preview，綁定target SHA、lane SHA、ledger及hash、兩個sets及hashes、protocol pin、staging path、commands、exclusions與repair envelope。Standalone綁定其execution contract與non-delegating Issue Grant；Parent的`contract`固定為`null`，改綁完整ordered child-contract set的canonical payload hash與aggregate evidence hash。
+7. 若valid human root delegation涵蓋全部exact inputs與capabilities，Coordinator直接由該root derive、寫入並read back sibling exact Closeout Grant後繼續；Issue Grant不得作為delegation。否則才顯示compact human authorization stop。
+8. 核對local target仍等於root與Preview的fixed identity。Target drift使root、Preview與全部derived Grants失效，停止請人類決斷，再從新的fixed target重建root與下游records。Target未變時，conflict仍停止；ledger或set變更只使Preview與exact Grant失效，只有更新後的inputs仍完全落在全部applicable current ceilings且complete revalidation通過時才可重建。Standalone除human root外也必須符合current execution contract與Issue Grant ceiling；需要replacement contract／Issue Grant時，先依其authority發布並read back superseding records，否則停止請人類決斷。
 9. 複製reviewed baseline到task-specific staging mirror。
 10. 先執行zero-write preview；planned path超出Grant立即停止。
 11. 在staging依ledger執行最窄的topic generation或人工patch。
@@ -613,7 +613,7 @@ Microsoft Deep Wiki只作 citation/page-writing與 future publication參考；fu
 - 建立任何 target repository的 Wiki baseline
 - 自動部署 Pages／portal
 - bump release version
-- 除exactly one已授權的pre-implementation Ron／Wiki local baseline commit外，建立其他commit
+- 未取得後續明確授權時建立其他commit；implementation與bounded repair已分別取得後續授權
 - push或建立 PR
 - 修改 unrelated dirty files
 
@@ -646,7 +646,7 @@ Microsoft Deep Wiki只作 citation/page-writing與 future publication參考；fu
 25. Locator resolver缺少、不支援或解析結果ambiguous時回報`not-verifiable`，不得接受candidate。
 26. Existing root缺少任一adoption criterion時分類為`needs-bootstrap`，不得直接採為Canonical Wiki。
 27. `adoptable` root沒有valid baseline-review evidence時只能記錄`missing`，不得因clean-path delegation直接宣稱`ready`。
-28. Clean且已授權的Wiki操作不要求重複確認；finding、ambiguity、scope change、missing capability或authorization boundary才停止請人類決斷。
+28. Clean且已授權的Wiki操作不要求重複確認；finding、ambiguity、ceiling expansion、missing capability或authorization boundary才停止請人類決斷。Ceiling內的exact input變更只作廢舊Preview／Grant並要求complete revalidation。
 29. Bootstrap Preview可跨session恢復，且任何bound input drift都使舊hash失效。
 30. Matching Change Spec未成功publish及read back前不得刪除Bootstrap Preview。
 31. `/wiki`不要求使用者提供或理解SHA、root、engine或protocol identity；clean result只顯示結果。
@@ -666,19 +666,23 @@ Microsoft Deep Wiki只作 citation/page-writing與 future publication參考；fu
 45. Shared core執行所有valid／invalid fixture後，tracked tree、Git refs、tracker與network state保持不變。
 46. `docs/agents/ron-workflow.md`缺少machine block、存在多個block、JSON invalid或schema/version不符時回報`not-configured`或`not-verifiable`，不得fallback解析自由文字。
 47. Bootstrap／repair的derived Issue Grant同時綁定read-back verified Change Spec與execution contract；任一缺少、hash drift或identity mismatch都阻止Lane建立。
+48. Derived Issue Grant與derived Closeout Grant各自直接綁定同一human root read-back hash，且兩者的delegation policy皆為`denied`。
+49. Parent Closeout Preview要求`contract: null`、ordered child-contract aggregate hash與aggregate evidence hash；任何虛構Parent executable contract都validation failure。
+50. Closeout staging path不在human root artifact／exact-path ceiling時，Closeout Grant派生失敗。
+51. Preview或derived Grant刪除human root任一exclusion時，派生失敗；增加限制不構成authority expansion。
 
 ## Proof-state boundary
 
 目前本機證據證明：
 
 - `/wiki` skill、shared workflow core與更新後的 Ron skill contracts 已建立；
-- 26 項 focused、contract 與 temporary-repository forward tests 通過；
+- 29 項 focused、contract 與 temporary-repository forward tests 通過；
 - promoted skill、docs、README、invocation metadata 與 plugin manifest parity 通過；
 - Node syntax、tracked diff whitespace 與 Git zero-mutation checks 通過。
 
 這些證據不代表：
 
-- Codex-native packaging contract test與read-only review已對目前 manifest 通過；
+- Codex-native packaging contract test與read-only review已對目前 bounded repair candidate通過；
 - engine已安裝或 smoke-tested；
 - Wiki baseline已建立；
-- implementation changes已 staged、committed、pushed或deployed。
+- bounded repair changes已 staged、committed、pushed或deployed。

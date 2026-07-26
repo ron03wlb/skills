@@ -15,7 +15,7 @@ Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `sc
 
 Read `docs/agents/ron-workflow.md`, then fetch the Issue, current Change Spec, execution contract, Authorization Record chain, dependencies, and latest checkpoint from GitHub.
 
-Recompute every payload hash. Resolve `supersedes` and `revokes` append-only chains. A derived Grant must bind the human delegation lineage plus stable IDs and hashes for both the current Spec and execution contract. Fail closed on tracker unavailability, edits, missing comment IDs, conflicting active Grants, or drift in Issue, Spec, contract, target, baseline, scope, Preview, or review profile.
+Recompute every payload hash. Resolve `supersedes` and `revokes` append-only chains. A derived Grant must bind the human root read-back hash plus stable IDs and hashes for both the current Spec and execution contract, and its delegation policy must be `denied`. It can be a sibling of a later exact Closeout Grant but can never derive one. Fail closed on tracker unavailability, edits, missing comment IDs, conflicting active Grants, or drift in Issue, Spec, contract, target, baseline, scope, Preview, or review profile.
 
 A Parent is never executable.
 

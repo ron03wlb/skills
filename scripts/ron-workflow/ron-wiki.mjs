@@ -674,6 +674,212 @@ function validateSyncPreview(preview) {
   validateEngine(preview.engine);
 }
 
+function validateWorkflowReference(reference, name) {
+  requireObject(reference, name);
+  requireString(reference.id, `${name}.id`);
+  requireString(reference.comment_id, `${name}.comment_id`);
+  requireSha256(reference.payload_sha256, `${name}.payload_sha256`);
+}
+
+function validateRootReference(reference, mode) {
+  requireObject(reference, "root_delegation");
+  if (mode === "standalone") {
+    requireString(reference.delegation_id, "root_delegation.delegation_id");
+    if (reference.record_id !== undefined) {
+      fail("invalid", "Standalone root delegation cannot use record_id");
+    }
+  } else {
+    requireString(reference.record_id, "root_delegation.record_id");
+    if (reference.delegation_id !== undefined) {
+      fail("invalid", "Parent root authorization cannot use delegation_id");
+    }
+  }
+  requireSha256(
+    reference.payload_sha256,
+    "root_delegation.payload_sha256",
+  );
+}
+
+export function validateCloseoutPreview(preview) {
+  requireObject(preview, "Closeout Preview");
+  if (preview.schema !== "workflow-closeout-preview:v1") {
+    fail("invalid", "unsupported Closeout Preview schema");
+  }
+  requireString(preview.preview_id, "preview_id");
+  requireString(preview.created_at, "created_at");
+  requireEnum(preview.mode, ["parent", "standalone"], "mode");
+  requireString(preview.issue, "issue");
+  validateWorkflowReference(preview.spec, "spec");
+  validateRootReference(preview.root_delegation, preview.mode);
+  if (preview.mode === "standalone") {
+    validateWorkflowReference(preview.contract, "contract");
+    requireNull(
+      preview.child_contracts_payload_sha256,
+      "child_contracts_payload_sha256",
+    );
+    const sourceAuthorization = requireObject(
+      preview.source_authorization,
+      "source_authorization",
+    );
+    requireString(
+      sourceAuthorization.record_id,
+      "source_authorization.record_id",
+    );
+    requireSha256(
+      sourceAuthorization.payload_sha256,
+      "source_authorization.payload_sha256",
+    );
+  } else {
+    requireNull(preview.contract, "contract");
+    requireSha256(
+      preview.child_contracts_payload_sha256,
+      "child_contracts_payload_sha256",
+    );
+    requireNull(preview.source_authorization, "source_authorization");
+  }
+  requireSha256(preview.evidence_payload_sha256, "evidence_payload_sha256");
+
+  const lane = requireObject(preview.lane, "lane");
+  requireString(lane.id, "lane.id");
+  requireIdentity(lane.identity, "lane.identity");
+  validateTarget(preview.target);
+
+  validateWikiExecutionBinding({
+    issue_type: preview.mode,
+    wiki_impact: preview.wiki_impact,
+    wiki_operation: preview.wiki_operation,
+    wiki_baseline_requirement: preview.wiki_baseline_requirement,
+    wiki_preview_id: preview.wiki_preview_id,
+    wiki_preview_payload_sha256: preview.wiki_preview_payload_sha256,
+  });
+
+  const ledgerResult = validateReconciliationLedger(preview.ledger);
+  if (ledgerResult.status === "findings") {
+    fail("findings", "Closeout Preview ledger contains a deviation", {
+      findings: ledgerResult.findings,
+    });
+  }
+  if (ledgerResult.status === "not-verifiable") {
+    fail("not-verifiable", "Closeout Preview ledger is unverified", {
+      findings: ledgerResult.findings,
+    });
+  }
+  if (
+    preview.ledger_payload_sha256 !== hashCanonicalJson(preview.ledger)
+  ) {
+    fail("scope", "Closeout Preview ledger hash has drifted");
+  }
+
+  assertUniqueStrings(
+    preview.semantic_write_set,
+    "semantic_write_set",
+    { repositoryPaths: true },
+  );
+  assertUniqueStrings(preview.support_write_set, "support_write_set", {
+    repositoryPaths: true,
+  });
+  if (
+    !equalStringSets(
+      preview.semantic_write_set,
+      ledgerResult.semantic_write_set,
+    )
+  ) {
+    fail("scope", "Closeout Preview semantic writes must equal ledger writes");
+  }
+  if (
+    preview.wiki_impact === "semantic" &&
+    preview.semantic_write_set.length === 0
+  ) {
+    fail("invalid", "semantic closeout requires a semantic write");
+  }
+  if (
+    preview.wiki_impact === "none" &&
+    (preview.semantic_write_set.length !== 0 ||
+      preview.support_write_set.length !== 0)
+  ) {
+    fail("scope", "no-impact closeout cannot write Wiki paths");
+  }
+  if (
+    preview.semantic_write_set_sha256 !==
+    hashCanonicalJson(preview.semantic_write_set)
+  ) {
+    fail("scope", "Closeout Preview semantic write-set hash has drifted");
+  }
+  if (
+    preview.support_write_set_sha256 !==
+    hashCanonicalJson(preview.support_write_set)
+  ) {
+    fail("scope", "Closeout Preview support write-set hash has drifted");
+  }
+
+  validateProtocol(preview.protocol);
+  assertRepositoryPath(preview.staging_path, "staging_path");
+  assertUniqueStrings(
+    preview.verification_commands,
+    "verification_commands",
+  );
+  if (preview.verification_commands.length === 0) {
+    fail("invalid", "Closeout Preview requires verification commands");
+  }
+  assertUniqueStrings(preview.review_axes, "review_axes");
+  for (const axis of preview.review_axes) {
+    requireEnum(axis, ["standards", "spec", "wiki"], "review_axes");
+  }
+  if (
+    !preview.review_axes.includes("standards") ||
+    !preview.review_axes.includes("spec") ||
+    (preview.wiki_impact === "semantic" &&
+      !preview.review_axes.includes("wiki"))
+  ) {
+    fail("invalid", "Closeout Preview is missing a required review axis");
+  }
+
+  const expectedCapability =
+    preview.mode === "parent" ? "close_parent" : "close_standalone";
+  if (preview.capability !== expectedCapability) {
+    fail("invalid", `Closeout Preview requires ${expectedCapability}`);
+  }
+  if (preview.target_refresh !== "denied") {
+    fail("invalid", "Closeout Preview target refresh policy is unsupported");
+  }
+
+  const repair = requireObject(preview.repair, "repair");
+  if (
+    !Number.isInteger(repair.wiki_waves) ||
+    repair.wiki_waves < 0 ||
+    repair.wiki_waves > 2
+  ) {
+    fail("invalid", "Closeout Preview permits at most two Wiki repair waves");
+  }
+  if (repair.wiki_authority !== "human-grant-required") {
+    fail("invalid", "Wiki repair requires a separate human Grant");
+  }
+  if (repair.code_findings !== "repair-leaf-only") {
+    fail("invalid", "code findings require a Repair Leaf");
+  }
+  requireCleanPathExcludes(preview.excludes);
+  return preview;
+}
+
+export function buildCloseoutPreviewEnvelope(input) {
+  requireObject(input, "Closeout Preview input");
+  const preview = {
+    schema: "workflow-closeout-preview:v1",
+    ...input,
+    ledger_payload_sha256: hashCanonicalJson(input.ledger),
+    semantic_write_set_sha256: hashCanonicalJson(input.semantic_write_set),
+    support_write_set_sha256: hashCanonicalJson(input.support_write_set),
+  };
+  validateCloseoutPreview(preview);
+  const payload = `${JSON.stringify(canonicalJsonValue(preview))}\n`;
+  return {
+    preview,
+    payload,
+    payload_sha256: hashPayload(payload),
+    envelope: createEnvelope("workflow-closeout-preview:v1", payload),
+  };
+}
+
 export function validatePreview(preview) {
   requireObject(preview, "Preview");
   if (preview.schema === "workflow-wiki-bootstrap-preview:v1") {
@@ -683,6 +889,9 @@ export function validatePreview(preview) {
   if (preview.schema === "workflow-wiki-sync-preview:v1") {
     validateSyncPreview(preview);
     return preview;
+  }
+  if (preview.schema === "workflow-closeout-preview:v1") {
+    return validateCloseoutPreview(preview);
   }
   fail("invalid", "unsupported Wiki Preview schema");
 }
@@ -708,6 +917,9 @@ export function validatePreIssueDelegation(delegation) {
   requireSha256(preview.payload_sha256, "preview.payload_sha256");
   requireString(delegation.repository, "repository");
   validateTarget(delegation.target);
+  if (delegation.target_refresh !== "denied") {
+    fail("invalid", "pre-Issue delegation must deny target refresh");
+  }
 
   const scope = requireObject(delegation.scope, "scope");
   for (const key of [
@@ -733,12 +945,63 @@ export function validatePreIssueDelegation(delegation) {
   ) {
     fail("invalid", `pre-Issue delegation may grant only ${publishCapability}`);
   }
+  assertUniqueStrings(
+    delegation.downstream_capabilities,
+    "downstream_capabilities",
+  );
+  if (delegation.downstream_capabilities.length === 0) {
+    fail("invalid", "root delegation requires downstream capabilities");
+  }
+  requireSubset(
+    delegation.downstream_capabilities,
+    ["execute", "close_standalone"],
+    "downstream_capabilities",
+  );
   assertUniqueStrings(delegation.validators, "validators");
   if (delegation.validators.length === 0) {
     fail("invalid", "pre-Issue delegation requires validators");
   }
+  assertUniqueStrings(delegation.review_axes, "review_axes");
+  if (delegation.review_axes.length === 0) {
+    fail("invalid", "pre-Issue delegation requires review axes");
+  }
+  for (const axis of delegation.review_axes) {
+    requireEnum(axis, ["standards", "spec", "wiki"], "review_axes");
+  }
   requireCleanPathExcludes(delegation.excludes);
   return delegation;
+}
+
+function buildCanonicalEnvelope(marker, value) {
+  const payload = `${JSON.stringify(canonicalJsonValue(value))}\n`;
+  return {
+    payload,
+    payload_sha256: hashPayload(payload),
+    envelope: createEnvelope(marker, payload),
+  };
+}
+
+export function buildCleanPathDelegationEnvelope(delegation) {
+  validatePreIssueDelegation(delegation);
+  return {
+    delegation,
+    ...buildCanonicalEnvelope(
+      "workflow-clean-path-delegation:v1",
+      delegation,
+    ),
+  };
+}
+
+export function buildAuthorizationEnvelope(authorization) {
+  requireObject(authorization, "Authorization Record");
+  if (authorization.schema !== "workflow-authorization:v1") {
+    fail("invalid", "unsupported Authorization Record schema");
+  }
+  requireString(authorization.record_id, "record_id");
+  return {
+    authorization,
+    ...buildCanonicalEnvelope("workflow-authorization:v1", authorization),
+  };
 }
 
 function requireSubset(values, ceiling, name) {
@@ -751,6 +1014,15 @@ function requireSubset(values, ceiling, name) {
 export function deriveIssueGrant(input) {
   requireObject(input, "Issue Grant derivation");
   const delegation = validatePreIssueDelegation(input.delegation);
+  requireSha256(
+    input.delegation_payload_sha256,
+    "delegation_payload_sha256",
+  );
+  if (
+    input.delegation_payload_sha256 !== hashCanonicalJson(delegation)
+  ) {
+    fail("scope", "root delegation payload hash has drifted");
+  }
   requireString(input.record_id, "record_id");
   requireString(input.issue, "issue");
   if (!input.issue.startsWith(`${delegation.repository}#`)) {
@@ -797,11 +1069,21 @@ export function deriveIssueGrant(input) {
     "contract.wiki_preview_payload_sha256",
   );
   requireSha256(contract.owned_paths_sha256, "contract.owned_paths_sha256");
+  const delegatedWikiBinding =
+    delegation.preview.kind === "bootstrap"
+      ? {
+          operation: "bootstrap",
+          baselineRequirement: "missing-with-bootstrap-preview",
+        }
+      : { operation: "reconcile", baselineRequirement: "ready" };
   if (
     contract.issue !== input.issue ||
     contract.spec_id !== spec.id ||
     contract.spec_comment_id !== spec.comment_id ||
     contract.spec_payload_sha256 !== spec.payload_sha256 ||
+    contract.wiki_operation !== delegatedWikiBinding.operation ||
+    contract.wiki_baseline_requirement !==
+      delegatedWikiBinding.baselineRequirement ||
     contract.wiki_operation !== input.wiki_operation ||
     contract.wiki_baseline_requirement !== input.wiki_baseline_requirement ||
     contract.wiki_preview_id !== delegation.preview.id ||
@@ -812,11 +1094,14 @@ export function deriveIssueGrant(input) {
   }
 
   assertUniqueStrings(input.capabilities, "capabilities");
-  const allowedCapabilities = ["execute", "close_standalone"];
   if (input.capabilities.length === 0) {
     fail("invalid", "derived Issue Grant requires a capability");
   }
-  requireSubset(input.capabilities, allowedCapabilities, "capabilities");
+  requireSubset(
+    input.capabilities,
+    delegation.downstream_capabilities,
+    "capabilities",
+  );
 
   assertUniqueStrings(input.exact_paths, "exact_paths", {
     repositoryPaths: true,
@@ -836,7 +1121,6 @@ export function deriveIssueGrant(input) {
     wiki_preview_payload_sha256: delegation.preview.payload_sha256,
   });
 
-  const delegationHash = hashCanonicalJson(delegation);
   const scopeHash = hashCanonicalJson(delegation.scope);
   return {
     schema: "workflow-authorization:v1",
@@ -849,7 +1133,7 @@ export function deriveIssueGrant(input) {
     derived_at: input.derived_at,
     delegated_from: delegation.delegation_id,
     delegated_from_kind: "pre-issue-record",
-    delegated_from_payload_sha256: delegationHash,
+    delegated_from_payload_sha256: input.delegation_payload_sha256,
     binds: {
       issue: input.issue,
       spec_id: spec.id,
@@ -868,15 +1152,382 @@ export function deriveIssueGrant(input) {
       exact_paths: [...input.exact_paths],
     },
     grants: [...input.capabilities],
+    validators: [...delegation.validators],
+    review_axes: [...delegation.review_axes],
     excludes: [...delegation.excludes],
     preconditions: [
       "matching Issue, Spec, Preview, target, paths, validators, and exclusions",
       "no findings, ambiguity, unverified proof, or new capability",
     ],
     delegation: {
-      clean_path: "bounded",
+      clean_path: "denied",
       derive_exact_grants: [],
-      target_refresh: "same-branch-fast-forward-revalidate",
+      target_refresh: "denied",
+      nested_clean_path: "denied",
+      nested_delegation: "denied",
+    },
+    supersedes: null,
+    revokes: null,
+  };
+}
+
+function requireDeniedDelegation(authorization) {
+  const policy = requireObject(
+    authorization.delegation,
+    "authorization.delegation",
+  );
+  assertUniqueStrings(
+    policy.derive_exact_grants,
+    "authorization.delegation.derive_exact_grants",
+  );
+  if (
+    policy.clean_path !== "denied" ||
+    policy.derive_exact_grants.length !== 0 ||
+    policy.target_refresh !== "denied" ||
+    policy.nested_clean_path !== "denied" ||
+    policy.nested_delegation !== "denied"
+  ) {
+    fail("scope", "derived Authorization must not delegate");
+  }
+}
+
+function validateCloseoutCeilings(authority, preview, exactPaths) {
+  assertUniqueStrings(authority.validators, "authority.validators");
+  assertUniqueStrings(authority.review_axes, "authority.review_axes");
+  requireCleanPathExcludes(authority.excludes);
+  requireSubset(
+    [
+      preview.staging_path,
+      ...preview.semantic_write_set,
+      ...preview.support_write_set,
+    ],
+    exactPaths,
+    "Closeout paths",
+  );
+  requireSubset(
+    preview.verification_commands,
+    authority.validators,
+    "Closeout validators",
+  );
+  requireSubset(
+    preview.review_axes,
+    authority.review_axes,
+    "Closeout review axes",
+  );
+  requireSubset(
+    authority.excludes,
+    preview.excludes,
+    "Closeout exclusion preservation",
+  );
+}
+
+function validateStandaloneCloseoutRoot(root, rootHash, preview) {
+  validatePreIssueDelegation(root);
+  if (
+    preview.root_delegation.delegation_id !== root.delegation_id ||
+    preview.root_delegation.payload_sha256 !== rootHash
+  ) {
+    fail("scope", "Closeout Preview does not bind the human root delegation");
+  }
+  const expectedBinding =
+    root.preview.kind === "bootstrap"
+      ? {
+          operation: "bootstrap",
+          baseline: "missing-with-bootstrap-preview",
+        }
+      : { operation: "reconcile", baseline: "ready" };
+  if (
+    root.target.branch !== preview.target.branch ||
+    root.target.identity !== preview.target.identity ||
+    root.preview.id !== preview.wiki_preview_id ||
+    root.preview.payload_sha256 !== preview.wiki_preview_payload_sha256 ||
+    preview.wiki_operation !== expectedBinding.operation ||
+    preview.wiki_baseline_requirement !== expectedBinding.baseline ||
+    !root.downstream_capabilities.includes(preview.capability)
+  ) {
+    fail("scope", "Closeout Preview exceeds its human root delegation");
+  }
+  validateCloseoutCeilings(
+    root,
+    preview,
+    Object.values(root.scope).flat(),
+  );
+  return {
+    id: root.delegation_id,
+    kind: "pre-issue-record",
+    approver: root.approver,
+    approved_at: root.approved_at,
+    scope_ceiling_sha256: hashCanonicalJson(root.scope),
+  };
+}
+
+function validateStandaloneIssueAuthorization(
+  authorization,
+  authorizationHash,
+  root,
+  rootHash,
+  preview,
+) {
+  requireObject(authorization, "source Authorization");
+  if (authorization.schema !== "workflow-authorization:v1") {
+    fail("invalid", "unsupported source Authorization schema");
+  }
+  requireString(authorization.record_id, "source Authorization record_id");
+  if (
+    authorization.status !== "active" ||
+    authorization.origin !== "derived-clean-path"
+  ) {
+    fail("scope", "source Authorization is not a current derived Issue Grant");
+  }
+  if (
+    preview.source_authorization.record_id !== authorization.record_id ||
+    preview.source_authorization.payload_sha256 !== authorizationHash ||
+    authorization.delegated_from !== root.delegation_id ||
+    authorization.delegated_from_kind !== "pre-issue-record" ||
+    authorization.delegated_from_payload_sha256 !== rootHash
+  ) {
+    fail("scope", "Issue Grant is not a sibling from the bound human root");
+  }
+  const binds = requireObject(authorization.binds, "source Authorization binds");
+  assertUniqueStrings(binds.exact_paths, "source Authorization exact_paths", {
+    repositoryPaths: true,
+  });
+  if (
+    binds.issue !== preview.issue ||
+    binds.spec_id !== preview.spec.id ||
+    binds.spec_comment_id !== preview.spec.comment_id ||
+    binds.spec_payload_sha256 !== preview.spec.payload_sha256 ||
+    binds.contract_id !== preview.contract.id ||
+    binds.contract_comment_id !== preview.contract.comment_id ||
+    binds.contract_payload_sha256 !== preview.contract.payload_sha256 ||
+    binds.target_branch !== preview.target.branch ||
+    (binds.target_sha ?? binds.target_identity) !== preview.target.identity ||
+    binds.wiki_operation !== preview.wiki_operation ||
+    binds.wiki_baseline_requirement !== preview.wiki_baseline_requirement ||
+    binds.wiki_preview_id !== preview.wiki_preview_id ||
+    binds.wiki_preview_payload_sha256 !==
+      preview.wiki_preview_payload_sha256 ||
+    !authorization.grants.includes(preview.capability)
+  ) {
+    fail("scope", "Closeout Preview exceeds its bound Issue Grant");
+  }
+  requireDeniedDelegation(authorization);
+  requireSubset(
+    root.excludes,
+    authorization.excludes,
+    "Issue Grant exclusion preservation",
+  );
+  validateCloseoutCeilings(authorization, preview, binds.exact_paths);
+}
+
+function validateParentCloseoutRoot(root, rootHash, preview) {
+  requireObject(root, "Parent root Authorization");
+  if (root.schema !== "workflow-authorization:v1") {
+    fail("invalid", "unsupported Parent root Authorization schema");
+  }
+  requireString(root.record_id, "Parent root record_id");
+  if (root.status !== "active" || root.origin !== "direct-human") {
+    fail("scope", "Parent closeout requires a current human root");
+  }
+  requireString(root.approver, "Parent root approver");
+  requireString(root.approved_at, "Parent root approved_at");
+  if (
+    preview.root_delegation.record_id !== root.record_id ||
+    preview.root_delegation.payload_sha256 !== rootHash
+  ) {
+    fail("scope", "Parent Preview does not bind its human root");
+  }
+  const binds = requireObject(root.binds, "Parent root binds");
+  for (const field of [
+    "contract_id",
+    "contract_comment_id",
+    "contract_payload_sha256",
+  ]) {
+    if (binds[field] !== undefined && binds[field] !== null) {
+      fail("invalid", "Parent root must not bind an executable contract");
+    }
+  }
+  requireSha256(
+    binds.child_contracts_payload_sha256,
+    "Parent root child contracts hash",
+  );
+  requireSha256(
+    binds.aggregate_evidence_payload_sha256,
+    "Parent root aggregate evidence hash",
+  );
+  requireSha256(
+    binds.scope_ceiling_sha256,
+    "Parent root scope ceiling hash",
+  );
+  assertUniqueStrings(binds.exact_paths, "Parent root exact_paths", {
+    repositoryPaths: true,
+  });
+  if (
+    binds.issue !== preview.issue ||
+    binds.spec_id !== preview.spec.id ||
+    binds.spec_comment_id !== preview.spec.comment_id ||
+    binds.spec_payload_sha256 !== preview.spec.payload_sha256 ||
+    binds.child_contracts_payload_sha256 !==
+      preview.child_contracts_payload_sha256 ||
+    binds.aggregate_evidence_payload_sha256 !==
+      preview.evidence_payload_sha256 ||
+    binds.target_branch !== preview.target.branch ||
+    (binds.target_sha ?? binds.target_identity) !== preview.target.identity ||
+    binds.wiki_operation !== preview.wiki_operation ||
+    binds.wiki_baseline_requirement !== preview.wiki_baseline_requirement ||
+    binds.wiki_preview_id !== preview.wiki_preview_id ||
+    binds.wiki_preview_payload_sha256 !==
+      preview.wiki_preview_payload_sha256
+  ) {
+    fail("scope", "Parent Preview exceeds its human root");
+  }
+  assertUniqueStrings(root.grants, "Parent root grants");
+  const policy = requireObject(root.delegation, "Parent root delegation");
+  assertUniqueStrings(
+    policy.derive_exact_grants,
+    "Parent root derive_exact_grants",
+  );
+  if (
+    !root.grants.includes(preview.capability) ||
+    policy.clean_path !== "bounded" ||
+    !policy.derive_exact_grants.includes(preview.capability) ||
+    policy.target_refresh !== "denied" ||
+    policy.nested_clean_path !== "denied" ||
+    policy.nested_delegation !== "denied"
+  ) {
+    fail("scope", "Parent root cannot derive this exact Closeout Grant");
+  }
+  validateCloseoutCeilings(root, preview, binds.exact_paths);
+  return {
+    id: root.record_id,
+    kind: "issue-root-record",
+    approver: root.approver,
+    approved_at: root.approved_at,
+    scope_ceiling_sha256: binds.scope_ceiling_sha256,
+  };
+}
+
+export function deriveCloseoutGrant(input) {
+  requireObject(input, "Closeout Grant derivation");
+  const preview = validateCloseoutPreview(input.preview);
+  requireSha256(
+    input.preview_payload_sha256,
+    "preview_payload_sha256",
+  );
+  if (
+    input.preview_payload_sha256 !== hashCanonicalJson(preview)
+  ) {
+    fail("scope", "Closeout Preview payload hash has drifted");
+  }
+  requireSha256(
+    input.root_delegation_payload_sha256,
+    "root_delegation_payload_sha256",
+  );
+  if (
+    input.root_delegation_payload_sha256 !==
+    hashCanonicalJson(input.root_delegation)
+  ) {
+    fail("scope", "human root payload hash has drifted");
+  }
+  let root;
+  if (preview.mode === "standalone") {
+    root = validateStandaloneCloseoutRoot(
+      input.root_delegation,
+      input.root_delegation_payload_sha256,
+      preview,
+    );
+    requireSha256(
+      input.source_authorization_payload_sha256,
+      "source_authorization_payload_sha256",
+    );
+    if (
+      input.source_authorization_payload_sha256 !==
+      hashCanonicalJson(input.source_authorization)
+    ) {
+      fail("scope", "source Authorization payload hash has drifted");
+    }
+    validateStandaloneIssueAuthorization(
+      input.source_authorization,
+      input.source_authorization_payload_sha256,
+      input.root_delegation,
+      input.root_delegation_payload_sha256,
+      preview,
+    );
+  } else {
+    requireNull(input.source_authorization, "source_authorization");
+    requireNull(
+      input.source_authorization_payload_sha256,
+      "source_authorization_payload_sha256",
+    );
+    root = validateParentCloseoutRoot(
+      input.root_delegation,
+      input.root_delegation_payload_sha256,
+      preview,
+    );
+  }
+  requireString(input.record_id, "record_id");
+  requireString(input.coordinator, "coordinator");
+  requireString(input.derived_at, "derived_at");
+
+  return {
+    schema: "workflow-authorization:v1",
+    record_id: input.record_id,
+    status: "active",
+    approver: root.approver,
+    approved_at: root.approved_at,
+    origin: "derived-clean-path",
+    derived_by: input.coordinator,
+    derived_at: input.derived_at,
+    delegated_from: root.id,
+    delegated_from_kind: root.kind,
+    delegated_from_payload_sha256:
+      input.root_delegation_payload_sha256,
+    binds: {
+      issue: preview.issue,
+      spec_id: preview.spec.id,
+      spec_comment_id: preview.spec.comment_id,
+      spec_payload_sha256: preview.spec.payload_sha256,
+      contract_id: preview.contract?.id ?? null,
+      contract_comment_id: preview.contract?.comment_id ?? null,
+      contract_payload_sha256: preview.contract?.payload_sha256 ?? null,
+      child_contracts_payload_sha256:
+        preview.child_contracts_payload_sha256,
+      target_branch: preview.target.branch,
+      target_sha: preview.target.identity,
+      lane_sha: preview.lane.identity,
+      closeout_preview_sha256: input.preview_payload_sha256,
+      evidence_sha256: preview.evidence_payload_sha256,
+      source_authorization_payload_sha256:
+        input.source_authorization_payload_sha256,
+      scope_ceiling_sha256: root.scope_ceiling_sha256,
+      wiki_operation: preview.wiki_operation,
+      wiki_baseline_requirement:
+        preview.wiki_baseline_requirement,
+      wiki_preview_id: preview.wiki_preview_id,
+      wiki_preview_payload_sha256:
+        preview.wiki_preview_payload_sha256,
+      wiki_semantic_write_set_sha256:
+        preview.semantic_write_set_sha256,
+      wiki_support_write_set_sha256:
+        preview.support_write_set_sha256,
+      exact_paths: [
+        preview.staging_path,
+        ...preview.semantic_write_set,
+        ...preview.support_write_set,
+      ],
+    },
+    grants: [preview.capability],
+    validators: [...preview.verification_commands],
+    review_axes: [...preview.review_axes],
+    excludes: [...preview.excludes],
+    preconditions: [
+      "matching Issue, Spec, mode-specific contract aggregate, evidence, Lane, target, ledger, paths, validators, review axes, and exclusions",
+      "no findings, ambiguity, unverified proof, target drift, or new capability",
+    ],
+    delegation: {
+      clean_path: "denied",
+      derive_exact_grants: [],
+      target_refresh: "denied",
       nested_clean_path: "denied",
       nested_delegation: "denied",
     },
@@ -1774,9 +2425,42 @@ export function runCliCommand(command, input = {}) {
         delegation: validatePreIssueDelegation(input.delegation),
       };
       break;
-    case "grant-derive":
-      result = { status: "valid", grant: deriveIssueGrant(input) };
+    case "delegation-envelope-create":
+      result = {
+        status: "valid",
+        ...buildCleanPathDelegationEnvelope(input.delegation),
+      };
       break;
+    case "grant-derive": {
+      const grant = deriveIssueGrant(input);
+      const built = buildAuthorizationEnvelope(grant);
+      result = {
+        status: "valid",
+        grant,
+        payload: built.payload,
+        payload_sha256: built.payload_sha256,
+        envelope: built.envelope,
+      };
+      break;
+    }
+    case "closeout-preview-create":
+      result = {
+        status: "valid",
+        ...buildCloseoutPreviewEnvelope(input),
+      };
+      break;
+    case "closeout-grant-derive": {
+      const grant = deriveCloseoutGrant(input);
+      const built = buildAuthorizationEnvelope(grant);
+      result = {
+        status: "valid",
+        grant,
+        payload: built.payload,
+        payload_sha256: built.payload_sha256,
+        envelope: built.envelope,
+      };
+      break;
+    }
     case "source-resolve":
       result = resolveSourceLocator(input.repository_root, input.locator);
       break;

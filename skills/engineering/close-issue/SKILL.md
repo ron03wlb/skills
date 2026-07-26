@@ -9,7 +9,7 @@ Close exactly one Ron Issue in `leaf`, `parent`, or `standalone` mode. Detect th
 
 ## Shared contracts
 
-Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs` for config, envelope, source, ledger, Preview, and execution-binding proof. Normal closeout and direct `/wiki` use this same reconciliation primitive; do not create a second Wiki updater.
+Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs` for config, envelope, source, ledger, Preview, and execution-binding proof. Create the Closeout Preview with `closeout-preview-create`, validate it with `preview-validate`, and derive its exact bounded Grant with `closeout-grant-derive`. Normal closeout and direct `/wiki` use this same reconciliation primitive; do not create a second Wiki updater.
 
 Read every Spec, execution contract, Authorization, completion, and checkpoint record by stable comment ID. Recompute hashes and resolve append-only supersession/revocation. Tracker unavailability, ambiguous lineage, stale Spec/contract/Grant, dirty unrelated state, or capability mismatch stops and preserves recovery state.
 
@@ -31,7 +31,7 @@ Leaf mode never mutates Wiki, advances target, rebases, removes the Lane, delete
 
 ## Parent or Standalone preflight
 
-For a Parent, verify every Leaf is closed, each `implemented_on_lane` commit is present in ordered Lane history, blockers are satisfied, ownership is released, and aggregate evidence covers the fixed point through Lane HEAD.
+For a Parent, verify every Leaf is closed, each `implemented_on_lane` commit is present in ordered Lane history, blockers are satisfied, ownership is released, and aggregate evidence covers the fixed point through Lane HEAD. A Parent has no executable contract: hash the complete ordered child-contract set and aggregate evidence instead.
 
 For a Standalone, verify its implementation evidence and `execute` Grant. Complete closeout requires `close_standalone`; Parent requires `close_parent`.
 
@@ -52,7 +52,7 @@ Aggregate prior Wiki, current Change Spec dispositions, the complete Issue diff,
 - `none | add | update | remove`;
 - exact Wiki path.
 
-Run `ledger-validate`. Any `deviation`, `unverified`, unsupported/ambiguous locator, missing behavioral Change Spec, finding, or changed scope ends the clean path before Wiki mutation. Return the problem and trade-offs; do not repair or rewrite intent autonomously.
+Run `ledger-validate`. Any `deviation`, `unverified`, unsupported/ambiguous locator, missing behavioral Change Spec, finding, ceiling expansion, or path outside an applicable current ceiling ends the clean path before Wiki mutation. With the target unchanged, an exact input change inside every applicable current ceiling only invalidates the old Preview and Grant; rebuild them and complete revalidation. Return actual authorization problems and trade-offs; do not repair or rewrite intent autonomously.
 
 Only a clean aligned ledger may derive:
 
@@ -63,19 +63,20 @@ An empty semantic set requires `wiki_impact: none`; an engine never selects eith
 
 ## Closeout Preview and authority
 
-Create one internal, hash-verified Closeout Preview binding:
+Use `closeout-preview-create`, then `preview-validate`, to create one internal, hash-verified `workflow-closeout-preview:v1` binding:
 
-- Issue, Spec, contract, Grant, delegation lineage, and ledger hash;
+- Issue and Spec; the Standalone contract and Issue Grant, or `contract: null` plus the Parent child-contract aggregate hash;
+- the human root read-back hash; Issue and Closeout Grants are non-delegating siblings from that root;
 - exact Lane and target identities;
-- both Wiki write sets and hashes;
+- task staging inside the artifact ceiling, plus both Wiki write sets and hashes;
 - target-sync method and exact verification commands;
 - `close_parent` or `close_standalone`;
 - candidate-creation and at most two human-authorized Wiki-repair waves;
-- exclusions and the rule that a code/test defect requires a Repair Leaf.
+- every root exclusion, plus the rule that a code/test defect requires a Repair Leaf.
 
-When a current bounded clean-path delegation covers every identity, path, validator, review axis, capability, target refresh, and exclusion, derive and read back the exact Closeout Grant without another prompt. Otherwise present only the compact authorization stop and ask for `同意`.
+When the current human root covers every identity, path, validator, review axis, capability, fixed-target policy, and exclusion, use `closeout-grant-derive` to derive and read back the sibling exact Closeout Grant without another prompt. Never derive it from a derived Issue Grant. Otherwise present only the compact authorization stop and ask for `同意`.
 
-A changed Spec, contract, target, Lane, ledger, write set, code scope, or Repair Leaf invalidates the Grant. A same-branch, fast-forward-only, conflict-free target refresh may rebuild the Preview and derive a replacement only when the original delegation covers it and complete revalidation passes. Conflict always stops; never auto-rebase.
+A changed Spec, Standalone contract or Parent child-contract aggregate, target, Lane, ledger, write set, code scope, or Repair Leaf invalidates the Grant. `target_refresh` is always `denied`: any target drift invalidates the human root, Preview, and derived Grants, then stops for a new human decision and rebuilt records. Conflict always stops; never auto-rebase.
 
 ## Build one Target Integration Candidate
 
@@ -109,7 +110,7 @@ Only after the exact candidate passes:
 1. confirm the local target is clean and still satisfies the Grant;
 2. fast-forward it to the reviewed candidate;
 3. verify target identity, tests, Wiki config/page/source/link/build contracts, and absence of per-Issue intermediates;
-4. post and read back `workflow-closeout-evidence:v1` binding the Issue mode, Grant, Spec, contract, Lane, ledger, candidate, verified target, commands, and `verified_on_target`;
+4. post and read back `workflow-closeout-evidence:v1` binding the Issue mode, Grant, Spec, Standalone contract or Parent child-contract aggregate, Lane, ledger, candidate, verified target, commands, and `verified_on_target`;
 5. close the Parent or Standalone and read back state;
 6. remove only manifest-owned external intermediates;
 7. remove the Lane worktree without deleting its branch.

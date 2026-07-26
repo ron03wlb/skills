@@ -2,7 +2,7 @@
 
 **Goal:** Deliver one state-aware `/wiki` skill backed by shared, deterministic Ron workflow contracts without creating a second Spec, authorization, or closeout protocol.
 **Why planning is required:** This changes promoted skill contracts, durable authorization records, local Git history, and the plugin manifest across several dependent workflow entry points.
-**Acceptance:** The accepted Canonical Wiki Spec is executable and self-consistent; the existing Ron/Wiki design is preserved in one scope-only local baseline commit; shared contract tooling passes focused and temporary-repository tests; updated skills and `/wiki` pass forward tests; no unrelated files, push, deployment, installation, release-version change, or remote mutation occurs.
+**Acceptance:** The accepted Canonical Wiki Spec is executable and self-consistent; the existing Ron/Wiki design, implementation, and bounded repair remain separate local commits; shared contract tooling passes focused and temporary-repository tests; updated skills and `/wiki` pass forward tests; no unrelated files, push, deployment, installation, release-version change, or remote mutation occurs.
 
 ### Outcome 1: Executable Wiki contract
 
@@ -35,4 +35,9 @@
 - Work: Review the final diff against the accepted Spec, run focused and repository-wide structural checks, validate promoted-skill parity and Markdown links, then use Codex CLI for a scoped read-only packaging review. Repository validation must not require or invoke Claude CLI.
 - Verify: `git diff --check`, the Ron/Wiki structural validator, `node --test tests/ron-workflow/*.test.mjs`, temporary-repository forward tests, `node --test tests/ron-workflow/skill-contracts.test.mjs`, and scoped `codex exec --ignore-user-config --ephemeral --sandbox read-only "<scoped review prompt>"` from the repository root.
 
-Current evidence: all 26 focused and forward tests, Node syntax, promoted-skill parity, current docs routing, invocation metadata, documentation structure, Git zero-mutation, and `git diff --check` pass. The scoped Codex CLI review returned `NO_FINDINGS`; it replaces the retired Claude CLI gate. Implementation staging, commit, installation, push, release, publication, and deployment remain outside scope.
+### Outcome 7: Closeout authority repair
+
+- Work: Add shared, deterministic Closeout Preview validation and exact Closeout Grant derivation with CLI coverage; bind Bootstrap and Sync Preview kinds to their only valid execution operations. Preserve the human root delegation so the exact Issue Grant and Closeout Grant are non-delegating siblings, bind durable read-back hashes, preserve every exclusion, include task staging in the artifact ceiling, and deny target refresh so any drift invalidates the root and downstream records. Parent closeout binds aggregate child-contract and evidence hashes instead of a nonexistent Parent execution contract. Update the shared Codex subagent protocol and proof-state records without overclaiming the candidate.
+- Verify: Focused red/green tests for invalid operation mapping, derived-Grant re-delegation, Parent closeout without an execution contract, durable hash drift, target-refresh denial, target-identity drift, staging-path overflow, exclusion removal, Closeout Preview drift, delegation ceiling overflow, and CLI behavior; the temporary-repository closeout forward test; `node --test tests/ron-workflow/*.test.mjs`; `node --check scripts/ron-workflow/ron-wiki.mjs`; and `git diff --check`.
+
+Current evidence: the accepted baseline is local commit `c66861b`; Outcomes 3–6 are local implementation commit `b74462e`. Outcome 7 becomes the bounded repair proof only when the local commit containing this record exists; before that it remains an authorized candidate. Installation, push, release, publication, and deployment remain outside scope.

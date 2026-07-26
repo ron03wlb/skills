@@ -152,7 +152,7 @@ Focused profile 允許一個 fresh reviewer 分開回報前兩軸；full profile
 
 Leaf mode 只驗證 commit、review、evidence 與 clean Lane，再關閉並 read back；不合併 target 或更新 Wiki。
 
-Parent／Standalone mode 先由協調代理呈現綁定 Lane SHA、target SHA、Wiki write sets、驗證命令、能力、排除項與 bounded repair envelope 的 Closeout Preview；成功路徑只要求使用者回答一次 `同意`。Grant read-back 後，協調代理完成 Wiki reconciliation、最新 target 同步與 Target Integration Candidate 建立。候選固定後，以 full profile 重新對焦所有適用軸線。Wiki-only finding 可在核准 write sets 內修正；code/test finding 轉為新的 Repair Leaf。通過後才 fast-forward target，並由協調代理完成 target verification、Issue 更新與 worktree cleanup。
+Parent／Standalone mode 先由協調代理機械式建立並驗證綁定 Lane SHA、target SHA、Wiki write sets、task staging、驗證命令、能力、完整排除項與 bounded repair envelope 的 Closeout Preview。Standalone綁定自己的contract與Issue Grant；沒有executable contract的Parent改綁ordered child-contract aggregate與aggregate evidence。若human root完整涵蓋exact inputs，協調代理直接由該root派生並read back non-delegating sibling Closeout Grant後繼續；不得由derived Issue Grant再委派。否則只呈現精簡的授權停止點並請使用者回答一次 `同意`。`target_refresh`固定為`denied`；任何target drift使root、Preview與derived Grants失效並停止請人類決斷。Grant read-back 後，協調代理完成 Wiki reconciliation 與 Target Integration Candidate 建立。候選固定後，以 full profile 重新對焦所有適用軸線。Wiki-only finding必須先取得bounded human repair Grant，才可在核准write sets內修正；code/test finding必須先取得人類授權，才建立新的Repair Leaf。通過後才fast-forward target，並由協調代理完成target verification、Issue更新與worktree cleanup。
 
 ### `explain-decision`
 
@@ -181,6 +181,7 @@ Parent／Standalone mode 先由協調代理呈現綁定 Lane SHA、target SHA、
 5. 新增 `execute-issue`
 6. 新增 `close-issue`
 7. 新增 `explain-decision`
-8. 同步 promoted-skill docs、READMEs、plugin manifest 與 `ask-matt`
+8. 新增 `wiki`
+9. 同步 promoted-skill docs、READMEs、plugin manifest 與 `ask-matt`
 
-上述實作已獲授權並由七個 Ron skills 採用。原始 Matt skills 不承載 Ron 的授權或 closeout 行為；唯一的上游流程變更是 `ask-matt` 的 Ron route 指標。此採用沒有新增通用 agent framework、Codex plugin、安裝、提交或發布動作。
+上述實作已獲授權並由八個 Ron skills 採用。原始 Matt skills 不承載 Ron 的授權或 closeout 行為；唯一的上游流程變更是 `ask-matt` 的 Ron route 指標。此採用沒有新增通用 agent framework、Codex plugin、安裝、推送或發布動作。包含本段的本機 commit 是 bounded repair proof；在該 commit 存在前只能稱為已授權且通過本機驗證的 candidate。

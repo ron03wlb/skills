@@ -22,11 +22,11 @@ Type `/close-issue`, or the agent reaches for it automatically when the exact cl
 
 ## Prerequisites
 
-The Issue must come from the [setup-ron](https://aihero.dev/skills-setup-ron) workflow with readable contracts, Grants, evidence, and Lane state. A valid clean-path delegation derives the exact Closeout Grant without another routine prompt; otherwise the compact Preview asks for one `同意`.
+The Issue must come from the [setup-ron](https://aihero.dev/skills-setup-ron) workflow with readable contracts, Grants, evidence, and Lane state. A valid human root derives the exact Closeout Grant without another routine prompt; a derived Issue Grant never delegates again. A Parent has no executable contract, so closeout uses the ordered child-contract and aggregate-evidence hashes. Otherwise the compact Preview asks for one `同意`.
 
 ## Candidate before target
 
-The target branch advances only to the candidate that passed Standards, Change Spec, and applicable Wiki review. Any finding stops for human decision. A bounded Wiki-only repair invalidates stale review evidence; a code or test defect requires a separately authorized Repair Leaf.
+The target branch advances only to the candidate that passed Standards, Change Spec, and applicable Wiki review. Target refresh is denied: if the bound target moves first, the root, Preview, and Grants expire and closeout asks for a new decision. Any finding stops for human decision. A bounded Wiki-only repair invalidates stale review evidence; a code or test defect requires a separately authorized Repair Leaf.
 
 Cleanup removes only exact manifest-owned intermediates. It never deletes the Lane branch, pushes, remotely merges, deploys, or performs live-provider work.
 

@@ -98,6 +98,7 @@ test("existing Ron skills consume the new shared contracts without stale gates",
 
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   assert.match(execute, /missing-with-bootstrap-preview/u);
+  assert.match(execute, /delegation policy must be `denied`/u);
   assert.doesNotMatch(
     execute,
     /approved Wiki baseline exists, or `wiki_impact: none`/u,
@@ -105,8 +106,38 @@ test("existing Ron skills consume the new shared contracts without stale gates",
 
   const close = read("skills/engineering/close-issue/SKILL.md");
   assert.match(close, /workflow-wiki-reconciliation-ledger:v1/u);
+  assert.match(close, /closeout-preview-create/u);
+  assert.match(close, /closeout-grant-derive/u);
+  assert.match(close, /non-delegating siblings/u);
+  assert.match(close, /Parent child-contract aggregate hash/u);
+  assert.match(close, /`target_refresh` is always `denied`/u);
   assert.match(close, /Any confirmed finding ends the clean path/u);
   assert.doesNotMatch(close, /always present one exact Closeout Preview/u);
+
+  const wiki = read("skills/engineering/wiki/SKILL.md");
+  assert.match(wiki, /delegation-envelope-create/u);
+  assert.match(wiki, /`target_refresh: denied`/u);
+
+  const protocol = read("docs/agents/codex-subagent-protocol.md");
+  assert.match(protocol, /八個 Ron skills/u);
+  assert.match(protocol, /bounded human repair Grant/u);
+  assert.match(protocol, /不得由derived Issue Grant再委派/u);
+  assert.match(protocol, /`target_refresh`固定為`denied`/u);
+  assert.doesNotMatch(protocol, /成功路徑只要求使用者回答一次/u);
+  assert.doesNotMatch(protocol, /七個 Ron skills/u);
+
+  assert.doesNotMatch(
+    read("research/ron-canonical-wiki-docs-as-code-spec.md"),
+    /未提交實作/u,
+  );
+  assert.doesNotMatch(
+    read("research/matt-first-issue-delivery-workflow-spec.md"),
+    /implementation is not installed, staged, committed/u,
+  );
+  assert.doesNotMatch(
+    read("research/ron-canonical-wiki-docs-as-code-spec.md"),
+    /bounded repair.*已完成並提交/u,
+  );
 });
 
 test("routers and human docs expose Wiki without repo-relative published links", () => {

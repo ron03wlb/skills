@@ -12,12 +12,17 @@ import test from "node:test";
 
 import {
   buildChangeSpecEnvelope,
+  buildCleanPathDelegationEnvelope,
+  buildCloseoutPreviewEnvelope,
   buildExecutionContractEnvelope,
+  buildAuthorizationEnvelope,
   createEnvelope,
+  deriveCloseoutGrant,
   deriveIssueGrant,
   extractWorkflowConfig,
   hashCanonicalJson,
   resolveSourceLocator,
+  validateCloseoutPreview,
   validatePreIssueDelegation,
   validatePreview,
   validateReconciliationLedger,
@@ -164,14 +169,17 @@ const preIssueDelegation = {
     branch: "main",
     identity: "b".repeat(40),
   },
+  target_refresh: "denied",
   scope: {
     code_paths: [],
-    artifact_paths: [],
+    artifact_paths: [".worktrees/ron-42/.wiki-staging"],
     wiki_paths: ["wiki/index.md", "wiki/orders.md"],
     config_paths: ["docs/agents/ron-workflow.md"],
   },
   grants: ["publish_bootstrap_spec"],
+  downstream_capabilities: ["execute", "close_standalone"],
   validators: ["node validate-page.mjs", "node validate-sources.mjs"],
+  review_axes: ["standards", "spec", "wiki"],
   excludes: [
     "push",
     "remote-merge",
@@ -209,6 +217,149 @@ const alignedLedger = {
     },
   ],
 };
+
+const closeoutDelegation = {
+  schema: "workflow-authorization:v1",
+  record_id: "grant-standalone-1",
+  status: "active",
+  approver: "ron",
+  approved_at: "2026-07-26T09:10:00.000Z",
+  origin: "derived-clean-path",
+  derived_by: "codex",
+  derived_at: "2026-07-26T09:10:00.000Z",
+  delegated_from: "delegation-1",
+  delegated_from_kind: "pre-issue-record",
+  delegated_from_payload_sha256: hashCanonicalJson(preIssueDelegation),
+  binds: {
+    issue: "ron/example#42",
+    spec_id: "spec-1",
+    spec_comment_id: "comment-1",
+    spec_payload_sha256: "f".repeat(64),
+    contract_id: "contract-1",
+    contract_comment_id: "comment-2",
+    contract_payload_sha256: "9".repeat(64),
+    target_branch: "main",
+    target_identity: "b".repeat(40),
+    scope_ceiling_sha256: "7".repeat(64),
+    wiki_operation: "bootstrap",
+    wiki_baseline_requirement: "missing-with-bootstrap-preview",
+    wiki_preview_id: "wiki-bootstrap-1",
+    wiki_preview_payload_sha256: "e".repeat(64),
+    exact_paths: [
+      ".worktrees/ron-42/.wiki-staging",
+      "wiki/index.md",
+      "wiki/orders.md",
+      "docs/agents/ron-workflow.md",
+    ],
+  },
+  grants: ["execute", "close_standalone"],
+  validators: ["node validate-page.mjs", "node validate-sources.mjs"],
+  review_axes: ["standards", "spec", "wiki"],
+  excludes: [
+    "push",
+    "remote-merge",
+    "deploy",
+    "branch-deletion",
+    "live-provider-actions",
+    "legacy-data-deletion",
+  ],
+  preconditions: ["all bound inputs remain current"],
+  delegation: {
+    clean_path: "denied",
+    derive_exact_grants: [],
+    target_refresh: "denied",
+    nested_clean_path: "denied",
+    nested_delegation: "denied",
+  },
+  supersedes: null,
+  revokes: null,
+};
+
+const closeoutPreviewInput = {
+  preview_id: "closeout-preview-1",
+  created_at: "2026-07-26T09:20:00.000Z",
+  mode: "standalone",
+  issue: "ron/example#42",
+  spec: {
+    id: "spec-1",
+    comment_id: "comment-1",
+    payload_sha256: "f".repeat(64),
+  },
+  contract: {
+    id: "contract-1",
+    comment_id: "comment-2",
+    payload_sha256: "9".repeat(64),
+  },
+  child_contracts_payload_sha256: null,
+  root_delegation: {
+    delegation_id: "delegation-1",
+    payload_sha256: hashCanonicalJson(preIssueDelegation),
+  },
+  source_authorization: {
+    record_id: "grant-standalone-1",
+    payload_sha256: hashCanonicalJson(closeoutDelegation),
+  },
+  evidence_payload_sha256: "8".repeat(64),
+  lane: { id: "lane-42", identity: "1".repeat(40) },
+  target: { branch: "main", identity: "b".repeat(40) },
+  wiki_impact: "semantic",
+  wiki_operation: "bootstrap",
+  wiki_baseline_requirement: "missing-with-bootstrap-preview",
+  wiki_preview_id: "wiki-bootstrap-1",
+  wiki_preview_payload_sha256: "e".repeat(64),
+  ledger: alignedLedger,
+  semantic_write_set: ["wiki/orders.md"],
+  support_write_set: [
+    "wiki/index.md",
+    "docs/agents/ron-workflow.md",
+  ],
+  protocol: {
+    name: "ron-wiki-protocol",
+    commit: "c".repeat(40),
+    hash: "d".repeat(64),
+  },
+  staging_path: ".worktrees/ron-42/.wiki-staging",
+  verification_commands: [
+    "node validate-page.mjs",
+    "node validate-sources.mjs",
+  ],
+  review_axes: ["standards", "spec", "wiki"],
+  capability: "close_standalone",
+  target_refresh: "denied",
+  repair: {
+    wiki_waves: 2,
+    wiki_authority: "human-grant-required",
+    code_findings: "repair-leaf-only",
+  },
+  excludes: [
+    "push",
+    "remote-merge",
+    "deploy",
+    "branch-deletion",
+    "live-provider-actions",
+    "legacy-data-deletion",
+  ],
+};
+
+function closeoutDerivationForRoot(root, previewInput = closeoutPreviewInput) {
+  const rootHash = hashCanonicalJson(root);
+  const sourceAuthorization = structuredClone(closeoutDelegation);
+  sourceAuthorization.delegated_from_payload_sha256 = rootHash;
+  sourceAuthorization.excludes = [...root.excludes];
+  const sourceHash = hashCanonicalJson(sourceAuthorization);
+  const boundPreviewInput = structuredClone(previewInput);
+  boundPreviewInput.root_delegation.payload_sha256 = rootHash;
+  boundPreviewInput.source_authorization.payload_sha256 = sourceHash;
+  const result = buildCloseoutPreviewEnvelope(boundPreviewInput);
+  return {
+    root_delegation: root,
+    root_delegation_payload_sha256: rootHash,
+    source_authorization: sourceAuthorization,
+    source_authorization_payload_sha256: sourceHash,
+    preview: result.preview,
+    preview_payload_sha256: result.payload_sha256,
+  };
+}
 
 test("extractWorkflowConfig accepts exactly one strict JSON machine block", () => {
   assert.deepEqual(extractWorkflowConfig(configMarkdown()), validConfig);
@@ -354,6 +505,13 @@ test("pre-Issue delegation binds one Preview and one publish capability", () => 
     validatePreIssueDelegation(preIssueDelegation),
     preIssueDelegation,
   );
+  assert.deepEqual(
+    verifyEnvelope(
+      buildCleanPathDelegationEnvelope(preIssueDelegation).envelope,
+      "workflow-clean-path-delegation:v1",
+    ).payload_sha256,
+    hashCanonicalJson(preIssueDelegation),
+  );
 
   const invalid = structuredClone(preIssueDelegation);
   invalid.grants.push("execute");
@@ -366,11 +524,19 @@ test("pre-Issue delegation binds one Preview and one publish capability", () => 
   assert.throws(() => validatePreIssueDelegation(missingApprover), {
     code: "invalid",
   });
+
+  const refreshableTarget = structuredClone(preIssueDelegation);
+  refreshableTarget.target_refresh =
+    "same-branch-fast-forward-revalidate";
+  assert.throws(() => validatePreIssueDelegation(refreshableTarget), {
+    code: "invalid",
+  });
 });
 
 test("deriveIssueGrant keeps capabilities and paths inside the human ceiling", () => {
   const input = {
     delegation: preIssueDelegation,
+    delegation_payload_sha256: hashCanonicalJson(preIssueDelegation),
     record_id: "grant-1",
     issue: "ron/example#42",
     spec: {
@@ -394,6 +560,7 @@ test("deriveIssueGrant keeps capabilities and paths inside the human ceiling", (
       wiki_preview_id: "wiki-bootstrap-1",
       wiki_preview_payload_sha256: "e".repeat(64),
       owned_paths_sha256: hashCanonicalJson([
+        ".worktrees/ron-42/.wiki-staging",
         "wiki/index.md",
         "wiki/orders.md",
         "docs/agents/ron-workflow.md",
@@ -403,6 +570,7 @@ test("deriveIssueGrant keeps capabilities and paths inside the human ceiling", (
     derived_at: "2026-07-26T09:10:00.000Z",
     capabilities: ["execute", "close_standalone"],
     exact_paths: [
+      ".worktrees/ron-42/.wiki-staging",
       "wiki/index.md",
       "wiki/orders.md",
       "docs/agents/ron-workflow.md",
@@ -417,6 +585,19 @@ test("deriveIssueGrant keeps capabilities and paths inside the human ceiling", (
   assert.deepEqual(grant.grants, ["execute", "close_standalone"]);
   assert.equal(grant.binds.wiki_preview_id, "wiki-bootstrap-1");
   assert.equal(grant.binds.contract_id, "contract-1");
+  assert.equal(grant.delegation.clean_path, "denied");
+  assert.deepEqual(grant.delegation.derive_exact_grants, []);
+  assert.equal(
+    verifyEnvelope(
+      buildAuthorizationEnvelope(grant).envelope,
+      "workflow-authorization:v1",
+    ).payload_sha256,
+    hashCanonicalJson(grant),
+  );
+
+  const staleRootHash = structuredClone(input);
+  staleRootHash.delegation_payload_sha256 = "0".repeat(64);
+  assert.throws(() => deriveIssueGrant(staleRootHash), { code: "scope" });
 
   const outsideScope = structuredClone(input);
   outsideScope.record_id = "grant-2";
@@ -432,6 +613,225 @@ test("deriveIssueGrant keeps capabilities and paths inside the human ceiling", (
   mismatchedContract.record_id = "grant-4";
   mismatchedContract.contract.spec_id = "other-spec";
   assert.throws(() => deriveIssueGrant(mismatchedContract), { code: "scope" });
+
+  const mismatchedPreviewKind = structuredClone(input);
+  mismatchedPreviewKind.record_id = "grant-5";
+  mismatchedPreviewKind.delegation.preview.kind = "sync";
+  mismatchedPreviewKind.delegation.grants = ["publish_wiki_repair_spec"];
+  assert.throws(() => deriveIssueGrant(mismatchedPreviewKind), {
+    code: "scope",
+  });
+});
+
+test("Closeout Preview builder binds the aligned ledger and exact write sets", () => {
+  const result = buildCloseoutPreviewEnvelope(closeoutPreviewInput);
+
+  assert.deepEqual(validateCloseoutPreview(result.preview), result.preview);
+  assert.deepEqual(validatePreview(result.preview), result.preview);
+  assert.equal(
+    verifyEnvelope(
+      result.envelope,
+      "workflow-closeout-preview:v1",
+    ).payload_sha256,
+    result.payload_sha256,
+  );
+  assert.equal(
+    result.preview.ledger_payload_sha256,
+    hashCanonicalJson(alignedLedger),
+  );
+  assert.equal(
+    result.preview.semantic_write_set_sha256,
+    hashCanonicalJson(["wiki/orders.md"]),
+  );
+
+  const driftedLedger = structuredClone(result.preview);
+  driftedLedger.ledger.rows[0].conformance = "deviation";
+  assert.throws(() => validateCloseoutPreview(driftedLedger), {
+    code: "findings",
+  });
+});
+
+test("Closeout Grant derivation binds the Preview and rejects ceiling drift", () => {
+  const input = {
+    ...closeoutDerivationForRoot(preIssueDelegation),
+    record_id: "closeout-grant-1",
+    coordinator: "codex",
+    derived_at: "2026-07-26T09:21:00.000Z",
+  };
+  const grant = deriveCloseoutGrant(input);
+
+  assert.deepEqual(grant.grants, ["close_standalone"]);
+  assert.equal(
+    grant.binds.closeout_preview_sha256,
+    input.preview_payload_sha256,
+  );
+  assert.equal(grant.binds.lane_sha, "1".repeat(40));
+  assert.equal(grant.delegation.clean_path, "denied");
+  assert.equal(grant.delegated_from, "delegation-1");
+  assert.equal(
+    grant.binds.source_authorization_payload_sha256,
+    input.source_authorization_payload_sha256,
+  );
+  assert.ok(grant.binds.exact_paths.includes(closeoutPreviewInput.staging_path));
+
+  const outsideCeiling = structuredClone(closeoutPreviewInput);
+  outsideCeiling.support_write_set.push("wiki/unapproved.md");
+  const outsideResult = buildCloseoutPreviewEnvelope(outsideCeiling);
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        ...input,
+        preview: outsideResult.preview,
+        preview_payload_sha256: outsideResult.payload_sha256,
+      }),
+    { code: "scope" },
+  );
+
+  const stalePreview = structuredClone(input.preview);
+  stalePreview.target.identity = "2".repeat(40);
+  assert.throws(
+    () => deriveCloseoutGrant({ ...input, preview: stalePreview }),
+    { code: "scope" },
+  );
+
+  const movedTargetRoot = structuredClone(preIssueDelegation);
+  movedTargetRoot.target.identity = "2".repeat(40);
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        ...closeoutDerivationForRoot(movedTargetRoot),
+        record_id: "closeout-grant-moved-target",
+        coordinator: "codex",
+        derived_at: "2026-07-26T09:21:00.000Z",
+      }),
+    { code: "scope" },
+  );
+
+  const missingCapability = structuredClone(preIssueDelegation);
+  missingCapability.downstream_capabilities = ["execute"];
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        ...closeoutDerivationForRoot(missingCapability),
+        record_id: "closeout-grant-missing-capability",
+        coordinator: "codex",
+        derived_at: "2026-07-26T09:21:00.000Z",
+      }),
+    { code: "scope" },
+  );
+
+  const stagingOverflow = structuredClone(preIssueDelegation);
+  stagingOverflow.scope.artifact_paths = [];
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        ...closeoutDerivationForRoot(stagingOverflow),
+        record_id: "closeout-grant-staging-overflow",
+        coordinator: "codex",
+        derived_at: "2026-07-26T09:21:00.000Z",
+      }),
+    { code: "scope" },
+  );
+
+  const removedExclusion = structuredClone(preIssueDelegation);
+  removedExclusion.excludes.push("network");
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        ...closeoutDerivationForRoot(removedExclusion),
+        record_id: "closeout-grant-removed-exclusion",
+        coordinator: "codex",
+        derived_at: "2026-07-26T09:21:00.000Z",
+      }),
+    { code: "scope" },
+  );
+});
+
+test("Parent Closeout binds aggregate child contracts without an executable contract", () => {
+  const rootAuthorization = structuredClone(closeoutDelegation);
+  rootAuthorization.record_id = "root-parent-1";
+  rootAuthorization.origin = "direct-human";
+  delete rootAuthorization.derived_by;
+  delete rootAuthorization.derived_at;
+  delete rootAuthorization.delegated_from;
+  delete rootAuthorization.delegated_from_kind;
+  delete rootAuthorization.delegated_from_payload_sha256;
+  delete rootAuthorization.binds.contract_id;
+  delete rootAuthorization.binds.contract_comment_id;
+  delete rootAuthorization.binds.contract_payload_sha256;
+  rootAuthorization.binds.child_contracts_payload_sha256 = "4".repeat(64);
+  rootAuthorization.binds.aggregate_evidence_payload_sha256 = "8".repeat(64);
+  rootAuthorization.binds.wiki_operation = "reconcile";
+  rootAuthorization.binds.wiki_baseline_requirement = "ready";
+  rootAuthorization.binds.wiki_preview_id = null;
+  rootAuthorization.binds.wiki_preview_payload_sha256 = null;
+  rootAuthorization.grants = ["close_parent"];
+  rootAuthorization.delegation = {
+    clean_path: "bounded",
+    derive_exact_grants: ["close_parent"],
+    target_refresh: "denied",
+    nested_clean_path: "denied",
+    nested_delegation: "denied",
+  };
+
+  const previewInput = structuredClone(closeoutPreviewInput);
+  previewInput.preview_id = "closeout-preview-parent-1";
+  previewInput.mode = "parent";
+  previewInput.contract = null;
+  previewInput.child_contracts_payload_sha256 = "4".repeat(64);
+  previewInput.root_delegation = {
+    record_id: rootAuthorization.record_id,
+    payload_sha256: hashCanonicalJson(rootAuthorization),
+  };
+  previewInput.source_authorization = null;
+  previewInput.wiki_operation = "reconcile";
+  previewInput.wiki_baseline_requirement = "ready";
+  previewInput.wiki_preview_id = null;
+  previewInput.wiki_preview_payload_sha256 = null;
+  previewInput.capability = "close_parent";
+
+  const result = buildCloseoutPreviewEnvelope(previewInput);
+  const grant = deriveCloseoutGrant({
+    root_delegation: rootAuthorization,
+    root_delegation_payload_sha256:
+      hashCanonicalJson(rootAuthorization),
+    source_authorization: null,
+    source_authorization_payload_sha256: null,
+    preview: result.preview,
+    preview_payload_sha256: result.payload_sha256,
+    record_id: "closeout-grant-parent-1",
+    coordinator: "codex",
+    derived_at: "2026-07-26T09:22:00.000Z",
+  });
+
+  assert.deepEqual(grant.grants, ["close_parent"]);
+  assert.equal(grant.delegated_from, "root-parent-1");
+  assert.equal(grant.binds.source_authorization_payload_sha256, null);
+  assert.equal(grant.binds.wiki_operation, "reconcile");
+  assert.equal(grant.binds.wiki_baseline_requirement, "ready");
+
+  const fakeParentContract = structuredClone(rootAuthorization);
+  fakeParentContract.binds.contract_id = "parent-must-not-have-contract";
+  const fakePreviewInput = structuredClone(previewInput);
+  fakePreviewInput.root_delegation.payload_sha256 =
+    hashCanonicalJson(fakeParentContract);
+  const fakePreview = buildCloseoutPreviewEnvelope(fakePreviewInput);
+  assert.throws(
+    () =>
+      deriveCloseoutGrant({
+        root_delegation: fakeParentContract,
+        root_delegation_payload_sha256:
+          hashCanonicalJson(fakeParentContract),
+        source_authorization: null,
+        source_authorization_payload_sha256: null,
+        preview: fakePreview.preview,
+        preview_payload_sha256: fakePreview.payload_sha256,
+        record_id: "closeout-grant-parent-invalid",
+        coordinator: "codex",
+        derived_at: "2026-07-26T09:22:00.000Z",
+      }),
+    { code: "invalid" },
+  );
 });
 
 test("source resolvers find one exact Markdown heading and JSON pointer", (t) => {

@@ -14,7 +14,7 @@ npx skills update wiki
 
 `wiki` initializes, resumes, inspects, or synchronizes the repository-local Canonical Wiki from verified Ron workflow state.
 
-It is state-aware: the same `/wiki` command creates the first complete baseline when one is missing and later changes only affected topics. It never patches accepted Wiki content outside the existing Issue, Grant, review, and closeout flow.
+It is state-aware: the same `/wiki` command creates the first complete baseline when one is missing and later changes only affected topics. It keeps one bounded human root through closeout so execution and closeout receive separate non-delegating Grants. It never patches accepted Wiki content outside the existing Issue, Grant, review, and closeout flow.
 
 ## When to reach for it
 
@@ -29,6 +29,8 @@ The repository needs a valid `docs/agents/ron-workflow.md`, a readable configure
 Initialization creates one complete reviewed baseline through a Bootstrap Standalone Issue. Ready-state synchronization reuses the active change-owning Issue, or creates one bounded Wiki-repair Standalone only when no Issue owns clean proven drift.
 
 Normal Parent or Standalone [close-issue](https://aihero.dev/skills-close-issue) runs the same reconciliation, so you do not need to remember `/wiki` after every change. Clean results stay compact; findings return only the problem and trade-offs that need a decision.
+
+The authority stays bound to one fixed target identity. If that target moves, `/wiki` stops and asks for a new decision instead of refreshing the Grant automatically.
 
 ## It's working if
 
