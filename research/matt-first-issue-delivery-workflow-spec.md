@@ -1,6 +1,6 @@
 # Matt-first Issue Delivery Workflow Spec
 
-**Status:** Core seven-skill Ron flow is locally implemented. Canonical Wiki v1, `/wiki`, reconciliation-ledger enforcement, bounded clean-path delegation, and one exact pre-implementation local baseline commit are authorized but are not yet implemented or locally validated. Nothing is pushed or published.
+**Status:** Core seven-skill Ron flow and Canonical Wiki v1 are locally implemented. `/wiki`, shared contracts, reconciliation-ledger enforcement, bounded clean-path delegation, and the exact pre-implementation baseline commit have focused and temporary-repository evidence. Codex-native packaging review passed; Claude CLI is not a validation dependency. The implementation is not installed, staged, committed, pushed, or published.
 
 ## Purpose
 
@@ -304,6 +304,9 @@ binds:
   spec_id: <change-spec-id>
   spec_comment_id: <tracker-comment-id>
   spec_payload_sha256: <hash>
+  contract_id: <execution-contract-id>
+  contract_comment_id: <tracker-comment-id>
+  contract_payload_sha256: <hash>
   target_branch: <branch>
   target_sha: <expected-baseline>
   lane_sha: <required-for-closeout-or-null>
@@ -358,7 +361,7 @@ Direct skill invocation counts as approval when either its exact scope is alread
 - `close_leaf` is a separate capability that must be directly named or pre-recorded;
 - a Lane batch first presents one exact Grant preview per Leaf, then one human approval may record all named Grants;
 - direct `/wiki` invocation may authorize exactly one clean bounded initialization or sync whose exact Preview or ledger, paths, validators, and exclusions are derived before external mutation;
-- when that operation needs a new Issue, the exact ceiling is first written as a mode-`0600`, hash-verified pre-Issue delegation under repository-local Git metadata; only its one named publish capability may create/reuse the Issue, and no Lane starts until a derived Issue Authorization Record binds and read-backs the local delegation hash;
+- when that operation needs a new Issue, the exact ceiling is first written as a mode-`0600`, hash-verified pre-Issue delegation under repository-local Git metadata; only its one named publish capability may create/reuse the Issue, and no Lane starts until the Change Spec and execution contract both read back and a derived Issue Authorization Record binds them plus the local delegation hash;
 - Parent or Standalone complete closeout creates one exact Closeout Preview containing Lane SHA, target SHA, Wiki ledger and write sets, verification commands, capabilities, exclusions, and the bounded candidate-creation/repair envelope; a valid clean-path delegation derives its exact Grant, otherwise the workflow asks only for compact human authorization;
 - the Grant binds those exact inputs and permitted mutations, while review and completion evidence bind the resulting `integration_candidate_sha`;
 - a changed contract hash, target SHA, write set, code scope, or new Repair Leaf invalidates the exact Grant. The workflow may rebuild and derive a replacement only when the original clean-path delegation still covers every input and revalidation passes; otherwise it stops for human decision. A candidate SHA changed only by an approved Wiki repair wave invalidates prior review evidence, not the Grant.
@@ -746,6 +749,7 @@ Stop and preserve recoverable state when:
 33. A direct `/wiki` invocation that needs a new Issue records and verifies one pre-Issue delegation before Issue creation, then records a derived Issue Grant before Lane creation.
 34. `/wiki` and `to-spec-ron` use byte-identical Change Spec construction and verification for identical input.
 35. Unsupported or ambiguous source resolvers stop with `not-verifiable` instead of weakening the locator contract.
+36. A Bootstrap or Wiki-repair derived Grant cannot create a Lane until both its Change Spec and execution contract have stable IDs, verified bytes, and matching hashes.
 
 ## Core implementation record
 
@@ -766,15 +770,22 @@ The previously authorized core implementation scope was:
 
 No existing Matt skill should be behaviorally rewritten merely to hide these extensions under an upstream name.
 
-The Canonical Wiki v1 extension, `/wiki`, shared Change Spec publisher, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. They remain unproved until the new focused and temporary-repository forward tests pass; the historical core validation below does not prove them. Final implementation commit, installation, push, release bump, marketplace publication, and deployment remain outside this authorization.
+The Canonical Wiki v1 extension, `/wiki`, shared Change Spec and execution-contract builders, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. The new focused and temporary-repository forward tests now prove the local implementation contracts. Final implementation commit, installation, push, release bump, marketplace publication, and deployment remain outside this authorization.
 
 The repository currently reports `.claude-plugin/plugin.json` version `1.2.0` and `package.json` version `1.1.0`. This pre-existing drift does not block local symlink implementation or forward tests, but it must be resolved under separate release authorization before any managed plugin publication.
 
 ## Local validation record
 
 - Promoted-skill parity passed across 29 skill directories, `.claude-plugin/plugin.json`, top-level and bucket READMEs, docs pages, and invocation metadata.
-- `claude plugin validate . --strict` passed after the manifest change.
+- Historical provider-native validation covered the earlier seven-skill manifest; it does not validate the current `/wiki` manifest change.
 - Ron frontmatter, `agents/openai.yaml`, default prompts, docs links, final newlines, trailing whitespace, and `git diff --check` passed.
 - A disposable `/private/tmp` Git repository, fake durable tracker, and fake Wiki verified comment hashing, real target/Lane SHAs, target drift, stale Grant rejection, first/non-first Leaf readiness, and exact Wiki sets.
 - Fresh read-only forward tests covered setup/spec/tickets, execute/Leaf close, Parent/Standalone closeout, and the decision sidecar. Findings about Lane serialization, rerun idempotency, Grant supersession, Standalone capability naming, and first-Leaf baseline binding were repaired and re-reviewed to PASS.
 - The temporary fixture is removed after the validation record is captured; the operating-system cleaner is not relied upon.
+
+Canonical Wiki v1 local validation on 2026-07-26:
+
+- 26 focused, contract, CLI, Git zero-mutation, fake-tracker Bootstrap, and documentation-structure forward tests passed.
+- Shared-core syntax, promoted-skill parity, current docs routing, invocation metadata, and `git diff --check` passed.
+- The system quick validator cannot validate this repository's user-invoked frontmatter contract because it does not accept the project-required `disable-model-invocation` key; the project contract test verifies that key together with `policy.allow_implicit_invocation: false`.
+- The current manifest uses the repository's deterministic packaging contract test plus scoped read-only Codex CLI review; no Claude CLI validation is required.

@@ -12,9 +12,9 @@ npx skills update setup-ron
 
 ## What it does
 
-`setup-ron` configures one repository for the Ron Issue delivery workflow: durable tracker capabilities, Wiki baseline, domain docs, target branch, and Execution Lane conventions.
+`setup-ron` configures one repository for the Ron Issue delivery workflow: durable tracker capabilities, Canonical Wiki contract, domain docs, target branch, and Execution Lane conventions.
 
-It does not assume that a GitHub remote or a Wiki is sufficient. It probes the required capabilities, presents one consolidated proposal, and reports degraded mode instead of claiming guarantees the repository cannot support.
+It does not generate Wiki content. It validates one strict machine-readable contract and creates one local setup-only commit; an existing Wiki becomes `ready` only after mechanical and independent semantic proof.
 
 ## When to reach for it
 
@@ -26,8 +26,8 @@ Run it inside a Git repository. Ron v1 full mode needs a GitHub repository whose
 
 ## One repository contract
 
-The lasting output is `docs/agents/ron-workflow.md`, plus shared tracker and domain files where needed. The setup is idempotent: rerunning it updates the one contract instead of creating parallel Ron-specific configuration.
+The lasting output is `docs/agents/ron-workflow.md`, plus shared tracker and domain files where needed. The setup is idempotent: rerunning it updates the one contract instead of creating parallel Ron-specific configuration. Dirty overlap, an unsupported resolver, or an unexpected path stops before commit.
 
 ## Where it fits
 
-This is the run-once entry to `setup-ron → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`. Use [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) for the upstream Matt flow without Ron authorization and closeout gates. See [ask-ron](https://aihero.dev/skills-ask-ron) for the governed route and [ask-matt](https://aihero.dev/skills-ask-matt) for the complete upstream map.
+This is the run-once entry to `setup-ron → wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`. Use [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) for the upstream Matt flow without Ron authorization and closeout gates. See [ask-ron](https://aihero.dev/skills-ask-ron) for the governed route and [ask-matt](https://aihero.dev/skills-ask-matt) for the complete upstream map.

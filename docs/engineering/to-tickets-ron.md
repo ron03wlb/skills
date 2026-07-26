@@ -14,7 +14,7 @@ npx skills update to-tickets-ron
 
 `to-tickets-ron` turns one verified Change Spec into dependency-ordered Executable Issues.
 
-It keeps Matt's tracer-bullet slicing, then binds each Leaf to its own outcome, behavioral seam, target, baseline, Lane, ownership, review profile, evidence state, and optional Grant. Parent authority never cascades.
+It keeps Matt's tracer-bullet slicing, then binds each Leaf to its own outcome, behavioral seam, target, Wiki operation/baseline requirement, Lane, ownership, review profile, evidence state, and optional Grant. Parent authority never cascades.
 
 ## When to reach for it
 
@@ -26,7 +26,7 @@ Run [setup-ron](https://aihero.dev/skills-setup-ron), then publish the Change Sp
 
 ## One Lane, one Issue at a time
 
-Related Leaves may reuse one clean Lane worktree, but every Leaf keeps a distinct contract, Grant, commit, review, evidence record, and closure. One batch `同意` can record exact per-Leaf `execute` and `close_leaf` Grants without turning them into inherited Parent authority.
+Related Leaves may reuse one clean Lane worktree, but every Leaf keeps a distinct contract, Grant, commit, review, evidence record, and closure. Contracts come from the same deterministic builder used by [wiki](https://aihero.dev/skills-wiki). One batch `同意` can record exact per-Leaf `execute` and `close_leaf` Grants without turning them into inherited Parent authority.
 
 ## Where it fits
 

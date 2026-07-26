@@ -8,7 +8,7 @@ We ship a native **Claude Code plugin** and, for now, **defer** a native **Codex
 
 Skills live in bucket folders under `skills/` — `engineering/` and `productivity/` are **promoted** (shipped); `misc/`, `personal/`, `in-progress/`, and `deprecated/` are **not**. A plugin must expose only the promoted set, which spans two of those bucket folders.
 
-- **Claude Code** — `.claude-plugin/plugin.json` accepts `skills` as an **array of explicit skill-directory paths**. We list the promoted skills one by one, exclude everything else with zero ambiguity, and add `.claude-plugin/marketplace.json` so the repo is its own single-plugin marketplace. Verified end to end: `claude plugin validate . --strict` passes, and `marketplace add` → `install` resolves all promoted skills.
+- **Claude Code** — `.claude-plugin/plugin.json` accepts `skills` as an **array of explicit skill-directory paths**. We list the promoted skills one by one, exclude everything else with zero ambiguity, and add `.claude-plugin/marketplace.json` so the repo is its own single-plugin marketplace. Historical provider-native evidence showed that marketplace add and install resolved all promoted skills.
 
 - **Codex** — `.codex-plugin/plugin.json` accepts `skills` only as a **single path string** (arrays are rejected with `missing or invalid plugin.json`), and Codex discovers `SKILL.md` files recursively under it. There is no way to name two bucket folders, or to curate a subset, from one path. Two escape hatches were tested and rejected:
   - Pointing at `./skills/` would also ship `deprecated/`, `in-progress/`, `personal/`, and `misc/` — retired, draft, and personal skills we deliberately don't promote.
@@ -26,3 +26,5 @@ The only robust ways to give Codex a single promoted-only path are (a) **restruc
 
 - Every promoted skill has an entry in `.claude-plugin/plugin.json`'s `skills` array (this already stood as a `CLAUDE.md` rule; it now also gates the plugin's contents).
 - `.claude-plugin/plugin.json`'s `version` tracks `package.json`'s version — bump both together on release. Claude uses the plugin `version` to decide when installed users see an update.
+- Repository validation is Codex-native: a deterministic contract test verifies manifest, promoted-skill, README, docs, and invocation-metadata parity, then `codex exec --ignore-user-config --ephemeral --sandbox read-only "<scoped review prompt>"` performs a scoped read-only review. The current Codex CLI has plugin management but no plugin-validation subcommand, so this proves the repository packaging contract rather than provider runtime installation.
+- Claude CLI is not a repository-validation dependency.

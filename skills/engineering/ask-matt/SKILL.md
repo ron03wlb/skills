@@ -75,7 +75,7 @@ Off the main flow entirely.
 
 ## Ron governed route
 
-If the repository uses `docs/agents/ron-workflow.md`, or the user asks for Issue-comment authorization, one reusable Execution Lane, Wiki reconciliation, and target-candidate closeout, recommend that they type **`/ask-ron`**. The Ron route keeps the Matt idea flow but uses `to-spec-ron`, `to-tickets-ron`, `execute-issue`, and `close-issue` for delivery. Do not silently mix the two execution routes.
+If the repository uses `docs/agents/ron-workflow.md`, or the user asks for Issue-comment authorization, one reusable Execution Lane, Canonical Wiki, and target-candidate closeout, recommend that they type **`/ask-ron`**. It routes the run-once `/setup-ron`, state-aware `/wiki`, and the Ron delivery skills (`to-spec-ron`, `to-tickets-ron`, `execute-issue`, `close-issue`). Do not silently mix the two execution routes.
 
 ## Precondition
 

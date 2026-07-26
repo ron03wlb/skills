@@ -6,103 +6,74 @@ disable-model-invocation: true
 
 # To Spec Ron
 
-Synthesize the already-resolved conversation into one durable Change Spec. Do not restart the interview. If a material decision or behavioral test seam is still unresolved, preserve the draft and tell the user to return to `/grill-with-docs`.
+Synthesize the already-resolved conversation into one durable Change Spec. Do not restart the interview. Preserve an incomplete draft and return to `/grill-with-docs` when a material behavior, Wiki conflict, or verification seam is unresolved.
 
-The Change Issue is created or reused only when synthesis is complete. Before that point, no Issue is created.
+## Shared publisher
+
+Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs`. Every normal, Bootstrap, and Wiki-repair Change Spec uses `change-spec-create` plus the same configured tracker create/post/stable-ID read-back sequence. Do not render or hash another Change Spec format.
+
+This user-invoked skill is not called by `/wiki`; both independently call the same mechanical publisher.
 
 ## Preconditions
 
-Read `docs/agents/ron-workflow.md`, the configured tracker and domain files, relevant Wiki pages, `CONTEXT.md`, ADRs, and repository evidence. Full completion requires a passing GitHub capability probe. Degraded trackers may retain a draft but cannot claim `specified`.
+Read and validate Ron config, tracker capability, current Change Spec chain, relevant Canonical Wiki topics/Sources, `CONTEXT.md`, ADRs, and repository evidence. Full completion requires exact GitHub comment read-back.
 
-Use the approved Wiki vocabulary. A Change Spec may explicitly override the Wiki; code may not do so silently. Record `wiki_impact: none` only for a genuinely technical change and make the reason explicit for later approval.
+For every relevant Wiki topic or material claim, resolve one disposition:
 
-## Working Spec
+- `inherit`
+- `add`
+- `change`
+- `remove`
 
-Resolve the draft path with:
+Record explicit overrides and their reason. A behavioral conflict between the request, current Wiki, and repository evidence blocks publication. Code cannot silently override the Wiki.
+
+Normal semantic work requires:
+
+```yaml
+wiki_impact: semantic
+wiki_operation: reconcile
+wiki_baseline_requirement: ready
+wiki_preview_id: null
+wiki_preview_payload_sha256: null
+```
+
+Genuinely technical work may use `none + not-applicable` only with an explicit reason and no hidden behavioral effect. Bootstrap and bounded Wiki repair are published only from matching `/wiki` Previews through the shared publisher.
+
+## Recoverable Working Spec
+
+Resolve:
 
 ```text
 git rev-parse --git-path ron-workflow/drafts/<draft-id>.md
 ```
 
-Create parent directories as needed and set the draft to mode `0600`. The draft is non-authoritative, lives under Git metadata rather than the worktree, and exists only for cross-session recovery.
-
-Keep it concise and update it in place while synthesis is incomplete. It may contain unresolved questions, but it must never be described as approved, published, or executable.
+Keep one mode-`0600`, non-authoritative draft while synthesis is incomplete. It may hold unresolved questions but is never approved, published, or executable.
 
 ## Final contract
 
-The final Change Spec contains:
+Provide the shared builder:
 
-- Problem and user-visible Solution;
-- behavior-distinct numbered User Stories;
-- Implementation Decisions without brittle code snippets or speculative paths;
-- confirmed behavioral verification seams;
-- Testing Decisions;
-- Wiki context and explicit overrides;
-- proof-claim boundaries;
-- Out of Scope and Further Notes.
+- stable Spec ID, Issue, timestamp, supersession;
+- Wiki impact, operation, baseline requirement, optional Preview binding;
+- per-topic/claim dispositions, context, and explicit overrides;
+- observable acceptance and confirmed public verification seams;
+- Problem, Solution, behavior-distinct User Stories;
+- Implementation and Testing Decisions;
+- Proof Boundaries, Out of Scope, and Further Notes.
 
-Prefer the highest existing public test seam and the smallest useful seam set. Reuse a seam already confirmed during grilling; do not ask again. If the seam has never been confirmed, show only that bounded decision and wait.
+Keep implementation decisions durable but avoid speculative paths and brittle snippets. Prefer the highest existing public seam and do not ask again about a seam confirmed during grilling.
 
 ## Publish atomically
 
-Create or reuse exactly one Change Issue. It is initially a Change Issue; `/to-tickets-ron` may later classify it as Parent, otherwise it remains Standalone.
+Create or reuse exactly one Change Issue. It remains Standalone unless `/to-tickets-ron` later makes it a Parent.
 
-Publish one append-only comment in this exact envelope:
+1. Run `change-spec-create`.
+2. Post its exact `workflow-change-spec:v1` envelope.
+3. Fetch the comment by stable ID.
+4. Run `envelope-verify` on the exact read-back bytes.
+5. Verify repository, Issue, Spec, and supersession identity.
+6. Delete the Working Spec only after every check passes.
 
-```text
-workflow-change-spec:v1
-<!-- workflow-payload:begin -->
-spec_id: <stable-id>
-status: specified
-issue: <owner/repo#number>
-created_at: <timestamp>
-wiki_impact: semantic | none
-wiki_context:
-  - <topic-and-source-reference>
-explicit_overrides:
-  - <confirmed-rule-change-or-none>
-acceptance:
-  - <observable-outcome>
-verification_seams:
-  - <public-boundary>
-out_of_scope:
-  - <excluded-behavior>
-supersedes: <spec-id-or-null>
+A correction is a new append-only Change Spec with a new ID and `supersedes`; never edit or delete history. Write/read-back failure, hash drift, ambiguous current chain, or tracker unavailability preserves the draft and returns `not-specified`.
 
-## Problem
-...
-
-## Solution
-...
-
-## User Stories
-...
-
-## Implementation Decisions
-...
-
-## Testing Decisions
-...
-
-## Proof Boundaries
-...
-
-## Further Notes
-...
-<!-- workflow-payload:end -->
-payload_sha256: <sha256>
-```
-
-Hash only the exact UTF-8 bytes between the two payload delimiters, excluding the delimiters, with LF line endings and exactly one terminal newline. The hash field and tracker metadata are excluded.
-
-After posting:
-
-1. fetch the comment by stable comment ID;
-2. verify the marker, delimiters, exact payload bytes, and SHA-256;
-3. verify that the Issue identity matches;
-4. record the Issue URL, comment ID, `spec_id`, and hash in the response;
-5. delete the Working Spec only after every check passes.
-
-A correction is a new append-only comment with a new `spec_id` and `supersedes`; never edit or delete historical Change Specs. On publish, read-back, identity, or hash failure, preserve the Working Spec and report `not-specified`.
-
-Do not apply an authorization label or imply execution readiness. The output is `specified`, not `authorized`, `ready`, or `implemented`.
+Do not create Authorization Records, contracts, worktrees, code, Wiki patches, commits, or labels. The result is `specified`, never `authorized`, `ready`, or `implemented`.

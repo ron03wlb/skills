@@ -14,7 +14,7 @@ npx skills update to-spec-ron
 
 `to-spec-ron` synthesizes an already-resolved discussion into one hash-verified Change Spec comment on a GitHub Issue.
 
-It creates or reuses the Issue only when the spec is complete. Until then it keeps a private, non-authoritative Working Spec under Git metadata, never a per-feature spec file in the worktree.
+It creates or reuses the Issue only when the spec is complete. Until then it keeps a private, non-authoritative Working Spec under Git metadata. Every normal, Bootstrap, and Wiki-repair Change Spec uses the same deterministic publisher.
 
 ## When to reach for it
 
@@ -26,7 +26,7 @@ Run [setup-ron](https://aihero.dev/skills-setup-ron) first. Full completion requ
 
 ## Append-only contract
 
-The Change Spec is a historical contract, not execution authority. Corrections create new comments that supersede older ones; editing the old comment invalidates dependent Grants.
+The Change Spec is a historical contract, not execution authority. It records `inherit`, `add`, `change`, or `remove` for relevant Wiki claims and whether execution requires a ready baseline. Corrections create new comments that supersede older ones; editing the old comment invalidates dependent contracts and Grants.
 
 The published state is `specified`. Authorization and execution readiness are separate later gates.
 

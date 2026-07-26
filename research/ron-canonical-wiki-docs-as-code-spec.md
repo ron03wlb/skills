@@ -1,6 +1,6 @@
 # Ron Canonical Wiki Docs-as-Code 完整方案
 
-狀態：設計與本機實作已授權，尚未完成或驗證
+狀態：本機實作、專用測試與 Codex-native packaging review 已完成；未安裝、未提交實作、未推送或發布
 日期：2026-07-26
 
 ## 目標
@@ -113,6 +113,7 @@ scripts/ron-workflow/ron-wiki.mjs
 - reconciliation ledger validation與write-set derivation
 - pre-Issue clean-path delegation validation及exact downstream Grant derivation
 - shared Change Spec payload construction與read-back byte verification
+- shared execution-contract payload construction與read-back byte verification
 
 CLI exit contract固定為：
 
@@ -198,9 +199,10 @@ Ready-state sync沒有active change-owning Issue時，唯一額外publish capabi
 
 3. 檔案mode為`0600`，marker為`workflow-clean-path-delegation:v1`，綁定direct invocation lineage、Preview ID／hash、repository、target、scope ceilings、publish capability、validators與exclusions。
 4. Shared core驗證delegation只涵蓋exactly one `publish_bootstrap_spec`或`publish_wiki_repair_spec`，才允許tracker adapter建立／reuse Issue並publish matching Change Spec。
-5. Change Spec成功以stable comment ID read back後，立即在該Issue寫入並read back一份`workflow-authorization:v1` record；它使用`origin: derived-clean-path`，並綁定pre-Issue delegation ID／payload hash、Issue、Spec與exact downstream capabilities。
-6. Issue Grant read-back成功前不得建立Lane或執行；失敗時保留Preview與pre-Issue delegation供recovery。
-7. Exact Issue Grant成功read back後，pre-Issue delegation已被durable Issue record完整承接，才可刪除local copy；Preview仍依其各自規則保留到matching Spec publish成功。
+5. Change Spec成功以stable comment ID read back後，使用shared core建立、publish並read back一份exact `workflow-execution-contract:v1`。
+6. 立即在該Issue寫入並read back一份`workflow-authorization:v1` record；execution contract的Issue、type、Spec IDs／hashes、Wiki／Preview binding與owned-paths hash必須逐欄相符。Record使用`origin: derived-clean-path`，並綁定pre-Issue delegation ID／payload hash、Issue、Spec、execution contract與exact downstream capabilities。
+7. Issue Grant read-back成功前不得建立Lane或執行；失敗時保留Preview與pre-Issue delegation供recovery。
+8. Exact Issue Grant成功read back後，pre-Issue delegation已被durable Issue record完整承接，才可刪除local copy；Preview仍依其各自規則保留到matching Spec publish成功。
 
 有active change-owning Issue時不使用pre-Issue delegation；human-originated delegation直接作為該Issue的append-only Authorization Record，並遵守相同scope ceiling與read-back規則。
 
@@ -427,15 +429,16 @@ Overall result：
 3. Preview為`not-bounded`、有finding、scope ambiguity或缺少capability時停止，說明問題與trade-off。
 4. Preview clean且`bounded`時，先在Git metadata寫入並驗證human-originated pre-Issue delegation；它只授權matching Preview的一次`publish_bootstrap_spec`。
 5. 透過與`to-spec-ron`共用的publisher建立並read back一個dedicated Wiki Bootstrap Standalone Issue。
-6. 在該Issue寫入direct invocation lineage與pre-Issue delegation hash，derive並read back exact Issue Grant。
-7. Issue Grant明載`wiki_operation: bootstrap`、`wiki_baseline_requirement: missing-with-bootstrap-preview`與matching Preview；成功read back前不得建立Lane。
-8. topic-sized batches是同一Standalone Issue與task staging mirror內可跨session恢復的generation／review checkpoints，不是Leaf Issues或partial acceptance units。
-9. 建立execution lane後，hash-valid的active Bootstrap Issue使`/wiki status`推導runtime狀態為`bootstrapping`；target config仍保持`baseline_state: missing`。
-10. 依topic-sized batches在task staging mirror產生候選頁；batch是generation／review單位，不是獨立target authority。
-11. 每批通過page、claim、source、link與build檢查。
-12. Standalone closeout建立一個完整integration candidate並進行Wiki review。
-13. Internal Closeout Preview與derived exact Grant全部落在delegation ceiling且verification clean時，不再次要求使用者確認。
-14. integration candidate同時包含完整baseline與`baseline_state: ready`；local target fast-forward及target verification成功後，target才成為`ready`。
+6. 使用shared core建立、publish並read back exact Standalone execution contract，綁定Spec、Preview、target、paths與verification。
+7. 在該Issue寫入direct invocation lineage與pre-Issue delegation hash，derive並read back exact Issue Grant；它同時綁定Spec與execution contract。
+8. Issue Grant明載`wiki_operation: bootstrap`、`wiki_baseline_requirement: missing-with-bootstrap-preview`與matching Preview；成功read back前不得建立Lane。
+9. topic-sized batches是同一Standalone Issue與task staging mirror內可跨session恢復的generation／review checkpoints，不是Leaf Issues或partial acceptance units。
+10. 建立execution lane後，hash-valid的active Bootstrap Issue使`/wiki status`推導runtime狀態為`bootstrapping`；target config仍保持`baseline_state: missing`。
+11. 依topic-sized batches在task staging mirror產生候選頁；batch是generation／review單位，不是獨立target authority。
+12. 每批通過page、claim、source、link與build檢查。
+13. Standalone closeout建立一個完整integration candidate並進行Wiki review。
+14. Internal Closeout Preview與derived exact Grant全部落在delegation ceiling且verification clean時，不再次要求使用者確認。
+15. integration candidate同時包含完整baseline與`baseline_state: ready`；local target fast-forward及target verification成功後，target才成為`ready`。
 
 target branch不接受未完成的partial baseline，也不持久保存`bootstrapping`。Tracker unavailable、Issue hash不符或lineage ambiguous時，`/wiki status`回報`not-verifiable`，不得猜測進度。失敗保留Issue、lane與候選證據。
 
@@ -601,7 +604,7 @@ Microsoft Deep Wiki只作 citation/page-writing與 future publication參考；fu
 
 `to-spec-ron`與`/wiki` initialization／repair必須共用同一Change Spec publishing primitive；`close-issue`與Authorization Record schema必須支援bounded clean-path delegation及derived exact Grant，不得複製第二套authority protocol。
 
-所有 promoted-skill docs、invocation metadata與 manifests必須同步；manifest變更後執行 `claude plugin validate . --strict`。
+所有 promoted-skill docs、invocation metadata與 manifests必須同步。Manifest變更後由Codex執行`node --test tests/ron-workflow/skill-contracts.test.mjs`，再從repository root以`codex exec --ignore-user-config --ephemeral --sandbox read-only "<scoped review prompt>"`唯讀核對exact packaging scope；repository validation不得依賴Claude CLI。
 
 ### Do not do in the same implementation
 
@@ -662,14 +665,20 @@ Microsoft Deep Wiki只作 citation/page-writing與 future publication參考；fu
 44. Bundled resolver profile只對明載的language／format與locator kind回報supported；unsupported extension、dynamic config key、ambiguous declaration或comment-only match都回報`not-verifiable`。
 45. Shared core執行所有valid／invalid fixture後，tracked tree、Git refs、tracker與network state保持不變。
 46. `docs/agents/ron-workflow.md`缺少machine block、存在多個block、JSON invalid或schema/version不符時回報`not-configured`或`not-verifiable`，不得fallback解析自由文字。
+47. Bootstrap／repair的derived Issue Grant同時綁定read-back verified Change Spec與execution contract；任一缺少、hash drift或identity mismatch都阻止Lane建立。
 
 ## Proof-state boundary
 
-本規格獲得確認與本機實作授權，不代表：
+目前本機證據證明：
 
-- `/wiki` skill已建立；
-- shared workflow core或forward tests已完成；
-- manifests已更新；
+- `/wiki` skill、shared workflow core與更新後的 Ron skill contracts 已建立；
+- 26 項 focused、contract 與 temporary-repository forward tests 通過；
+- promoted skill、docs、README、invocation metadata 與 plugin manifest parity 通過；
+- Node syntax、tracked diff whitespace 與 Git zero-mutation checks 通過。
+
+這些證據不代表：
+
+- Codex-native packaging contract test與read-only review已對目前 manifest 通過；
 - engine已安裝或 smoke-tested；
 - Wiki baseline已建立；
 - implementation changes已 staged、committed、pushed或deployed。

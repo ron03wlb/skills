@@ -16,7 +16,7 @@ npx skills update ask-matt
 
 It **does no work itself**. It doesn't grill, write a spec, or fix anything — it only orients. It exists for the **user-invoked** skills above all: nothing fires those for you, so *you* have to remember they exist, and `ask-matt` is the memory you offload that to. It also points at the model-invoked skills you'd reach for by name — `/tdd`, `/diagnosing-bugs`, `/prototype`, `/code-review`, and the two vocabulary references, `/domain-modeling` and `/codebase-design`. It answers "which one, and when", then hands you off to the skill that actually does the job.
 
-When a repository declares `docs/agents/ron-workflow.md`, it points to [ask-ron](https://aihero.dev/skills-ask-ron) instead of silently mixing Matt's ordinary execution route with Ron's Issue authorization, Execution Lane, Wiki reconciliation, and closeout gates.
+When a repository declares `docs/agents/ron-workflow.md`, it points to [ask-ron](https://aihero.dev/skills-ask-ron) instead of silently mixing Matt's ordinary execution route with Ron's run-once setup, state-aware [wiki](https://aihero.dev/skills-wiki), Issue authorization, Execution Lane, and closeout gates.
 
 ## When to reach for it
 

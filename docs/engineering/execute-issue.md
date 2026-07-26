@@ -12,9 +12,9 @@ npx skills update execute-issue
 
 ## What it does
 
-`execute-issue` implements exactly one authorized Ron Leaf or Standalone Issue through TDD, fixed-candidate review, one final local commit, and durable completion evidence.
+`execute-issue` implements exactly one authorized Ron Leaf or Standalone Issue through the contract's feedback loop, fixed-candidate review, one final local commit, and durable completion evidence.
 
-It stops at `implemented_on_lane`. The `execute` capability does not close the Issue, merge the target, push, deploy, or perform live operations.
+Code behavior uses TDD. A bounded [wiki](https://aihero.dev/skills-wiki) Bootstrap or repair Standalone uses page/source/link/build validation instead, while Leaves remain unable to mutate Wiki. Execution stops at `implemented_on_lane`.
 
 ## When to reach for it
 
@@ -28,7 +28,7 @@ The repository needs a full [setup-ron](https://aihero.dev/skills-setup-ron) con
 
 The Issue Context Packet carries only current pointers, hashes, ownership, seams, commands, and stop conditions. Small work stays inline; a subagent is used only when isolation or independent work pays for its coordination cost.
 
-Every repair creates a new candidate and invalidates stale review evidence. A third material repair wave is refused.
+Every confirmed finding ends the clean path and returns its trade-offs. Only a new bounded repair Grant permits repair; each repair creates a new candidate and invalidates stale review evidence. A third material repair wave is refused.
 
 ## Where it fits
 

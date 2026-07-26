@@ -13,6 +13,7 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)** — Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
 - **[setup-ron](./setup-ron/SKILL.md)** — Configure durable tracker, Wiki, target, and Execution Lane contracts for the Ron workflow.
+- **[wiki](./wiki/SKILL.md)** — Initialize, resume, inspect, or synchronize the Ron Canonical Wiki from verified repository state.
 - **[to-spec](./to-spec/SKILL.md)** — Turn the current conversation into a spec and publish it to the issue tracker.
 - **[to-spec-ron](./to-spec-ron/SKILL.md)** — Publish a hash-verified Change Spec only after synthesis is complete.
 - **[to-tickets](./to-tickets/SKILL.md)** — Break any plan, spec, or conversation into a set of tracer-bullet tickets, each declaring its blocking edges — text in a local file, or native blocking links on a real tracker.

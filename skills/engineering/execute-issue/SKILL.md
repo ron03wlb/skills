@@ -7,11 +7,15 @@ description: Execute one Ron Leaf or Standalone Issue when its contract and Gran
 
 Implement exactly one Ron Executable Issue. This skill may run when the user names the exact Issue or when a current `execute` Grant is already recorded. It never treats a spec, label, plan, test result, or Parent approval as execution authority.
 
+## Shared contracts
+
+Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs`. Run `config-validate`, verify Spec/contract/Grant envelopes, and validate the exact Wiki execution binding. Do not infer readiness from prose.
+
 ## Authority and readiness
 
 Read `docs/agents/ron-workflow.md`, then fetch the Issue, current Change Spec, execution contract, Authorization Record chain, dependencies, and latest checkpoint from GitHub.
 
-Recompute every payload hash. Resolve `supersedes` and `revokes` append-only chains. Fail closed on tracker unavailability, edits, missing comment IDs, conflicting active Grants, or drift in Issue, spec, contract, target, baseline, scope, or review profile.
+Recompute every payload hash. Resolve `supersedes` and `revokes` append-only chains. A derived Grant must bind the human delegation lineage plus stable IDs and hashes for both the current Spec and execution contract. Fail closed on tracker unavailability, edits, missing comment IDs, conflicting active Grants, or drift in Issue, Spec, contract, target, baseline, scope, Preview, or review profile.
 
 A Parent is never executable.
 
@@ -26,7 +30,9 @@ Authorization is not readiness. Also verify:
 - when `lane_predecessor` is non-null, it is closed with valid `implemented_on_lane` evidence, its commit is exactly at Lane HEAD, its ownership is released, and the tree is clean;
 - when `lane_predecessor` is null, the tree is clean and Lane HEAD exactly equals the Grant `lane_sha`, or the contract `target_sha` when a pre-created Grant has `lane_sha: null`;
 - owned paths do not overlap another writer;
-- the approved Wiki baseline exists, or `wiki_impact: none` is explicitly bound;
+- `none + not-applicable` has explicit `wiki_impact: none`;
+- `reconcile + ready` has a validated ready baseline; an optional Sync Preview ID/hash pair must match when this is a Wiki-repair Standalone;
+- `bootstrap + missing-with-bootstrap-preview` is one Standalone with matching bounded Preview, pre-Issue delegation lineage, Spec, contract, and Grant;
 - verification commands and behavioral seams are coherent;
 - enough context remains to reserve about 35% for review, repair, and verification.
 
@@ -64,11 +70,13 @@ The Coordinator owns tracker writes, authorization checks, final staging, commit
 
 ## Implement and review
 
-Use the `/tdd` discipline at the seams already confirmed in the execution contract:
+For code behavior, use the `/tdd` discipline at the seams already confirmed in the execution contract:
 
 1. write one failing behavioral test;
 2. add only enough implementation to pass;
 3. repeat one vertical slice at a time.
+
+For a Bootstrap or Wiki-repair Standalone, write only exact contract-owned Wiki/config paths and use page/source/link/build fixtures as the feedback loop; do not invent a code test. A Leaf never mutates Wiki. A normal `reconcile + ready` product Standalone also defers Wiki mutation to closeout; only a matching non-null Sync Preview identifies a Wiki-repair execution.
 
 Do not ask again about an unchanged seam. A newly discovered public behavior or expanded acceptance boundary stops execution for a superseding Change Spec, contract, and Grant.
 
@@ -77,7 +85,7 @@ Freeze a `candidate_sha` or immutable tree reference before review:
 - `focused`: one fresh `gpt-5.6-sol/high` reviewer reports separate Standards and Spec sections; add an independent Wiki reviewer only when applicable;
 - `full`: separate Standards, Spec, and applicable Wiki reviewers.
 
-Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Repairs use the one writable owner, produce a new candidate, and invalidate stale reviews. Allow at most two material repair waves. A persistent material finding writes a checkpoint and stops.
+Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Any confirmed finding ends the clean path and returns the problem and trade-offs to the human. Only a new bounded repair Grant may let the one writable owner repair; each repair produces a new candidate and invalidates stale reviews. Allow at most two material repair waves after that Grant. A persistent material finding writes a checkpoint and stops.
 
 ## Commit and record evidence
 

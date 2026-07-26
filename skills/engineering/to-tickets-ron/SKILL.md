@@ -8,11 +8,15 @@ disable-model-invocation: true
 
 Turn one verified Change Spec into dependency-ordered Executable Issues. Preserve Matt's tracer-bullet principle, but add the Issue, Lane, baseline, review, evidence, and authorization boundaries required by the Ron workflow.
 
+## Shared contracts
+
+Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs`. Verify the Change Spec with `envelope-verify` and create every executable contract with `execution-contract-create`. `/wiki` uses the same builder for Bootstrap and Wiki-repair Standalones; do not maintain a second contract renderer.
+
 ## Preconditions
 
 Read back the Change Issue and its current `workflow-change-spec:v1` comment by stable ID. Recompute the payload hash and resolve supersession. Stop if the tracker is unavailable, the chain is ambiguous, or `docs/agents/ron-workflow.md` is not in full mode.
 
-Use the Change Spec's confirmed behavior and test seams. Do not copy the full Change Spec into children.
+Use the Change Spec's confirmed behavior, test seams, Wiki dispositions, operation, and baseline requirement. Do not copy the full Change Spec into children.
 
 ## Draft executable slices
 
@@ -31,7 +35,7 @@ Split when outcomes, authorization scopes, targets, baselines, owners, acceptanc
 
 Use `focused` review only for low-risk, single-seam work with no shared-contract, migration, permission, security, data-integrity, or concurrency impact. Otherwise use `full`.
 
-Present the numbered breakdown, blocking edges, Lane order, target/baseline, risk, review profile, owned scope, and Wiki impact. Ask once whether the granularity and edges are approved; revise before publishing.
+Present the numbered breakdown, blocking edges, Lane order, target/baseline, risk, review profile, owned scope, Wiki operation, and disposition scope. Ask once whether the granularity and edges are approved; revise before publishing.
 
 ## Publish contracts
 
@@ -77,6 +81,11 @@ blocked_by:
 owned_paths:
   - <exact-path-or-bounded-pattern>
 wiki_impact: semantic | none
+wiki_operation: reconcile | none
+wiki_baseline_requirement: ready | not-applicable
+wiki_preview_id: null
+wiki_preview_payload_sha256: null
+wiki_dispositions_sha256: <hash-or-null>
 risk: low | medium | high
 review_profile: focused | full
 expected_proof_state: implemented_on_lane
@@ -86,12 +95,13 @@ excludes:
   - deploy
   - branch-deletion
   - live-provider-actions
+  - legacy-data-deletion
 supersedes: <contract-id-or-null>
 <!-- workflow-payload:end -->
 payload_sha256: <sha256>
 ```
 
-Use the same UTF-8/LF/terminal-newline hash rule as `workflow-change-spec:v1`. Read every comment back by ID and verify its hash. A missing or mismatched contract leaves that Issue blocked.
+Use `execution-contract-create` for the exact UTF-8/LF/terminal-newline bytes. Post each envelope, read it back by stable comment ID, and run `envelope-verify`. A missing or mismatched contract leaves that Issue blocked.
 
 ## Optional batch Grant
 
@@ -121,11 +131,17 @@ binds:
   spec_comment_id: <comment-id>
   spec_payload_sha256: <hash>
   contract_id: <contract-id>
+  contract_comment_id: <comment-id>
   contract_payload_sha256: <hash>
   target_branch: <branch>
   target_sha: <sha>
   lane_sha: <sha-or-null>
   closeout_preview_sha256: <hash-or-null>
+  wiki_operation: reconcile | none
+  wiki_baseline_requirement: ready | not-applicable
+  wiki_preview_id: null
+  wiki_preview_payload_sha256: null
+  wiki_dispositions_sha256: <hash-or-null>
   wiki_semantic_write_set_sha256: <hash-or-null>
   wiki_support_write_set_sha256: <hash-or-null>
 grants:
@@ -137,11 +153,14 @@ excludes:
   - deploy
   - branch-deletion
   - live-provider-actions
+  - legacy-data-deletion
 preconditions:
   - <machine-checkable-condition, including Lane predecessor closure when applicable>
 delegation:
+  clean_path: denied
   read_only_subagents: allowed_when_independent
   writable_subagent: one_worker_with_exclusive_worktree
+  nested_clean_path: denied
   nested_delegation: denied
 supersedes: <record-id-or-null>
 revokes: <record-id-or-null>

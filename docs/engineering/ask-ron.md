@@ -22,11 +22,11 @@ You invoke this by typing `/ask-ron` — the agent won't reach for it on its own
 
 ## The route it protects
 
-The common path keeps Matt's idea work, then adds durable delivery controls:
+The common path configures and initializes repository knowledge before keeping Matt's idea work and adding durable delivery controls:
 
-`grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`
+`setup-ron → wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`
 
-Each Leaf completes before the next begins. After the final Leaf, Parent closeout presents one exact preview; a single `同意` authorizes the successful local integration path.
+Each Leaf completes before the next begins. Parent closeout automatically reuses [wiki](https://aihero.dev/skills-wiki) reconciliation. A valid bounded clean path continues without routine approval; only findings, ambiguity, expanded scope, or missing capability return to you.
 
 ## Where it fits
 

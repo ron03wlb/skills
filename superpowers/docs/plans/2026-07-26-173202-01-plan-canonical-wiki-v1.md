@@ -17,7 +17,7 @@
 
 ### Outcome 3: Shared deterministic workflow core
 
-- Work: Add a dependency-free Node command module under `scripts/ron-workflow/` plus fixtures and `node:test` coverage under `tests/ron-workflow/`. It owns canonical JSON/envelope hashing, config and preview validation, source-locator resolution, ledger validation, clean-path delegation validation/derivation, and Change Spec payload construction. It performs no tracker, Git-history, Wiki, or network mutation.
+- Work: Add a dependency-free Node command module under `scripts/ron-workflow/` plus fixtures and `node:test` coverage under `tests/ron-workflow/`. It owns canonical JSON/envelope hashing, config and preview validation, source-locator resolution, ledger validation, clean-path delegation validation/derivation, and Change Spec and execution-contract payload construction. It performs no tracker, Git-history, Wiki, or network mutation.
 - Verify: `node --test tests/ron-workflow/*.test.mjs`
 
 ### Outcome 4: Existing Ron skills use the shared contracts
@@ -32,5 +32,7 @@
 
 ### Outcome 6: Completion evidence
 
-- Work: Review the final diff against the accepted Spec, run focused and repository-wide structural checks, validate promoted-skill parity and Markdown links, and run `claude plugin validate . --strict` when the required CLI is available. Treat unavailable strict plugin validation as an unverified packaging gate rather than a pass.
-- Verify: `git diff --check`, the Ron/Wiki structural validator, `node --test tests/ron-workflow/*.test.mjs`, temporary-repository forward tests, and `claude plugin validate . --strict` when available.
+- Work: Review the final diff against the accepted Spec, run focused and repository-wide structural checks, validate promoted-skill parity and Markdown links, then use Codex CLI for a scoped read-only packaging review. Repository validation must not require or invoke Claude CLI.
+- Verify: `git diff --check`, the Ron/Wiki structural validator, `node --test tests/ron-workflow/*.test.mjs`, temporary-repository forward tests, `node --test tests/ron-workflow/skill-contracts.test.mjs`, and scoped `codex exec --ignore-user-config --ephemeral --sandbox read-only "<scoped review prompt>"` from the repository root.
+
+Current evidence: all 26 focused and forward tests, Node syntax, promoted-skill parity, current docs routing, invocation metadata, documentation structure, Git zero-mutation, and `git diff --check` pass. The scoped Codex CLI review returned `NO_FINDINGS`; it replaces the retired Claude CLI gate. Implementation staging, commit, installation, push, release, publication, and deployment remain outside scope.

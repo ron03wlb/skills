@@ -6,99 +6,79 @@ disable-model-invocation: true
 
 # Setup Ron
 
-Configure one repository for the Ron workflow. This is an idempotent, prompt-driven setup: inspect first, present one consolidated proposal, obtain one approval, then make only the missing or changed configuration edits.
+Configure one repository idempotently for the Ron workflow. Direct invocation authorizes one exact clean local configuration path; continue without another routine prompt when every detected fact, path, capability, and validation result is clean.
 
-Do not invoke `/setup-matt-pocock-skills`. Reuse its shared files when they exist, and add only the Ron-specific contract.
+Do not invoke the user-invoked `/setup-matt-pocock-skills`. Reuse its shared files when they exist and add only the Ron contract.
+
+## Shared core
+
+Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs`. Validate the final `docs/agents/ron-workflow.md` with `config-validate` and inspect `capabilities`. Do not hand-roll config parsing or silently weaken a missing resolver.
 
 ## Full-mode requirements
 
 Ron v1 full mode requires GitHub Issues with:
 
-- durable append-only comments with stable identifiers;
+- durable append-only comments and stable IDs;
 - exact comment read-back;
 - Issue hierarchy or durable parent references;
-- Issue state read-back after closure.
+- closure-state read-back.
 
-GitLab, Linear, other trackers, and local Markdown are degraded or unsupported in v1. Record the limitation and do not claim Ron's cross-session authorization guarantees. A failed capability probe leaves setup incomplete; it must not be waved through.
+Probe the configured adapter read-only. A failed or unavailable probe leaves setup degraded or incomplete; never claim cross-session authorization guarantees from local Markdown, labels, or an unverified adapter. Do not create a probe Issue without separate authority.
 
-## Process
-
-### 1. Inspect without mutating
+## Inspect without mutating
 
 Read:
 
-- `git remote -v`, `.git/config`, the current branch, and candidate target branches;
+- repository identity, remotes, Git config, current and candidate target branches;
 - root `AGENTS.md` or `CLAUDE.md`;
-- `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and optional `docs/agents/triage-labels.md`;
-- `CONTEXT.md`, `CONTEXT-MAP.md`, and existing ADR locations;
-- `docs/agents/ron-workflow.md`, if present;
-- candidate Wiki roots, build configuration, navigation, indexes, and `llms.txt`;
-- existing worktrees and repository cleanliness.
+- shared tracker, domain, and optional triage configuration;
+- `CONTEXT.md`, ADRs, existing Ron config, worktrees, and cleanliness;
+- candidate knowledge roots, indexes, navigation, builds, and current-behavior scope;
+- available source-resolver languages/formats and exact deterministic validators.
 
-Probe the configured GitHub adapter read-only. Confirm the repository identity, comment identifiers/read-back, Issue relationships, and closure-state read-back. Do not create a probe Issue unless the user separately approves that external write.
+For every candidate Wiki root, assess it at one fixed target identity:
 
-### 2. Propose one configuration
+1. Git-tracked and present at that identity;
+2. scoped to current business behavior;
+3. contains a topic/page inventory or index;
+4. has no competing canonical authority.
 
-Prefer detected facts over questions. Present one recommended proposal containing:
+All four produce `adoptable`; anything else is `needs-bootstrap` and may supply only source seeds. `adoptable` does not mean `ready`.
 
-- tracker and capability-probe result;
-- canonical Wiki root and engine, or an explicit missing-baseline state;
-- Wiki build command and exact mechanical `wiki_support_write_set`;
-- domain-doc layout;
-- local target branch and current target SHA;
-- Lane worktree root and naming convention;
-- local fast-forward-only integration policy;
-- proof-state and excluded-operation summary.
+## Resolve one configuration
 
-Ask for one consolidated approval. Ask a narrower follow-up only when the repository does not provide enough evidence to choose safely.
+Prefer evidenced facts. Default a new root to `wiki/` without creating it. For an `adoptable` root, run deterministic page/source/link/build checks and one independent read-only semantic review against current code and tests. Record `ready` only when both axes are clean; otherwise record `missing` and report the evidence gap or repair/migration trade-off.
 
-### 3. Write idempotently
+Select:
 
-Create or update `docs/agents/ron-workflow.md` with:
+- `mode: full | degraded` from the tracker probe;
+- `interaction.policy: exception_only`;
+- the `ron-wiki:v1`, page, Sources, and resolver contracts;
+- protocol identity/hash and optional engine state; engine defaults to `absent`;
+- exact validator commands and `wiki_support_write_set`;
+- local target branch, fast-forward-only integration, and Lane convention;
+- immutable exclusions for push, remote merge, deploy, branch deletion, and live-provider actions.
 
-```yaml
-ron_workflow: v1
-mode: full | degraded
-tracker:
-  adapter: github
-  repository: owner/name
-  capability_probe: passed | failed
-wiki:
-  root: <path-or-null>
-  engine: <name-or-null>
-  build_command: <command-or-null>
-  reviewed_baseline: <reference-or-missing>
-  support_write_set:
-    - <exact-path>
-domain:
-  layout: single-context | multi-context
-target:
-  branch: <local-branch>
-  integration: fast-forward-only
-lane:
-  worktree_root: <absolute-or-repository-relative-path>
-  naming: <convention>
-excludes:
-  - push
-  - remote-merge
-  - deploy
-  - branch-deletion
-  - live-provider-actions
-```
+External resolvers require an exact executable identity or content hash, supported kinds/extensions, a read-only invocation, and a clean capability probe. Missing support remains `not-verifiable`.
 
-Use `docs/agents/issue-tracker.md` and `docs/agents/domain.md` as shared configuration. Create them only when missing; update them surgically when the approved setup differs. Do not create Ron-specific duplicates.
+Stop for human decision only on competing roots, conflicting instructions, dirty overlap, missing required capability, unsupported environment, or a choice that changes scope or authority.
 
-Add or update one `## Agent skills` section in the existing `CLAUDE.md` or `AGENTS.md`, preserving all surrounding content. Point it to the shared tracker/domain files and `docs/agents/ron-workflow.md`. If neither instruction file exists, ask which one to create.
+## Write the exact contract
 
-Do not invent a Wiki structure. Record `reviewed_baseline: missing` until a real baseline has been reviewed. Purely technical work may later use `wiki_impact: none`, but setup does not pre-approve that classification.
+Create or update `docs/agents/ron-workflow.md` with exactly one marker-bounded `ron-workflow-config:v1` strict JSON block. Preserve human explanation outside the block, but never derive machine state from it. Persist only `baseline_state: missing | ready`; never persist `bootstrapping`.
 
-### 4. Verify
+Reuse `docs/agents/issue-tracker.md` and `docs/agents/domain.md`. Create them only when missing and update them surgically. Add or update one `## Agent skills` section in the existing instruction file; if neither instruction file exists, use the repository's established convention or stop when no safe convention exists.
 
-Read every written file back, validate paths and commands that can be checked safely, and rerun the read-only tracker probe. Report:
+Setup writes only approved Ron operational configuration and instruction paths. It never creates Wiki baseline content, product Issues, product changes, engine state, publication output, or Execution Lanes.
 
-- `configured-full`, `configured-degraded`, or `not-configured`;
-- exact files changed;
-- current target branch/SHA and Wiki state;
-- capabilities that remain excluded.
+## Validate and commit locally
 
-Setup never creates product Issues, Authorization Records, worktrees, commits, pushes, deployments, or live-provider changes.
+1. Read every proposed file back.
+2. Run `config-validate`, tracker capability probes, path/command checks, and exact-diff validation.
+3. Confirm no unexpected path, baseline content, product change, or unrelated dirt is staged.
+4. Create one local setup commit containing only exact configuration paths.
+5. Fast-forward the named local target to that commit and verify its contents there.
+
+Use a setup-owned worktree when isolation is required. Dirty overlap, unexpected path, conflict, hook failure, commit failure, target drift, or verification failure stops with recoverable state. Never push, remote-merge, deploy, delete a branch, or change live providers.
+
+Return only `設定完成` when clean. Expand exact changed paths and proof details only for a finding, missing capability, or user request.
