@@ -1,0 +1,119 @@
+---
+name: execute-issue
+description: Execute one Ron Leaf or Standalone Issue when its contract and Grant are current, producing one reviewed local commit and durable evidence.
+---
+
+# Execute Issue
+
+Implement exactly one Ron Executable Issue. This skill may run when the user names the exact Issue or when a current `execute` Grant is already recorded. It never treats a spec, label, plan, test result, or Parent approval as execution authority.
+
+## Authority and readiness
+
+Read `docs/agents/ron-workflow.md`, then fetch the Issue, current Change Spec, execution contract, Authorization Record chain, dependencies, and latest checkpoint from GitHub.
+
+Recompute every payload hash. Resolve `supersedes` and `revokes` append-only chains. Fail closed on tracker unavailability, edits, missing comment IDs, conflicting active Grants, or drift in Issue, spec, contract, target, baseline, scope, or review profile.
+
+A Parent is never executable.
+
+If the user directly invoked this skill with one exact current Leaf or Standalone contract, that invocation may authorize only the standard `execute` capability. Build the exact Authorization Record, post it, and read it back before mutating. An implicit invocation needs an existing valid Grant. Ambiguous scope requires a preview and explicit approval.
+
+The Authorization Record begins with `workflow-authorization:v1`. Its hashed payload binds the record/approver/time, Issue, current spec and contract IDs/comment IDs/hashes, target branch/SHA, Lane SHA when applicable, named grants, exclusions, machine-checkable preconditions, delegation policy, and `supersedes`/`revokes` references. Use the fixed `<!-- workflow-payload:begin -->` and `<!-- workflow-payload:end -->` delimiters and the UTF-8/LF/one-terminal-newline SHA-256 rule. Never edit or delete an old record.
+
+Authorization is not readiness. Also verify:
+
+- blockers are closed with expected evidence;
+- the named Lane worktree is isolated and owned by one writer;
+- when `lane_predecessor` is non-null, it is closed with valid `implemented_on_lane` evidence, its commit is exactly at Lane HEAD, its ownership is released, and the tree is clean;
+- when `lane_predecessor` is null, the tree is clean and Lane HEAD exactly equals the Grant `lane_sha`, or the contract `target_sha` when a pre-created Grant has `lane_sha: null`;
+- owned paths do not overlap another writer;
+- the approved Wiki baseline exists, or `wiki_impact: none` is explicitly bound;
+- verification commands and behavioral seams are coherent;
+- enough context remains to reserve about 35% for review, repair, and verification.
+
+Stop and preserve recoverable state if any gate fails.
+
+Create a new Lane worktree when the current checkout has unrelated dirt, the work is high-risk or long-lived, target/baseline differs, another writer is active, a writable subagent will run, or writable ownership could overlap. Reuse an existing Lane only for the same Parent, target, and lineage after the predecessor is closed and committed, the tree is clean, ownership is released, and a fresh preflight passes. The Lane survives Leaf closeout.
+
+## Build the Context Packet
+
+Create a task-specific directory under `/private/tmp` and an exact artifact manifest outside the worktree. The ephemeral Issue Context Packet contains pointers and hashes, not copied histories:
+
+- Issue/type, Grant ID, contract/spec comment IDs and hashes;
+- target/baseline, Lane ID/worktree, predecessor;
+- relevant Wiki, `CONTEXT.md`, ADR, and code pointers;
+- owned paths, acceptance, seams, commands, review profile;
+- stop conditions and latest checkpoint.
+
+Never place packets, raw subagent reports, temporary specs, or manifests in the product worktree.
+
+Keep about 20% of context for preflight, 45% for implementation, and 35% for review/repair/verification. Move the Issue to fresh context or a fresh worker when the reserve cannot be protected, the domain or target changed, a prior checkpoint is unresolved, or isolation materially improves reliability.
+
+## Choose inline or delegated execution
+
+Default to inline. Delegate only when the task is fully expressible by the Packet, needs no human decision, preserves exclusive ownership, and saves meaningful time or context.
+
+When delegation is justified, apply the repository's `docs/agents/codex-subagent-protocol.md` when available and always enforce this minimum:
+
+- research/exploration: `gpt-5.6-terra`, `medium`;
+- writable implementation or any review: `gpt-5.6-sol`, `high`;
+- reserve one slot for the Coordinator;
+- no nested delegation or parallel writable Issues;
+- every Task Brief binds wave, Issue, Grant, candidate SHA when applicable, exact ownership, constraints, evidence, and return format.
+
+The Coordinator owns tracker writes, authorization checks, final staging, commit, and acceptance.
+
+## Implement and review
+
+Use the `/tdd` discipline at the seams already confirmed in the execution contract:
+
+1. write one failing behavioral test;
+2. add only enough implementation to pass;
+3. repeat one vertical slice at a time.
+
+Do not ask again about an unchanged seam. A newly discovered public behavior or expanded acceptance boundary stops execution for a superseding Change Spec, contract, and Grant.
+
+Freeze a `candidate_sha` or immutable tree reference before review:
+
+- `focused`: one fresh `gpt-5.6-sol/high` reviewer reports separate Standards and Spec sections; add an independent Wiki reviewer only when applicable;
+- `full`: separate Standards, Spec, and applicable Wiki reviewers.
+
+Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Repairs use the one writable owner, produce a new candidate, and invalidate stale reviews. Allow at most two material repair waves. A persistent material finding writes a checkpoint and stops.
+
+## Commit and record evidence
+
+Run the exact final verification commands, inspect the complete Issue diff, stage only Issue-owned paths, and create one final local implementation commit. Do not include workflow scratch or unrelated user changes.
+
+Post and read back an append-only completion record:
+
+```text
+workflow-completion-evidence:v1
+<!-- workflow-payload:begin -->
+issue: <owner/repo#number>
+contract_id: <contract-id>
+grant_id: <authorization-record-id>
+lane_id: <lane-id>
+baseline_sha: <sha>
+commit_sha: <final-local-commit>
+candidate_sha: <reviewed-candidate>
+proof_state: implemented_on_lane
+review_profile: focused | full
+review_axes:
+  standards: <evidence>
+  spec: <evidence>
+  wiki: <evidence-or-not-applicable-with-reason>
+verification:
+  - command: <exact-command>
+    result: <exit-and-summary>
+artifacts_manifest: <exact-external-path>
+excludes:
+  - integrated_to_target
+  - pushed
+  - remotely_merged
+  - deployed
+<!-- workflow-payload:end -->
+payload_sha256: <sha256>
+```
+
+Read the record back and verify its hash. The result is `implemented_on_lane`, not integrated, pushed, deployed, or closed.
+
+If a valid `close_leaf` capability is already read back, continue by invoking `close-issue` in Leaf mode. Otherwise stop and report that exact missing capability. Never merge an individual Leaf into the target branch.

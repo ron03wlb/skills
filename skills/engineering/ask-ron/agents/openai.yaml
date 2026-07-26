@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ask Ron"
+  short_description: "Find the next Ron workflow gate"
+  default_prompt: "Use $ask-ron to identify the next safe step in the Ron Issue delivery workflow."
+policy:
+  allow_implicit_invocation: false

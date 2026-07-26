@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explain Decision"
+  short_description: "Clarify one choice without context spill"
+  default_prompt: "Use $explain-decision to explain the current unresolved choice in a bounded read-only sidecar."

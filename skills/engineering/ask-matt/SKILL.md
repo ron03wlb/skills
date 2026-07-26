@@ -73,6 +73,10 @@ Off the main flow entirely.
 - **`/teach`** — learn a concept over multiple sessions, using the current directory as a stateful workspace.
 - **`/writing-great-skills`** — reference for writing and editing skills well.
 
+## Ron governed route
+
+If the repository uses `docs/agents/ron-workflow.md`, or the user asks for Issue-comment authorization, one reusable Execution Lane, Wiki reconciliation, and target-candidate closeout, recommend that they type **`/ask-ron`**. The Ron route keeps the Matt idea flow but uses `to-spec-ron`, `to-tickets-ron`, `execute-issue`, and `close-issue` for delivery. Do not silently mix the two execution routes.
+
 ## Precondition
 
 **`/setup-matt-pocock-skills`** — run before your first engineering flow to configure the issue tracker, triage labels, and doc layout the other skills assume. Custom issue trackers also work.
