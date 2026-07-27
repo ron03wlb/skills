@@ -26,6 +26,7 @@ import {
   validatePreIssueDelegation,
   validatePreview,
   validateReconciliationLedger,
+  validateWikiLinks,
   validateWikiPage,
   validateWikiExecutionBinding,
   verifyEnvelope,
@@ -1302,4 +1303,54 @@ test("Wiki page validator enforces sections, claim mappings, and one Sources obj
     .replace(statesBlock, "")
     .replace("## Sources", `${statesBlock}## Sources`);
   assert.throws(() => validateWikiPage(wrongOrder), { code: "invalid" });
+});
+
+test("Wiki link validator resolves local Markdown links and fails closed", (t) => {
+  const root = fixtureRepository(t);
+  mkdirSync(join(root, "wiki", "flows"), { recursive: true });
+  writeFileSync(
+    join(root, "wiki", "index.md"),
+    [
+      "# Wiki",
+      "",
+      "[Order flow](flows/orders.md#current-behavior)",
+      "",
+      "[External reference](https://example.com/reference)",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    join(root, "wiki", "flows", "orders.md"),
+    ["# Orders", "", "## Current behavior", "", "Pending orders are cancellable.", ""].join(
+      "\n",
+    ),
+  );
+
+  const clean = validateWikiLinks(root, "wiki");
+  assert.equal(clean.status, "valid");
+  assert.deepEqual(clean.files, ["wiki/flows/orders.md", "wiki/index.md"]);
+  assert.equal(clean.links_checked, 1);
+
+  writeFileSync(
+    join(root, "wiki", "broken.md"),
+    [
+      "# Broken",
+      "",
+      "[Missing](missing.md)",
+      "",
+      "[Escaping](../src/orders.ts)",
+      "",
+    ].join("\n"),
+  );
+  assert.throws(
+    () => validateWikiLinks(root, "wiki"),
+    (error) => {
+      assert.equal(error.code, "findings");
+      assert.deepEqual(
+        error.details.findings.map((finding) => finding.reason).sort(),
+        ["missing-target", "outside-wiki-root"].sort(),
+      );
+      return true;
+    },
+  );
 });

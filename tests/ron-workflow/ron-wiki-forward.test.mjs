@@ -165,6 +165,18 @@ test("CLI maps valid, invalid, and not-verifiable proofs to stable exits", () =>
       JSON.parse(unsupportedResult.stdout).status,
       "not-verifiable",
     );
+
+    mkdirSync(join(unsupportedRoot, "wiki"));
+    writeFileSync(
+      join(unsupportedRoot, "wiki/index.md"),
+      "# Wiki\n\n[Missing](missing.md)\n",
+    );
+    const brokenLinks = run("links-validate", {
+      repository_root: unsupportedRoot,
+      wiki_root: "wiki",
+    });
+    assert.equal(brokenLinks.status, 4);
+    assert.equal(JSON.parse(brokenLinks.stdout).status, "findings");
   } finally {
     rmSync(unsupportedRoot, { recursive: true, force: true });
   }
@@ -176,6 +188,10 @@ test("CLI proofs leave a temporary Git repository and its refs unchanged", (t) =
   mkdirSync(join(root, "wiki"), { recursive: true });
   mkdirSync(join(root, "src"), { recursive: true });
   cpSync(validPage, join(root, "wiki/orders.md"));
+  writeFileSync(
+    join(root, "wiki/index.md"),
+    "# Wiki\n\n[Orders](orders.md#current-behavior)\n",
+  );
   writeFileSync(
     join(root, "src/orders.ts"),
     "export function createOrder() { return true; }\n",
@@ -199,6 +215,14 @@ test("CLI proofs leave a temporary Git repository and its refs unchanged", (t) =
     { cwd: root },
   );
   assert.equal(pageResult.status, 0, pageResult.stderr);
+
+  const linksResult = run(
+    "links-validate",
+    { repository_root: root, wiki_root: "wiki" },
+    { cwd: root },
+  );
+  assert.equal(linksResult.status, 0, linksResult.stderr);
+  assert.equal(JSON.parse(linksResult.stdout).links_checked, 1);
 
   for (const locator of [
     { path: "src/orders.ts", kind: "symbol", value: "createOrder" },

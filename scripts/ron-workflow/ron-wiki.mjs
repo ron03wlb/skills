@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, extname, resolve, sep } from "node:path";
+import { readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, extname, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const CONFIG_BEGIN = "<!-- ron-workflow-config:v1:begin -->";
@@ -2377,6 +2377,232 @@ export function validateWikiPage(markdown) {
   };
 }
 
+function isInside(root, candidate) {
+  return candidate === root || candidate.startsWith(`${root}${sep}`);
+}
+
+function repositoryPath(root, file) {
+  return relative(root, file).split(sep).join("/");
+}
+
+function collectWikiMarkdownFiles(root, directory, files = []) {
+  let entries;
+  try {
+    entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  } catch (error) {
+    fail("not-verifiable", "Wiki root is not readable", {
+      cause: error.message,
+    });
+  }
+  for (const entry of entries) {
+    const path = resolve(directory, entry.name);
+    if (entry.isSymbolicLink()) {
+      fail("not-verifiable", "Wiki validation does not follow symbolic links", {
+        path: repositoryPath(root, path),
+      });
+    }
+    if (entry.isDirectory()) {
+      collectWikiMarkdownFiles(root, path, files);
+    } else if (
+      entry.isFile() &&
+      [".md", ".mdx"].includes(extname(entry.name).toLowerCase())
+    ) {
+      files.push(path);
+    }
+  }
+  return files;
+}
+
+function extractWikiLinkTargets(markdown) {
+  const targets = [];
+  const inline =
+    /!?\[[^\]\n]*\]\(\s*(?:<([^>\n]+)>|([^)\s]+))(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\)))?\s*\)/gu;
+  for (const match of markdown.matchAll(inline)) {
+    targets.push(match[1] ?? match[2]);
+  }
+  const references =
+    /^\s*\[[^\]\n]+\]:\s*(?:<([^>\n]+)>|([^\s]+))/gmu;
+  for (const match of markdown.matchAll(references)) {
+    targets.push(match[1] ?? match[2]);
+  }
+  const wikiLinks = /!?\[\[([^\]\n]+)\]\]/gu;
+  for (const match of markdown.matchAll(wikiLinks)) {
+    targets.push(match[1].split("|", 1)[0].trim());
+  }
+  return targets;
+}
+
+function headingSlugs(markdown) {
+  const counts = new Map();
+  const slugs = new Set();
+  for (const match of markdown.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gmu)) {
+    const base = match[1]
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{Letter}\p{Number}\p{Mark} _-]/gu, "")
+      .replace(/\s+/gu, "-");
+    const count = counts.get(base) ?? 0;
+    counts.set(base, count + 1);
+    slugs.add(count === 0 ? base : `${base}-${count}`);
+  }
+  return slugs;
+}
+
+function decodedLinkPart(value, sourcePath, target) {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    fail("not-verifiable", "Wiki link contains invalid percent encoding", {
+      path: sourcePath,
+      target,
+      cause: error.message,
+    });
+  }
+}
+
+function resolveWikiLinkTarget(root, wikiRoot, source, target) {
+  if (/^[a-z][a-z0-9+.-]*:/iu.test(target) || target.startsWith("//")) {
+    return { external: true };
+  }
+
+  const fragmentOffset = target.indexOf("#");
+  const rawPath =
+    fragmentOffset === -1 ? target : target.slice(0, fragmentOffset);
+  const rawFragment =
+    fragmentOffset === -1 ? "" : target.slice(fragmentOffset + 1);
+  const queryOffset = rawPath.indexOf("?");
+  const withoutQuery =
+    queryOffset === -1 ? rawPath : rawPath.slice(0, queryOffset);
+  const sourcePath = repositoryPath(root, source);
+  const linkPath = decodedLinkPart(withoutQuery, sourcePath, target);
+  const fragment = decodedLinkPart(rawFragment, sourcePath, target);
+
+  if (linkPath.startsWith("/")) {
+    return { finding: { path: sourcePath, target, reason: "outside-wiki-root" } };
+  }
+
+  const candidate = linkPath === "" ? source : resolve(dirname(source), linkPath);
+  if (!isInside(wikiRoot, candidate)) {
+    return { finding: { path: sourcePath, target, reason: "outside-wiki-root" } };
+  }
+
+  const candidates = [candidate];
+  if (linkPath !== "" && extname(candidate) === "") {
+    candidates.push(`${candidate}.md`, `${candidate}.mdx`);
+  }
+  let resolvedTarget;
+  for (const path of candidates) {
+    try {
+      const real = realpathSync(path);
+      if (
+        isInside(wikiRoot, real) &&
+        statSync(real).isFile() &&
+        resolvedTarget === undefined
+      ) {
+        resolvedTarget = real;
+      } else if (
+        isInside(wikiRoot, real) &&
+        statSync(real).isFile() &&
+        resolvedTarget !== real
+      ) {
+        return {
+          finding: {
+            path: sourcePath,
+            target,
+            reason: "ambiguous-target",
+          },
+        };
+      }
+    } catch {
+      // Try the next deterministic Markdown candidate.
+    }
+  }
+  if (resolvedTarget === undefined) {
+    return { finding: { path: sourcePath, target, reason: "missing-target" } };
+  }
+
+  if (fragment !== "") {
+    let targetText;
+    try {
+      targetText = readFileSync(resolvedTarget, "utf8").replace(/\r\n?/gu, "\n");
+    } catch (error) {
+      fail("not-verifiable", "Wiki link target is not readable UTF-8", {
+        path: repositoryPath(root, resolvedTarget),
+        cause: error.message,
+      });
+    }
+    if (!headingSlugs(targetText).has(fragment)) {
+      return {
+        finding: {
+          path: sourcePath,
+          target,
+          reason: "missing-fragment",
+        },
+      };
+    }
+  }
+  return { external: false };
+}
+
+export function validateWikiLinks(repositoryRoot, wikiRootPath) {
+  requireString(repositoryRoot, "repositoryRoot");
+  assertRepositoryPath(wikiRootPath, "wikiRoot");
+
+  let root;
+  let wikiRoot;
+  try {
+    root = realpathSync(repositoryRoot);
+    wikiRoot = realpathSync(resolve(root, wikiRootPath));
+  } catch (error) {
+    fail("not-verifiable", "Wiki root does not exist", {
+      cause: error.message,
+    });
+  }
+  if (!isInside(root, wikiRoot) || !statSync(wikiRoot).isDirectory()) {
+    fail("invalid", "Wiki root escapes the repository or is not a directory");
+  }
+
+  const files = collectWikiMarkdownFiles(root, wikiRoot).sort((left, right) =>
+    repositoryPath(root, left).localeCompare(repositoryPath(root, right)),
+  );
+  const findings = [];
+  let linksChecked = 0;
+  for (const file of files) {
+    let markdown;
+    try {
+      markdown = readFileSync(file, "utf8").replace(/\r\n?/gu, "\n");
+    } catch (error) {
+      fail("not-verifiable", "Wiki page is not readable UTF-8", {
+        path: repositoryPath(root, file),
+        cause: error.message,
+      });
+    }
+    for (const target of extractWikiLinkTargets(markdown)) {
+      const result = resolveWikiLinkTarget(root, wikiRoot, file, target);
+      if (result.external) continue;
+      linksChecked += 1;
+      if (result.finding) findings.push(result.finding);
+    }
+  }
+  findings.sort(
+    (left, right) =>
+      left.path.localeCompare(right.path) ||
+      left.target.localeCompare(right.target) ||
+      left.reason.localeCompare(right.reason),
+  );
+  if (findings.length > 0) {
+    fail("findings", "Wiki links contain unresolved targets", { findings });
+  }
+  return {
+    status: "valid",
+    root: wikiRootPath,
+    files: files.map((file) => repositoryPath(root, file)),
+    links_checked: linksChecked,
+  };
+}
+
 export function resolverCapabilities() {
   return {
     profile: "ron-source-resolvers:v1",
@@ -2463,6 +2689,9 @@ export function runCliCommand(command, input = {}) {
     }
     case "source-resolve":
       result = resolveSourceLocator(input.repository_root, input.locator);
+      break;
+    case "links-validate":
+      result = validateWikiLinks(input.repository_root, input.wiki_root);
       break;
     case "page-validate":
       result = validateWikiPage(input.markdown);
