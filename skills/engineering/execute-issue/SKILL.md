@@ -85,7 +85,7 @@ Freeze a `candidate_sha` or immutable tree reference before review:
 - `focused`: one fresh `gpt-5.6-sol/high` reviewer reports separate Standards and Spec sections; add an independent Wiki reviewer only when applicable;
 - `full`: separate Standards, Spec, and applicable Wiki reviewers.
 
-Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Any confirmed finding ends the clean path and returns the problem and trade-offs to the human. Only a new bounded repair Grant may let the one writable owner repair; each repair produces a new candidate and invalidates stale reviews. Allow at most two material repair waves after that Grant. A persistent material finding writes a checkpoint and stops.
+Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Any confirmed finding ends the clean path and returns the problem and trade-offs to the human. Only a new bounded Repair Grant may let the one writable owner repair; each repair produces a new candidate and invalidates stale reviews. Require the Grant to bind an integer `max_material_repair_waves` from one through ten and the current `repair_wave`; refuse a missing, invalid, or exceeded bound. Never reinterpret an existing Grant under the higher workflow ceiling. A persistent material finding after the granted final wave writes a checkpoint and stops.
 
 ## Commit and record evidence
 

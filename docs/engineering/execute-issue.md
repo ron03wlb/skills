@@ -28,7 +28,7 @@ The repository needs a full [setup-ron](https://aihero.dev/skills-setup-ron) con
 
 The Issue Context Packet carries only current pointers, hashes, ownership, seams, commands, and stop conditions. Small work stays inline; a subagent is used only when isolation or independent work pays for its coordination cost.
 
-Every confirmed finding ends the clean path and returns its trade-offs. Only a new bounded repair Grant permits repair; each repair creates a new candidate and invalidates stale review evidence. A third material repair wave is refused.
+Every confirmed finding ends the clean path and returns its trade-offs. Only a new bounded Repair Grant permits repair; each repair creates a new candidate and invalidates stale review evidence. The Grant must bind an integer `max_material_repair_waves` from one through ten plus the current `repair_wave`; a missing, invalid, or exceeded bound is refused, and the higher workflow ceiling never widens an existing Grant.
 
 ## Where it fits
 

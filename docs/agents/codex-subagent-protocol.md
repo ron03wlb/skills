@@ -130,7 +130,7 @@ Ron 流程沿用 Matt `code-review` 的 Standards 與 Spec 概念，但不直接
 
 Focused profile 允許一個 fresh reviewer 分開回報前兩軸；full profile 各自委派，且 Parent／Standalone 最終候選必須 full。每個子代理以 candidate SHA 證據回報，內容不超過 400 字。若不存在某個權威來源，不得虛構該軸線。協調代理驗證後，必須分開呈現適用軸線。
 
-每個 candidate 最多進行兩個 material repair waves。每次修改都產生新 SHA 並使舊結果失效；高風險修復重跑 full profile。第二次修復後仍有 material finding，或 finding 顯示 Spec、seam、Issue sizing 有問題時，寫 checkpoint 並停止。
+每個 Repair Grant 必須明確綁定整數 `max_material_repair_waves`，範圍為 1 到 10，以及目前的 `repair_wave`；candidate 不得超過該 Grant 的上限，且提高 workflow ceiling 不得回溯放寬既有 Grant。每次修改都產生新 SHA 並使舊結果失效；高風險修復重跑 full profile。達到授權上限後仍有 material finding，或 finding 顯示 Spec、seam、Issue sizing 有問題時，寫 checkpoint 並停止。
 
 ### `improve-codebase-architecture`
 

@@ -602,7 +602,7 @@ Every Leaf execution contract and Grant fixes one review profile before implemen
 
 The Parent or Standalone Target Integration Candidate always receives a full review for every applicable axis. A missing Wiki axis is skipped with an evidence-backed reason rather than a fabricated review.
 
-Any confirmed finding ends the clean-path delegation and returns the problem and trade-offs to the human. After a bounded repair Grant is issued, one candidate may enter at most two material repair waves. Each wave uses the single writable owner to address all confirmed findings and produces a new SHA. Re-review covers the affected axes, or the full profile for high-risk repairs. Tool failure, duplicate findings, and unsupported reviewer claims do not consume a repair wave. A persistent material finding after the second wave, or evidence that the Spec, seam, or Issue sizing is wrong, writes a checkpoint and stops with the worktree preserved.
+Any confirmed finding ends the clean-path delegation and returns the problem and trade-offs to the human. A bounded Repair Grant must bind an explicit integer `max_material_repair_waves` from one through ten. One candidate may enter no more material repair waves than that Grant permits, and the higher workflow ceiling never widens an existing Grant. Each wave uses the single writable owner to address all confirmed findings and produces a new SHA. Re-review covers the affected axes, or the full profile for high-risk repairs. Tool failure, duplicate findings, and unsupported reviewer claims do not consume a repair wave. A missing or invalid limit, a persistent material finding after the granted final wave, or evidence that the Spec, seam, or Issue sizing is wrong writes a checkpoint and stops with the worktree preserved.
 
 A Parent final-review code or test finding ends the clean-path delegation and does not consume closeout repair waves. Ron presents the problem and trade-offs; only after human authorization may it create a Repair Leaf with its own execution contract, Grant, one final commit, and closure. The changed Lane SHA invalidates the Parent Closeout Grant and requires a fresh Closeout Preview and integration candidate.
 
@@ -706,7 +706,7 @@ Stop and preserve recoverable state when:
 - the worktree is dirty outside Issue ownership;
 - the Issue no longer fits the Executable Issue sizing gate;
 - review results are stale or materially disputed;
-- two material repair waves do not produce an acceptable candidate;
+- the current Repair Grant's material-repair ceiling is exhausted without an acceptable candidate;
 - an actual Wiki write falls outside the approved semantic or configured support set;
 - target integration or verification fails;
 - target SHA differs from the approved Closeout Preview;
@@ -736,7 +736,7 @@ Stop and preserve recoverable state when:
 19. A Wiki build, citation, or pending-baseline failure preserves the Issue, artifacts, and worktree.
 20. Target verification proves that target HEAD equals the reviewed `integration_candidate_sha`, the reconciled Wiki is present, and temporary per-Issue spec files are absent.
 21. A Parent final-review code finding creates a separately authorized Repair Leaf instead of changing code inside `close-issue`.
-22. A third material repair wave is refused; the workflow writes a checkpoint and preserves the worktree.
+22. A Repair Grant may authorize from one through ten material repair waves; a wave beyond its explicit ceiling is refused, including an eleventh wave, and the workflow writes a checkpoint and preserves the worktree.
 23. A coordination-only Parent with no tracked closeout diff records completion without an empty commit.
 24. An unexpected Wiki semantic page or support file invalidates the Closeout Grant before target advancement.
 25. GitHub comment edits, missing comment IDs, or payload-hash mismatch invalidate dependent authorization.

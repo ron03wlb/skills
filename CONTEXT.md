@@ -226,7 +226,7 @@ _Avoid_: Wiki engine, Wiki authority, review authority, required runtime
 The pre-approved `focused` or `full` allocation of independent Standards, Spec, and applicable Wiki review work for one candidate.
 
 **Material repair wave**:
-One bounded pass in which the single writable owner addresses confirmed review findings and produces a new candidate SHA. A candidate may use at most two.
+One bounded pass in which the single writable owner addresses confirmed review findings and produces a new candidate SHA. The current Repair Grant must bind an explicit integer `max_material_repair_waves` from one through ten; a candidate may not exceed that bound, and the higher workflow ceiling never widens an existing Grant.
 
 ## Relationships
 
