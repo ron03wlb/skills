@@ -26,7 +26,7 @@ The common path configures and initializes repository knowledge before keeping M
 
 `setup-ron → wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`
 
-Each Leaf completes before the next begins. Parent closeout automatically reuses [wiki](https://aihero.dev/skills-wiki) reconciliation. A valid bounded clean path continues without routine approval; only findings, ambiguity, expanded scope, or missing capability return to you.
+Each Leaf completes before the next begins. During execution, coherent verified slices may be committed locally and in-scope review repairs may repeat up to the Grant's ten-wave limit without routine approval. Parent closeout automatically reuses [wiki](https://aihero.dev/skills-wiki) reconciliation. Ambiguity, expanded scope, a persistent finding after the limit, or a missing capability still returns to you.
 
 ## Where it fits
 

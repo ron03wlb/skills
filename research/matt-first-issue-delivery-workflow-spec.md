@@ -1,6 +1,6 @@
 # Matt-first Issue Delivery Workflow Spec
 
-**Status:** The eight-skill Ron flow and Canonical Wiki v1 implementation is locally committed. The local commit containing this status is the bounded Closeout authority repair proof; before that commit exists, the repair is only an authorized, locally verified candidate. Codex-native packaging review passed for the implementation; Claude CLI is not a validation dependency. Nothing is installed, pushed, or published.
+**Status:** The eight-skill Ron flow and Canonical Wiki v1 implementation is locally committed, and the affected skills are installed through repo-linked local symlinks. Installation does not imply that later policy edits are staged, committed, pushed, or published. Codex-native packaging review passed for the prior implementation; Claude CLI is not a validation dependency.
 
 ## Purpose
 
@@ -144,7 +144,7 @@ Coordinates a set of dependent Leaf Issues. It does not directly implement produ
 
 ### Leaf Issue
 
-An independently verifiable vertical outcome under a Parent. A completed Leaf has a final local commit and completion evidence on its Execution Lane, but is not yet integrated into the target branch.
+An independently verifiable vertical outcome under a Parent. A completed Leaf has an ordered chain of reviewed local implementation commits and completion evidence on its Execution Lane, but is not yet integrated into the target branch.
 
 ### Standalone Issue
 
@@ -162,7 +162,7 @@ An Executable Issue must satisfy all of the following:
 - one consistent risk, baseline, and target;
 - one writable owner;
 - enough context budget for implementation, review, repair, verification, and closeout;
-- one final local commit and one final completion-evidence record.
+- one or more ordered local implementation commits and one final completion-evidence record.
 
 Split an Issue before execution when it has independent outcomes, incompatible authorization scopes, different targets or baselines, multiple writable owners, separable acceptance boundaries, external waiting time, or too little review reserve.
 
@@ -399,7 +399,7 @@ May include:
 - run focused tests and verification;
 - use allowed subagents;
 - stage exact owned paths;
-- create one final local commit;
+- create a local checkpoint commit after any coherent vertical slice passes its relevant verification;
 - write event-driven checkpoints and final completion evidence;
 - invoke `close-issue` in Leaf mode through a separately named `close_leaf` capability.
 
@@ -476,16 +476,15 @@ For every ready Leaf:
 2. Build a fresh Issue Context Packet.
 3. Verify the Lane worktree, clean predecessor commit, ownership, target, and hashes.
 4. Select inline or subagent execution.
-5. Run TDD at the agreed seams.
-6. Freeze a review candidate and run the approved focused or full review profile.
-7. Repair findings through the single writable owner and invalidate stale reviews.
-8. Run final focused verification.
-9. Stage exact Issue-owned paths.
-10. Create one final local commit.
-11. Write completion evidence with `implemented_on_lane`, not `integrated_to_target`.
-12. Stop unless a valid `close_leaf` capability can be read back.
-13. Invoke `close-issue` in Leaf mode to verify the commit, review, evidence, and clean Lane; close the Issue and read back the closed state.
-14. Continue only after closure to the next ready, already authorized Leaf.
+5. Run TDD at the agreed seams; after any coherent vertical slice passes its relevant verification, stage exact Issue-owned paths and create a local checkpoint commit without another human approval.
+6. Require a clean worktree, freeze Lane HEAD as the review candidate, and run the approved focused or full review profile over the complete ordered commit chain.
+7. Repair confirmed in-contract findings through the single writable owner for at most ten material waves under the same `execute` Grant; each wave verifies, commits, freezes a new candidate, and invalidates stale reviews.
+8. Run final focused verification and confirm the reviewed candidate is still Lane HEAD.
+9. Inspect the aggregate owned diff and every ordered implementation commit.
+10. Write completion evidence with the ordered commits and `implemented_on_lane`, not `integrated_to_target`.
+11. Stop unless a valid `close_leaf` capability can be read back.
+12. Invoke `close-issue` in Leaf mode to verify the commits, review, evidence, and clean Lane; close the Issue and read back the closed state.
+13. Continue only after closure to the next ready, already authorized Leaf.
 
 Do not merge individual Leaf commits into the target branch.
 
@@ -525,7 +524,7 @@ Normal execution never places the following in the worktree:
 
 Task-specific copies under `/private/tmp` are explicitly removed after bounded use rather than left to the operating-system cleaner. An accidentally materialized or tracked intermediate blocks closeout unless its exact cleanup was separately approved; routine closeout must not normalize accidental repository pollution. If closeout fails, retain recovery-relevant artifacts and the worktree until the failure is resolved.
 
-A Parent does not create an empty commit. Each Executable Issue has one final implementation commit, while a coordination-only Parent records completion against `integration_candidate_sha`. A Parent closeout commit exists only when approved Wiki, domain, ADR, navigation, or tracked-cleanup changes produce a real tree diff.
+A Parent does not create an empty commit. Each Executable Issue has one or more ordered local implementation commits, while a coordination-only Parent records completion against `integration_candidate_sha`. A Parent closeout commit exists only when approved Wiki, domain, ADR, navigation, or tracked-cleanup changes produce a real tree diff.
 
 ### Retain as durable authority or product output
 
@@ -602,9 +601,9 @@ Every Leaf execution contract and Grant fixes one review profile before implemen
 
 The Parent or Standalone Target Integration Candidate always receives a full review for every applicable axis. A missing Wiki axis is skipped with an evidence-backed reason rather than a fabricated review.
 
-Any confirmed finding ends the clean-path delegation and returns the problem and trade-offs to the human. A bounded Repair Grant must bind an explicit integer `max_material_repair_waves` from one through ten. One candidate may enter no more material repair waves than that Grant permits, and the higher workflow ceiling never widens an existing Grant. Each wave uses the single writable owner to address all confirmed findings and produces a new SHA. Re-review covers the affected axes, or the full profile for high-risk repairs. Tool failure, duplicate findings, and unsupported reviewer claims do not consume a repair wave. A missing or invalid limit, a persistent material finding after the granted final wave, or evidence that the Spec, seam, or Issue sizing is wrong writes a checkpoint and stops with the worktree preserved.
+Every new `execute` Grant binds `max_material_repair_waves: 10` and `local_checkpoint_commits: allowed_after_verified_slice`. After review confirms an in-contract finding, the same Grant lets the single writable owner repair and re-review without another human approval for at most ten material waves. Each wave addresses all confirmed findings, runs affected verification, creates a local checkpoint commit, and produces a new SHA; re-review covers the affected axes, or the full profile for high-risk repairs. Tool failure, duplicate findings, and unsupported reviewer claims do not consume a wave. A finding that changes scope, acceptance, a public seam, target, or exclusions, a persistent material finding after wave ten, or evidence that the Spec or Issue sizing is wrong writes a checkpoint and stops with the worktree preserved. An older Grant without both controls is never reinterpreted under this broader policy.
 
-A Parent final-review code or test finding ends the clean-path delegation and does not consume closeout repair waves. Ron presents the problem and trade-offs; only after human authorization may it create a Repair Leaf with its own execution contract, Grant, one final commit, and closure. The changed Lane SHA invalidates the Parent Closeout Grant and requires a fresh Closeout Preview and integration candidate.
+A Parent final-review code or test finding ends the clean-path delegation and does not consume closeout repair waves. Ron presents the problem and trade-offs; only after human authorization may it create a Repair Leaf with its own execution contract, Grant, ordered local implementation commits, and closure. The changed Lane SHA invalidates the Parent Closeout Grant and requires a fresh Closeout Preview and integration candidate.
 
 ### Subagent Task Brief
 
@@ -706,7 +705,7 @@ Stop and preserve recoverable state when:
 - the worktree is dirty outside Issue ownership;
 - the Issue no longer fits the Executable Issue sizing gate;
 - review results are stale or materially disputed;
-- the current Repair Grant's material-repair ceiling is exhausted without an acceptable candidate;
+- the current `execute` Grant's ten-wave material-repair ceiling is exhausted without an acceptable candidate;
 - an actual Wiki write falls outside the approved semantic or configured support set;
 - target integration or verification fails;
 - target SHA differs from the approved Closeout Preview;
@@ -716,7 +715,7 @@ Stop and preserve recoverable state when:
 ## Acceptance scenarios
 
 1. A batch approval writes a distinct, readable Grant to every named Leaf; an unlisted Leaf remains blocked.
-2. Three sequential Leaf Issues reuse one Lane worktree, each producing one commit, then closing through a separately granted `close_leaf` capability before the next begins.
+2. Three sequential Leaf Issues reuse one Lane worktree, each producing one or more ordered local commits, then closing through a separately granted `close_leaf` capability before the next begins.
 3. A changed Leaf spec hash invalidates that Leaf without invalidating unrelated valid Grants.
 4. Tracker unavailability prevents execution even when a local copy of an old Grant exists.
 5. One writable worker and two independent read-only agents can run concurrently without shared writable ownership.
@@ -736,7 +735,7 @@ Stop and preserve recoverable state when:
 19. A Wiki build, citation, or pending-baseline failure preserves the Issue, artifacts, and worktree.
 20. Target verification proves that target HEAD equals the reviewed `integration_candidate_sha`, the reconciled Wiki is present, and temporary per-Issue spec files are absent.
 21. A Parent final-review code finding creates a separately authorized Repair Leaf instead of changing code inside `close-issue`.
-22. A Repair Grant may authorize from one through ten material repair waves; a wave beyond its explicit ceiling is refused, including an eleventh wave, and the workflow writes a checkpoint and preserves the worktree.
+22. An `execute` Grant authorizes local commits after coherent verified slices and up to ten in-contract material review-repair waves without repeated human approval; an eleventh wave is refused, and the workflow writes a checkpoint and preserves the worktree.
 23. A coordination-only Parent with no tracked closeout diff records completion without an empty commit.
 24. An unexpected Wiki semantic page or support file invalidates the Closeout Grant before target advancement.
 25. GitHub comment edits, missing comment IDs, or payload-hash mismatch invalidate dependent authorization.
@@ -775,7 +774,7 @@ The previously authorized core implementation scope was:
 
 No existing Matt skill should be behaviorally rewritten merely to hide these extensions under an upstream name.
 
-The Canonical Wiki v1 extension, `/wiki`, shared Change Spec and execution-contract builders, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. The final implementation commit was separately authorized and exists locally. The local commit containing this statement is the bounded repair proof; before that commit exists, the repair is only an authorized, locally verified candidate. Installation, push, release bump, marketplace publication, and deployment remain excluded.
+The Canonical Wiki v1 extension, `/wiki`, shared Change Spec and execution-contract builders, reconciliation-ledger enforcement, bounded clean-path delegation, and the scope-only local baseline commit were authorized on 2026-07-26. The implementation was separately authorized and committed locally. Repository and linked local-skill updates are local proof states only; push, release bump, marketplace publication, and deployment remain excluded.
 
 The repository currently reports `.claude-plugin/plugin.json` version `1.2.0` and `package.json` version `1.1.0`. This pre-existing drift does not block local symlink implementation or forward tests, but it must be resolved under separate release authorization before any managed plugin publication.
 

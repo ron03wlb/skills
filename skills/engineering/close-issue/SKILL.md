@@ -20,7 +20,7 @@ Require a valid `close_leaf` capability. A direct invocation may authorize it on
 Verify:
 
 - current Spec, contract, Grant, and completion-evidence bytes/hashes;
-- the final Issue commit is present at Lane HEAD and matches its owned diff;
+- the ordered implementation commits are all present through Lane HEAD, the completion record names the final reviewed Lane HEAD, and their aggregate diff matches the Issue-owned scope;
 - review evidence targets that candidate and all required axes passed;
 - final commands passed;
 - the Lane is clean and manifest-owned scratch is accounted for.
@@ -31,7 +31,7 @@ Leaf mode never mutates Wiki, advances target, rebases, removes the Lane, delete
 
 ## Parent or Standalone preflight
 
-For a Parent, verify every Leaf is closed, each `implemented_on_lane` commit is present in ordered Lane history, blockers are satisfied, ownership is released, and aggregate evidence covers the fixed point through Lane HEAD. A Parent has no executable contract: hash the complete ordered child-contract set and aggregate evidence instead.
+For a Parent, verify every Leaf is closed, each Leaf's ordered `implemented_on_lane` commits are present in Lane history, blockers are satisfied, ownership is released, and aggregate evidence covers the fixed point through Lane HEAD. A Parent has no executable contract: hash the complete ordered child-contract set and aggregate evidence instead.
 
 For a Standalone, verify its implementation evidence and `execute` Grant. Complete closeout requires `close_standalone`; Parent requires `close_parent`.
 
@@ -98,7 +98,7 @@ Run full Standards, Spec, and applicable Wiki reviews against the same fixed can
 
 The Coordinator verifies findings against evidence, never majority vote. Any confirmed finding ends the clean path:
 
-- code/test finding → explain trade-offs; only after human authorization create a Repair Leaf with its own contract, Grant, commit, and closeout;
+- code/test finding → explain trade-offs; only after human authorization create a Repair Leaf with its own contract, Grant, ordered local commits, and closeout;
 - Wiki-only finding → explain trade-offs; only after a bounded human repair Grant may the one writer repair inside the existing ledger actions and write sets.
 
 Each authorized repair creates a new candidate and invalidates affected reviews. Allow at most two material Wiki repair waves; then checkpoint and stop.

@@ -29,7 +29,7 @@ Each Leaf is a narrow vertical tracer bullet with:
 - one active writable owner; path overlap is forbidden between Issues that could be writable concurrently, but sequential Leaves in one Lane may reuse paths after the predecessor is closed and ownership is released;
 - dependencies that genuinely block it;
 - enough context reserve for implementation, review, repair, verification, and closeout;
-- one final local commit and one final completion-evidence record.
+- any number of local checkpoint commits after coherent verified slices, plus one final completion-evidence record.
 
 Split when outcomes, authorization scopes, targets, baselines, owners, acceptance boundaries, external waits, or context budgets differ. Do not split merely because several files or layers change.
 
@@ -47,7 +47,7 @@ Lane order is also a durable serialization edge. For every non-first Leaf in one
 
 - set `lane_predecessor` to the immediately preceding Leaf;
 - include that Leaf in `blocked_by`, even when there is no additional product dependency;
-- add a Grant precondition requiring the predecessor to be closed with valid `implemented_on_lane` evidence, its commit present at Lane HEAD, ownership released, and the Lane clean.
+- add a Grant precondition requiring the predecessor to be closed with valid `implemented_on_lane` evidence, all of its ordered implementation commits present through Lane HEAD, ownership released, and the Lane clean.
 
 This prevents batch authorization from making two writable Leaves ready at once.
 
@@ -114,7 +114,7 @@ The recommended successful-path capabilities for each Leaf are:
 
 For a Standalone Issue, preview separately named `execute` and `close_standalone` capabilities instead.
 
-The Grant binds Issue, contract/spec IDs and hashes, target branch/SHA, owned scope, review profile, preconditions, delegation limits, and exclusions. One user `同意` may approve the fixed batch. Reuse an exact active record; otherwise post and read back one append-only, properly superseding `workflow-authorization:v1` record on each named Issue.
+The Grant binds Issue, contract/spec IDs and hashes, target branch/SHA, owned scope, review profile, a ten-wave review-repair limit, local checkpoint-commit policy, preconditions, delegation limits, and exclusions. One user `同意` may approve the fixed batch. Reuse an exact active record only when it includes the same controls; otherwise post and read back one append-only, properly superseding `workflow-authorization:v1` record on each named Issue.
 
 Use this envelope:
 
@@ -156,6 +156,10 @@ excludes:
   - legacy-data-deletion
 preconditions:
   - <machine-checkable-condition, including Lane predecessor closure when applicable>
+limits:
+  max_material_repair_waves: 10
+commit_policy:
+  local_checkpoint_commits: allowed_after_verified_slice
 delegation:
   clean_path: denied
   read_only_subagents: allowed_when_independent
@@ -170,6 +174,6 @@ payload_sha256: <sha256>
 
 Hash and read back the payload with the same exact envelope rule. A revocation is a new record naming `revokes`; never edit an old Grant.
 
-An unlisted Leaf, later Repair Leaf, changed contract hash, or changed target has no authority. Batch approval records authority, not readiness: only the first dependency-ready Leaf may execute, and every later Leaf must pass its durable Lane predecessor precondition. If the user declines or defers, leave the contracts published but report `specified-not-authorized`. Do not execute any Issue from this skill.
+An unlisted Leaf, later Repair Leaf, changed contract hash, changed target, or older Grant without the repair and commit controls has no broader authority. Batch approval records authority, not readiness: only the first dependency-ready Leaf may execute, and every later Leaf must pass its durable Lane predecessor precondition. If the user declines or defers, leave the contracts published but report `specified-not-authorized`. Do not execute any Issue from this skill.
 
 Finish with the exact frontier: the first dependency-ready Issue, its proof state, and whether valid `execute` plus the type-appropriate `close_leaf` or `close_standalone` capability were read back.

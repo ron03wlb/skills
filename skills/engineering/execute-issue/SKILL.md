@@ -1,6 +1,6 @@
 ---
 name: execute-issue
-description: Execute one Ron Leaf or Standalone Issue when its contract and Grant are current, producing one reviewed local commit and durable evidence.
+description: Execute one Ron Leaf or Standalone Issue when its contract and Grant are current, producing reviewed local implementation commits and durable evidence.
 ---
 
 # Execute Issue
@@ -21,6 +21,8 @@ A Parent is never executable.
 
 If the user directly invoked this skill with one exact current Leaf or Standalone contract, that invocation may authorize only the standard `execute` capability. Build the exact Authorization Record, post it, and read it back before mutating. An implicit invocation needs an existing valid Grant. Ambiguous scope requires a preview and explicit approval.
 
+Every new or superseding `execute` Grant binds `max_material_repair_waves: 10` and `local_checkpoint_commits: allowed_after_verified_slice`. These controls authorize the review-repair loop and local commit timing inside the unchanged Issue contract; they do not expand owned paths, acceptance, seams, target, exclusions, or any external capability. Do not reinterpret an older Grant that omits either control—replace it through the normal append-only approval path before using the broader behavior.
+
 The Authorization Record begins with `workflow-authorization:v1`. Its hashed payload binds the record/approver/time, Issue, current spec and contract IDs/comment IDs/hashes, target branch/SHA, Lane SHA when applicable, named grants, exclusions, machine-checkable preconditions, delegation policy, and `supersedes`/`revokes` references. Use the fixed `<!-- workflow-payload:begin -->` and `<!-- workflow-payload:end -->` delimiters and the UTF-8/LF/one-terminal-newline SHA-256 rule. Never edit or delete an old record.
 
 Authorization is not readiness. Also verify:
@@ -34,7 +36,7 @@ Authorization is not readiness. Also verify:
 - `reconcile + ready` has a validated ready baseline; an optional Sync Preview ID/hash pair must match when this is a Wiki-repair Standalone;
 - `bootstrap + missing-with-bootstrap-preview` is one Standalone with matching bounded Preview, pre-Issue delegation lineage, Spec, contract, and Grant;
 - verification commands and behavioral seams are coherent;
-- enough context remains to reserve about 35% for review, repair, and verification.
+- enough context remains to reserve about 35% for review, up to ten repair waves, and verification.
 
 Stop and preserve recoverable state if any gate fails.
 
@@ -47,7 +49,7 @@ Create a task-specific directory under `/private/tmp` and an exact artifact mani
 - Issue/type, Grant ID, contract/spec comment IDs and hashes;
 - target/baseline, Lane ID/worktree, predecessor;
 - relevant Wiki, `CONTEXT.md`, ADR, and code pointers;
-- owned paths, acceptance, seams, commands, review profile;
+- owned paths, acceptance, seams, commands, review profile, repair limit, and checkpoint-commit policy;
 - stop conditions and latest checkpoint.
 
 Never place packets, raw subagent reports, temporary specs, or manifests in the product worktree.
@@ -66,7 +68,7 @@ When delegation is justified, apply the repository's `docs/agents/codex-subagent
 - no nested delegation or parallel writable Issues;
 - every Task Brief binds wave, Issue, Grant, candidate SHA when applicable, exact ownership, constraints, evidence, and return format.
 
-The Coordinator owns tracker writes, authorization checks, final staging, commit, and acceptance.
+The Coordinator owns tracker writes, authorization checks, every local commit, and acceptance.
 
 ## Implement and review
 
@@ -75,6 +77,8 @@ For code behavior, use the `/tdd` discipline at the seams already confirmed in t
 1. write one failing behavioral test;
 2. add only enough implementation to pass;
 3. repeat one vertical slice at a time.
+
+After any coherent vertical slice is complete and its highest relevant seam passes, the Coordinator may stage only Issue-owned paths and create a local checkpoint commit without another human approval. The Grant does not cap the number of these commits. Keep each checkpoint reviewable and never include workflow scratch, partially verified work, or unrelated user changes.
 
 For a Bootstrap or Wiki-repair Standalone, write only exact contract-owned Wiki/config paths and use page/source/link/build fixtures as the feedback loop; do not invent a code test. A Leaf never mutates Wiki. A normal `reconcile + ready` product Standalone also defers Wiki mutation to closeout; only a matching non-null Sync Preview identifies a Wiki-repair execution.
 
@@ -85,11 +89,11 @@ Freeze a `candidate_sha` or immutable tree reference before review:
 - `focused`: one fresh `gpt-5.6-sol/high` reviewer reports separate Standards and Spec sections; add an independent Wiki reviewer only when applicable;
 - `full`: separate Standards, Spec, and applicable Wiki reviewers.
 
-Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. Any confirmed finding ends the clean path and returns the problem and trade-offs to the human. Only a new bounded Repair Grant may let the one writable owner repair; each repair produces a new candidate and invalidates stale reviews. Require the Grant to bind an integer `max_material_repair_waves` from one through ten and the current `repair_wave`; refuse a missing, invalid, or exceeded bound. Never reinterpret an existing Grant under the higher workflow ceiling. A persistent material finding after the granted final wave writes a checkpoint and stops.
+Every reviewer receives the same fixed candidate. Validate findings against evidence, never by majority vote. The current `execute` Grant authorizes the one writable owner to address confirmed findings inside the unchanged contract for up to ten material repair waves without another human approval. Each wave consumes one count only when repair begins, runs the affected verification, creates a local checkpoint commit, freezes a new candidate, invalidates stale reviews, and re-runs the affected axes; use the full profile for high-risk repairs. Tool failure, duplicate findings, and unsupported reviewer claims do not consume a wave. A finding that changes scope, acceptance, a public seam, target, or exclusions still stops for a superseding Spec, contract, and Grant. A persistent material finding after wave ten writes a checkpoint and stops.
 
 ## Commit and record evidence
 
-Run the exact final verification commands, inspect the complete Issue diff, stage only Issue-owned paths, and create one final local implementation commit. Do not include workflow scratch or unrelated user changes.
+Run the exact final verification commands, inspect the aggregate Issue diff and every ordered implementation commit from the Issue baseline through Lane HEAD, and require a clean worktree. The reviewed candidate must be the final Lane HEAD; do not create an unreviewed final commit after review.
 
 Post and read back an append-only completion record:
 
@@ -101,7 +105,9 @@ contract_id: <contract-id>
 grant_id: <authorization-record-id>
 lane_id: <lane-id>
 baseline_sha: <sha>
-commit_sha: <final-local-commit>
+implementation_commits:
+  - <ordered-local-implementation-commit>
+commit_sha: <final-lane-head>
 candidate_sha: <reviewed-candidate>
 proof_state: implemented_on_lane
 review_profile: focused | full

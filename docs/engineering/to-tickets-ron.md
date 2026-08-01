@@ -26,7 +26,7 @@ Run [setup-ron](https://aihero.dev/skills-setup-ron), then publish the Change Sp
 
 ## One Lane, one Issue at a time
 
-Related Leaves may reuse one clean Lane worktree, but every Leaf keeps a distinct contract, Grant, commit, review, evidence record, and closure. Contracts come from the same deterministic builder used by [wiki](https://aihero.dev/skills-wiki). One batch `同意` can record exact per-Leaf `execute` and `close_leaf` Grants without turning them into inherited Parent authority.
+Related Leaves may reuse one clean Lane worktree, but every Leaf keeps a distinct contract, Grant, ordered commit chain, review, evidence record, and closure. Each Grant permits checkpoint commits after verified slices and up to ten in-scope review-repair waves without per-step approval. Contracts come from the same deterministic builder used by [wiki](https://aihero.dev/skills-wiki). One batch `同意` can record exact per-Leaf `execute` and `close_leaf` Grants without turning them into inherited Parent authority.
 
 ## Where it fits
 

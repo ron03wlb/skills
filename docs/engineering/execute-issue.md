@@ -12,7 +12,7 @@ npx skills update execute-issue
 
 ## What it does
 
-`execute-issue` implements exactly one authorized Ron Leaf or Standalone Issue through the contract's feedback loop, fixed-candidate review, one final local commit, and durable completion evidence.
+`execute-issue` implements exactly one authorized Ron Leaf or Standalone Issue through the contract's feedback loop, fixed-candidate review, ordered local implementation commits, and durable completion evidence.
 
 Code behavior uses TDD. A bounded [wiki](https://aihero.dev/skills-wiki) Bootstrap or repair Standalone uses page/source/link/build validation instead, while Leaves remain unable to mutate Wiki. Execution stops at `implemented_on_lane`.
 
@@ -28,7 +28,9 @@ The repository needs a full [setup-ron](https://aihero.dev/skills-setup-ron) con
 
 The Issue Context Packet carries only current pointers, hashes, ownership, seams, commands, and stop conditions. Small work stays inline; a subagent is used only when isolation or independent work pays for its coordination cost.
 
-Every confirmed finding ends the clean path and returns its trade-offs. Only a new bounded Repair Grant permits repair; each repair creates a new candidate and invalidates stale review evidence. The Grant must bind an integer `max_material_repair_waves` from one through ten plus the current `repair_wave`; a missing, invalid, or exceeded bound is refused, and the higher workflow ceiling never widens an existing Grant.
+Each coherent vertical slice may become a local checkpoint commit after its relevant seam passes; this needs no per-commit approval and never widens the Issue-owned scope. Review covers the complete ordered commit chain at Lane HEAD.
+
+The `execute` Grant authorizes up to ten material review-repair waves without another routine approval. Every repair stays inside the unchanged contract, creates a new checkpoint commit and candidate, and re-runs affected review axes. A scope, acceptance, public-seam, target, or exclusion change still stops for a superseding contract and Grant, as does a persistent finding after wave ten.
 
 ## Where it fits
 

@@ -95,10 +95,18 @@ test("existing Ron skills consume the new shared contracts without stale gates",
   const toTickets = read("skills/engineering/to-tickets-ron/SKILL.md");
   assert.match(toTickets, /execution-contract-create/u);
   assert.match(toTickets, /wiki_baseline_requirement/u);
+  assert.match(toTickets, /max_material_repair_waves: 10/u);
+  assert.match(toTickets, /local_checkpoint_commits: allowed_after_verified_slice/u);
+  assert.doesNotMatch(toTickets, /one final local commit/u);
 
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   assert.match(execute, /missing-with-bootstrap-preview/u);
   assert.match(execute, /delegation policy must be `denied`/u);
+  assert.match(execute, /without another human approval/u);
+  assert.match(execute, /local checkpoint commit/u);
+  assert.match(execute, /implementation_commits:/u);
+  assert.doesNotMatch(execute, /Only a new bounded Repair Grant/u);
+  assert.doesNotMatch(execute, /create one final local implementation commit/u);
   assert.doesNotMatch(
     execute,
     /approved Wiki baseline exists, or `wiki_impact: none`/u,
@@ -112,6 +120,7 @@ test("existing Ron skills consume the new shared contracts without stale gates",
   assert.match(close, /Parent child-contract aggregate hash/u);
   assert.match(close, /`target_refresh` is always `denied`/u);
   assert.match(close, /Any confirmed finding ends the clean path/u);
+  assert.match(close, /ordered implementation commits/u);
   assert.doesNotMatch(close, /always present one exact Closeout Preview/u);
 
   const wiki = read("skills/engineering/wiki/SKILL.md");

@@ -14,7 +14,7 @@ npx skills update close-issue
 
 `close-issue` closes one verified Ron Issue under an exact close capability.
 
-Leaf mode only verifies and closes the Leaf. Parent or Standalone mode requires an aligned Wiki reconciliation ledger, creates and fully reviews one Target Integration Candidate, fast-forwards the local target, verifies it, closes the Issue, and then cleans the Lane.
+Leaf mode verifies the Leaf's ordered local implementation commits, final reviewed Lane HEAD, and evidence before closing it. Parent or Standalone mode requires an aligned Wiki reconciliation ledger, creates and fully reviews one Target Integration Candidate, fast-forwards the local target, verifies it, closes the Issue, and then cleans the Lane.
 
 ## When to reach for it
 

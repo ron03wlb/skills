@@ -39,7 +39,7 @@ For a small, independently executable change, keep the Change Issue as Standalon
 - The decisions are settled but no durable Change Spec exists: type `/to-spec-ron`.
 - A Change Spec exists but executable slices do not: type `/to-tickets-ron`.
 - One Leaf or Standalone Issue has a current execution contract and valid `execute` authority: use `execute-issue`.
-- A Leaf is committed with current review and `implemented_on_lane` evidence: use `close-issue` in Leaf mode.
+- A Leaf's ordered local commits have current review and `implemented_on_lane` evidence: use `close-issue` in Leaf mode.
 - Every Leaf is closed and the Lane is ready for aggregate reconciliation: use `close-issue` in Parent mode.
 - A hard bug is not yet understood: use `/diagnosing-bugs` before entering the Ron spec route.
 - A huge effort cannot yet fit into one coherent Change Spec: use `/wayfinder`, then return to `/to-spec-ron`.
@@ -48,10 +48,10 @@ For a small, independently executable change, keep the Change Issue as Standalon
 
 - Change Spec describes intent; an Authorization Record grants named capabilities.
 - Authorization is not readiness.
-- `execute-issue` commits and records `implemented_on_lane`; it does not close an Issue by itself.
+- `execute-issue` may commit each coherent verified slice, repair confirmed review findings up to the Grant's ten-wave limit, and record `implemented_on_lane`; it does not close an Issue by itself.
 - Leaf closeout does not merge to target or update the Wiki.
 - Parent or Standalone closeout reuses the same `/wiki` reconciliation primitive, reviews the exact integration candidate, advances only the local target branch, verifies, closes, then cleans the worktree. Do not run `/wiki` again after a clean closeout.
-- A valid bounded clean-path delegation continues without routine approval; findings, ambiguity, expanded scope, or missing capability return to the human with trade-offs.
+- A valid bounded clean-path delegation continues without routine approval; in-contract execution findings use the Grant's ten repair waves, while ambiguity, expanded scope, a persistent finding after the limit, a closeout finding, or missing capability returns to the human with trade-offs.
 - Reviewed, tests passed, committed, implemented on Lane, integrated locally, target-verified, Issue closed, pushed, remotely merged, deployed, and live-verified are distinct claims.
 - Push, remote merge, deployment, branch deletion, destructive cleanup, and live-provider actions need separate authority.
 

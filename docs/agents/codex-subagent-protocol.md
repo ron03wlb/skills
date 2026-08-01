@@ -1,6 +1,6 @@
 # Codex 子代理協作規約
 
-**狀態：** 已由 Ron skills 採用於本地工作樹；尚未安裝、提交或發布。實際行為仍由各 skill 的 routing 與 enforcement steps 定義。
+**狀態：** 已由 Ron skills 與 repo-linked 本機 skills 採用。這只代表本地來源與安裝連結；commit、push、release 與發布仍是分開的證明狀態。實際行為仍由各 skill 的 routing 與 enforcement steps 定義。
 
 ## 目標
 
@@ -64,7 +64,7 @@
 | Review | 固定 `candidate_sha` 後，執行 Issue Grant 指定的 focused 或 full profile | 所有適用軸線都針對相同 SHA。 |
 | Repair | 唯一可寫入擁有者 | 每次修改都產生新的 `candidate_sha`。 |
 | Re-review | 受影響軸線；高風險變更重跑全部軸線 | 不接受指向舊 SHA 的證據。 |
-| Finalize | 僅協調代理 | commit、tracker、integration、verification、cleanup 依序通過。 |
+| Finalize | 僅協調代理 | 最終 evidence、tracker、integration、verification、cleanup 依序通過。 |
 
 每個委派都必須綁定 `wave_id`、`issue_id`、`grant_id`、適用時的 `candidate_sha`、ownership、model 與 reasoning effort。
 
@@ -130,7 +130,7 @@ Ron 流程沿用 Matt `code-review` 的 Standards 與 Spec 概念，但不直接
 
 Focused profile 允許一個 fresh reviewer 分開回報前兩軸；full profile 各自委派，且 Parent／Standalone 最終候選必須 full。每個子代理以 candidate SHA 證據回報，內容不超過 400 字。若不存在某個權威來源，不得虛構該軸線。協調代理驗證後，必須分開呈現適用軸線。
 
-每個 Repair Grant 必須明確綁定整數 `max_material_repair_waves`，範圍為 1 到 10，以及目前的 `repair_wave`；candidate 不得超過該 Grant 的上限，且提高 workflow ceiling 不得回溯放寬既有 Grant。每次修改都產生新 SHA 並使舊結果失效；高風險修復重跑 full profile。達到授權上限後仍有 material finding，或 finding 顯示 Spec、seam、Issue sizing 有問題時，寫 checkpoint 並停止。
+每個新 `execute` Grant 都綁定 `max_material_repair_waves: 10` 與 `local_checkpoint_commits: allowed_after_verified_slice`。同一 Grant 允許唯一可寫入擁有者在不改變 contract 的前提下，最多進行十次 review 修復而不再逐次請求人類核准；每次修復須通過受影響驗證、建立 local checkpoint commit、產生新 SHA 並使舊結果失效，高風險修復重跑 full profile。工具失敗、重複 finding 或不受證據支持的 finding 不計次。scope、acceptance、public seam、target 或 exclusion 改變，或第十次後仍有 material finding，寫 checkpoint 並停止。
 
 ### `improve-codebase-architecture`
 
@@ -146,11 +146,11 @@ Focused profile 允許一個 fresh reviewer 分開回報前兩軸；full profile
 
 ### `execute-issue`
 
-預設由單一協調代理直接實作。只有議題已完整指定，且隔離工作樹擁有權能實質保護既有工作或啟用真正獨立的垂直切片時，才使用執行子代理。委派前，協調代理記錄目標版本、工作樹路徑、擁有的路徑、驗收條件與整合檢查。`tdd` 與已核准的 focused/full review 仍是必要流程；執行子代理的自我回報不可取代其中任何一項。`execute-issue` 只提交並寫入 `implemented_on_lane` 證據，不改變 Issue closure state。
+預設由單一協調代理直接實作。只有議題已完整指定，且隔離工作樹擁有權能實質保護既有工作或啟用真正獨立的垂直切片時，才使用執行子代理。委派前，協調代理記錄目標版本、工作樹路徑、擁有的路徑、驗收條件與整合檢查。`tdd` 與已核准的 focused/full review 仍是必要流程；執行子代理的自我回報不可取代其中任何一項。每個 coherent slice 通過相關驗證後，協調代理可建立 local checkpoint commit；review 失敗可依同一 Grant 在範圍內修復並重審最多十次。`execute-issue` 最後寫入 ordered commits 與 `implemented_on_lane` 證據，不改變 Issue closure state。
 
 ### `close-issue`
 
-Leaf mode 只驗證 commit、review、evidence 與 clean Lane，再關閉並 read back；不合併 target 或更新 Wiki。
+Leaf mode 只驗證 ordered implementation commits、final reviewed Lane HEAD、review、evidence 與 clean Lane，再關閉並 read back；不合併 target 或更新 Wiki。
 
 Parent／Standalone mode 先由協調代理機械式建立並驗證綁定 Lane SHA、target SHA、Wiki write sets、task staging、驗證命令、能力、完整排除項與 bounded repair envelope 的 Closeout Preview。Standalone綁定自己的contract與Issue Grant；沒有executable contract的Parent改綁ordered child-contract aggregate與aggregate evidence。若human root完整涵蓋exact inputs，協調代理直接由該root派生並read back non-delegating sibling Closeout Grant後繼續；不得由derived Issue Grant再委派。否則只呈現精簡的授權停止點並請使用者回答一次 `同意`。`target_refresh`固定為`denied`；任何target drift使root、Preview與derived Grants失效並停止請人類決斷。Grant read-back 後，協調代理完成 Wiki reconciliation 與 Target Integration Candidate 建立。候選固定後，以 full profile 重新對焦所有適用軸線。Wiki-only finding必須先取得bounded human repair Grant，才可在核准write sets內修正；code/test finding必須先取得人類授權，才建立新的Repair Leaf。通過後才fast-forward target，並由協調代理完成target verification、Issue更新與worktree cleanup。
 

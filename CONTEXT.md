@@ -27,13 +27,13 @@ The single **Issue** created or reused when `to-spec-ron` completes. It owns the
 An **Issue** that coordinates related **Leaf Issues** and owns their aggregate integration and closeout; it is not itself an executable implementation unit.
 
 **Leaf Issue**:
-An independently verifiable vertical outcome under a **Parent Issue**. Completion means it is committed and evidenced on its **Execution Lane**, not yet integrated into the target branch.
+An independently verifiable vertical outcome under a **Parent Issue**. Completion means its ordered local implementation commits are reviewed and evidenced on its **Execution Lane**, not yet integrated into the target branch.
 
 **Standalone Issue**:
 An **Executable Issue** without a **Parent Issue**; its authorized lifecycle may continue through local target integration and closeout.
 
 **Executable Issue**:
-A **Leaf Issue** or qualified **Standalone Issue** with one coherent outcome, one grant, one writable owner, and one final local commit.
+A **Leaf Issue** or qualified **Standalone Issue** with one coherent outcome, one grant, one writable owner, and one or more ordered local implementation commits.
 _Avoid_: Parent task, implementation Parent
 
 **Execution Lane**:
@@ -226,7 +226,10 @@ _Avoid_: Wiki engine, Wiki authority, review authority, required runtime
 The pre-approved `focused` or `full` allocation of independent Standards, Spec, and applicable Wiki review work for one candidate.
 
 **Material repair wave**:
-One bounded pass in which the single writable owner addresses confirmed review findings and produces a new candidate SHA. The current Repair Grant must bind an explicit integer `max_material_repair_waves` from one through ten; a candidate may not exceed that bound, and the higher workflow ceiling never widens an existing Grant.
+One bounded pass in which the single writable owner addresses confirmed review findings inside the unchanged execution contract, creates a local checkpoint commit, and produces a new candidate SHA. The current `execute` Grant binds `max_material_repair_waves: 10`; it authorizes up to ten waves without another human approval but never widens scope, acceptance, seams, target, or exclusions.
+
+**Local checkpoint commit**:
+An Issue-owned local commit made after one coherent vertical slice or review repair passes its relevant verification. The `execute` Grant may allow any number through `local_checkpoint_commits: allowed_after_verified_slice`; push, target integration, deployment, and unrelated paths remain excluded.
 
 ## Relationships
 
