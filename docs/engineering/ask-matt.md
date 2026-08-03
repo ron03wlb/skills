@@ -16,6 +16,8 @@ npx skills update ask-matt
 
 It **does no work itself**. It doesn't grill, write a spec, or fix anything — it only orients. It exists for the **user-invoked** skills above all: nothing fires those for you, so *you* have to remember they exist, and `ask-matt` is the memory you offload that to. It also points at the model-invoked skills you'd reach for by name — `/tdd`, `/diagnosing-bugs`, `/prototype`, `/code-review`, and the two vocabulary references, `/domain-modeling` and `/codebase-design`. It answers "which one, and when", then hands you off to the skill that actually does the job.
 
+When a repository declares `docs/agents/ron-workflow.md`, it points to [ask-ron](https://aihero.dev/skills-ask-ron) instead of silently mixing Matt's ordinary execution route with Ron's run-once setup, state-aware [wiki](https://aihero.dev/skills-wiki), Issue authorization, Execution Lane, and closeout gates.
+
 ## When to reach for it
 
 You invoke this by typing `/ask-matt` — the agent won't reach for it on its own.
@@ -28,4 +30,4 @@ The idea `ask-matt` gives you to think with is the **flow** — a path *through*
 
 ## Where it fits
 
-`ask-matt` is the **router** — the standalone map that sits over the whole set. It is the node every other docs page links back to as [ask-matt](https://aihero.dev/skills-ask-matt), so it never sits *in* a chain; it points *into* every chain. From here you'll most often land on [grill-with-docs](https://aihero.dev/skills-grill-with-docs), the head of the main flow, or [triage](https://aihero.dev/skills-triage), the on-ramp for work you didn't create. When even the router's own picture is stale, its [Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/ask-matt) is the map of record.
+`ask-matt` is the **router** — the standalone map that sits over the whole set. It is the node every other docs page links back to as [ask-matt](https://aihero.dev/skills-ask-matt), so it never sits *in* a chain; it points *into* every chain. From here you'll most often land on [grill-with-docs](https://aihero.dev/skills-grill-with-docs), the head of the main flow, [triage](https://aihero.dev/skills-triage), the on-ramp for work you didn't create, or [ask-ron](https://aihero.dev/skills-ask-ron) when the repository selected the governed route. When even the router's own picture is stale, its [Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/ask-matt) is the map of record.

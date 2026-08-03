@@ -1,5 +1,10 @@
 # Handoff: Codex 子代理協作規約採用
 
+> **Superseded design state:** The confirmed workflow now lives in
+> [`research/matt-first-issue-delivery-workflow-spec.md`](../../research/matt-first-issue-delivery-workflow-spec.md)
+> and [`codex-subagent-protocol.md`](./codex-subagent-protocol.md). The paths,
+> repository state, adoption targets, and authorization status below are historical.
+
 ## 目的
 
 在 `C:\Workspace\open_source\skills` 將已審核的 Codex 子代理規約落實到既有 Matt skills。使用者尚未授權實作；下一位 agent 應先確認是否要開始修改，而不是自行擴大範圍。
@@ -62,7 +67,7 @@
 
 ## Suggested skills
 
-- `using-superpowers`：先分級採用工作並確認最小驗證要求。
+- `using-superpowers`：歷史比較建議；現行 Ron workflow 明確禁止將 Superpowers skills 作為 runtime dependency。
 - `openai-docs`：若 Codex 的 custom agent 或模型設定能力需要重新查證。
 - `code-review`：完成後，以 Standards／Spec 兩軸獨立審查變更。
 - `verification-before-completion`：若擴大到自訂 agent 檔、工作樹寫入與跨 skill 行為變更時，確認主張均有對應證據。

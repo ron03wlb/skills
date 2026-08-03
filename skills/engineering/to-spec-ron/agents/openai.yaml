@@ -1,0 +1,6 @@
+interface:
+  display_name: "To Spec Ron"
+  short_description: "Publish a durable Ron Change Spec"
+  default_prompt: "Use $to-spec-ron to synthesize this resolved discussion into a verified Change Spec comment."
+policy:
+  allow_implicit_invocation: false
