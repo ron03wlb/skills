@@ -1,5 +1,7 @@
 # Ron Wiki 主規格生成與候選引擎選型
 
+> Historical design, superseded by [ADR-0021](../docs/adr/0021-focus-ron-on-local-issue-delivery.md). The current `/wiki` skill is a standalone Wiki-only edit, validation, semantic-review, repair, and local-commit flow.
+
 研究日期：2026-07-26
 研究範圍：目前仍可公開取得、具明確授權且近期有維護跡象的 codebase Wiki 工具；網路事實只採官方 GitHub repository、manifest、原始碼、commit 與 release。
 

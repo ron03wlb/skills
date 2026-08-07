@@ -28,4 +28,4 @@ This keeps explanatory exploration from consuming the main decision context.
 
 ## Where it fits
 
-This is a reach-for-it-anytime sidecar inside [grill-me](https://aihero.dev/skills-grill-me) or [grill-with-docs](https://aihero.dev/skills-grill-with-docs). It resumes the same question afterward. See [ask-ron](https://aihero.dev/skills-ask-ron) for the Ron route and [ask-matt](https://aihero.dev/skills-ask-matt) for the wider skill map.
+This is a reach-for-it-anytime sidecar inside [grill-me](https://aihero.dev/skills-grill-me) or [grill-with-docs](https://aihero.dev/skills-grill-with-docs). It resumes the same question afterward. See [ask-matt](https://aihero.dev/skills-ask-matt) for the wider skill map.

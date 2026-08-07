@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0021
 ---
 
 # Review an integration candidate before advancing target

@@ -12,28 +12,18 @@ npx skills update execute-issue
 
 ## What it does
 
-`execute-issue` implements exactly one authorized Ron Leaf or Standalone Issue through the contract's feedback loop, fixed-candidate review, ordered local implementation commits, and durable completion evidence.
-
-Code behavior uses TDD. A bounded [wiki](https://aihero.dev/skills-wiki) Bootstrap or repair Standalone uses page/source/link/build validation instead, while Leaves remain unable to mutate Wiki. Execution stops at `implemented_on_lane`.
-
-Wiki-optional delivery runs the same authorization, implementation, non-Wiki review, and evidence path without requiring a Wiki baseline or claiming Wiki validation.
+`execute-issue` implements one tracker Issue in a dedicated worktree, then runs Matt's existing [code-review](https://aihero.dev/skills-code-review) for Standards and Spec. Confirmed findings are fixed and the full review reruns until clean, up to ten repair waves per invocation.
 
 ## When to reach for it
 
-Type `/execute-issue`, or the agent reaches for it automatically when one exact Issue already has a valid `execute` Grant. Reach for it only after a hash-verified execution contract exists; use [to-tickets-ron](https://aihero.dev/skills-to-tickets-ron) first when it does not.
+Type `/execute-issue` after explicitly choosing the worktree alternative for a dependency-ready Issue. The agent won't reach for it on its own; [implement](https://aihero.dev/skills-implement) remains the default.
 
-## Prerequisites
+## Review-repair loop
 
-The repository needs a full [setup-ron](https://aihero.dev/skills-setup-ron) configuration, a readable GitHub tracker, one current Change Spec, and a dependency-ready Executable Issue.
+The Issue and its linked Spec define scope. Tool failures, duplicates, and unsupported findings do not consume a repair wave; scope expansion stops until the Issue or Spec is updated.
 
-## Bounded execution
-
-The Issue Context Packet carries only current pointers, hashes, ownership, seams, commands, and stop conditions. Small work stays inline; a subagent is used only when isolation or independent work pays for its coordination cost.
-
-Each coherent vertical slice may become a local checkpoint commit after its relevant seam passes; this needs no per-commit approval and never widens the Issue-owned scope. Review covers the complete ordered commit chain at Lane HEAD.
-
-The `execute` Grant authorizes up to ten material review-repair waves without another routine approval. Every repair stays inside the unchanged contract, creates a new checkpoint commit and candidate, and re-runs affected review axes. A scope, acceptance, public-seam, target, or exclusion change still stops for a superseding contract and Grant, as does a persistent finding after wave ten.
+Clean execution writes one compact tracker completion note with the original target, worktree, topic branch, candidate commit, both clean review axes, verification results, and repair count. It does not integrate, remove the worktree, or close the Issue.
 
 ## Where it fits
 
-This is the implementation step between [to-tickets-ron](https://aihero.dev/skills-to-tickets-ron) and [close-issue](https://aihero.dev/skills-close-issue). It reuses [tdd](https://aihero.dev/skills-tdd) discipline while enforcing Ron authority and Lane proof states. See [ask-ron](https://aihero.dev/skills-ask-ron) and the upstream [ask-matt](https://aihero.dev/skills-ask-matt) map.
+It is the issue-worktree implementation step after [to-tickets](https://aihero.dev/skills-to-tickets) or [triage](https://aihero.dev/skills-triage), followed by a separately invoked [close-issue](https://aihero.dev/skills-close-issue). Use [implement](https://aihero.dev/skills-implement) instead when work can finish in the current branch without a separate integration phase; see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

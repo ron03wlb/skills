@@ -1,5 +1,7 @@
 # Matt-first Issue Delivery Workflow Spec
 
+> Historical design, superseded by [ADR-0022](../docs/adr/0022-use-issue-native-execution-and-closeout.md). Current Issue delivery defaults to `/implement`; only when the human explicitly chooses the worktree alternative do they invoke `/execute-issue` and then `/close-issue`, using a plain completion note without lifecycle authorization, hashed envelopes, a Wiki phase, or `setup-ron`.
+
 **Status:** The eight-skill Ron flow and Canonical Wiki v1 implementation is locally committed, and the affected skills are installed through repo-linked local symlinks. Installation does not imply that later policy edits are staged, committed, pushed, or published. Codex-native packaging review passed for the prior implementation; Claude CLI is not a validation dependency.
 
 ## Purpose

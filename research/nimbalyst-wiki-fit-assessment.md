@@ -1,5 +1,7 @@
 # Nimbalyst 作為 Ron Canonical Wiki 的適配性評估
 
+> Historical assessment retained for context. [ADR-0021](../docs/adr/0021-focus-ron-on-local-issue-delivery.md) removed Wiki maintenance from Ron delivery and made `/wiki` independent.
+
 狀態：研究結論；建議已於2026-07-26接受
 日期：2026-07-26
 

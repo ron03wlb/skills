@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0021
 ---
 
 # Keep Nimbalyst optional and non-authoritative

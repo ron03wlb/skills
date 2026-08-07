@@ -12,24 +12,18 @@ npx skills update close-issue
 
 ## What it does
 
-`close-issue` closes one verified Ron Issue under an exact close capability.
-
-Leaf mode verifies the Leaf's ordered local implementation commits, final reviewed Lane HEAD, and evidence before closing it. Parent or Standalone mode creates and fully reviews one Target Integration Candidate, fast-forwards the local target, verifies it, closes the Issue, and then cleans the Lane. A ready Wiki requires an aligned reconciliation ledger; Wiki-optional delivery binds no ledger, Wiki write set, protocol, or Wiki review.
+`close-issue` takes one clean `execute-issue` worktree, refreshes it from the original local target, fast-forwards that target to the reviewed candidate, removes the worktree, and closes the Issue. It does not repair product code.
 
 ## When to reach for it
 
-Type `/close-issue`, or the agent reaches for it automatically when the exact close capability is already recorded. Use Leaf mode after `implemented_on_lane`; use Parent mode only after every Leaf is closed.
+Type `/close-issue` after [execute-issue](https://aihero.dev/skills-execute-issue) records a clean completion note. The agent won't reach for it on its own; a human invokes this separate closeout phase and starts only one target integration at a time.
 
-## Prerequisites
+## Safe local integration
 
-The Issue must come from the [setup-ron](https://aihero.dev/skills-setup-ron) workflow with readable contracts, Grants, evidence, and Lane state. A valid human root derives the exact Closeout Grant without another routine prompt; a derived Issue Grant never delegates again. A Parent has no executable contract, so closeout uses the ordered child-contract and aggregate-evidence hashes. Otherwise the compact Preview asks for one `同意`.
+If target refresh changes the candidate, verification and Standards/Spec review run again and the clean completion note is refreshed before integration. A confirmed finding leaves the Issue open for a separate execution; closeout never edits product code.
 
-## Candidate before target
-
-The target branch advances only to the candidate that passed Standards, Change Spec, and applicable Wiki review. Target refresh is denied: if the bound target moves first, the root, Preview, and Grants expire and closeout asks for a new decision. Any finding stops for human decision. A bounded Wiki-only repair invalidates stale review evidence; a code or test defect requires a separately authorized Repair Leaf.
-
-Cleanup removes only exact manifest-owned intermediates. It never deletes the Lane branch, pushes, remotely merges, deploys, or performs live-provider work.
+The target advances only by fast-forward to the reviewed candidate. Cleanup removes the exact clean registered worktree but keeps the topic branch. A retry recognizes an already integrated candidate, an already removed worktree, or an already closed Issue whose completion identities all match; it verifies completed steps instead of repeating them. No rebase, push, remote merge, deploy, unrelated deletion, or automatic command chaining occurs.
 
 ## Where it fits
 
-This is the closeout step after [execute-issue](https://aihero.dev/skills-execute-issue), repeated per Leaf and once at Parent. It owns the same reconciliation primitive used by [wiki](https://aihero.dev/skills-wiki). See [ask-ron](https://aihero.dev/skills-ask-ron) for proof-state routing and [ask-matt](https://aihero.dev/skills-ask-matt) for the upstream map.
+This is the separate integration and cleanup step after [execute-issue](https://aihero.dev/skills-execute-issue). [to-tickets](https://aihero.dev/skills-to-tickets) supplies dependency-ordered work, while [ask-matt](https://aihero.dev/skills-ask-matt) maps the full flow.

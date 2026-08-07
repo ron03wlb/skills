@@ -20,7 +20,7 @@ The route most work travels. You have an idea and want it built.
    - **`/prototype`** to answer the question with throwaway code,
    - **`/handoff`** back what you learned, and reference it from the original idea thread.
 3. **Branch — is this a multi-session build?**
-   - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scratch/<feature>/issues/`, worked blockers-first by hand; on a real tracker the edges become native blocking links, so any ticket whose blockers are done can be grabbed — kick off **`/implement`** per ticket, **clearing context between each one**.
+   - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scratch/<feature>/issues/`; on a real tracker the edges become native blocking links. By default, start a fresh **`/implement`** for each frontier Issue.
    - **No** → **`/implement`** right here, in the same context window.
 
    Either way, **`/implement`** builds each issue by driving **`/tdd`** internally — one red-green slice at a time — then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before committing. Reach for **`/tdd`** on its own when you just want to build a concrete behaviour test-first without a full spec, and **`/code-review`** on its own whenever you want to review a branch or PR against a fixed point.
@@ -73,9 +73,11 @@ Off the main flow entirely.
 - **`/teach`** — learn a concept over multiple sessions, using the current directory as a stateful workspace.
 - **`/writing-great-skills`** — reference for writing and editing skills well.
 
-## Ron governed route
+## Issue worktree route
 
-If the repository uses `docs/agents/ron-workflow.md`, or the user asks for Issue-comment authorization, one reusable Execution Lane, optional Canonical Wiki integration, and target-candidate closeout, recommend that they type **`/ask-ron`**. It routes the run-once `/setup-ron`, optional state-aware `/wiki`, and the Ron delivery skills (`to-spec-ron`, `to-tickets-ron`, `execute-issue`, `close-issue`). Do not silently mix the two execution routes.
+Only when the user explicitly selects the worktree alternative, replace **`/implement`** with **`/execute-issue`** followed by **`/close-issue`**. `execute-issue` implements one tracker Issue in a dedicated worktree and repairs Standards/Spec findings; `close-issue` separately refreshes and fast-forwards the original local branch, removes the worktree, and closes the Issue. A human starts only one target integration at a time.
+
+The user-invoked **`/wiki`** is an independent Wiki-only edit/review/commit flow. Use **`/remove-ron`** only to remove the retired repository-local Ron setup footprint from a consumer repository.
 
 ## Precondition
 

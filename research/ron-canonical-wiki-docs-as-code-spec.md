@@ -1,5 +1,7 @@
 # Ron Canonical Wiki Docs-as-Code 完整方案
 
+> Historical design, superseded by [ADR-0021](../docs/adr/0021-focus-ron-on-local-issue-delivery.md). The current `/wiki` flow is independent from Ron delivery and no longer uses repository setup, tracker work, or closeout coupling.
+
 狀態：本機實作已提交；只有包含本狀態列的本機 commit 存在時，bounded repair 才算已提交，否則仍是已授權且通過本機驗證的 candidate；未安裝、未推送或發布
 日期：2026-07-26
 

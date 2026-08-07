@@ -6,18 +6,17 @@ Skills I use daily for code work.
 
 Reachable only when you type them (Claude Code: `disable-model-invocation: true`; Codex: `policy.allow_implicit_invocation: false` in `agents/openai.yaml`).
 
+- **[execute-issue](./execute-issue/SKILL.md)** — Implement one Issue in a worktree and repair review findings until Standards and Spec are clean.
+- **[close-issue](./close-issue/SKILL.md)** — Integrate one reviewed Issue into its original local branch, remove its worktree, and close it.
 - **[ask-matt](./ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
-- **[ask-ron](./ask-ron/SKILL.md)** — Route work through the Ron Issue delivery workflow without mutating state.
 - **[grill-with-docs](./grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
 - **[triage](./triage/SKILL.md)** — Move issues through a state machine of triage roles.
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)** — Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
-- **[setup-ron](./setup-ron/SKILL.md)** — Configure durable tracker, Wiki, target, and Execution Lane contracts for the Ron workflow.
-- **[wiki](./wiki/SKILL.md)** — Initialize, resume, inspect, or synchronize the Ron Canonical Wiki from verified repository state.
+- **[wiki](./wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
+- **[remove-ron](./remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
 - **[to-spec](./to-spec/SKILL.md)** — Turn the current conversation into a spec and publish it to the issue tracker.
-- **[to-spec-ron](./to-spec-ron/SKILL.md)** — Publish a hash-verified Change Spec only after synthesis is complete.
 - **[to-tickets](./to-tickets/SKILL.md)** — Break any plan, spec, or conversation into a set of tracer-bullet tickets, each declaring its blocking edges — text in a local file, or native blocking links on a real tracker.
-- **[to-tickets-ron](./to-tickets-ron/SKILL.md)** — Create bounded, dependency-ordered Executable Issues and optional per-Issue Grants.
 - **[implement](./implement/SKILL.md)** — Build the work described by a spec or set of tickets, driving `/tdd` at pre-agreed seams and closing out with `/code-review` before committing.
 - **[wayfinder](./wayfinder/SKILL.md)** — Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on the issue tracker, resolved one at a time until the way to the destination is clear.
 
@@ -26,8 +25,6 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 Model- or user-reachable (rich trigger phrasing so the model can reach for them).
 
 - **[prototype](./prototype/SKILL.md)** — Build a throwaway prototype to answer a design question: a runnable terminal app for state/logic, or several toggleable UI variations.
-- **[execute-issue](./execute-issue/SKILL.md)** — Implement one authorized Ron Leaf or Standalone Issue and record `implemented_on_lane` evidence.
-- **[close-issue](./close-issue/SKILL.md)** — Close a verified Leaf, or reconcile and locally integrate a Parent or Standalone Issue.
 - **[diagnosing-bugs](./diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
 - **[research](./research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.
 - **[tdd](./tdd/SKILL.md)** — Test-driven development with a red-green-refactor loop. Builds features or fixes bugs one vertical slice at a time.

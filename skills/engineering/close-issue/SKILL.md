@@ -1,123 +1,35 @@
 ---
 name: close-issue
-description: Close a verified Ron Leaf, Parent, or Standalone Issue under exact local closeout authority, including Wiki reconciliation and target verification when applicable.
+description: Integrate one reviewed Issue worktree into its original local branch, remove it, and close the Issue.
+disable-model-invocation: true
 ---
 
 # Close Issue
 
-Close exactly one Ron Issue in `leaf`, `parent`, or `standalone` mode. Detect the mode from durable tracker records. Never infer Parent authority from child Grants or close authority from completion evidence.
+Close exactly one executed Issue. This skill integrates the reviewed candidate, removes its worktree, and closes the Issue; it never repairs product code or invokes `execute-issue` automatically.
 
-## Shared contracts
+## Entry
 
-Resolve this `SKILL.md` to its real path, ascend to the plugin root, and use `scripts/ron-workflow/ron-wiki.mjs` for config, envelope, source, ledger, Preview, and execution-binding proof. Create the Closeout Preview with `closeout-preview-create`, validate it with `preview-validate`, and derive its exact bounded Grant with `closeout-grant-derive`. Normal closeout and direct `/wiki` use this same reconciliation primitive; do not create a second Wiki updater.
+Read the Issue and its latest `execute-issue` completion note once. A direct invocation covers the local merge, worktree removal, and Issue closure for that one Issue; do not ask for phase-by-phase authorization.
 
-Read every Spec, execution contract, Authorization, completion, and checkpoint record by stable comment ID. Recompute hashes and resolve append-only supersession/revocation. Tracker unavailability, ambiguous lineage, stale Spec/contract/Grant, dirty unrelated state, or capability mismatch stops and preserves recovery state.
+Require the note to identify the original target branch, Issue worktree, topic branch, baseline, final reviewed candidate, clean Standards and Spec results, and passing verification.
 
-## Leaf mode
+If the Issue is already closed, resume only when the original target `HEAD` equals the recorded candidate, the Issue worktree is absent, and the completion note identities match. Read back and verify the closed state, report completion, and stop without closing it again. Any other already-closed state is ambiguous and stops.
 
-Require a valid `close_leaf` capability. A direct invocation may authorize it only for one exact current Leaf; write and read back the Authorization Record before closing.
+For an open Issue, confirm the candidate is still the clean Issue worktree `HEAD`, the target worktree is clean, and blockers are closed. On retry, an absent Issue worktree is valid only when the original target `HEAD` already equals the recorded candidate; continue with tracker closure. Stop on any other ambiguity, dirty state, changed scope, missing evidence, or another local integration in progress. The human manually ensures only one integration is active; do not add a queue or lock.
 
-Verify:
+## Refresh the candidate
 
-- current Spec, contract, Grant, and completion-evidence bytes/hashes;
-- the ordered implementation commits are all present through Lane HEAD, the completion record names the final reviewed Lane HEAD, and their aggregate diff matches the Issue-owned scope;
-- review evidence targets that candidate and all required axes passed;
-- final commands passed;
-- the Lane is clean and manifest-owned scratch is accounted for.
+Merge the latest local target branch into the topic branch without rebasing. Conflicts, unrelated changes, or scope expansion stop with the Issue open; do not resolve product-code findings in closeout.
 
-Close and read back the Leaf, release writable ownership, and remove only exact external intermediates that are no longer needed.
+If the merge changes the candidate, rerun the recorded verification and Matt `code-review` against the current target and the same Issue or linked Spec. Any confirmed finding leaves the Issue open and returns it to a separate `/execute-issue` invocation. After a clean changed candidate, update and read back the completion note with the new candidate and verification results before integration. If the target was already an ancestor and the candidate did not change, reuse the clean execution review.
 
-Leaf mode never mutates Wiki, advances target, rebases, removes the Lane, deletes a branch, pushes, deploys, or acts on live providers.
+## Integrate, clean up, and close
 
-## Parent or Standalone preflight
+From the original target worktree, fast-forward the target branch to the exact reviewed candidate and verify its `HEAD`. On retry, skip this step only when target `HEAD` already equals that candidate. Do not merge from inside the Issue worktree or remove the active working directory.
 
-For a Parent, verify every Leaf is closed, each Leaf's ordered `implemented_on_lane` commits are present in Lane history, blockers are satisfied, ownership is released, and aggregate evidence covers the fixed point through Lane HEAD. A Parent has no executable contract: hash the complete ordered child-contract set and aggregate evidence instead.
+Confirm the Issue worktree is registered, is the exact path from the completion note, and remains clean. Remove that worktree with `git worktree remove` from the target worktree, then prune only stale worktree metadata. On retry after verified target integration, an already absent worktree means cleanup is complete. Never delete the topic branch.
 
-For a Standalone, verify its implementation evidence and `execute` Grant. Complete closeout requires `close_standalone`; Parent requires `close_parent`.
+Close the Issue through the configured tracker and read it back once. If integration, cleanup, or tracker closure fails after an earlier step succeeded, report the exact partial state and resume idempotently; never roll back a successfully integrated target automatically.
 
-Validate the configured baseline requirement:
-
-- `none + not-applicable` requires explicit evidence-backed `wiki_impact: none`;
-- `semantic + none + not-applicable` requires a configured `missing` baseline and preserves Wiki-optional delivery;
-- `reconcile + ready` requires the reviewed ready baseline;
-- `bootstrap + missing-with-bootstrap-preview` requires one matching Bootstrap Preview/Spec/contract/Grant chain and is valid only for that Standalone.
-
-## Reconciliation before mutation
-
-For Wiki-optional delivery, skip reconciliation entirely. The Closeout Preview binds `ledger: null`, empty semantic/support write sets, `protocol: null`, Standards and Spec review only, and zero Wiki repair waves.
-
-For `reconcile` or `bootstrap`, aggregate prior Wiki, current Change Spec dispositions, the complete Issue diff, code/test source locators, and reviewer evidence. Build `workflow-wiki-reconciliation-ledger:v1` with one row per affected topic or material claim:
-
-- prior Wiki state;
-- `inherit | add | change | remove`;
-- code/test source locators;
-- `aligned | deviation | unverified`;
-- `none | add | update | remove`;
-- exact Wiki path.
-
-Run `ledger-validate`. Any `deviation`, `unverified`, unsupported/ambiguous locator, missing behavioral Change Spec, finding, ceiling expansion, or path outside an applicable current ceiling ends the clean path before Wiki mutation. With the target unchanged, an exact input change inside every applicable current ceiling only invalidates the old Preview and Grant; rebuild them and complete revalidation. Return actual authorization problems and trade-offs; do not repair or rewrite intent autonomously.
-
-Only a clean aligned ledger may derive:
-
-- exact `wiki_semantic_write_set`;
-- exact configured `wiki_support_write_set`.
-
-For Wiki-optional delivery both write sets are empty. Otherwise an empty semantic set requires `wiki_impact: none`; an engine never selects either set.
-
-## Closeout Preview and authority
-
-Use `closeout-preview-create`, then `preview-validate`, to create one internal, hash-verified `workflow-closeout-preview:v1` binding:
-
-- Issue and Spec; the Standalone contract and Issue Grant, or `contract: null` plus the Parent child-contract aggregate hash;
-- the human root read-back hash; Issue and Closeout Grants are non-delegating siblings from that root;
-- exact Lane and target identities;
-- task staging inside the artifact ceiling, plus both Wiki write sets and hashes when Wiki applies;
-- target-sync method and exact verification commands;
-- `close_parent` or `close_standalone`;
-- candidate-creation and at most two human-authorized Wiki-repair waves;
-- every root exclusion, plus the rule that a code/test defect requires a Repair Leaf.
-
-When the current human root covers every identity, path, validator, review axis, capability, fixed-target policy, and exclusion, use `closeout-grant-derive` to derive and read back the sibling exact Closeout Grant without another prompt. Never derive it from a derived Issue Grant. Otherwise present only the compact authorization stop and ask for `同意`.
-
-A changed Spec, Standalone contract or Parent child-contract aggregate, target, Lane, ledger, write set, code scope, or Repair Leaf invalidates the Grant. `target_refresh` is always `denied`: any target drift invalidates the human root, Preview, and derived Grants, then stops for a new human decision and rebuilt records. Conflict always stops; never auto-rebase.
-
-## Build one Target Integration Candidate
-
-After the exact closeout Grant reads back:
-
-1. synchronize the latest local target into the Lane without rebasing;
-2. recalculate the aggregate diff and, when Wiki applies, the ledger and write sets;
-3. for `reconcile`, change only aligned ledger actions and configured support outputs;
-4. for `bootstrap`, add the complete baseline and change config from `missing` to `ready` in the same candidate;
-5. run the exact non-Wiki verification plus applicable page/source/link/navigation/config/build validation;
-6. create a closeout commit only for a real approved diff;
-7. freeze one `integration_candidate_sha`.
-
-Never accept a partial Bootstrap baseline, unexpected path, silent deletion, or empty Parent commit.
-
-## Independent final review
-
-Run full Standards, Spec, and applicable Wiki reviews against the same fixed candidate. Wiki review compares prior Wiki, current Spec, code/tests, ledger, and candidate Wiki. Use fresh read-only reviewers; the writable owner, Coordinator, author, and engine cannot self-accept.
-
-The Coordinator verifies findings against evidence, never majority vote. Any confirmed finding ends the clean path:
-
-- code/test finding → explain trade-offs; only after human authorization create a Repair Leaf with its own contract, Grant, ordered local commits, and closeout;
-- Wiki-only finding → explain trade-offs; only after a bounded human repair Grant may the one writer repair inside the existing ledger actions and write sets.
-
-Each authorized repair creates a new candidate and invalidates affected reviews. Allow at most two material Wiki repair waves; then checkpoint and stop.
-
-## Advance, verify, close, clean
-
-Only after the exact candidate passes:
-
-1. confirm the local target is clean and still satisfies the Grant;
-2. fast-forward it to the reviewed candidate;
-3. verify target identity, tests, Wiki config/page/source/link/build contracts, and absence of per-Issue intermediates;
-4. post and read back `workflow-closeout-evidence:v1` binding the Issue mode, Grant, Spec, Standalone contract or Parent child-contract aggregate, Lane, ledger, candidate, verified target, commands, and `verified_on_target`;
-5. close the Parent or Standalone and read back state;
-6. remove only manifest-owned external intermediates;
-7. remove the Lane worktree without deleting its branch.
-
-Failure leaves the Issue open when possible and preserves recovery state. Never push, remote-merge, deploy, delete a branch or legacy data, publish derived output, or perform live-provider actions.
-
-Return only `收尾完成` on a clean path. Otherwise report the smallest problem, evidence, trade-offs, and required decision. Keep reviewed, tested, committed, implemented on Lane, locally integrated, target-verified, Issue-closed, pushed, remotely merged, deployed, and live-verified as separate claims.
+Never push, remote-merge, deploy, delete unrelated files, publish derived output, or act on live providers. Keep local integration, Issue closure, push, remote merge, deployment, and live verification as separate claims.

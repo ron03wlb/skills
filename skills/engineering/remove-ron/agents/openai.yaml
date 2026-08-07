@@ -1,0 +1,7 @@
+interface:
+  display_name: "Remove Ron"
+  short_description: "Remove retired local Ron setup"
+  default_prompt: "Use $remove-ron to remove only the retired repository-local Ron setup footprint."
+
+policy:
+  allow_implicit_invocation: false

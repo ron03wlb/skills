@@ -1,6 +1,0 @@
-interface:
-  display_name: "Setup Ron"
-  short_description: "Configure a repo for Ron workflow"
-  default_prompt: "Use $setup-ron to configure this repository for the Ron Issue delivery workflow."
-policy:
-  allow_implicit_invocation: false

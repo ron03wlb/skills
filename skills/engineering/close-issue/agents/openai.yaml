@@ -1,4 +1,7 @@
 interface:
   display_name: "Close Issue"
-  short_description: "Close and locally integrate a Ron Issue"
-  default_prompt: "Use $close-issue to close one verified Ron Issue under the exact granted mode."
+  short_description: "Integrate, clean up, and close one Issue"
+  default_prompt: "Use $close-issue to integrate one reviewed Issue worktree into its original local branch, remove the worktree, and close the Issue."
+
+policy:
+  allow_implicit_invocation: false

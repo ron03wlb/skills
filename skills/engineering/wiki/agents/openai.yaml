@@ -1,7 +1,7 @@
 interface:
   display_name: "Wiki"
-  short_description: "Initialize or synchronize the Canonical Wiki"
-  default_prompt: "Use $wiki to initialize or synchronize this repository's Canonical Wiki from verified state."
+  short_description: "Inspect or update a repository Wiki"
+  default_prompt: "Use $wiki to inspect or update this repository's Wiki independently from Issue delivery."
 
 policy:
   allow_implicit_invocation: false

@@ -1,4 +1,7 @@
 interface:
   display_name: "Execute Issue"
-  short_description: "Implement one authorized Ron Issue"
-  default_prompt: "Use $execute-issue to implement exactly one authorized Ron Leaf or Standalone Issue."
+  short_description: "Implement and repair-review one Issue"
+  default_prompt: "Use $execute-issue to implement one Issue in a worktree and repair review findings until Standards and Spec are clean."
+
+policy:
+  allow_implicit_invocation: false
