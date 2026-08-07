@@ -18,6 +18,8 @@ Read back the Change Issue and its current `workflow-change-spec:v1` comment by 
 
 Use the Change Spec's confirmed behavior, test seams, Wiki dispositions, operation, and baseline requirement. Do not copy the full Change Spec into children.
 
+When the Spec uses `semantic + none + not-applicable`, preserve Wiki-optional delivery in every executable contract and Grant: keep Preview and disposition hashes null, do not add Wiki-owned paths or review, and do not stop to bootstrap a baseline.
+
 ## Draft executable slices
 
 Prefer one Standalone Issue when the work is one coherent, independently verifiable outcome. Otherwise turn the Change Issue into a Parent and draft Leaf Issues.

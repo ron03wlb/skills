@@ -339,11 +339,8 @@ export function validateWikiExecutionBinding(binding) {
   );
 
   if (binding.wiki_operation === "none") {
-    if (
-      binding.wiki_impact !== "none" ||
-      binding.wiki_baseline_requirement !== "not-applicable"
-    ) {
-      fail("invalid", "none requires wiki_impact none and no baseline");
+    if (binding.wiki_baseline_requirement !== "not-applicable") {
+      fail("invalid", "none requires no Wiki baseline");
     }
     requireNull(binding.wiki_preview_id, "wiki_preview_id");
     requireNull(
@@ -753,16 +750,22 @@ export function validateCloseoutPreview(preview) {
     wiki_preview_payload_sha256: preview.wiki_preview_payload_sha256,
   });
 
-  const ledgerResult = validateReconciliationLedger(preview.ledger);
-  if (ledgerResult.status === "findings") {
-    fail("findings", "Closeout Preview ledger contains a deviation", {
-      findings: ledgerResult.findings,
-    });
-  }
-  if (ledgerResult.status === "not-verifiable") {
-    fail("not-verifiable", "Closeout Preview ledger is unverified", {
-      findings: ledgerResult.findings,
-    });
+  let ledgerResult;
+  if (preview.wiki_operation === "none") {
+    requireNull(preview.ledger, "ledger");
+    ledgerResult = { status: "clean", semantic_write_set: [], findings: [] };
+  } else {
+    ledgerResult = validateReconciliationLedger(preview.ledger);
+    if (ledgerResult.status === "findings") {
+      fail("findings", "Closeout Preview ledger contains a deviation", {
+        findings: ledgerResult.findings,
+      });
+    }
+    if (ledgerResult.status === "not-verifiable") {
+      fail("not-verifiable", "Closeout Preview ledger is unverified", {
+        findings: ledgerResult.findings,
+      });
+    }
   }
   if (
     preview.ledger_payload_sha256 !== hashCanonicalJson(preview.ledger)
@@ -787,13 +790,13 @@ export function validateCloseoutPreview(preview) {
     fail("scope", "Closeout Preview semantic writes must equal ledger writes");
   }
   if (
-    preview.wiki_impact === "semantic" &&
+    preview.wiki_operation !== "none" &&
     preview.semantic_write_set.length === 0
   ) {
     fail("invalid", "semantic closeout requires a semantic write");
   }
   if (
-    preview.wiki_impact === "none" &&
+    preview.wiki_operation === "none" &&
     (preview.semantic_write_set.length !== 0 ||
       preview.support_write_set.length !== 0)
   ) {
@@ -812,7 +815,11 @@ export function validateCloseoutPreview(preview) {
     fail("scope", "Closeout Preview support write-set hash has drifted");
   }
 
-  validateProtocol(preview.protocol);
+  if (preview.wiki_operation === "none") {
+    requireNull(preview.protocol, "protocol");
+  } else {
+    validateProtocol(preview.protocol);
+  }
   assertRepositoryPath(preview.staging_path, "staging_path");
   assertUniqueStrings(
     preview.verification_commands,
@@ -828,7 +835,7 @@ export function validateCloseoutPreview(preview) {
   if (
     !preview.review_axes.includes("standards") ||
     !preview.review_axes.includes("spec") ||
-    (preview.wiki_impact === "semantic" &&
+    (preview.wiki_operation !== "none" &&
       !preview.review_axes.includes("wiki"))
   ) {
     fail("invalid", "Closeout Preview is missing a required review axis");
@@ -850,6 +857,9 @@ export function validateCloseoutPreview(preview) {
     repair.wiki_waves > 2
   ) {
     fail("invalid", "Closeout Preview permits at most two Wiki repair waves");
+  }
+  if (preview.wiki_operation === "none" && repair.wiki_waves !== 0) {
+    fail("invalid", "Wiki-free closeout cannot include Wiki repair waves");
   }
   if (repair.wiki_authority !== "human-grant-required") {
     fail("invalid", "Wiki repair requires a separate human Grant");
@@ -2005,14 +2015,14 @@ export function buildChangeSpecEnvelope(input) {
   });
 
   requireStringArray(input.wiki_context, "wiki_context", {
-    allowEmpty: binding.wiki_impact === "none",
+    allowEmpty: binding.wiki_operation === "none",
   });
   requireArray(input.wiki_dispositions, "wiki_dispositions");
-  if (binding.wiki_impact === "semantic" && input.wiki_dispositions.length === 0) {
-    fail("invalid", "semantic Change Specs require Wiki dispositions");
+  if (binding.wiki_operation !== "none" && input.wiki_dispositions.length === 0) {
+    fail("invalid", "Wiki operations require dispositions");
   }
-  if (binding.wiki_impact === "none" && input.wiki_dispositions.length !== 0) {
-    fail("invalid", "non-semantic Change Specs cannot contain Wiki dispositions");
+  if (binding.wiki_operation === "none" && input.wiki_dispositions.length !== 0) {
+    fail("invalid", "Wiki-free Change Specs cannot contain dispositions");
   }
   const dispositionKeys = new Set();
   const dispositions = input.wiki_dispositions.map((disposition, index) => {
@@ -2136,7 +2146,7 @@ export function buildExecutionContractEnvelope(input) {
     wiki_preview_id: input.wiki_preview_id,
     wiki_preview_payload_sha256: input.wiki_preview_payload_sha256,
   });
-  if (binding.wiki_impact === "semantic") {
+  if (binding.wiki_operation !== "none") {
     requireSha256(input.wiki_dispositions_sha256, "wiki_dispositions_sha256");
   } else {
     requireNull(input.wiki_dispositions_sha256, "wiki_dispositions_sha256");

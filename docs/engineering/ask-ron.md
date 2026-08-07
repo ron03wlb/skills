@@ -22,11 +22,11 @@ You invoke this by typing `/ask-ron` — the agent won't reach for it on its own
 
 ## The route it protects
 
-The common path configures and initializes repository knowledge before keeping Matt's idea work and adding durable delivery controls:
+The common path configures the repository, then keeps Matt's idea work and adds durable delivery controls:
 
-`setup-ron → wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`
+`setup-ron → optional wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`
 
-Each Leaf completes before the next begins. During execution, coherent verified slices may be committed locally and in-scope review repairs may repeat up to the Grant's ten-wave limit without routine approval. Parent closeout automatically reuses [wiki](https://aihero.dev/skills-wiki) reconciliation. Ambiguity, expanded scope, a persistent finding after the limit, or a missing capability still returns to you.
+When no accepted Wiki baseline exists, Wiki-optional delivery skips only Wiki-specific gates and claims; the complete Issue lifecycle still runs. Each Leaf completes before the next begins. During execution, coherent verified slices may be committed locally and in-scope review repairs may repeat up to the Grant's ten-wave limit without routine approval. A ready baseline still uses [wiki](https://aihero.dev/skills-wiki) reconciliation. Ambiguity, expanded scope, a persistent finding after the limit, or a missing capability still returns to you.
 
 ## Where it fits
 

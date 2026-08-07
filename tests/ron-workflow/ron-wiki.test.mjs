@@ -430,7 +430,26 @@ test("workflow envelopes reject tampering and marker drift", () => {
   );
 });
 
-test("Wiki execution bindings permit only the three specified baseline combinations", () => {
+test("Wiki execution bindings permit Wiki-optional semantic delivery", () => {
+  assert.deepEqual(
+    validateWikiExecutionBinding({
+      issue_type: "standalone",
+      wiki_impact: "semantic",
+      wiki_operation: "none",
+      wiki_baseline_requirement: "not-applicable",
+      wiki_preview_id: null,
+      wiki_preview_payload_sha256: null,
+    }),
+    {
+      issue_type: "standalone",
+      wiki_impact: "semantic",
+      wiki_operation: "none",
+      wiki_baseline_requirement: "not-applicable",
+      wiki_preview_id: null,
+      wiki_preview_payload_sha256: null,
+    },
+  );
+
   assert.deepEqual(
     validateWikiExecutionBinding({
       issue_type: "standalone",
@@ -649,6 +668,27 @@ test("Closeout Preview builder binds the aligned ledger and exact write sets", (
   driftedLedger.ledger.rows[0].conformance = "deviation";
   assert.throws(() => validateCloseoutPreview(driftedLedger), {
     code: "findings",
+  });
+
+  const wikiOptional = structuredClone(closeoutPreviewInput);
+  wikiOptional.wiki_operation = "none";
+  wikiOptional.wiki_baseline_requirement = "not-applicable";
+  wikiOptional.wiki_preview_id = null;
+  wikiOptional.wiki_preview_payload_sha256 = null;
+  wikiOptional.ledger = null;
+  wikiOptional.semantic_write_set = [];
+  wikiOptional.support_write_set = [];
+  wikiOptional.protocol = null;
+  wikiOptional.review_axes = ["standards", "spec"];
+  wikiOptional.repair.wiki_waves = 0;
+  const noWikiResult = buildCloseoutPreviewEnvelope(wikiOptional);
+  assert.equal(noWikiResult.preview.ledger, null);
+  assert.deepEqual(noWikiResult.preview.review_axes, ["standards", "spec"]);
+
+  const invalidWikiRepair = structuredClone(wikiOptional);
+  invalidWikiRepair.repair.wiki_waves = 1;
+  assert.throws(() => buildCloseoutPreviewEnvelope(invalidWikiRepair), {
+    code: "invalid",
   });
 });
 
@@ -1197,6 +1237,18 @@ test("shared Change Spec builder produces one deterministic verified envelope", 
   noImpact.wiki_preview_payload_sha256 = null;
   noImpact.wiki_context = [];
   assert.throws(() => buildChangeSpecEnvelope(noImpact), { code: "invalid" });
+
+  const wikiOptional = structuredClone(input);
+  wikiOptional.wiki_operation = "none";
+  wikiOptional.wiki_baseline_requirement = "not-applicable";
+  wikiOptional.wiki_preview_id = null;
+  wikiOptional.wiki_preview_payload_sha256 = null;
+  wikiOptional.wiki_context = [];
+  wikiOptional.wiki_dispositions = [];
+  assert.match(
+    buildChangeSpecEnvelope(wikiOptional).payload,
+    /wiki_operation: "none"/,
+  );
 });
 
 test("shared execution-contract builder binds the Spec, Preview, and exact paths", () => {
@@ -1259,6 +1311,17 @@ test("shared execution-contract builder binds the Spec, Preview, and exact paths
   assert.throws(
     () => buildExecutionContractEnvelope(missingDispositions),
     { code: "invalid" },
+  );
+
+  const wikiOptional = structuredClone(input);
+  wikiOptional.wiki_operation = "none";
+  wikiOptional.wiki_baseline_requirement = "not-applicable";
+  wikiOptional.wiki_preview_id = null;
+  wikiOptional.wiki_preview_payload_sha256 = null;
+  wikiOptional.wiki_dispositions_sha256 = null;
+  assert.match(
+    buildExecutionContractEnvelope(wikiOptional).payload,
+    /wiki_dispositions_sha256: null/,
   );
 });
 

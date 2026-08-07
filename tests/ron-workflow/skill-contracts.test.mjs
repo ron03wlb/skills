@@ -149,6 +149,44 @@ test("existing Ron skills consume the new shared contracts without stale gates",
   );
 });
 
+test("Ron supports Wiki-optional semantic delivery without weakening ready Wiki", () => {
+  const ask = read("skills/engineering/ask-ron/SKILL.md");
+  assert.match(ask, /Wiki-optional delivery/u);
+  assert.match(ask, /baseline is `missing`.*grill-with-docs/u);
+  assert.doesNotMatch(ask, /baseline is `missing`: type/u);
+
+  const toSpec = read("skills/engineering/to-spec-ron/SKILL.md");
+  assert.match(
+    toSpec,
+    /wiki_impact: semantic[\s\S]*wiki_operation: none[\s\S]*wiki_baseline_requirement: not-applicable/u,
+  );
+
+  const toTickets = read("skills/engineering/to-tickets-ron/SKILL.md");
+  assert.match(toTickets, /preserve Wiki-optional delivery/u);
+
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  assert.match(execute, /semantic \+ none \+ not-applicable/u);
+
+  const close = read("skills/engineering/close-issue/SKILL.md");
+  assert.match(close, /ledger: null/u);
+  assert.match(close, /protocol: null/u);
+
+  for (const name of [
+    "ask-ron",
+    "setup-ron",
+    "to-spec-ron",
+    "to-tickets-ron",
+    "execute-issue",
+    "close-issue",
+  ]) {
+    assert.match(
+      read(`docs/engineering/${name}.md`),
+      /Wiki-optional delivery/u,
+      `docs/engineering/${name}.md omits Wiki-optional delivery`,
+    );
+  }
+});
+
 test("routers and human docs expose Wiki without repo-relative published links", () => {
   assert.match(read("skills/engineering/ask-ron/SKILL.md"), /\/wiki/u);
   assert.match(read("skills/engineering/ask-matt/SKILL.md"), /state-aware `\/wiki`/u);

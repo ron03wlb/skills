@@ -16,6 +16,8 @@ npx skills update execute-issue
 
 Code behavior uses TDD. A bounded [wiki](https://aihero.dev/skills-wiki) Bootstrap or repair Standalone uses page/source/link/build validation instead, while Leaves remain unable to mutate Wiki. Execution stops at `implemented_on_lane`.
 
+Wiki-optional delivery runs the same authorization, implementation, non-Wiki review, and evidence path without requiring a Wiki baseline or claiming Wiki validation.
+
 ## When to reach for it
 
 Type `/execute-issue`, or the agent reaches for it automatically when one exact Issue already has a valid `execute` Grant. Reach for it only after a hash-verified execution contract exists; use [to-tickets-ron](https://aihero.dev/skills-to-tickets-ron) first when it does not.

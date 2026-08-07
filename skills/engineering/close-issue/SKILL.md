@@ -38,12 +38,15 @@ For a Standalone, verify its implementation evidence and `execute` Grant. Comple
 Validate the configured baseline requirement:
 
 - `none + not-applicable` requires explicit evidence-backed `wiki_impact: none`;
+- `semantic + none + not-applicable` requires a configured `missing` baseline and preserves Wiki-optional delivery;
 - `reconcile + ready` requires the reviewed ready baseline;
 - `bootstrap + missing-with-bootstrap-preview` requires one matching Bootstrap Preview/Spec/contract/Grant chain and is valid only for that Standalone.
 
 ## Reconciliation before mutation
 
-Aggregate prior Wiki, current Change Spec dispositions, the complete Issue diff, code/test source locators, and reviewer evidence. Build `workflow-wiki-reconciliation-ledger:v1` with one row per affected topic or material claim:
+For Wiki-optional delivery, skip reconciliation entirely. The Closeout Preview binds `ledger: null`, empty semantic/support write sets, `protocol: null`, Standards and Spec review only, and zero Wiki repair waves.
+
+For `reconcile` or `bootstrap`, aggregate prior Wiki, current Change Spec dispositions, the complete Issue diff, code/test source locators, and reviewer evidence. Build `workflow-wiki-reconciliation-ledger:v1` with one row per affected topic or material claim:
 
 - prior Wiki state;
 - `inherit | add | change | remove`;
@@ -59,7 +62,7 @@ Only a clean aligned ledger may derive:
 - exact `wiki_semantic_write_set`;
 - exact configured `wiki_support_write_set`.
 
-An empty semantic set requires `wiki_impact: none`; an engine never selects either set.
+For Wiki-optional delivery both write sets are empty. Otherwise an empty semantic set requires `wiki_impact: none`; an engine never selects either set.
 
 ## Closeout Preview and authority
 
@@ -68,7 +71,7 @@ Use `closeout-preview-create`, then `preview-validate`, to create one internal, 
 - Issue and Spec; the Standalone contract and Issue Grant, or `contract: null` plus the Parent child-contract aggregate hash;
 - the human root read-back hash; Issue and Closeout Grants are non-delegating siblings from that root;
 - exact Lane and target identities;
-- task staging inside the artifact ceiling, plus both Wiki write sets and hashes;
+- task staging inside the artifact ceiling, plus both Wiki write sets and hashes when Wiki applies;
 - target-sync method and exact verification commands;
 - `close_parent` or `close_standalone`;
 - candidate-creation and at most two human-authorized Wiki-repair waves;
@@ -83,10 +86,10 @@ A changed Spec, Standalone contract or Parent child-contract aggregate, target, 
 After the exact closeout Grant reads back:
 
 1. synchronize the latest local target into the Lane without rebasing;
-2. recalculate aggregate diff, ledger, and write sets;
+2. recalculate the aggregate diff and, when Wiki applies, the ledger and write sets;
 3. for `reconcile`, change only aligned ledger actions and configured support outputs;
 4. for `bootstrap`, add the complete baseline and change config from `missing` to `ready` in the same candidate;
-5. run page validation, resolve every source locator, check claims, links, navigation, config state, tracked-tree cleanliness, and configured build;
+5. run the exact non-Wiki verification plus applicable page/source/link/navigation/config/build validation;
 6. create a closeout commit only for a real approved diff;
 7. freeze one `integration_candidate_sha`.
 

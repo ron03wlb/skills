@@ -49,6 +49,8 @@ All four produce `adoptable`; anything else is `needs-bootstrap` and may supply 
 
 Prefer evidenced facts. Default a new root to `wiki/` without creating it. For an `adoptable` root, run deterministic page/source/link/build checks and one independent read-only semantic review against current code and tests. Record `ready` only when both axes are clean; otherwise record `missing` and report the evidence gap or repair/migration trade-off.
 
+A `missing` baseline does not make Ron delivery incomplete. It enables Wiki-optional delivery: semantic Issues may complete through closeout while every Wiki-specific gate, claim, write, validation, and review remains not applicable.
+
 Select:
 
 - `mode: full | degraded` from the tracker probe;

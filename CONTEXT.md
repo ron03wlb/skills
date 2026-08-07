@@ -129,8 +129,12 @@ The current proof state of the **Canonical Wiki**: `missing` before an accepted 
 _Avoid_: Stored partial baseline, unverified active Issue, generated, directory exists, assumed ready
 
 **Wiki baseline requirement**:
-The execution-contract binding that distinguishes `not-applicable`, `missing-with-bootstrap-preview`, and `ready`. Only a Standalone **Wiki bootstrap Issue** with a matching bounded Preview may use `missing-with-bootstrap-preview`; normal semantic work requires `ready`, and explicitly technical `wiki_impact: none` work uses `not-applicable`.
-_Avoid_: Baseline-exists boolean, bootstrap bypass, semantic work on missing baseline
+Whether one Issue lifecycle requires an accepted **Canonical Wiki** baseline. Wiki reconciliation requires a ready baseline, Wiki bootstrap owns creation of a missing baseline, and **Wiki-optional delivery** has no baseline precondition and makes no Wiki claim.
+_Avoid_: Baseline-exists boolean, bootstrap bypass, silent Wiki claims without a ready baseline
+
+**Wiki-optional delivery**:
+A Ron Issue lifecycle that may complete when no accepted **Canonical Wiki** baseline exists. It preserves the non-Wiki authorization, execution, review, target-verification, and Issue-closeout guarantees while making no Wiki reconciliation or validation claim.
+_Avoid_: Wiki bypass, degraded delivery, partial closeout
 
 **Wiki bootstrap Issue**:
 A dedicated **Standalone Issue** that defines the required initial topic inventory and coordinates bounded generation and review batches. Ron v1 does not model bootstrap batches as **Leaf Issues**. Setup never creates this Issue or accepts its content implicitly.
@@ -251,8 +255,8 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**
 - A **Decision Explanation Packet** produces a non-authoritative **Decision Card**
 - An **Artifact manifest** limits closeout cleanup to task-owned paths
-- A **Parent Closeout Grant** binds one **Closeout Preview** and its **Wiki semantic write set** and **Wiki support write set**
-- A semantic **Parent Issue** or **Standalone Issue** closeout derives its Wiki write sets from an `aligned` **Wiki reconciliation ledger**
+- When Wiki reconciliation applies, a **Parent Closeout Grant** binds one **Closeout Preview** and its **Wiki semantic write set** and **Wiki support write set**
+- When Wiki reconciliation applies, a semantic **Parent Issue** or **Standalone Issue** closeout derives its Wiki write sets from an `aligned` **Wiki reconciliation ledger**
 - A **Wiki validation result** combines a deterministic **Wiki validation pipeline** result with an independent **Wiki semantic review** result without merging their proof authority
 - **Exception-only interaction** uses a **Bounded clean-path delegation** rather than replacing an **Authorization Record**
 - A **Wiki root adoption assessment** determines whether an existing directory may be proposed as the **Canonical Wiki root** without proving baseline readiness

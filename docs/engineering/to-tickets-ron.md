@@ -16,6 +16,8 @@ npx skills update to-tickets-ron
 
 It keeps Matt's tracer-bullet slicing, then binds each Leaf to its own outcome, behavioral seam, target, Wiki operation/baseline requirement, Lane, ownership, review profile, evidence state, and optional Grant. Parent authority never cascades.
 
+Wiki-optional delivery preserves semantic intent while keeping Wiki Preview/disposition hashes, owned paths, and review not applicable; it never forces baseline bootstrap before ticket execution.
+
 ## When to reach for it
 
 You invoke this by typing `/to-tickets-ron` — the agent won't reach for it on its own. Use it when a current `workflow-change-spec:v1` comment exists and the work needs executable slicing. For ordinary tracker tickets without Ron authorization contracts, use [to-tickets](https://aihero.dev/skills-to-tickets).

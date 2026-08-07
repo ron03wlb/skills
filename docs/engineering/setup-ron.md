@@ -16,6 +16,8 @@ npx skills update setup-ron
 
 It does not generate Wiki content. It validates one strict machine-readable contract and creates one local setup-only commit; an existing Wiki becomes `ready` only after mechanical and independent semantic proof.
 
+A missing baseline enables Wiki-optional delivery rather than blocking Ron: semantic work may complete through closeout while Wiki-specific work remains not applicable.
+
 ## When to reach for it
 
 You invoke this by typing `/setup-ron` — the agent won't reach for it on its own. Run it once before the first Ron workflow, or again when the tracker, Wiki, target branch, or Lane convention changes.
@@ -30,4 +32,4 @@ The lasting output is `docs/agents/ron-workflow.md`, plus shared tracker and dom
 
 ## Where it fits
 
-This is the run-once entry to `setup-ron → wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`. Use [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) for the upstream Matt flow without Ron authorization and closeout gates. See [ask-ron](https://aihero.dev/skills-ask-ron) for the governed route and [ask-matt](https://aihero.dev/skills-ask-matt) for the complete upstream map.
+This is the run-once entry to `setup-ron → optional wiki → grill-with-docs → to-spec-ron → to-tickets-ron → execute-issue → close-issue`. Use [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) for the upstream Matt flow without Ron authorization and closeout gates. See [ask-ron](https://aihero.dev/skills-ask-ron) for the governed route and [ask-matt](https://aihero.dev/skills-ask-matt) for the complete upstream map.

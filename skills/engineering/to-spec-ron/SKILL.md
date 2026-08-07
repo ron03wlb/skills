@@ -16,9 +16,9 @@ This user-invoked skill is not called by `/wiki`; both independently call the sa
 
 ## Preconditions
 
-Read and validate Ron config, tracker capability, current Change Spec chain, relevant Canonical Wiki topics/Sources, `CONTEXT.md`, ADRs, and repository evidence. Full completion requires exact GitHub comment read-back.
+Read and validate Ron config, tracker capability, current Change Spec chain, `CONTEXT.md`, ADRs, repository evidence, and relevant Canonical Wiki topics/Sources only when the baseline is `ready`. Full completion requires exact GitHub comment read-back.
 
-For every relevant Wiki topic or material claim, resolve one disposition:
+For every relevant Wiki topic or material claim when the baseline is `ready`, resolve one disposition:
 
 - `inherit`
 - `add`
@@ -36,6 +36,20 @@ wiki_baseline_requirement: ready
 wiki_preview_id: null
 wiki_preview_payload_sha256: null
 ```
+
+When the configured baseline is `missing`, semantic work uses Wiki-optional delivery and carries no Wiki claims:
+
+```yaml
+wiki_impact: semantic
+wiki_operation: none
+wiki_baseline_requirement: not-applicable
+wiki_preview_id: null
+wiki_preview_payload_sha256: null
+wiki_context: []
+wiki_dispositions: []
+```
+
+Do not stop to bootstrap Wiki, invent Wiki context, or claim Wiki validation.
 
 Genuinely technical work may use `none + not-applicable` only with an explicit reason and no hidden behavioral effect. Bootstrap and bounded Wiki repair are published only from matching `/wiki` Previews through the shared publisher.
 

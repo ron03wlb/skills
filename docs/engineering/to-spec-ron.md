@@ -26,7 +26,7 @@ Run [setup-ron](https://aihero.dev/skills-setup-ron) first. Full completion requ
 
 ## Append-only contract
 
-The Change Spec is a historical contract, not execution authority. It records `inherit`, `add`, `change`, or `remove` for relevant Wiki claims and whether execution requires a ready baseline. Corrections create new comments that supersede older ones; editing the old comment invalidates dependent contracts and Grants.
+The Change Spec is a historical contract, not execution authority. With a ready baseline it records `inherit`, `add`, `change`, or `remove` for relevant Wiki claims. With a missing baseline, Wiki-optional delivery records semantic impact with no Wiki operation, context, or dispositions. Corrections create new comments that supersede older ones; editing the old comment invalidates dependent contracts and Grants.
 
 The published state is `specified`. Authorization and execution readiness are separate later gates.
 

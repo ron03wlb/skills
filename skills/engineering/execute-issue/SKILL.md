@@ -33,6 +33,7 @@ Authorization is not readiness. Also verify:
 - when `lane_predecessor` is null, the tree is clean and Lane HEAD exactly equals the Grant `lane_sha`, or the contract `target_sha` when a pre-created Grant has `lane_sha: null`;
 - owned paths do not overlap another writer;
 - `none + not-applicable` has explicit `wiki_impact: none`;
+- `semantic + none + not-applicable` is Wiki-optional delivery only when the configured baseline is `missing`, with null Wiki Preview/disposition bindings and no Wiki-owned paths or review;
 - `reconcile + ready` has a validated ready baseline; an optional Sync Preview ID/hash pair must match when this is a Wiki-repair Standalone;
 - `bootstrap + missing-with-bootstrap-preview` is one Standalone with matching bounded Preview, pre-Issue delegation lineage, Spec, contract, and Grant;
 - verification commands and behavioral seams are coherent;
