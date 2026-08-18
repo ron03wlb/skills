@@ -75,7 +75,7 @@ Off the main flow entirely.
 
 ## Issue worktree route
 
-Only when the user explicitly selects the worktree alternative, replace **`/implement`** with **`/execute-issue`** followed by **`/close-issue`**. `execute-issue` implements one tracker Issue in a dedicated worktree and repairs Standards/Spec findings; `close-issue` separately refreshes and fast-forwards the original local branch, removes the worktree, and closes the Issue. A human starts only one target integration at a time.
+Only when the user explicitly selects the worktree alternative, replace **`/implement`** with **`/execute-issue`** followed by **`/close-issue`**. `execute-issue` implements one tracker Issue in a dedicated worktree and repairs Standards/Spec findings; `close-issue` separately refreshes and fast-forwards the original local branch, proves unrelated target dirt is preserved through a read-back receipt, removes the Issue worktree, and closes the Issue. Issue worktrees may run concurrently; a human starts only one integration into the same target branch at a time.
 
 The user-invoked **`/wiki`** is an independent Wiki-only edit/review/commit flow. Use **`/remove-ron`** only to remove the retired repository-local Ron setup footprint from a consumer repository.
 

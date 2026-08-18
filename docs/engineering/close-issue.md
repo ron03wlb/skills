@@ -12,17 +12,17 @@ npx skills update close-issue
 
 ## What it does
 
-`close-issue` takes one clean `execute-issue` worktree, refreshes it from the original local target, fast-forwards that target to the reviewed candidate, removes the worktree, and closes the Issue. It does not repair product code.
+`close-issue` takes one clean `execute-issue` worktree, refreshes it from the original local target, fast-forwards that target to the reviewed candidate, removes the worktree, and closes the Issue. The candidate worktree must be clean, but the target may keep unrelated staged, unstaged, and untracked work; closeout proves that work is unchanged instead of making you clear it first.
 
 ## When to reach for it
 
-Type `/close-issue` after [execute-issue](https://aihero.dev/skills-execute-issue) records a clean completion note. The agent won't reach for it on its own; a human invokes this separate closeout phase and starts only one target integration at a time.
+Type `/close-issue` after [execute-issue](https://aihero.dev/skills-execute-issue) records a clean completion note. The agent won't reach for it on its own; a human invokes this separate closeout phase and starts only one integration into the same target branch at a time. Other Issue worktrees and target branches can continue independently.
 
 ## Safe local integration
 
-If target refresh changes the candidate, verification and Standards/Spec review run again and the clean completion note is refreshed before integration. A confirmed finding leaves the Issue open for a separate execution; closeout never edits product code.
+If target refresh changes the candidate, verification and Standards/Spec review run again. Before fast-forwarding, closeout fingerprints existing target dirt, rejects same-path or path-prefix collisions, and requires read-back preservation evidence. Target drift, dirty-state drift, tracker failure, or ambiguous recovery stops the invocation; closeout never stashes, commits, cleans, re-baselines, or edits product code.
 
-The target advances only by fast-forward to the reviewed candidate. Cleanup removes the exact clean registered worktree but keeps the topic branch. A retry recognizes an already integrated candidate, an already removed worktree, or an already closed Issue whose completion identities all match; it verifies completed steps instead of repeating them. No rebase, push, remote merge, deploy, unrelated deletion, or automatic command chaining occurs.
+The target advances only by fast-forward to the reviewed candidate. Preservation proof gates worktree cleanup and Issue closure, and retries resume only while their recorded evidence still matches. The topic branch remains, and no rebase, push, remote merge, deploy, unrelated deletion, or automatic command chaining occurs.
 
 ## Where it fits
 

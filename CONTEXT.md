@@ -33,8 +33,8 @@ The compact human-readable tracker record written after one `execute-issue` cand
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 
 **Manual integration serialization**:
-The operating rule that a human starts `close-issue` target integration for only one **Issue worktree** at a time. The skill checks once that the target and candidate are safe; it does not add a queue or lock.
-_Avoid_: Automatic closeout chain, workflow scheduler, parallel target writers
+The operating rule that a human starts only one `close-issue` integration into the same target branch at a time; integrations into other target branches may proceed concurrently. The skill protects the candidate and target through refresh, collision checks, preservation evidence, and current-target gates; it does not add a queue or lock.
+_Avoid_: Automatic closeout chain, workflow scheduler, concurrent writers for the same target branch
 
 **Ron repository footprint**:
 The repository-local Ron configuration, Ron-only instruction text, and inactive or completed `.git/ron-workflow/` metadata left by the retired setup or prior runs. It excludes a current recoverable draft, the Canonical Wiki, tracker history, branches, worktrees, and installed skills.
@@ -168,7 +168,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`
-- **Manual integration serialization** permits only one target integration at a time
+- **Manual integration serialization** permits only one integration into the same target branch at a time; other target branches may proceed concurrently
 - A changed **Target Integration Candidate** is reverified and re-reviewed before target advancement
 - `close-issue` fast-forwards the target, removes the clean registered **Issue worktree**, and closes the Issue without repairing product code
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**

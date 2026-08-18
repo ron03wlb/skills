@@ -108,11 +108,55 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /Close the Issue/iu);
   assert.match(close, /read it back once/iu);
   assert.match(close, /without rebasing/iu);
-  assert.match(close, /manually.*one.*integration/isu);
+  assert.match(close, /original target worktree does not need to be clean/iu);
+  assert.match(close, /staged, unstaged, and untracked/iu);
+  assert.match(close, /same path or an ancestor\/descendant path-prefix pair/iu);
+  assert.match(close, /Any collision stops with the Issue open/iu);
+  assert.match(close, /For candidate and dirty renames, include both source and destination/iu);
+  assert.match(close, /Parse.*NUL-safely.*case semantics/isu);
+  assert.match(close, /worktree content fingerprints.*index entries/isu);
+  assert.match(close, /dirty-target-preservation:v1/u);
+  assert.match(close, /phase `PREPARED`.*target-before SHA.*candidate SHA.*digest.*counts/isu);
+  assert.match(close, /Read back and verify those exact fields before continuing/iu);
+  assert.match(close, /update.*`VERIFIED`.*read back.*(?:failure|mismatch).*stops before cleanup/isu);
+  assert.match(close, /target `HEAD` or digest moved.*stop this invocation.*Do not refresh the candidate, replace the receipt baseline/isu);
+  assert.doesNotMatch(close, /target `HEAD` moved.*return to candidate refresh/isu);
+  assert.match(close, /git merge --ff-only/u);
+  assert.match(close, /never automatically stash, commit, clean, reset/iu);
+  assert.match(close, /digest mismatch.*do not attempt automatic repair or rollback/isu);
+  const prepared = close.indexOf("receipt in phase `PREPARED`");
+  const preparedReadBack = close.indexOf("Read back and verify those exact fields", prepared);
+  const finalPreflight = close.indexOf("Re-read the target `HEAD` and recompute the dirty snapshot immediately before the fast-forward", preparedReadBack);
+  const fastForward = close.indexOf("run `git merge --ff-only`");
+  const postFastForward = close.indexOf("After the fast-forward, recompute the canonical dirty snapshot", fastForward);
+  const verified = close.indexOf("update the receipt to `VERIFIED`", fastForward);
+  const verifiedReadBack = close.indexOf("then read back and verify those exact fields", verified);
+  const cleanupHeadCheck = close.indexOf("Immediately re-read the target `HEAD`", verifiedReadBack);
+  const cleanupAction = close.indexOf("Remove that worktree with `git worktree remove`", cleanupHeadCheck);
+  const closureReceiptGate = close.indexOf("Require the same `VERIFIED` receipt", cleanupAction);
+  const closureHeadCheck = close.indexOf("immediately re-read the target `HEAD`", closureReceiptGate);
+  const closureAction = close.indexOf("Close the Issue through the configured tracker", closureHeadCheck);
+  const orderedProof = [prepared, preparedReadBack, finalPreflight, fastForward, postFastForward, verified, verifiedReadBack, cleanupHeadCheck, cleanupAction, closureReceiptGate, closureHeadCheck, closureAction];
+  assert.equal(orderedProof.every((position, index) => position !== -1 && (index === 0 || orderedProof[index - 1] < position)), true);
+  assert.match(close, /tracker failure.*mismatch.*stops before integration/isu);
+  assert.match(close, /never publish paths or file contents/iu);
+  const verifiedProof = close.match(/After the fast-forward,[^\n]+/u)?.[0] ?? "";
+  assert.match(verifiedProof, /digest.*match.*`VERIFIED`.*target-after equal to the candidate.*same digest.*read back/iu);
+  assert.match(close, /`PREPARED` with target still equal to target-before.*matching digest.*fast-forward/isu);
+  assert.match(close, /`PREPARED` with target already equal to the candidate.*matching digest.*`VERIFIED`.*cleanup/isu);
+  assert.match(close, /`VERIFIED` with target equal to the candidate.*cleanup and closure.*without re-baselining/isu);
+  assert.match(close, /missing, `FAILED`, mismatched, unreadable, or third-SHA receipt.*ambiguous and stops/isu);
+  const cleanupGate = close.match(/Require the matching `VERIFIED` receipt before cleanup\.[^\n]+/u)?.[0] ?? "";
+  const closureGate = close.match(/Require the same `VERIFIED` receipt[^\n]+/u)?.[0] ?? "";
+  assert.match(cleanupGate, /re-read.*target `HEAD`.*receipt candidate.*before.*worktree/iu);
+  assert.match(closureGate, /re-read.*target `HEAD`.*receipt candidate.*before.*clos/iu);
+  assert.match(close, /target drift after verification.*stops.*without.*changing.*`VERIFIED`.*re-baselining/isu);
+  assert.match(read("docs/engineering/close-issue.md"), /target may keep unrelated staged, unstaged, and untracked work/iu);
   assert.match(close, /update and read back the completion note/iu);
-  assert.match(close, /On retry.*target `HEAD` already equals/isu);
   assert.match(close, /already absent worktree means cleanup is complete/iu);
-  assert.match(close, /already closed.*target `HEAD`.*recorded candidate.*worktree.*absent.*completion note/isu);
+  const alreadyClosed = close.match(/If the Issue is already closed,[^\n]+/u)?.[0] ?? "";
+  assert.match(alreadyClosed, /target `HEAD`.*recorded candidate.*worktree.*absent/iu);
+  assert.match(alreadyClosed, /matching.*`VERIFIED` receipt/iu);
   assert.match(close, /read back.*closed state.*without.*clos(?:e|ing).*again/isu);
   assert.match(close, /never repairs product code/iu);
 
@@ -215,8 +259,15 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
   assert.match(matt, /default.*`\/implement`/isu);
+  assert.match(matt, /Issue worktrees may run concurrently/iu);
+  assert.match(matt, /proves unrelated target dirt.*read-back receipt/iu);
+  assert.match(matt, /one integration into the same target branch/iu);
   assert.match(matt, /explicitly.*`\/execute-issue`.*`\/close-issue`/isu);
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
+
+  const context = read("CONTEXT.md");
+  assert.match(context, /Manual integration serialization.*one integration into the same target branch.*other target branches.*concurrently/isu);
+  assert.doesNotMatch(context, /checks once|parallel target writers/iu);
 
   for (const name of [
     "ask-matt",
