@@ -42,6 +42,12 @@ The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://
 - Tracker work stays on the published Spec and Issue path, while standalone work stays on the direct `implement` path.
 - Helpers and closeout steps appear only where their prerequisites and authority are already established.
 
+## Other routes and phase boundaries
+
+Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) is the reference for skills and other agent-facing documents.
+
+At a phase boundary, choose whether to continue, clear, create a [handoff](https://aihero.dev/skills-handoff), delegate a bounded subtask, or compact. Do not switch context strategies mid-phase unless the remaining work can be split cleanly.
+
 ## Where it fits
 
 `ask-matt` is a reach-for-it-anytime router, not a chain step. Its most common neighbours are [grill-with-docs](https://aihero.dev/skills-grill-with-docs), [to-spec](https://aihero.dev/skills-to-spec), and [execute-issue](https://aihero.dev/skills-execute-issue); [ask-matt](https://aihero.dev/skills-ask-matt) remains the map of record.

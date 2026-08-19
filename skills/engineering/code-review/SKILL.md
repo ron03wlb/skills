@@ -6,7 +6,7 @@ description: Review changes since a fixed point along independent Standards and 
 Two-axis review of the committed or WIP candidate changes since a fixed point:
 
 - **Standards** — does the code conform to this repo's documented coding standards?
-- **Spec** — does the code faithfully implement the originating issue / PRD / spec?
+- **Spec** — does the code faithfully implement the originating issue / spec?
 
 Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
 
@@ -31,7 +31,7 @@ Look for the originating spec, in this order:
 
 1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
 2. A path the user passed as an argument.
-3. A PRD/spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
+3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
 4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
 
 ### 3. Identify the standards sources
@@ -65,8 +65,6 @@ When `execute-issue` supplies a prospective `workflowArtifacts` declaration, inc
 Classification is behavioral, never extension-based. The Standards axis checks the requirement source, exact path ownership, and repository-instruction compliance. The Spec axis checks that the file stays non-contract and inside the published scope. Public-contract, routing, Acceptance Criteria, governance, runtime, arbitrary, ambiguous, falsely sourced, or unowned documentation is ordinary material scope; report it rather than accepting the declaration. The field never supplies coverage, review, or verification authority.
 
 ### 5. Spawn both sub-agents in parallel
-
-Send a single message with two `Agent` tool calls. Use the `general-purpose` subagent for both.
 
 **Standards sub-agent prompt** — include:
 

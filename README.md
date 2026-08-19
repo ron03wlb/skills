@@ -204,6 +204,7 @@ Skills I use daily for code work.
 - **[codebase-design](./skills/engineering/codebase-design/SKILL.md)** — Shared discipline and vocabulary for designing deep modules: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface.
 - **[code-review](./skills/engineering/code-review/SKILL.md)** — Two-axis review of the diff and any prospective workflow artifact declaration: **Standards** and **Spec**, run as parallel sub-agents; automatic activation also covers material security, data, concurrency, migration, contract, or cross-module risk before integration.
 - **[resolving-merge-conflicts](./skills/engineering/resolving-merge-conflicts/SKILL.md)** — Work through an in-progress git merge or rebase conflict hunk by hunk, resolving by intent traced to each side's primary source, then finish the operation — never `--abort`.
+- **[wizard](./skills/engineering/wizard/SKILL.md)** — Generate an interactive bash wizard for manual setup, credentials, dashboard steps, migrations, or cutovers that only a human can perform.
 
 ### Productivity
 

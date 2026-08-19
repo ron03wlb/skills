@@ -28,6 +28,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - Raw request → `/triage`; reproduced failure → `/diagnosing-bugs`.
 - Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source research → `/research`.
 - Architecture → `/improve-codebase-architecture`; terminology → `/domain-modeling`; module seams → `/codebase-design`.
+- A human-only dashboard, credential, migration, or cutover step → `/wizard`.
 
 ## Independent controls
 
