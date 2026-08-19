@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield Cost Model"
+  short_description: "Model cash and effort costs across growth"
+  default_prompt: "Use $greenfield-cost-model to build a twelve-month cash and effort cost model for this greenfield project."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield Technical Decisions"
+  short_description: "Compare reversible early technical choices"
+  default_prompt: "Use $greenfield-technical-decisions to compare initial technical options and trade-offs for this greenfield project."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield Architecture Patterns"
+  short_description: "Apply deeper architecture only when risk requires"
+  default_prompt: "Use $greenfield-architecture-patterns to compare proportionate architecture patterns for this greenfield project."

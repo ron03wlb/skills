@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield Product Strategy"
+  short_description: "Frame product direction before Matt to-spec"
+  default_prompt: "Use $greenfield-product-strategy to frame the product boundary and success outcomes for this greenfield project."

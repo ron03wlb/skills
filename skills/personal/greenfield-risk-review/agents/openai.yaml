@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield Risk Review"
+  short_description: "Find the riskiest product assumption first"
+  default_prompt: "Use $greenfield-risk-review to identify the highest-risk product assumption before implementation."

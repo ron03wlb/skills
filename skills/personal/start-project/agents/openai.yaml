@@ -1,0 +1,6 @@
+interface:
+  display_name: "Start Project"
+  short_description: "Guide greenfield discovery into Matt to-spec"
+  default_prompt: "Use $start-project to guide this greenfield project through discovery and prepare it for Matt to-spec."
+policy:
+  allow_implicit_invocation: false

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenfield MVP Plan"
+  short_description: "Bound MVP scope without starting implementation"
+  default_prompt: "Use $greenfield-mvp-plan to define a bounded MVP and advisory build sequence for this greenfield project."
