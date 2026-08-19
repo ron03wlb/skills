@@ -51,6 +51,40 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("code-review owns requested and material-risk review activation", () => {
+  const riskTrigger = /material security, data, concurrency, migration, contract, or cross-module risk/iu;
+  for (const path of [
+    "skills/engineering/code-review/SKILL.md",
+    "docs/engineering/code-review.md",
+    "README.md",
+    "skills/engineering/README.md",
+    "skills/engineering/ask-matt/SKILL.md",
+    "docs/engineering/ask-matt.md",
+  ]) {
+    assert.match(read(path), riskTrigger, path + " omits the material-risk review trigger");
+  }
+
+  const skill = read("skills/engineering/code-review/SKILL.md");
+  const metadata = read("skills/engineering/code-review/agents/openai.yaml");
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.match(skill, /fixed point/iu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(metadata, /risky diffs/iu);
+
+  assert.match(skill, /committed candidate.*git diff <fixed-point>\.\.\.HEAD/isu);
+  assert.match(skill, /WIP candidate.*git diff <fixed-point>.*git status --short.*in-scope untracked/isu);
+  assert.match(skill, /work-in-progress.*use `HEAD` as the fixed point/isu);
+  assert.match(skill, /non-empty.*tracked diff.*in-scope untracked/isu);
+  const docs = read("docs/engineering/code-review.md");
+  assert.match(docs, /empty candidate.*in-scope untracked/isu);
+  assert.doesNotMatch(docs, /empty diff/iu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    const entry = read(path).match(/^- \*\*\[code-review\][^\n]*/mu)?.[0] ?? "";
+    assert.match(entry, riskTrigger, path + " splits the code-review description across lines");
+  }
+});
+
 test("Wiki is one independent user-invoked documentation control", () => {
   const skill = read("skills/engineering/wiki/SKILL.md");
   const metadata = read("skills/engineering/wiki/agents/openai.yaml");
@@ -87,6 +121,107 @@ test("Wiki is one independent user-invoked documentation control", () => {
     assert.equal(skill.includes(staleTerm), false, `Wiki skill still depends on ${staleTerm}`);
   }
 });
+test("planning artifacts are sealed before tracker work becomes executable", () => {
+  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const context = read("CONTEXT.md");
+  const specDocs = read("docs/engineering/to-spec.md");
+  const ticketsDocs = read("docs/engineering/to-tickets.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+  const deliveryAdr = read("docs/adr/0022-use-issue-native-execution-and-closeout.md");
+
+  const specSeal = spec.indexOf("Planning Seal");
+  const specPublish = spec.indexOf("Publish the Spec", specSeal);
+  assert.equal(specSeal !== -1 && specPublish > specSeal, true, "to-spec must seal planning artifacts before publish");
+  const specRetryRecovery = spec.indexOf("Before classifying the current delta on a retry");
+  const specNoDeltaSelection = spec.indexOf("If there is no relevant planning-artifact delta");
+  assert.equal(specRetryRecovery !== -1 && specRetryRecovery < specNoDeltaSelection, true, "to-spec must recover a partial-publication seal before no-delta selection");
+  assert.match(spec, /partial-publication state.*verified Planning Seal.*reuse it.*never replace.*current target `HEAD`/isu);
+  assert.match(spec, /no relevant planning-artifact delta.*do not create an empty commit/isu);
+  assert.match(spec, /exact approved paths or hunks.*preserv(?:e|ing) unrelated/isu);
+  assert.match(spec, /cannot be isolated from unrelated work.*stop/isu);
+  assert.doesNotMatch(spec, /delta contains unrelated work.*stop/isu);
+  assert.match(spec, /existing Spec.*revision.*update the same tracker Spec.*do not create a duplicate/isu);
+  assert.match(spec, /create or update.*label.*read-back.*full SHA.*partial state.*do not amend, reset, or roll back/isu);
+  assert.match(specDocs, /failure.*full SHA.*retry.*prior partial-state report.*missing or conflicting evidence stops/isu);
+  const specTemplate = spec.match(/<spec-template>(.*?)<\/spec-template>/su)?.[1] ?? "";
+  assert.match(specTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Spec template omits revision lineage");
+
+  const ticketsSeal = tickets.indexOf("Planning Seal");
+  const ticketsPublish = tickets.indexOf("Publish the tickets", ticketsSeal);
+  assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate or advance the seal before publish");
+  assert.match(tickets, /no relevant planning-artifact delta.*reuse/isu);
+  assert.match(tickets, /in-Spec.*successor Planning Seal/isu);
+  assert.match(tickets, /public behavior, acceptance, target, or exclusion.*stop.*tell the human to invoke `\/to-spec`/isu);
+  assert.match(tickets, /do not modify.*parent/isu);
+  const inheritedSealCheck = tickets.indexOf("Validate the inherited Planning Seal");
+  const successorSeal = tickets.indexOf("successor Planning Seal");
+  assert.equal(inheritedSealCheck !== -1 && inheritedSealCheck < successorSeal, true, "to-tickets must validate inherited lineage before a successor");
+  assert.match(tickets, /inherited Planning Seal.*exist locally.*ancestor of the target.*before.*successor/isu);
+  const retryRecovery = tickets.indexOf("Before classifying the current delta on a retry");
+  const noDeltaSelection = tickets.indexOf("If there is no relevant planning-artifact delta");
+  assert.equal(retryRecovery !== -1 && retryRecovery < noDeltaSelection, true, "to-tickets must recover a partial-publication seal before no-delta selection");
+  assert.match(tickets, /partial-publication state.*verified Planning Seal.*reuse it.*never fall back to the inherited seal/isu);
+  assert.match(tickets, /report its full SHA with the partial state/isu);
+  const localTicketTemplate = tickets.match(/<local-ticket-template>(.*?)<\/local-ticket-template>/su)?.[1] ?? "";
+  const issueTemplate = tickets.match(/<issue-template>(.*?)<\/issue-template>/su)?.[1] ?? "";
+  for (const [name, template] of [["local", localTicketTemplate], ["tracker", issueTemplate]]) {
+    assert.match(template, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, `${name} ticket template has an incomplete Planning baseline`);
+  }
+  assert.match(tickets, /Read each published ticket back.*Planning baseline.*blocking/isu);
+  const realTrackerPublish = tickets.indexOf("- **A real issue tracker");
+  const ticketReadBack = tickets.indexOf("Read each published ticket back");
+  assert.equal(ticketReadBack > realTrackerPublish, true, "to-tickets must read back after selecting the publication mode");
+
+  assert.match(execute, /Planning Seal.*ancestor of the execution baseline/isu);
+  assert.match(execute, /seal-currency check.*not scope authority/isu);
+  assert.match(execute, /never creates or repairs a Planning Seal/iu);
+  assert.match(execute, /stop.*tell the human to invoke `\/to-spec` or `\/to-tickets`/isu);
+  assert.match(context, /new seal commit.*only approved.*no relevant planning-artifact delta.*reuse/isu);
+
+  const prerequisites = specDocs.match(/## Prerequisites\s+(.*?)\n## /su)?.[1] ?? "";
+  assert.match(prerequisites, /setup-matt-pocock-skills/u, "to-spec docs have an empty Prerequisites section");
+  const ticketsWhen = ticketsDocs.match(/## When to reach for it\s+(.*?)\n## /su)?.[1] ?? "";
+  assert.match(ticketsWhen, /approved plan or conversation.*directly/isu, "to-tickets docs make to-spec mandatory");
+  assert.doesNotMatch(ticketsWhen, /produce one first/iu, "to-tickets docs contradict the no-linked-Spec path");
+  const directTicketRoute = /approved plan or conversation may skip `\/to-spec` and invoke `\/to-tickets` directly/iu;
+  for (const [path, content] of [
+    ["skills/engineering/ask-matt/SKILL.md", matt],
+    ["docs/engineering/ask-matt.md", mattDocs],
+    ["docs/adr/0022-use-issue-native-execution-and-closeout.md", deliveryAdr],
+  ]) assert.match(content, directTicketRoute, `${path} omits the direct ticket route`);
+  for (const [path, content] of [
+    ["skills/engineering/ask-matt/SKILL.md", matt],
+    ["docs/engineering/ask-matt.md", mattDocs],
+  ]) assert.match(content, /grill-with-docs.*planning-artifact delta.*to-spec/isu, path + " lets a small grilled build bypass to-spec");
+
+  for (const [path, page] of [["to-spec", specDocs], ["to-tickets", ticketsDocs], ["ask-matt", mattDocs]]) {
+    const whatItDoes = page.match(/## What it does\s+(.*?)\n## /su)?.[1] ?? "";
+    const paragraphs = whatItDoes.trim().split(/\n\s*\n/u).filter(Boolean);
+    assert.equal(paragraphs.length <= 2, true, `${path} docs exceed two What-it-does paragraphs`);
+  }
+
+
+  const fixedHeadings = new Set(["What it does", "When to reach for it", "Prerequisites", "It's working if", "Where it fits"]);
+  const ticketMiddleHeadings = [...ticketsDocs.matchAll(/^## (.+)$/gmu)]
+    .map((match) => match[1])
+    .filter((heading) => !fixedHeadings.has(heading));
+  assert.equal(ticketMiddleHeadings.length <= 3, true, "to-tickets docs exceed three free-form middle sections");
+  for (const path of [
+    "docs/engineering/to-spec.md",
+    "docs/engineering/to-tickets.md",
+    "docs/engineering/execute-issue.md",
+    "skills/engineering/ask-matt/SKILL.md",
+    "docs/engineering/ask-matt.md",
+    "README.md",
+    "skills/engineering/README.md",
+    "CONTEXT.md",
+    "docs/adr/0022-use-issue-native-execution-and-closeout.md",
+  ]) assert.match(read(path), /Planning Seal/u, `${path} omits the Planning Seal contract`);
+});
+
 
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
@@ -289,6 +424,10 @@ test("changed delivery documentation remains structurally valid", () => {
   for (const path of [
     "README.md",
     "skills/engineering/README.md",
+    "skills/engineering/to-spec/SKILL.md",
+    "skills/engineering/to-tickets/SKILL.md",
+    "docs/engineering/to-spec.md",
+    "docs/engineering/to-tickets.md",
     "skills/engineering/ask-matt/SKILL.md",
     "skills/engineering/wiki/SKILL.md",
     "skills/engineering/remove-ron/SKILL.md",

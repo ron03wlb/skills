@@ -1,7 +1,7 @@
 interface:
   display_name: "Execute Issue"
-  short_description: "Implement and repair-review one Issue"
-  default_prompt: "Use $execute-issue to implement one Issue in a worktree and repair review findings until Standards and Spec are clean."
+  short_description: "Validate planning and execute one Issue"
+  default_prompt: "Use $execute-issue to validate the Planning Seal, implement one Issue in a worktree, and repair review findings until Standards and Spec are clean."
 
 policy:
   allow_implicit_invocation: false

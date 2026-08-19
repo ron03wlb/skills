@@ -1,6 +1,6 @@
 ---
 name: to-spec
-description: Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
+description: Turn the current conversation into a spec, seal approved planning artifacts, and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
 disable-model-invocation: true
 ---
 
@@ -16,9 +16,29 @@ The issue tracker and triage label vocabulary should have been provided to you �
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Determine whether this is a primary Spec or a revision. If the conversation or argument references an existing Spec, read its full body and comments, set mode to `revision`, and update the same tracker Spec; do not create a duplicate. Otherwise set mode to `primary`. Draft the Spec using the template below, but do not publish it or apply `ready-for-agent` yet.
+
+4. Select the Planning Seal before publication. It is the target-branch commit recorded as the planning baseline for approved glossary and ADR changes from the settled conversation. A direct `/to-spec` invocation authorizes at most one local commit when those artifacts need sealing; it does not authorize any other commit, push, merge, cleanup, or unrelated path.
+
+Resolve the local target branch and inspect its staged, unstaged, and untracked changes. Classify only the planning artifacts owned by this Spec:
+
+Before classifying the current delta on a retry, read any prior partial-publication state. If its tracker read-back or exact partial-state report records a verified Planning Seal, require that full SHA to exist locally and be an ancestor of the current target `HEAD`, then reuse it. Conflicting or missing retry evidence stops; never replace a previously selected seal with the current target `HEAD`.
+
+- If there is no relevant planning-artifact delta and no verified partial-publication seal was recovered, reuse the current target `HEAD` as the planning baseline and do not create an empty commit.
+- If the delta consists of exact approved paths or hunks from the settled conversation, commit only those changes. Preserve unrelated staged entries, working-tree changes, untracked files, file modes, and path status; never use broad staging. If a file mixes owned and unrelated hunks and exact isolation cannot be proved, stop.
+- If ownership, target identity, or scope is ambiguous, or the approved delta cannot be isolated from unrelated work, stop before commit or publication and ask only for the missing decision.
+
+Verify the resulting full commit SHA, require the owned planning changes to be committed, and prove the unrelated target snapshot is unchanged. Record `created` when this invocation made the commit and `reused` when no commit was needed. If the commit fails, stop before tracker publication. Any failure or mismatch after the seal is selected—including tracker create or update, label application, or read-back—keeps the verified seal. Report its full SHA with the exact partial state; do not amend, reset, or roll back the Planning Seal.
+
+5. Publish the Spec. In `primary` mode, create the tracker Spec. In `revision` mode, update the same tracker Spec and do not create a duplicate. Populate its Planning baseline fields, apply the `ready-for-agent` triage label, then read the published body back once and require the recorded mode, commit, and seal state to match before reporting completion.
 
 <spec-template>
+
+## Planning baseline
+
+- Mode: <primary or revision>
+- Commit: <full local target-branch commit SHA>
+- Seal: <created or reused>
 
 ## Problem Statement
 

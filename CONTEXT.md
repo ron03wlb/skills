@@ -28,6 +28,10 @@ _Avoid_: Shared execution lane, authorization workspace
 The original target-branch commit captured once when `execute-issue` starts. It is the fixed point for the first Standards and Spec review, not an authorization hash.
 _Avoid_: Per-wave hash confirmation, lifecycle Grant
 
+**Planning Seal**:
+The local target-branch commit selected as the planning baseline before Spec or ticket work becomes executable. When a new seal commit is needed, it contains only approved glossary and ADR changes owned by that scope. When there is no relevant planning-artifact delta, the current target commit is reused without claiming that all of its contents are planning artifacts; unrelated or mixed dirt remains untouched.
+_Avoid_: Dirty-doc commit, lifecycle authorization, execution checkpoint
+
 **Execution completion note**:
 The compact human-readable tracker record written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, original target, worktree, topic branch, baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately.
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
@@ -165,6 +169,9 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **Decision ticket** is an **Issue** (a child of a `wayfinder:map`)
 - **Ron removal** deletes only the exact **Ron repository footprint** and leaves historical or active delivery objects intact
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
+- `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
+- `/to-tickets` reuses that seal or creates one successor for approved in-Spec planning changes; public scope expansion returns to `/to-spec`
+- `execute-issue` verifies the **Planning Seal** is an ancestor of its execution baseline and never creates or repairs the seal
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`

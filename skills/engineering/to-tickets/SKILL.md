@@ -55,12 +55,29 @@ Ask the user:
 
 Iterate until the user approves the breakdown.
 
-### 5. Publish the tickets to the configured tracker
+### 5. Validate or advance the Planning Seal
+
+Before any ticket becomes executable, read the inherited Planning baseline from the linked Spec when one exists, resolve the local target branch, and inspect the planning-artifact delta created during ticket refinement.
+
+Validate the inherited Planning Seal: require its commit to exist locally and be an ancestor of the target `HEAD` before considering any successor Planning Seal. A missing or unreachable inherited seal stops before successor creation or publication; tell the human to invoke `/to-spec` for a revision.
+
+Before classifying the current delta on a retry, read any prior partial-publication state. If its read-back ticket or exact partial-state report records a verified Planning Seal, require that full SHA to exist locally and be an ancestor of the target `HEAD`, then reuse it. Conflicting or missing retry evidence stops; never fall back to the inherited seal after a successor was selected.
+
+- If there is no relevant planning-artifact delta and no verified partial-publication seal was recovered, reuse the inherited Planning Seal. Without a linked Spec, reuse the current target `HEAD` as the planning baseline. Do not create an empty commit.
+- If exact approved paths or hunks contain an in-Spec glossary or ADR refinement, a direct `/to-tickets` invocation authorizes at most one successor Planning Seal commit containing only that delta. Preserve unrelated staged, unstaged, and untracked work. Stop if exact isolation, ownership, or target identity cannot be proved.
+- If a linked Spec exists and refinement introduces new public behavior, acceptance, target, or exclusion, stop. Tell the human to invoke `/to-spec` for a revision; do not modify or silently expand the parent Issue.
+- Without a linked Spec, the user-approved breakdown is the scope authority. Apply the same exact-delta rules to create a primary Planning Seal when needed and record it as `created`; ambiguous scope stops.
+
+Require the selected Planning Seal commit to exist locally and be an ancestor of the target `HEAD`. After a new commit, verify its full SHA, the exact owned diff, and preservation of unrelated target state. Commit failure stops before publication. If ticket publication or read-back later fails, keep the verified seal and report its full SHA with the partial state; do not amend, reset, or roll it back.
+
+### 6. Publish the tickets to the configured tracker
 
 Publish the approved tickets. **How** depends on the tracker `/setup-matt-pocock-skills` configured — the tickets are the same either way, only the shape of the blocking edges changes:
 
 - **Local files** → write one file per ticket under `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01` in dependency order (blockers first). Each file's "Blocked by" lists the numbers/titles it depends on. Use the per-ticket file template below — one ticket per file, never a single combined file.
 - **A real issue tracker (GitHub, Linear, …)** → publish one issue per ticket in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers. Use the platform's native blocking / sub-issue relationship where it has one; otherwise set each ticket's "Blocked by" to the blocking issues. Apply the `ready-for-agent` triage label unless instructed otherwise — the tickets are agent-grabbable by construction.
+
+Read each published ticket back once. Require its body, Planning baseline, blocking text or native blocking links, and `ready-for-agent` state to match the approved breakdown before reporting completion. A missing or mismatched field is a partial publication: report the exact created ticket identifiers and stop without modifying the parent or unrelated Issues.
 
 Work the **frontier**: any ticket whose blockers are all done. For a purely linear chain that means top to bottom.
 
@@ -73,6 +90,11 @@ Do NOT close or modify any parent issue.
 **What to build:** the end-to-end behaviour this ticket makes work, from the user's perspective — not a layer-by-layer implementation list.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None — can start immediately".
+
+## Planning baseline
+
+- Commit: <full local target-branch commit SHA>
+- Seal: <created, successor, or reused>
 
 **Status:** ready-for-agent
 
@@ -99,6 +121,11 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 ## Blocked by
 
 - A reference to each blocking ticket, or "None — can start immediately".
+
+## Planning baseline
+
+- Commit: <full local target-branch commit SHA>
+- Seal: <created, successor, or reused>
 
 </issue-template>
 

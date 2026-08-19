@@ -20,14 +20,15 @@ The route most work travels. You have an idea and want it built.
    - **`/prototype`** to answer the question with throwaway code,
    - **`/handoff`** back what you learned, and reference it from the original idea thread.
 3. **Branch — is this a multi-session build?**
-   - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scratch/<feature>/issues/`; on a real tracker the edges become native blocking links. By default, start a fresh **`/implement`** for each frontier Issue.
-   - **No** → **`/implement`** right here, in the same context window.
+   - **Yes** → **`/to-spec`** turns the thread into a Spec and creates or reuses its **Planning Seal** before the Spec becomes `ready-for-agent`. If the bounded Spec fits one fresh implementation session, start **`/implement`** from that Spec. If it needs multiple independently executable Issues, continue to **`/to-tickets`**; it validates the inherited seal, creates a successor only for approved in-Spec planning refinements, and publishes tracer-bullet tickets with blocking edges. An approved plan or conversation may skip `/to-spec` and invoke `/to-tickets` directly when it needs ticket fan-out without a formal Spec.
+   - **No** → if `/grill-with-docs` produced an owned planning-artifact delta, invoke **`/to-spec`** to seal it, then **`/implement`** from the bounded Spec; otherwise use **`/implement`** right here in the same context window. `/to-tickets` remains optional.
 
    Either way, **`/implement`** builds each issue by driving **`/tdd`** internally — one red-green slice at a time — then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before committing. Reach for **`/tdd`** on its own when you just want to build a concrete behaviour test-first without a full spec, and **`/code-review`** on its own whenever you want to review a branch or PR against a fixed point.
+   The agent also reaches for /code-review before integration when a change has material security, data, concurrency, migration, contract, or cross-module risk; that automatic gate still requires a fixed point.
 
 ### Context hygiene
 
-Keep steps 1–3 in **one unbroken context window** — don't compact or clear until after `/to-tickets` — so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from the ticket.
+Keep steps 1–3 in **one unbroken context window** through `/to-spec`, or through `/to-tickets` when ticket fan-out is needed, so the Planning Seal covers the settled shared context. Each `/implement` then starts fresh from the Spec or frontier Issue.
 
 The limit on this is the **[smart zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**: the window (~120k tokens on state-of-the-art models) within which the model still reasons sharply. If a session approaches it before `/to-tickets`, don't push on degraded — `/handoff` and continue in a fresh thread.
 
@@ -75,7 +76,7 @@ Off the main flow entirely.
 
 ## Issue worktree route
 
-Only when the user explicitly selects the worktree alternative, replace **`/implement`** with **`/execute-issue`** followed by **`/close-issue`**. `execute-issue` implements one tracker Issue in a dedicated worktree and repairs Standards/Spec findings; `close-issue` separately refreshes and fast-forwards the original local branch, proves unrelated target dirt is preserved through a read-back receipt, removes the Issue worktree, and closes the Issue. Issue worktrees may run concurrently; a human starts only one integration into the same target branch at a time.
+The default implementation path is **`/implement`**. Only when the user explicitly selects the worktree alternative, replace it with **`/execute-issue`** followed by **`/close-issue`**. `to-spec` or `to-tickets` commits any approved planning-artifact delta as a scoped Planning Seal before the Issue becomes executable; `execute-issue` validates that seal but never repairs it. It then implements one tracker Issue in a dedicated worktree and repairs Standards/Spec findings; `close-issue` separately refreshes and fast-forwards the original local branch, proves unrelated target dirt is preserved through a read-back receipt, removes the Issue worktree, and closes the Issue. Issue worktrees may run concurrently; a human starts only one integration into the same target branch at a time.
 
 The user-invoked **`/wiki`** is an independent Wiki-only edit/review/commit flow. Use **`/remove-ron`** only to remove the retired repository-local Ron setup footprint from a consumer repository.
 

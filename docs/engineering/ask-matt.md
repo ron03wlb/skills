@@ -15,8 +15,7 @@ npx skills update ask-matt
 `ask-matt` is the router over the skills in this repo. You describe the situation you're in; it tells you which skill or flow fits and in what order to run them.
 
 It **does no work itself**. It doesn't grill, write a spec, or fix anything — it only orients. It exists for the **user-invoked** skills above all: nothing fires those for you, so *you* have to remember they exist, and `ask-matt` is the memory you offload that to. It also points at the model-invoked skills you'd reach for by name — `/tdd`, `/diagnosing-bugs`, `/prototype`, `/code-review`, and the two vocabulary references, `/domain-modeling` and `/codebase-design`. It answers "which one, and when", then hands you off to the skill that actually does the job.
-
-The main flow uses [implement](https://aihero.dev/skills-implement) by default. Only when you explicitly select a dedicated-worktree alternative does it replace that step with [execute-issue](https://aihero.dev/skills-execute-issue) followed by [close-issue](https://aihero.dev/skills-close-issue). Those Issue worktrees may proceed concurrently; only integration into the same target branch is serialized, and a read-back preservation receipt lets unrelated target dirt remain in place. The independent [wiki](https://aihero.dev/skills-wiki) flow handles Wiki-only edits, and [remove-ron](https://aihero.dev/skills-remove-ron) removes the retired repository-local Ron setup footprint.
+For material security, data, concurrency, migration, contract, or cross-module risk, it maps the pre-integration gate to /code-review even when you did not explicitly ask for review.
 
 ## When to reach for it
 
@@ -26,7 +25,9 @@ Reach for it whenever you're unsure which skill or flow a situation calls for: y
 
 ## Flows, not just skills
 
-The idea `ask-matt` gives you to think with is the **flow** — a path *through* the skills rather than a single one. Most work runs along one **main flow** (idea → ship: grill → spec → tickets → implement → review), two **on-ramps** merge onto it (a triage lane for incoming bugs and requests; a codebase-health lane that generates ideas), and everything else is a **standalone** you reach for on its own. Ask a question and you get placed on the right flow, at the right step — not just handed a tool.
+The idea `ask-matt` gives you to think with is the **flow** — a path *through* the skills rather than a single one. Most work runs along one **main flow** (idea → ship: grill → spec and Planning Seal → optional tickets → implement → review), two **on-ramps** merge onto it, and everything else is a **standalone** you reach for on its own. Ask a question and you get placed on the right flow, at the right step — not just handed a tool.
+
+The main flow uses [to-spec](https://aihero.dev/skills-to-spec) to create or reuse a **Planning Seal** before tracker work becomes executable. When `grill-with-docs` produced an owned planning-artifact delta, even a small build invokes `/to-spec`; the bounded Spec can then go directly to [implement](https://aihero.dev/skills-implement), which remains the default implementation path. Larger work continues through [to-tickets](https://aihero.dev/skills-to-tickets), which validates or advances the seal before fan-out. An approved plan or conversation may skip `/to-spec` and invoke `/to-tickets` directly when no formal Spec is needed. Only when you explicitly select a dedicated-worktree alternative does implement become [execute-issue](https://aihero.dev/skills-execute-issue) followed by [close-issue](https://aihero.dev/skills-close-issue). Those Issue worktrees may proceed concurrently; only integration into the same target branch is serialized. The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside delivery.
 
 ## Where it fits
 

@@ -1,6 +1,6 @@
 ---
 name: execute-issue
-description: Implement one tracker Issue in a dedicated worktree, repairing Standards and Spec findings before separate integration.
+description: Validate planning context and implement one tracker Issue in a dedicated worktree, repairing Standards and Spec findings before separate integration.
 disable-model-invocation: true
 ---
 
@@ -12,7 +12,15 @@ Implement exactly one open Issue in a dedicated Git worktree. This skill owns im
 
 Read the exact Issue, its parent or linked Spec when present, repository instructions, acceptance criteria, blockers, and exclusions. The Issue and linked Spec define scope; unresolved blockers or materially ambiguous acceptance stop implementation.
 
-Use or create one dedicated worktree and topic branch for the Issue. Identify the original target branch, worktree path, topic branch, and baseline commit once. If any identity is ambiguous, ask once before writing. Preserve unrelated work and do not repeatedly ask for authorization or re-confirm commit hashes during an unchanged run.
+Identify the original target branch and worktree, then read its current `HEAD` as the prospective execution baseline before creating the Issue worktree. If any identity is ambiguous, ask once before writing. Preserve unrelated work and do not repeatedly ask for authorization or re-confirm commit hashes during an unchanged run.
+
+When the Issue or linked Spec records a Planning baseline, require its Planning Seal commit to exist locally and be an ancestor of the execution baseline. A source produced by `/to-spec` or `/to-tickets` with a missing, mismatched, or unreachable seal stops before worktree creation.
+
+As part of validation, perform a seal-currency check: require that the target has no uncommitted planning-artifact delta already owned by this Issue or Spec. This detects a stale seal; it is not scope authority and does not authorize `execute-issue` to classify new scope, commit artifacts, or repair the baseline. Ambiguous ownership stops and returns to the source skill. An older or externally created Issue without a Planning baseline may proceed only when no relevant planning artifact requires sealing; record the seal as `not-applicable`.
+
+`execute-issue` never creates or repairs a Planning Seal, stages planning artifacts on the target, or modifies the parent to make the check pass. Missing or expanded planning scope stops execution. Tell the human to invoke `/to-spec` or `/to-tickets` as appropriate.
+
+Use or create one dedicated worktree and topic branch for the Issue from the verified execution baseline. Identify the worktree path and topic branch once.
 
 ## Implement
 
@@ -37,6 +45,7 @@ Run final verification, require a clean Issue worktree, and ensure its `HEAD` is
 
 - Issue and linked Spec references;
 - original target branch, worktree path, topic branch, baseline, and final candidate commit;
+- Planning baseline commit and seal state (`created`, `reused`, `successor`, or `not-applicable`);
 - `standards: clean` and `spec: clean`;
 - exact verification commands and results;
 - repair-wave count;

@@ -20,7 +20,7 @@ Every ticket is a **tracer bullet** — a thin *vertical* slice that cuts throug
 
 You invoke this by typing `/to-tickets` — the agent won't reach for it on its own.
 
-Reach for it once you have an agreed plan or a written spec and you want it split into tickets. Point it at the conversation, or pass a spec or issue reference and it fetches the body and comments first. If the change hasn't been written up as a spec yet, produce one first — for that, use [to-spec](https://aihero.dev/skills-to-spec).
+Reach for it once you have an approved plan, a written Spec, or an approved conversation and want it split into tickets. An approved plan or conversation can go directly to `to-tickets`; when a Spec or Issue reference exists, pass it so the skill can fetch the full body and comments. Use [to-spec](https://aihero.dev/skills-to-spec) when you need formal Spec publication or when ticket refinement changes public behavior, acceptance, target, or exclusions.
 
 ## Prerequisites
 
@@ -35,11 +35,19 @@ The blocking edges are the whole point. They make one set of tickets read two wa
 
 The edges live in the ticket regardless of medium; the medium only decides whether anything acts on them in parallel. `to-tickets` produces the artifact — how you run it (sequential by hand, or a parallel fleet) is up to you.
 
+Ticket granularity is not new product scope. No relevant planning-artifact delta means the existing seal is reused; an exact approved in-Spec refinement may advance it without touching unrelated dirt. New public behaviour, acceptance, target, or exclusions belong in a revised Spec rather than a child-ticket commit.
+
+With a linked Spec, `to-tickets` first requires the inherited seal commit to exist locally and be an ancestor of the target. Invalid lineage stops before successor creation or publication and tells the human to invoke `/to-spec`.
+
+If publication or read-back fails after a successor seal is selected, the partial-state report records its full SHA. A retry verifies and reuses that exact seal before considering the current delta; it never falls back to the inherited seal.
+
+When `to-tickets` starts directly from an approved plan or conversation with no linked Spec, that approved breakdown is its scope authority and it may establish the primary seal under the same exact-delta rules, recorded as `created`.
+
 ## Vertical slices, not horizontal ones
 
 The whole skill turns on one distinction. A **horizontal** slice ships one layer of the change — all the schema, or all the API — and nothing works until every layer lands. A **vertical** slice, the tracer bullet, ships one narrow path through *every* layer at once, so it can be demoed the moment it's done.
 
-Before slicing, `to-tickets` looks for prefactoring — "make the change easy, then make the easy change" — and orders that work first. It then quizzes you on the breakdown (granularity, blocking edges, what to merge or split) before publishing anything, and publishes blockers first so each ticket's "Blocked by" can reference a real ticket.
+Before slicing, `to-tickets` looks for prefactoring — "make the change easy, then make the easy change" — and orders that work first. It then quizzes you on the breakdown (granularity, blocking edges, what to merge or split) before publishing anything, and publishes blockers first so each ticket's "Blocked by" can reference a real ticket. It reads every published ticket back so the approved body, Planning baseline, blocking edges, and ready state are proven rather than assumed.
 
 ## The wide-refactor exception
 
@@ -50,7 +58,7 @@ One shape breaks the tracer-bullet rule: a **wide refactor** — a single mechan
 `to-tickets` is a step in the main build chain:
 
 ```txt
-grill-with-docs → to-spec → to-tickets → implement → code-review
+grill-with-docs → [to-spec] → to-tickets → implement → code-review
 ```
 
-It sits between [to-spec](https://aihero.dev/skills-to-spec), which hands it a settled spec with user stories to slice against, and [implement](https://aihero.dev/skills-implement), which builds each ticket, driving [tdd](https://aihero.dev/skills-tdd) internally to write the tests test-first, before its [code-review](https://aihero.dev/skills-code-review) pass. Work the frontier one ticket per fresh context, clearing between them. When you're unsure which skill or flow fits, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.
+It usually follows [to-spec](https://aihero.dev/skills-to-spec), inheriting its Planning Seal, but it can also start from an approved plan or conversation. It hands each frontier Issue to [implement](https://aihero.dev/skills-implement), which drives [tdd](https://aihero.dev/skills-tdd) before its [code-review](https://aihero.dev/skills-code-review) pass. Work the frontier one Issue per fresh context. When you're unsure which skill or flow fits, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.
