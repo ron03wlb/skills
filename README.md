@@ -207,6 +207,7 @@ General workflow tools, not code-specific.
 
 **User-invoked**
 
+- **[confirm-understanding](./skills/productivity/confirm-understanding/SKILL.md)** — Calibrate your understanding against chosen evidence with a bounded multiple-choice check.
 - **[grill-me](./skills/productivity/grill-me/SKILL.md)** — Get relentlessly interviewed about a plan or design until every branch of the decision tree is resolved.
 - **[handoff](./skills/productivity/handoff/SKILL.md)** — Compact the current conversation into a handoff document so another agent can continue the work.
 - **[teach](./skills/productivity/teach/SKILL.md)** — Teach the user a new skill or concept over multiple sessions, using the current directory as a stateful teaching workspace.

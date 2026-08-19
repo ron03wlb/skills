@@ -1,0 +1,5 @@
+interface:
+  display_name: "Confirm Understanding"
+  short_description: "Calibrate understanding against chosen evidence"
+policy:
+  allow_implicit_invocation: false

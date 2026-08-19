@@ -51,6 +51,32 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("confirm-understanding requires a bounded evidence calibration before alignment", () => {
+  const skill = read("skills/productivity/confirm-understanding/SKILL.md");
+  const docs = read("docs/productivity/confirm-understanding.md");
+  const metadata = read("skills/productivity/confirm-understanding/agents/openai.yaml");
+
+  assert.match(skill, /^disable-model-invocation:\s*true$/mu);
+  assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(skill, /Evidence Set.*scope.*Core Propositions/isu);
+  const questionCaps = skill.match(/10 questions/giu) ?? [];
+  assert.equal(questionCaps.length, 1, "question cap must have one owner");
+  assert.match(skill, /hard cap of 10 questions.*narrow or split the scope/isu);
+  assert.match(skill, /one Core Proposition/iu);
+  const privateFeedbackRules = skill.match(/correctness feedback private/giu) ?? [];
+  assert.equal(privateFeedbackRules.length, 1, "round secrecy must have one owner");
+  assert.match(skill, /Every initial or repair calibration round follows one \*\*Round Protocol\*\*/iu);
+  assert.match(skill, /If none can be derived.*record.*core Evidence Gap.*skip the question steps/isu);
+  assert.match(skill, /This step is complete only when.*either.*at least one assessed Core Proposition.*or \(b\) no Core Proposition is assessable.*core Evidence Gap/isu);
+  assert.doesNotMatch(skill.slice(skill.indexOf("## 1."), skill.indexOf("## 2.")), /`INCONCLUSIVE`|Alignment Record/u);
+  assert.match(skill, /ALIGNED.*every assessed Core Proposition.*no core Evidence Gap/isu);
+  assert.match(skill, /fresh question correctly.*seeing the answer never counts as alignment/isu);
+  assert.match(skill, /`INCONCLUSIVE` if a core Evidence Gap exists or the first round is incomplete/iu);
+  assert.match(skill, /stops during a repair round.*current `NOT_ALIGNED` status/isu);
+  assert.match(docs, /inaccessible.*missing.*ambiguous.*contradictory.*no assessable Core Proposition/isu);
+  assert.match(skill, /Writing a file.*separate action requiring explicit user authorization/isu);
+});
+
 test("code-review owns requested and material-risk review activation", () => {
   const riskTrigger = /material security, data, concurrency, migration, contract, or cross-module risk/iu;
   for (const path of [

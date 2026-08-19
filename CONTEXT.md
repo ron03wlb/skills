@@ -18,6 +18,24 @@ A `wayfinder` unit — a child **Issue** of a `wayfinder:map` holding a *questio
 **Triage role**:
 A canonical state-machine label applied to an **Issue** during triage (e.g. `needs-triage`, `ready-for-afk`). Each role maps to a real label string in the **Issue tracker** via `docs/agents/triage-labels.md`.
 
+### Understanding calibration
+
+**Evidence Set**:
+The explicitly named sources treated as authoritative for one bounded understanding calibration.
+_Avoid_: Model summary, assumed context, answer key
+
+**Core Proposition**:
+One material decision, causal relationship, boundary, or practical implication derived unambiguously from an **Evidence Set** and necessary to calibrate the named scope.
+_Avoid_: Trivia, wording recall, compound question
+
+**Evidence Gap**:
+An inaccessible, missing, ambiguous, or contradictory part of an **Evidence Set** that prevents one **Core Proposition** from having a reliable answer. It is uncertainty in the evidence, not a user misunderstanding.
+_Avoid_: Wrong answer, failed question, knowledge gap
+
+**Alignment Record**:
+The read-only result of one bounded understanding calibration, naming its **Evidence Set**, scope, confirmed **Core Propositions**, mismatches, **Evidence Gaps**, and current status.
+_Avoid_: Test score, source update, meeting minutes
+
 ### Issue delivery
 
 **Issue worktree**:
@@ -164,6 +182,9 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 
 ## Relationships
 
+- An **Evidence Set** grounds the **Core Propositions** for one bounded calibration
+- A core **Evidence Gap** prevents an **Alignment Record** from claiming full alignment
+- An **Alignment Record** reports only the scope actually calibrated
 - An **Issue tracker** holds many **Issues**
 - An **Issue** carries one **Triage role** at a time
 - A **Decision ticket** is an **Issue** (a child of a `wayfinder:map`)
