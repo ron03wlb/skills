@@ -23,12 +23,14 @@ File count, module count, risk, or apparent size alone never decides. Classify a
 
 ## 2. Draft the classified contract
 
-Use exactly one shape-specific template below. User Outcomes are optional actor/value context, at most three, and never define done.
+User Outcomes are optional actor/value context, at most three, and never define done.
 
 - A **Single-Issue** Spec is the executable authority. Stable `AC-n` Acceptance Criteria are its sole done authority. Expected paths and symbols are source-grounded starting points, not an allowlist. Every Acceptance Criterion must be covered by at least one Implementation Plan step and one Verification item; every Implementation Plan step must cover at least one Acceptance Criterion. Use inline `Covers: AC-n`, compare the defined and covered ID sets before publication, and stop on missing, unexpected, or orphan mappings without creating a matrix or parser.
 - A **Multi-Issue** parent is decomposition authority only. Keep the overall outcome, cross-Issue constraints, decomposition rationale, exclusions, and `/to-tickets` handoff. Do not put child Acceptance Criteria, Implementation Plans, touchpoints, or verification commands in the parent; `/to-tickets` gives each child its own mapped executable contract.
 
 The next command is authoritative: Single-Issue ends with `/execute-issue <Spec-ID>`; Multi-Issue ends with `/to-tickets <Spec-ID>`.
+
+After classification, read only the matching template: `references/single-issue-template.md` or `references/multi-issue-template.md`. Do not load the unused shape's template.
 
 ## 3. Select the Planning Seal
 
@@ -47,95 +49,3 @@ Verify the full SHA, owned diff, and unchanged unrelated snapshot. Record `creat
 Publish the Spec only after the Planning Seal succeeds. In `primary` mode create the tracker record, then populate it with its real Spec ID and exact next command. In `revision` mode update the same record. Apply `ready-for-agent`, read the body and label back once, and require mode, full seal SHA/state, classification, selected template, and next command to match. For Single-Issue verify every `AC-n` mapping; for Multi-Issue verify cross-Issue constraints and decomposition rationale exist and child-level executable sections remain absent.
 
 If tracker create or update, label application, or read-back fails, report the selected seal's full SHA with the exact partial state; do not amend, reset, or roll back that seal.
-
-<single-issue-template>
-
-## Planning baseline
-
-- Mode: <primary or revision>
-- Commit: <full local target-branch commit SHA>
-- Seal: <created, successor, or reused>
-
-## Delivery classification
-
-- Shape: Single-Issue
-- Rationale: <why this fits one execution cycle>
-
-## Problem Statement
-
-<The observable problem and why it matters.>
-
-## Proposed Outcome
-
-<The settled behavior and boundaries.>
-
-## User Outcomes
-
-<Zero to three concise actor/value outcomes.>
-
-## Acceptance Criteria
-
-- **AC-1 - <name>:** <Objectively verifiable condition.>
-
-## Implementation Plan
-
-Expected touchpoints are non-exhaustive:
-
-- `<path or symbol>`
-
-### Step 1: <outcome>
-
-<Source-grounded work.> **Covers: AC-1.**
-
-## Verification
-
-- <Observable check and command where known.> **Covers: AC-1.**
-
-## Out of Scope
-
-- <Explicit exclusion.>
-
-## Next command
-
-`/execute-issue <Spec-ID>`
-
-</single-issue-template>
-
-<multi-issue-template>
-
-## Planning baseline
-
-- Mode: <primary or revision>
-- Commit: <full local target-branch commit SHA>
-- Seal: <created, successor, or reused>
-
-## Delivery classification
-
-- Shape: Multi-Issue
-- Rationale: <why independently executable children or blocking edges are required>
-
-## Problem Statement
-
-<The observable problem and why it matters.>
-
-## Overall Outcome
-
-<The settled aggregate result without child-level done criteria.>
-
-## Cross-Issue Constraints
-
-- <Boundary or invariant every child decomposition must preserve.>
-
-## Decomposition Rationale
-
-<Independent outcomes, blockers, and why one execution cycle is unsafe or insufficient.>
-
-## Out of Scope
-
-- <Explicit exclusion.>
-
-## Next command
-
-`/to-tickets <Spec-ID>`
-
-</multi-issue-template>

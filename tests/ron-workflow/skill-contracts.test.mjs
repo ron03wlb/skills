@@ -178,8 +178,9 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(spec, /existing Spec.*revision.*update the same tracker Spec.*do not create a duplicate/isu);
   assert.match(spec, /create or update.*label.*read-back.*full SHA.*partial state.*do not amend, reset, or roll back/isu);
   assert.match(specDocs, /failure.*full SHA.*retry.*prior partial-state report.*missing or conflicting evidence stops/isu);
-  const singleTemplate = spec.match(/<single-issue-template>(.*?)<\/single-issue-template>/su)?.[1] ?? "";
-  const multiTemplate = spec.match(/<multi-issue-template>(.*?)<\/multi-issue-template>/su)?.[1] ?? "";
+  assert.match(spec, /read only the matching template.*references\/single-issue-template\.md.*references\/multi-issue-template\.md.*Do not load the unused/isu);
+  const singleTemplate = read("skills/engineering/to-spec/references/single-issue-template.md");
+  const multiTemplate = read("skills/engineering/to-spec/references/multi-issue-template.md");
   assert.match(singleTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Single-Issue template omits revision lineage");
   assert.match(singleTemplate, /Shape: Single-Issue.*User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*`\/execute-issue <Spec-ID>`/su);
   assert.match(multiTemplate, /Shape: Multi-Issue.*Overall Outcome.*Cross-Issue Constraints.*Decomposition Rationale.*`\/to-tickets <Spec-ID>`/su);
@@ -187,7 +188,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.doesNotMatch(singleTemplate + multiTemplate, /extremely extensive|## User Stories|## Implementation Decisions/iu);
   assert.match(spec, /sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.match(spec, /repository evidence.*automatic.*one blocking question.*recommendation/isu);
-  assert.match(spec, /at most three.*User Outcomes/isu);
+  assert.match(spec, /User Outcomes.*at most three/isu);
   assert.match(spec, /every Acceptance Criterion.*Implementation Plan step.*Verification.*every Implementation Plan step.*Acceptance Criterion/isu);
   assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
 
@@ -472,6 +473,29 @@ test("Issue integration preserves dirty target state and composes candidates in 
     assert.deepEqual(receiptReadBack, closeReceipt);
     assert.equal(receiptReadBack.executionStateId, executionState.id);
     assert.equal(receiptReadBack.candidateReachable, true);
+
+    const closeAndReadBack = ({ tracker, issueWorktree }) => {
+      assert.equal(tracker.state, "OPEN");
+      assert.equal(tracker.latestExecutionStateId, receiptReadBack.executionStateId, "execution state drift stops closure");
+      assert.equal(tracker.blockersClosed, true, "blocker drift stops closure");
+      assert.equal(receiptReadBack.phase, "VERIFIED");
+      assert.equal(receiptReadBack.targetAfter, git("rev-parse", "target"));
+      assert.equal(issueWorktree.registered && issueWorktree.clean, true, "only the exact clean Issue worktree may be removed");
+      issueWorktree.registered = false;
+      tracker.state = "CLOSED";
+      return JSON.parse(JSON.stringify({ state: tracker.state, worktreeRegistered: issueWorktree.registered }));
+    };
+    const blockerDrift = { state: "OPEN", latestExecutionStateId: executionState.id, blockersClosed: false };
+    const blockerWorktree = { registered: true, clean: true };
+    assert.throws(() => closeAndReadBack({ tracker: blockerDrift, issueWorktree: blockerWorktree }), /blocker drift/u);
+    assert.deepEqual({ state: blockerDrift.state, registered: blockerWorktree.registered }, { state: "OPEN", registered: true });
+    const executionDrift = { state: "OPEN", latestExecutionStateId: "issue-b-blocked", blockersClosed: true };
+    const executionWorktree = { registered: true, clean: true };
+    assert.throws(() => closeAndReadBack({ tracker: executionDrift, issueWorktree: executionWorktree }), /execution state drift/u);
+    assert.deepEqual({ state: executionDrift.state, registered: executionWorktree.registered }, { state: "OPEN", registered: true });
+    const tracker = { state: "OPEN", latestExecutionStateId: executionState.id, blockersClosed: true };
+    const issueWorktree = { registered: true, clean: true };
+    assert.deepEqual(closeAndReadBack({ tracker, issueWorktree }), { state: "CLOSED", worktreeRegistered: false });
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -516,11 +540,19 @@ test("aggregate pre-push gate fails closed and binds readiness to exact target H
     git("checkout", "target");
     git("merge", "--ff-only", integrationB);
     const verifiedHead = git("rev-parse", "HEAD");
+    git("checkout", "-b", "issue-omitted", baseline);
+    writeFileSync(join(repo, "omitted.txt"), "not integrated\n");
+    git("add", "omitted.txt");
+    git("commit", "-m", "omitted issue");
+    const omittedCandidate = git("rev-parse", "HEAD");
+    git("checkout", "target");
 
     const successA = { id: "A-success", kind: "implementation_complete", target: "target", candidate: candidateA, commands: ["test:a"] };
     const successB = { id: "B-success", kind: "implementation_complete", target: "target", candidate: candidateB, commands: ["test:b"] };
+    const successOmitted = { id: "O-success", kind: "implementation_complete", target: "target", candidate: omittedCandidate, commands: ["test:o"] };
     const receiptA = { phase: "VERIFIED", target: "target", executionStateId: successA.id, candidate: candidateA, integration: candidateA };
     const receiptB = { phase: "VERIFIED", target: "target", executionStateId: successB.id, candidate: candidateB, integration: integrationB };
+    const receiptOmitted = { phase: "VERIFIED", target: "target", executionStateId: successOmitted.id, candidate: omittedCandidate, integration: omittedCandidate };
     const completeIssues = [
       { id: "A", execution: [successA], receipts: [receiptA] },
       { id: "B", execution: [successB], receipts: [receiptB] },
@@ -565,6 +597,7 @@ test("aggregate pre-push gate fails closed and binds readiness to exact target H
     assert.throws(() => runGate({ issues: [{ ...completeIssues[0], receipts: [] }] }), /missing closeout receipt/u);
     assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [] }] }), /missing completion/u);
     assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [successA, { id: "A-blocked", kind: "blocked", target: "target" }] }] }), /superseding blocked state/u);
+    assert.throws(() => runGate({ issues: [...completeIssues, { id: "O", execution: [successOmitted], receipts: [receiptOmitted] }] }), /omitted candidate/u);
     assert.throws(() => runGate({ issues: completeIssues, reviewClean: false }), /aggregate review failed/u);
     assert.throws(() => runGate({ issues: completeIssues, verificationClean: false }), /aggregate verification failed/u);
     assert.equal(git("notes", "--ref=refs/notes/matt-push-ready", "list"), "");
