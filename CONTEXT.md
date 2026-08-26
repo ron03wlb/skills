@@ -78,6 +78,54 @@ _Avoid_: Automatic conflict resolution, closeout repair commit
 The state in which an open **Issue** has resolved blockers, clear acceptance and Spec scope, an identifiable original target, and no conflicting worktree owner.
 _Avoid_: Approved
 
+**Executable Issue**:
+An open **Issue** that is one dependency-ready execution unit with numbered **Acceptance Criteria**, one embedded **Implementation Plan**, a valid **Planning Seal**, and the target identity needed by `execute-issue`. A **Single-Issue Spec** is executable itself; `/to-tickets` produces executable child Issues for a **Multi-Issue Spec**.
+_Avoid_: Parent Multi-Issue Spec, implementation prompt, ready label alone
+
+**Necessary discovery**:
+An unplanned caller, test, configuration, migration companion, generated file, or similar dependency proved necessary to complete an existing plan step and unchanged **Acceptance Criterion**. `execute-issue` includes it automatically, and the candidate diff remains the path evidence.
+_Avoid_: Scope expansion, exhaustive path update, tracker path inventory
+
+**Material plan deviation**:
+An in-scope change to the planned seam, implementation steps, data path, or risk handling that preserves the existing behavior and **Acceptance Criteria**. Execution continues and the completion note records the reason and covered criteria.
+_Avoid_: Necessary discovery, scope change, silent redesign
+
+**Scope change**:
+A discovery that changes behavior, **Acceptance Criteria**, target, exclusions, independently deliverable outcomes, or ownership. Execution stops and returns to `/to-spec` or `/to-tickets` instead of treating it as implementation freedom.
+_Avoid_: Material plan deviation, necessary dependency, review repair
+
+**Tracker Spec**:
+A Spec published by `/to-spec` into the configured **Issue tracker**, including a tracker implemented as local `.scratch/` files. It participates in **Delivery routing**, Planning Seal, execution, and closeout regardless of storage medium.
+_Avoid_: Remote Spec, local file means standalone, untracked plan
+
+**Standalone Spec**:
+An approved local Spec or plan that has not been published into the configured **Issue tracker** and does not participate in tracker delivery lifecycle. It may be implemented directly through `/implement`.
+_Avoid_: Local Tracker Spec, Executable Issue, unpublished draft mistaken for tracker authority
+
+**Single-Issue Spec**:
+A Spec whose complete acceptance scope is one cohesive outcome that one **Issue worktree**, one execution context, one reviewed candidate, and one closeout can complete. Cross-module reach, risk, file count, or estimated effort alone do not make it multi-Issue.
+_Avoid_: Small feature, simple change, one-file Spec
+
+**Multi-Issue Spec**:
+A Spec that requires more than one independently executable **Issue** because its outcomes are independently verifiable or deliverable, have blocking edges, or cannot be completed safely in one execution, review, and closeout cycle.
+_Avoid_: Large feature, complex change, multi-file Spec
+
+**Implementation Plan**:
+The ordered, source-grounded execution design embedded in the authoritative tracker body of a **Single-Issue Spec**. Its file paths and symbols are non-exhaustive expected touchpoints, not an allowlist; it maps that Spec's acceptance scope to implementation and verification work that one `execute-issue` run can complete.
+_Avoid_: Separate plan file, planning comment, ticket breakdown, implementation decision list, exhaustive file manifest
+
+**Delivery routing**:
+The `/to-spec`-owned classification of a published Spec as **Single-Issue Spec** or **Multi-Issue Spec** and selection of its one executable next command. Other skills consume that result without independently reclassifying the Spec.
+_Avoid_: Router suggestion, duplicated sizing rule, executor routing guess
+
+**User Outcome**:
+An optional concise statement of actor and value that preserves why a Spec matters. A Spec uses at most three when they add context not already clear from its problem and solution; they never define done.
+_Avoid_: Extensive user-story inventory, Acceptance Criterion, implementation requirement
+
+**Acceptance Criterion**:
+A stable-ID, objectively verifiable observable condition that defines when Spec scope is done. It is the sole authority mapped by the **Implementation Plan**, verification, review, and `execute-issue`; negative, error, boundary, and cross-system behavior are included when material.
+_Avoid_: User story, implementation step, test case, unnumbered requirement
+
 ### Context and delegation
 
 **Issue Context Packet**:
@@ -191,6 +239,18 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **Ron removal** deletes only the exact **Ron repository footprint** and leaves historical or active delivery objects intact
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
+- `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/execute-issue <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`
+- `/to-spec` classifies automatically from Spec and source evidence; only material ambiguity that can change **Delivery routing** permits one blocking question with a recommendation, and uncertainty never defaults to either Single-Issue or Multi-Issue
+- `ask-matt`, `/to-tickets`, and `execute-issue` consume **Delivery routing** without duplicating or overriding its classification criteria
+- `/implement` accepts an explicitly selected **Standalone Spec** for direct-branch work, while every **Tracker Spec**, including a local-file tracker record, follows `/to-spec`-owned **Delivery routing**
+- A **Single-Issue Spec** owns one embedded **Implementation Plan** in the same tracker record; no separate plan artifact or comment carries execution authority
+- A **Multi-Issue Spec** keeps only the overall outcome, cross-Issue constraints, and decomposition rationale; `/to-tickets` gives each child **Executable Issue** its own compact **Acceptance Criteria**, **Implementation Plan**, verification, blocking edges, and Planning baseline
+- `/to-tickets` outputs `/execute-issue <Issue-ID>` only for the dependency-ready frontier and never prompts execution of blocked Issues
+- A Spec may contain at most three non-authoritative **User Outcomes**, while its numbered **Acceptance Criteria** are the only done and traceability authority
+- **Acceptance Criteria**, **Implementation Plan** steps, and verification use compact many-to-many `Covers: AC-n` references: every criterion has at least one step and verification, every step covers at least one criterion, and no separate matrix or orphan is allowed
+- Before publication, `/to-spec` compares the criterion IDs with the IDs covered by plan steps and verification and stops on any missing ID or uncovered step; this is a prompt-level invariant backed by contract tests, not a separate parser or matrix artifact
+- `execute-issue` applies **Necessary discovery** automatically without duplicating the candidate's path list in tracker evidence, records only **Material plan deviations**, and returns every **Scope change** to planning
+- A one-outcome Spec that cannot fit one execution and review cycle is still a **Multi-Issue Spec**; `/to-tickets` prefers independently verifiable vertical slices and uses expand-contract when no single wide change can remain green as a vertical slice
 - `/to-tickets` reuses that seal or creates one successor for approved in-Spec planning changes; public scope expansion returns to `/to-spec`
 - `execute-issue` verifies the **Planning Seal** is an ancestor of its execution baseline and never creates or repairs the seal
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
