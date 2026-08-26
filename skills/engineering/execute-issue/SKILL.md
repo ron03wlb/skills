@@ -6,49 +6,52 @@ disable-model-invocation: true
 
 # Execute Issue
 
-Implement exactly one open Issue in a dedicated Git worktree. This skill owns implementation plus the existing Matt `code-review`; it stops after a clean completion note and never invokes `close-issue`.
+Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicated Git worktree. This skill owns implementation and Matt `code-review`; it stops at a trustworthy completion note and never invokes `close-issue`.
 
 ## Entry
 
-Read the exact Issue, its parent or linked Spec when present, repository instructions, acceptance criteria, blockers, and exclusions. The Issue and linked Spec define scope; unresolved blockers or materially ambiguous acceptance stop implementation.
+Read the exact Issue, parent or linked Spec, comments, repository instructions, Acceptance Criteria, Implementation Plan, blockers, target, and exclusions. Consume the published Single-Issue or child classification without reclassifying it. Unresolved blockers or material ambiguity stops before writing.
 
-Identify the original target branch and worktree, then read its current `HEAD` as the prospective execution baseline before creating the Issue worktree. If any identity is ambiguous, ask once before writing. Preserve unrelated work and do not repeatedly ask for authorization or re-confirm commit hashes during an unchanged run.
+Capture the original target branch, worktree, and current `HEAD` once as the execution baseline. Preserve unrelated work and do not repeatedly re-confirm unchanged identities.
 
-When the Issue or linked Spec records a Planning baseline, require its Planning Seal commit to exist locally and be an ancestor of the execution baseline. A source produced by `/to-spec` or `/to-tickets` with a missing, mismatched, or unreachable seal stops before worktree creation.
+Require any Planning Seal to exist locally and be an ancestor of the execution baseline. Perform a seal-currency check: the target must have no uncommitted planning-artifact delta owned by this Issue or Spec. This check is not scope authority. Missing, stale, unreachable, or ambiguously owned planning evidence stops; tell the human to invoke `/to-spec` or `/to-tickets`.
 
-As part of validation, perform a seal-currency check: require that the target has no uncommitted planning-artifact delta already owned by this Issue or Spec. This detects a stale seal; it is not scope authority and does not authorize `execute-issue` to classify new scope, commit artifacts, or repair the baseline. Ambiguous ownership stops and returns to the source skill. An older or externally created Issue without a Planning baseline may proceed only when no relevant planning artifact requires sealing; record the seal as `not-applicable`.
+`execute-issue` never creates or repairs a Planning Seal, stages target planning artifacts, or edits the parent to make validation pass. An older Issue without a Planning baseline may use `not-applicable` only when no relevant planning artifact needs sealing.
 
-`execute-issue` never creates or repairs a Planning Seal, stages planning artifacts on the target, or modifies the parent to make the check pass. Missing or expanded planning scope stops execution. Tell the human to invoke `/to-spec` or `/to-tickets` as appropriate.
+Create or reuse one dedicated Issue worktree and topic branch from the verified baseline. Record their exact identities once and run a cheap relevant baseline check.
 
-Use or create one dedicated worktree and topic branch for the Issue from the verified execution baseline. Identify the worktree path and topic branch once.
+## Implement and verify
 
-## Implement
+Trace the real behavior and highest practical verification seam. Use TDD when a focused behavioral test can capture the change. Commit coherent verified slices on the topic branch.
 
-Trace the real behavior and verification seam, then implement only the Issue outcome. Use TDD when a focused behavioral test can capture the change. Commit coherent, verified slices on the topic branch without touching unrelated paths.
+Expected paths and symbols are non-exhaustive planning evidence, not an allowlist:
 
-New public behavior, acceptance, target, or exclusions require the Issue or linked Spec to be updated before continuing. They are not review repairs.
+- Include a **Necessary discovery** automatically when source evidence proves it is required by an existing plan step and unchanged Acceptance Criterion.
+- Record a concise **Material plan deviation** and covered `AC-n` when the implementation path changes but behavior and Acceptance Criteria do not.
+- A **Scope change** to behavior, Acceptance Criteria, target, exclusions, independent outcomes, or ownership stops and returns to planning.
+
+Run affected verification after each slice or repair. Before review, run the Issue's required final verification, including focused checks, typechecking where configured, and the repository-required full suite. Record exact commands and results.
 
 ## Review and repair
 
-Commit the current candidate and invoke the existing Matt `code-review` against the recorded baseline and Issue or linked Spec. Require both axes to be clean:
+Commit the candidate and invoke Matt `code-review` against the recorded baseline and Issue or linked Spec. Require both independent axes to be clean:
 
-- Standards: repository-documented standards are satisfied.
-- Spec: the implementation matches the current Issue acceptance criteria and linked Spec.
+- **Standards:** repository instructions and documented standards are satisfied.
+- **Spec:** every Acceptance Criterion and exclusion is satisfied without scope creep.
 
-Confirm findings against source, tests, and the Spec. If any confirmed in-scope finding remains, fix every finding, run affected verification, commit the repair, and rerun the full `code-review` with both Standards and Spec. Continue until both axes report no confirmed findings.
+Confirm findings against source, tests, and the Spec. Fix every confirmed in-scope finding, run affected verification, commit the repair, and rerun the full two-axis review. Allow at most 10 repair waves per invocation; a wave counts only when code repair begins. Tool failures, duplicates, and unsupported findings do not count. If wave 10 remains unclean, preserve the latest verified commit, record the blocked state, and leave the Issue open.
 
-Allow at most 10 repair waves per invocation. A wave counts only when code repair begins. Tool failure, duplicate feedback, and unsupported findings do not count. If wave 10 still has a confirmed finding, preserve the latest verified commit, leave the Issue open, and stop. A later explicit `/execute-issue` invocation receives a new ten-wave limit; do not persist a counter.
+Any later blocked execution state for this Issue supersedes older successful execution evidence; it does not affect other Issues.
 
 ## Completion note
 
-Run final verification, require a clean Issue worktree, and ensure its `HEAD` is the reviewed candidate. Record one compact, human-readable completion note on the configured tracker, using a comment or local ticket section, containing:
+Rerun required final verification. Declare `implementation_complete` only when final verification passes, Standards and Spec are clean, the Issue worktree is clean, and its `HEAD` equals the reviewed candidate.
 
-- Issue and linked Spec references;
-- original target branch, worktree path, topic branch, baseline, and final candidate commit;
-- Planning baseline commit and seal state (`created`, `reused`, `successor`, or `not-applicable`);
-- `standards: clean` and `spec: clean`;
-- exact verification commands and results;
-- repair-wave count;
-- confirmation that the worktree is clean.
+Write one compact tracker completion note containing:
 
-Read the note back once, report `implementation_complete`, and stop. The human separately invokes `/close-issue`; execution never integrates the target, removes the worktree, closes the Issue, pushes, or deploys.
+- Issue and linked Spec; original target branch/worktree, topic branch/worktree, baseline, and final candidate;
+- Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
+- `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
+- `worktree: clean` and `implementation_complete`.
+
+Read the note back once and stop. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; the human separately invokes `/close-issue`.

@@ -12,20 +12,22 @@ npx skills update execute-issue
 
 ## What it does
 
-`execute-issue` implements one tracker Issue in a dedicated worktree, then runs Matt's existing [code-review](https://aihero.dev/skills-code-review) for Standards and Spec. Confirmed findings are fixed and the full review reruns until clean, up to ten repair waves per invocation.
+`execute-issue` implements one dependency-ready Tracker Spec or child Issue in a dedicated worktree, verifies it, and runs [code-review](https://aihero.dev/skills-code-review) independently for Standards and Spec until both are clean.
 
-Before creating the worktree, it validates any recorded **Planning Seal**: the seal commit must exist locally and be an ancestor of the execution baseline. A seal-currency check rejects an uncommitted planning delta already owned by the Issue or Spec; it is not scope authority. `execute-issue` never commits or repairs target-branch planning files itself.
+It trusts the published delivery classification. The Planning Seal must be reachable and current, but expected paths remain discovery hints rather than an allowlist.
 
 ## When to reach for it
 
-Type `/execute-issue` after explicitly choosing the worktree alternative for a dependency-ready Issue. The agent won't reach for it on its own; [implement](https://aihero.dev/skills-implement) remains the default.
+You invoke this by typing `/execute-issue <Issue-ID>` — the agent won't reach for it on its own.
 
-## Review-repair loop
+Reach for it when [to-spec](https://aihero.dev/skills-to-spec) or [to-tickets](https://aihero.dev/skills-to-tickets) emits that exact command. Use [implement](https://aihero.dev/skills-implement) for an approved Standalone Spec or explicit direct current-branch task.
 
-The Issue and its linked Spec define scope. Tool failures, duplicates, and unsupported findings do not consume a repair wave; scope expansion stops until the Issue or Spec and its Planning Seal are updated.
+## Trustworthy candidate
 
-Clean execution writes one compact tracker completion note with the Planning baseline, original target, worktree, topic branch, candidate commit, both clean review axes, verification results, and repair count. It does not integrate, remove the worktree, or close the Issue.
+Necessary source-grounded dependencies continue automatically while Acceptance Criteria stay unchanged; behavior, target, exclusion, or ownership changes return to planning. Focused checks run through implementation, followed by required final verification and the repository full suite.
+
+Confirmed review findings are repaired for at most ten waves per invocation. `implementation_complete` is recorded only when final verification passes, both review axes are clean, the worktree is clean, and its `HEAD` equals the reviewed candidate. A later blocked execution state supersedes older success for that Issue only.
 
 ## Where it fits
 
-It is the issue-worktree implementation step after a bounded [to-spec](https://aihero.dev/skills-to-spec), a frontier [to-tickets](https://aihero.dev/skills-to-tickets) Issue, or [triage](https://aihero.dev/skills-triage), followed by a separately invoked [close-issue](https://aihero.dev/skills-close-issue). Use [implement](https://aihero.dev/skills-implement) instead when work can finish in the current branch without a separate integration phase; see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+`execute-issue` follows a Single-Issue [to-spec](https://aihero.dev/skills-to-spec) or ready [to-tickets](https://aihero.dev/skills-to-tickets) child and stops before integration. The human next invokes [close-issue](https://aihero.dev/skills-close-issue). After all desired closes, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) proves the aggregate target. See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.

@@ -12,18 +12,24 @@ npx skills update close-issue
 
 ## What it does
 
-`close-issue` takes one clean `execute-issue` worktree, refreshes it from the original local target, fast-forwards that target to the reviewed candidate, removes the worktree, and closes the Issue. The candidate worktree must be clean, but the target may keep unrelated staged, unstaged, and untracked work; closeout proves that work is unchanged instead of making you clear it first.
+`close-issue` integrates one unchanged reviewed candidate into the current local target, proves inclusion and dirty-target preservation, removes the exact Issue worktree, and closes the Issue.
+
+It does not refresh or re-review the candidate. If target and candidate histories diverge, an isolated no-fast-forward merge commit composes them; conflicts stop before the real target or tracker state changes.
 
 ## When to reach for it
 
-Type `/close-issue` after [execute-issue](https://aihero.dev/skills-execute-issue) records a clean completion note. The agent won't reach for it on its own; a human invokes this separate closeout phase and starts only one integration into the same target branch at a time. Other Issue worktrees and target branches can continue independently.
+You invoke this by typing `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete` — the agent won't reach for it on its own.
 
-## Safe local integration
+Independent Issues may close in any order. Only writes to one target branch are serialized; the Issue does not need to know whether siblings ran concurrently.
 
-If target refresh changes the candidate, verification and Standards/Spec review run again. Before fast-forwarding, closeout fingerprints existing target dirt, rejects same-path or path-prefix collisions, and requires read-back preservation evidence. Target drift, dirty-state drift, tracker failure, or ambiguous recovery stops the invocation; closeout never stashes, commits, cleans, re-baselines, or edits product code.
+## Exact-candidate integration
 
-The target advances only by fast-forward to the reviewed candidate. Preservation proof gates worktree cleanup and Issue closure, and retries resume only while their recorded evidence still matches. The topic branch remains, and no rebase, push, remote merge, deploy, unrelated deletion, or automatic command chaining occurs.
+The target advances once by fast-forward to an integration candidate that contains both the prior target and exact reviewed candidate. A read-back receipt proves candidate ancestry before cleanup and closure, so a successfully closed Issue cannot be omitted from its named local target.
+
+The target may keep unrelated staged, unstaged, and untracked work. Closeout fingerprints it, rejects same-path and path-prefix collisions, and preserves hook evidence. Failed preservation stops by default; a later explicitly authorized reconciliation retains the failed evidence and states that preservation equality is not proven.
+
+Closeout never edits product code, reruns expensive verification, pushes, deploys, automatically reopens an Issue, or rolls back a successful local integration.
 
 ## Where it fits
 
-This is the separate integration and cleanup step after [execute-issue](https://aihero.dev/skills-execute-issue). [to-tickets](https://aihero.dev/skills-to-tickets) supplies dependency-ordered work, while [ask-matt](https://aihero.dev/skills-ask-matt) maps the full flow.
+`close-issue` follows [execute-issue](https://aihero.dev/skills-execute-issue). After any desired Issues are closed, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) performs the aggregate gate on the exact target. See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

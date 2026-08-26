@@ -6,8 +6,9 @@ Skills I use daily for code work.
 
 Reachable only when you type them (Claude Code: `disable-model-invocation: true`; Codex: `policy.allow_implicit_invocation: false` in `agents/openai.yaml`).
 
-- **[execute-issue](./execute-issue/SKILL.md)** — Implement one Issue in a worktree and repair review findings until Standards and Spec are clean.
-- **[close-issue](./close-issue/SKILL.md)** — Integrate one reviewed Issue into its original local branch, remove its worktree, and close it.
+- **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
+- **[close-issue](./close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.
+- **[verify-target-before-push](./verify-target-before-push/SKILL.md)** — Prove one exact aggregate target contains every relevant closed candidate and is review/test clean without pushing.
 - **[ask-matt](./ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
 - **[triage](./triage/SKILL.md)** — Move issues through a state machine of triage roles.
@@ -15,9 +16,9 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
 - **[wiki](./wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
-- **[to-spec](./to-spec/SKILL.md)** — Synthesize the conversation, seal approved planning artifacts in a scoped Planning Seal, and publish the Spec.
-- **[to-tickets](./to-tickets/SKILL.md)** — Validate or advance the Planning Seal, then publish tracer-bullet tickets with explicit blocking edges.
-- **[implement](./implement/SKILL.md)** — Build the work described by a spec or set of tickets, driving `/tdd` at pre-agreed seams and closing out with `/code-review` before committing.
+- **[to-spec](./to-spec/SKILL.md)** — Classify and publish an execution-ready Spec with a Planning Seal, mapped Acceptance Criteria, and one exact next command.
+- **[to-tickets](./to-tickets/SKILL.md)** — Turn a Multi-Issue Spec into independently executable children and emit commands only for the ready frontier.
+- **[implement](./implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./wayfinder/SKILL.md)** — Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on the issue tracker, resolved one at a time until the way to the destination is clear.
 
 ## Model-invoked

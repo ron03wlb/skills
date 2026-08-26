@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 const read = (path) => readFileSync(path, "utf8").replace(/\r\n?/gu, "\n");
@@ -150,6 +152,7 @@ test("Wiki is one independent user-invoked documentation control", () => {
 test("planning artifacts are sealed before tracker work becomes executable", () => {
   const spec = read("skills/engineering/to-spec/SKILL.md");
   const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const implement = read("skills/engineering/implement/SKILL.md");
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const context = read("CONTEXT.md");
   const specDocs = read("docs/engineering/to-spec.md");
@@ -157,6 +160,9 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   const mattDocs = read("docs/engineering/ask-matt.md");
   const deliveryAdr = read("docs/adr/0022-use-issue-native-execution-and-closeout.md");
+  const successorAdrPath = "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md";
+  assert.equal(existsSync(successorAdrPath), true, "delivery routing needs a successor ADR");
+  const successorAdr = read(successorAdrPath);
 
   const specSeal = spec.indexOf("Planning Seal");
   const specPublish = spec.indexOf("Publish the Spec", specSeal);
@@ -174,6 +180,14 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(specDocs, /failure.*full SHA.*retry.*prior partial-state report.*missing or conflicting evidence stops/isu);
   const specTemplate = spec.match(/<spec-template>(.*?)<\/spec-template>/su)?.[1] ?? "";
   assert.match(specTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Spec template omits revision lineage");
+  assert.match(specTemplate, /Delivery classification.*Shape: <Single-Issue or Multi-Issue>/su);
+  assert.match(specTemplate, /User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*Next command/su);
+  assert.doesNotMatch(specTemplate, /extremely extensive|## User Stories|## Implementation Decisions/iu);
+  assert.match(spec, /sole authority.*Single-Issue.*Multi-Issue/isu);
+  assert.match(spec, /repository evidence.*automatic.*one blocking question.*recommendation/isu);
+  assert.match(spec, /at most three.*User Outcomes/isu);
+  assert.match(spec, /every Acceptance Criterion.*plan step.*verification.*every plan step.*Acceptance Criterion/isu);
+  assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
 
   const ticketsSeal = tickets.indexOf("Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish the tickets", ticketsSeal);
@@ -195,8 +209,13 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   const issueTemplate = tickets.match(/<issue-template>(.*?)<\/issue-template>/su)?.[1] ?? "";
   for (const [name, template] of [["local", localTicketTemplate], ["tracker", issueTemplate]]) {
     assert.match(template, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, `${name} ticket template has an incomplete Planning baseline`);
+    assert.match(template, /Acceptance Criteria.*Implementation Plan.*Verification.*Blocked by/su, `${name} ticket is not directly executable`);
+    assert.match(template, /Covers: AC-/u, `${name} ticket omits inline AC mapping`);
   }
   assert.match(tickets, /Read each published ticket back.*Planning baseline.*blocking/isu);
+  assert.match(tickets, /consume.*classification.*never reclassif.*Multi-Issue/isu);
+  assert.match(tickets, /`\/execute-issue <Issue-ID>`.*only for the dependency-ready frontier/isu);
+  assert.match(tickets, /does not need to know.*concurrent/isu);
   const realTrackerPublish = tickets.indexOf("- **A real issue tracker");
   const ticketReadBack = tickets.indexOf("Read each published ticket back");
   assert.equal(ticketReadBack > realTrackerPublish, true, "to-tickets must read back after selecting the publication mode");
@@ -209,19 +228,17 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
 
   const prerequisites = specDocs.match(/## Prerequisites\s+(.*?)\n## /su)?.[1] ?? "";
   assert.match(prerequisites, /setup-matt-pocock-skills/u, "to-spec docs have an empty Prerequisites section");
-  const ticketsWhen = ticketsDocs.match(/## When to reach for it\s+(.*?)\n## /su)?.[1] ?? "";
-  assert.match(ticketsWhen, /approved plan or conversation.*directly/isu, "to-tickets docs make to-spec mandatory");
-  assert.doesNotMatch(ticketsWhen, /produce one first/iu, "to-tickets docs contradict the no-linked-Spec path");
-  const directTicketRoute = /approved plan or conversation may skip `\/to-spec` and invoke `\/to-tickets` directly/iu;
+  assert.match(implement, /Standalone Spec.*explicit.*direct.*current branch/isu);
+  assert.match(implement, /Tracker Spec.*`\/execute-issue`/isu);
+  assert.match(successorAdr, /supersedes:.*0022/iu);
+  assert.match(successorAdr, /integration candidate.*push_ready/isu);
   for (const [path, content] of [
     ["skills/engineering/ask-matt/SKILL.md", matt],
     ["docs/engineering/ask-matt.md", mattDocs],
-    ["docs/adr/0022-use-issue-native-execution-and-closeout.md", deliveryAdr],
-  ]) assert.match(content, directTicketRoute, `${path} omits the direct ticket route`);
-  for (const [path, content] of [
-    ["skills/engineering/ask-matt/SKILL.md", matt],
-    ["docs/engineering/ask-matt.md", mattDocs],
-  ]) assert.match(content, /grill-with-docs.*planning-artifact delta.*to-spec/isu, path + " lets a small grilled build bypass to-spec");
+  ]) {
+    assert.match(content, /to-spec.*sole.*Single-Issue.*Multi-Issue/isu, path + " duplicates or hides delivery classification");
+    assert.match(content, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu, path + " routes execution incorrectly");
+  }
 
   for (const [path, page] of [["to-spec", specDocs], ["to-tickets", ticketsDocs], ["ask-matt", mattDocs]]) {
     const whatItDoes = page.match(/## What it does\s+(.*?)\n## /su)?.[1] ?? "";
@@ -264,64 +281,53 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   const close = read("skills/engineering/close-issue/SKILL.md");
   assert.match(close, /completion note/iu);
   assert.match(close, /original target branch/iu);
-  assert.match(close, /fast-forward/iu);
+  assert.match(close, /capture.*target.*`T`.*reviewed candidate.*`C`/isu);
+  assert.match(close, /isolated temporary integration worktree/iu);
+  assert.match(close, /`T`.*ancestor of `C`.*`I = C`/isu);
+  assert.match(close, /no-fast-forward merge.*`I`/isu);
+  assert.match(close, /conflict.*before.*real target.*receipt.*Issue closure/isu);
+  assert.match(close, /never invokes `execute-issue`.*never reruns.*Standards.*Spec.*full verification/isu);
+  assert.match(close, /git merge --ff-only/u);
+  assert.match(close, /target `HEAD`.*`I`.*`C`.*ancestor/isu);
   assert.match(close, /git worktree remove/u);
   assert.match(close, /Close the Issue/iu);
   assert.match(close, /read it back once/iu);
-  assert.match(close, /without rebasing/iu);
   assert.match(close, /original target worktree does not need to be clean/iu);
   assert.match(close, /staged, unstaged, and untracked/iu);
   assert.match(close, /same path or an ancestor\/descendant path-prefix pair/iu);
   assert.match(close, /Any collision stops with the Issue open/iu);
   assert.match(close, /For candidate and dirty renames, include both source and destination/iu);
   assert.match(close, /Parse.*NUL-safely.*case semantics/isu);
-  assert.match(close, /worktree content fingerprints.*index entries/isu);
   assert.match(close, /dirty-target-preservation:v1/u);
-  assert.match(close, /phase `PREPARED`.*target-before SHA.*candidate SHA.*digest.*counts/isu);
+  assert.match(close, /phase `PREPARED`.*`T`.*`C`.*`I`.*digest.*counts.*hook/isu);
   assert.match(close, /Read back and verify those exact fields before continuing/iu);
-  assert.match(close, /update.*`VERIFIED`.*read back.*(?:failure|mismatch).*stops before cleanup/isu);
-  assert.match(close, /target `HEAD` or digest moved.*stop this invocation.*Do not refresh the candidate, replace the receipt baseline/isu);
-  assert.doesNotMatch(close, /target `HEAD` moved.*return to candidate refresh/isu);
-  assert.match(close, /git merge --ff-only/u);
+  assert.match(close, /`VERIFIED`.*target-after.*`I`.*candidate reachable.*read back/isu);
   assert.match(close, /never automatically stash, commit, clean, reset/iu);
-  assert.match(close, /digest mismatch.*do not attempt automatic repair or rollback/isu);
-  const prepared = close.indexOf("receipt in phase `PREPARED`");
-  const preparedReadBack = close.indexOf("Read back and verify those exact fields", prepared);
-  const finalPreflight = close.indexOf("Re-read the target `HEAD` and recompute the dirty snapshot immediately before the fast-forward", preparedReadBack);
-  const fastForward = close.indexOf("run `git merge --ff-only`");
-  const postFastForward = close.indexOf("After the fast-forward, recompute the canonical dirty snapshot", fastForward);
-  const verified = close.indexOf("update the receipt to `VERIFIED`", fastForward);
-  const verifiedReadBack = close.indexOf("then read back and verify those exact fields", verified);
-  const cleanupHeadCheck = close.indexOf("Immediately re-read the target `HEAD`", verifiedReadBack);
-  const cleanupAction = close.indexOf("Remove that worktree with `git worktree remove`", cleanupHeadCheck);
-  const closureReceiptGate = close.indexOf("Require the same `VERIFIED` receipt", cleanupAction);
-  const closureHeadCheck = close.indexOf("immediately re-read the target `HEAD`", closureReceiptGate);
-  const closureAction = close.indexOf("Close the Issue through the configured tracker", closureHeadCheck);
-  const orderedProof = [prepared, preparedReadBack, finalPreflight, fastForward, postFastForward, verified, verifiedReadBack, cleanupHeadCheck, cleanupAction, closureReceiptGate, closureHeadCheck, closureAction];
-  assert.equal(orderedProof.every((position, index) => position !== -1 && (index === 0 || orderedProof[index - 1] < position)), true);
-  assert.match(close, /tracker failure.*mismatch.*stops before integration/isu);
+  assert.match(close, /target.*digest.*hook.*drift.*`FAILED`.*stop/isu);
   assert.match(close, /never publish paths or file contents/iu);
-  const verifiedProof = close.match(/After the fast-forward,[^\n]+/u)?.[0] ?? "";
-  assert.match(verifiedProof, /digest.*match.*`VERIFIED`.*target-after equal to the candidate.*same digest.*read back/iu);
-  assert.match(close, /`PREPARED` with target still equal to target-before.*matching digest.*fast-forward/isu);
-  assert.match(close, /`PREPARED` with target already equal to the candidate.*matching digest.*`VERIFIED`.*cleanup/isu);
-  assert.match(close, /`VERIFIED` with target equal to the candidate.*cleanup and closure.*without re-baselining/isu);
-  assert.match(close, /missing, `FAILED`, mismatched, unreadable, or third-SHA receipt.*ambiguous and stops/isu);
-  const cleanupGate = close.match(/Require the matching `VERIFIED` receipt before cleanup\.[^\n]+/u)?.[0] ?? "";
-  const closureGate = close.match(/Require the same `VERIFIED` receipt[^\n]+/u)?.[0] ?? "";
-  assert.match(cleanupGate, /re-read.*target `HEAD`.*receipt candidate.*before.*worktree/iu);
-  assert.match(closureGate, /re-read.*target `HEAD`.*receipt candidate.*before.*clos/iu);
-  assert.match(close, /target drift after verification.*stops.*without.*changing.*`VERIFIED`.*re-baselining/isu);
+  assert.match(close, /`FAILED`.*explicit human reconciliation.*preservation equality is not proven/isu);
+  assert.match(close, /matching read-back `VERIFIED` or `RECONCILED`.*before cleanup.*before closing/isu);
   assert.match(read("docs/engineering/close-issue.md"), /target may keep unrelated staged, unstaged, and untracked work/iu);
-  assert.match(close, /update and read back the completion note/iu);
   assert.match(close, /already absent worktree means cleanup is complete/iu);
   const alreadyClosed = close.match(/If the Issue is already closed,[^\n]+/u)?.[0] ?? "";
-  assert.match(alreadyClosed, /target `HEAD`.*recorded candidate.*worktree.*absent/iu);
-  assert.match(alreadyClosed, /matching.*`VERIFIED` receipt/iu);
+  assert.match(alreadyClosed, /candidate.*integration candidate.*ancestors.*current target.*worktree.*absent/iu);
   assert.match(close, /read back.*closed state.*without.*clos(?:e|ing).*again/isu);
   assert.match(close, /never repairs product code/iu);
 
-  for (const name of ["execute-issue", "close-issue"]) {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  assert.match(verify, /capture.*verification baseline.*exact target `HEAD`/isu);
+  assert.match(verify, /closed Issue.*completion note.*original target/isu);
+  assert.match(verify, /missing.*receipt.*candidate.*not reachable.*stop/isu);
+  assert.match(verify, /code-review.*Standards.*Spec axis.*member Issue.*linked Specs/isu);
+  assert.match(verify, /aggregate.*member/isu);
+  assert.match(verify, /union-focused.*full verification/isu);
+  assert.match(verify, /clean verification worktree/iu);
+  assert.match(verify, /push_ready:v1.*exact target `HEAD`.*member Issue.*candidate.*integration/isu);
+  assert.match(verify, /target movement.*invalidates/iu);
+  assert.match(verify, /never closes Issues.*changes product code.*pushes.*deploys/isu);
+  assert.match(verify, /integration-repair Issue.*explicit.*reopen/isu);
+
+  for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
     const skill = read(`skills/engineering/${name}/SKILL.md`);
     const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
     const page = read(`docs/engineering/${name}.md`);
@@ -342,7 +348,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     const modelStart = readme.indexOf(modelHeading, userStart);
     const userInvoked = readme.slice(userStart, modelStart);
     const modelInvoked = readme.slice(modelStart + modelHeading.length);
-    for (const name of ["execute-issue", "close-issue"]) {
+    for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
       assert.match(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as user-invoked`);
       assert.doesNotMatch(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as model-invoked`);
     }
@@ -357,6 +363,81 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(historicalBanner, /explicitly.*`\/execute-issue`.*`\/close-issue`/isu);
   assert.match(historicalBanner, /without lifecycle authorization/iu);
   assert.doesNotMatch(historicalBanner, /uses one lifecycle authorization/iu);
+});
+
+test("Issue integration composes independently reviewed candidates in arbitrary close order", () => {
+  const repo = mkdtempSync(join(tmpdir(), "skills-integration-fixture-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  const isAncestor = (ancestor, descendant) => {
+    try {
+      git("merge-base", "--is-ancestor", ancestor, descendant);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    git("init", "-b", "target");
+    git("config", "user.name", "Contract Test");
+    git("config", "user.email", "contract@example.test");
+    writeFileSync(join(repo, "base.txt"), "base\n");
+    git("add", "base.txt");
+    git("commit", "-m", "base");
+    const baseline = git("rev-parse", "HEAD");
+
+    git("checkout", "-b", "issue-a");
+    writeFileSync(join(repo, "a.txt"), "A\n");
+    git("add", "a.txt");
+    git("commit", "-m", "issue A");
+    const candidateA = git("rev-parse", "HEAD");
+
+    git("checkout", "target");
+    assert.equal(isAncestor(baseline, candidateA), true);
+    git("merge", "--ff-only", candidateA);
+    assert.equal(git("rev-parse", "HEAD"), candidateA, "direct close should fast-forward to the reviewed candidate");
+
+    git("checkout", "-b", "issue-b", baseline);
+    writeFileSync(join(repo, "b.txt"), "B\n");
+    git("add", "b.txt");
+    git("commit", "-m", "issue B");
+    const candidateB = git("rev-parse", "HEAD");
+
+    git("checkout", "target");
+    const targetAfterA = git("rev-parse", "HEAD");
+    git("checkout", "-b", "integrate-b", targetAfterA);
+    git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
+    const integrationB = git("rev-parse", "HEAD");
+    assert.equal(git("rev-list", "--parents", "-n", "1", integrationB).split(/\s+/u).length, 3);
+    assert.equal(isAncestor(targetAfterA, integrationB), true);
+    assert.equal(isAncestor(candidateB, integrationB), true);
+
+    git("checkout", "target");
+    git("merge", "--ff-only", integrationB);
+    const aggregate = git("rev-parse", "HEAD");
+    assert.equal(isAncestor(candidateA, aggregate), true);
+    assert.equal(isAncestor(candidateB, aggregate), true);
+
+    git("checkout", "-b", "issue-conflict", baseline);
+    writeFileSync(join(repo, "base.txt"), "issue change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "conflicting issue");
+    const conflictingCandidate = git("rev-parse", "HEAD");
+
+    git("checkout", "target");
+    writeFileSync(join(repo, "base.txt"), "target change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "target conflict");
+    const targetBeforeConflict = git("rev-parse", "HEAD");
+    git("checkout", "-b", "integrate-conflict", targetBeforeConflict);
+    assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
+    git("merge", "--abort");
+    git("checkout", "target");
+    assert.equal(git("rev-parse", "HEAD"), targetBeforeConflict, "a conflict must not advance the real target");
+    assert.equal(isAncestor(conflictingCandidate, targetBeforeConflict), false);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });
 
 test("setup-ron is retired and remove-ron is a narrow user-invoked cleanup", () => {
@@ -419,11 +500,12 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/remove-ron`/u);
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
-  assert.match(matt, /default.*`\/implement`/isu);
+  assert.match(matt, /`\/verify-target-before-push/iu);
+  assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
-  assert.match(matt, /proves unrelated target dirt.*read-back receipt/iu);
-  assert.match(matt, /one integration into the same target branch/iu);
-  assert.match(matt, /explicitly.*`\/execute-issue`.*`\/close-issue`/isu);
+  assert.match(matt, /close-issue.*exact candidate.*current local target.*close/isu);
+  assert.match(matt, /Before push.*verify-target-before-push.*exact aggregate target/isu);
+  assert.match(matt, /to-spec.*sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
   const context = read("CONTEXT.md");
@@ -436,6 +518,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
     "remove-ron",
     "execute-issue",
     "close-issue",
+    "verify-target-before-push",
   ]) {
     const page = read(`docs/engineering/${name}.md`);
     assert.doesNotMatch(page, /\]\((?:\.\/|\.\.\/)/u);
@@ -459,8 +542,14 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/remove-ron/SKILL.md",
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/close-issue/SKILL.md",
+    "skills/engineering/verify-target-before-push/SKILL.md",
+    "docs/engineering/implement.md",
+    "docs/engineering/execute-issue.md",
+    "docs/engineering/close-issue.md",
+    "docs/engineering/verify-target-before-push.md",
     "docs/adr/0021-focus-ron-on-local-issue-delivery.md",
     "docs/adr/0022-use-issue-native-execution-and-closeout.md",
+    "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md",
   ]) {
     for (const match of read(path).matchAll(/\]\(([^)]+)\)/gu)) {
       const destination = match[1].replace(/^<|>$/gu, "");

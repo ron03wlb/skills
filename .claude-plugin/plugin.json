@@ -34,6 +34,7 @@
     "./skills/engineering/implement",
     "./skills/engineering/execute-issue",
     "./skills/engineering/close-issue",
+    "./skills/engineering/verify-target-before-push",
     "./skills/engineering/prototype",
     "./skills/engineering/research",
     "./skills/engineering/domain-modeling",

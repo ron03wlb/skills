@@ -55,7 +55,7 @@ The compact human-readable tracker record written after one `execute-issue` cand
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 
 **Manual integration serialization**:
-The operating rule that a human starts only one `close-issue` integration into the same target branch at a time; integrations into other target branches may proceed concurrently. The skill protects the candidate and target through refresh, collision checks, preservation evidence, and current-target gates; it does not add a queue or lock.
+The operating rule that a human starts only one `close-issue` integration into the same target branch at a time; Issue execution and integrations into other target branches may proceed concurrently. The skill protects the target through isolated composition, collision checks, preservation evidence, and current-target gates; it does not add a queue or lock.
 _Avoid_: Automatic closeout chain, workflow scheduler, concurrent writers for the same target branch
 
 **Ron repository footprint**:
@@ -66,13 +66,17 @@ _Avoid_: All Ron-related history, Wiki content, execution branches
 The explicit `/remove-ron` cleanup of one **Ron repository footprint**. It removes only owned local artifacts, commits an actual tracked cleanup diff, and stops on active execution, dirty overlap, or ambiguous ownership without touching external history or delivery state.
 _Avoid_: Plugin uninstall, branch cleanup, Issue deletion, full purge
 
-**Target Integration Candidate**:
-The exact post-target-sync commit reviewed before the local target branch advances. Target integration is a fast-forward to this same reviewed commit.
-_Avoid_: Pre-merge candidate, target verification
+**Integration candidate**:
+The exact commit prepared in an isolated temporary worktree from the current target and one unchanged reviewed Issue candidate. It is the reviewed candidate itself when that candidate contains the target, otherwise a no-fast-forward merge commit containing both histories.
+_Avoid_: Refreshed Issue candidate, conflict-resolution commit, aggregate verification
 
-**Target refresh**:
-The closeout-entry merge of the latest original local target branch into one **Issue worktree** without rebasing. A changed candidate reruns verification and Standards/Spec review; conflict, scope expansion, or a confirmed finding leaves the Issue open for a separate `execute-issue` run.
-_Avoid_: Automatic conflict resolution, closeout repair commit
+**Issue integration receipt**:
+The read-back closeout record binding one Issue, target-before, reviewed candidate, **Integration candidate**, candidate ancestry, and dirty-target preservation evidence. A verified receipt proves local inclusion and gates exact worktree cleanup and Issue closure; it does not prove aggregate semantics.
+_Avoid_: Execution completion note, push authorization, test report
+
+**Push-ready receipt**:
+The local read-back `push_ready` record produced only after aggregate Standards/multi-Spec review, required verification, and closed-candidate reachability all pass on one exact target `HEAD`. Any target movement invalidates it.
+_Avoid_: Issue integration receipt, push command, production verification
 
 **Execution readiness**:
 The state in which an open **Issue** has resolved blockers, clear acceptance and Spec scope, an identifiable original target, and no conflicting worktree owner.
@@ -257,15 +261,15 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`
 - **Manual integration serialization** permits only one integration into the same target branch at a time; other target branches may proceed concurrently
-- A changed **Target Integration Candidate** is reverified and re-reviewed before target advancement
-- `close-issue` fast-forwards the target, removes the clean registered **Issue worktree**, and closes the Issue without repairing product code
+- `close-issue` prepares one **Integration candidate** without changing the reviewed Issue candidate, fast-forwards the target, proves the **Issue integration receipt**, removes the clean registered **Issue worktree**, and closes the Issue without repairing product code
+- `/verify-target-before-push` proves all relevant closed candidates are reachable, performs aggregate review and verification on exact target `HEAD`, and writes a current **Push-ready receipt** without pushing
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**
 - A **Decision Explanation Packet** produces a non-authoritative **Decision Card**
 - A **Wiki validation result** combines a deterministic **Wiki validation pipeline** result with an independent **Wiki semantic review** result without merging their proof authority
 - The **Wiki control skill** resolves a root, validates and semantically reviews bounded Wiki-only edits, and commits only a clean Wiki diff
 - Issue delivery does not invoke the **Wiki control skill** or inherit its validation and review obligations
 - A **Wiki auxiliary tool** may consume the **Canonical Wiki** but never inherits Wiki mutation or review authority
-- Final review and the **Execution completion note** bind the resulting **Target Integration Candidate**
+- Final execution review and the **Execution completion note** bind the unchanged reviewed Issue candidate; closeout separately binds the resulting **Integration candidate**
 - **Execution code review** supplies the Standards and Spec results used by `execute-issue`
 - `execute-issue` owns implementation, Standards/Spec review, and the **Material repair wave** loop for one Issue
 

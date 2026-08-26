@@ -1,36 +1,51 @@
 ---
 name: to-spec
-description: Turn the current conversation into a spec, seal approved planning artifacts, and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
+description: Turn the settled conversation into an execution-ready Spec, seal approved planning artifacts, classify its delivery shape, and publish it.
 disable-model-invocation: true
 ---
 
-This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know.
+# To Spec
 
-The issue tracker and triage label vocabulary should have been provided to you — run `/setup-matt-pocock-skills` if not.
+Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and prefer existing high-level verification seams.
 
-## Process
+The configured issue tracker and triage labels must already exist; otherwise run `/setup-matt-pocock-skills`.
 
-1. Explore the repo to understand the current state of the codebase, if you haven't already. Use the project's domain glossary vocabulary throughout the spec, and respect any ADRs in the area you're touching.
+## 1. Resolve the publication
 
-2. Sketch out the seams at which you're going to test the feature. Existing seams should be preferred to new ones. Use the highest seam possible. If new seams are needed, propose them at the highest point you can. The fewer seams across the codebase, the better - the ideal number is one.
+Read any referenced Spec body and comments. An existing Spec uses `revision` mode: update the same tracker Spec and do not create a duplicate. Otherwise use `primary` mode and create one Spec.
 
-Check with the user that these seams match their expectations.
+`to-spec` is the sole authority for classifying a Tracker Spec:
 
-3. Determine whether this is a primary Spec or a revision. If the conversation or argument references an existing Spec, read its full body and comments, set mode to `revision`, and update the same tracker Spec; do not create a duplicate. Otherwise set mode to `primary`. Draft the Spec using the template below, but do not publish it or apply `ready-for-agent` yet.
+- **Single-Issue**: one cohesive outcome fits one Issue worktree, execution context, reviewed candidate, and closeout.
+- **Multi-Issue**: there are independently executable outcomes or blocking edges, or the work cannot safely fit one execution/review/closeout cycle.
 
-4. Select the Planning Seal before publication. It is the target-branch commit recorded as the planning baseline for approved glossary and ADR changes from the settled conversation. A direct `/to-spec` invocation authorizes at most one local commit when those artifacts need sealing; it does not authorize any other commit, push, merge, cleanup, or unrelated path.
+File count, module count, risk, or apparent size alone never decides. Classify automatically from the settled requirements and repository evidence. Only material ambiguity that could change the route permits one blocking question with a recommendation; never default from uncertainty.
 
-Resolve the local target branch and inspect its staged, unstaged, and untracked changes. Classify only the planning artifacts owned by this Spec:
+## 2. Draft an executable contract
 
-Before classifying the current delta on a retry, read any prior partial-publication state. If its tracker read-back or exact partial-state report records a verified Planning Seal, require that full SHA to exist locally and be an ancestor of the current target `HEAD`, then reuse it. Conflicting or missing retry evidence stops; never replace a previously selected seal with the current target `HEAD`.
+Use the template below. User Outcomes are optional actor/value context, at most three, and never define done. Stable `AC-n` Acceptance Criteria are the sole done authority. Expected paths and symbols are source-grounded starting points, not an allowlist.
 
-- If there is no relevant planning-artifact delta and no verified partial-publication seal was recovered, reuse the current target `HEAD` as the planning baseline and do not create an empty commit.
-- If the delta consists of exact approved paths or hunks from the settled conversation, commit only those changes. Preserve unrelated staged entries, working-tree changes, untracked files, file modes, and path status; never use broad staging. If a file mixes owned and unrelated hunks and exact isolation cannot be proved, stop.
-- If ownership, target identity, or scope is ambiguous, or the approved delta cannot be isolated from unrelated work, stop before commit or publication and ask only for the missing decision.
+Every Acceptance Criterion must be covered by at least one Implementation Plan step and one Verification item; every plan step must cover at least one Acceptance Criterion. Use inline `Covers: AC-n` references. Compare the defined and covered ID sets before publication and stop on missing, unexpected, or orphan mappings; do not create a separate matrix or parser.
 
-Verify the resulting full commit SHA, require the owned planning changes to be committed, and prove the unrelated target snapshot is unchanged. Record `created` when this invocation made the commit and `reused` when no commit was needed. If the commit fails, stop before tracker publication. Any failure or mismatch after the seal is selected—including tracker create or update, label application, or read-back—keeps the verified seal. Report its full SHA with the exact partial state; do not amend, reset, or roll back the Planning Seal.
+The next command is authoritative: Single-Issue ends with `/execute-issue <Spec-ID>`; Multi-Issue ends with `/to-tickets <Spec-ID>`.
 
-5. Publish the Spec. In `primary` mode, create the tracker Spec. In `revision` mode, update the same tracker Spec and do not create a duplicate. Populate its Planning baseline fields, apply the `ready-for-agent` triage label, then read the published body back once and require the recorded mode, commit, and seal state to match before reporting completion.
+## 3. Select the Planning Seal
+
+Select the local target-branch commit that seals approved glossary and ADR changes before tracker work becomes executable. This invocation authorizes at most one scoped local planning commit, not implementation, push, merge, cleanup, or unrelated paths.
+
+Before classifying the current delta on a retry, read any prior partial-publication state. If tracker read-back or the exact partial-state report records a verified Planning Seal, require that full SHA to exist locally and be an ancestor of current target `HEAD`, then reuse it. Missing or conflicting evidence stops; never replace it with current target `HEAD`.
+
+- If there is no relevant planning-artifact delta and no recovered seal, reuse current target `HEAD` and do not create an empty commit.
+- If exact approved paths or hunks contain the owned delta, commit only those changes while preserving unrelated staged, unstaged, and untracked work. If owned hunks cannot be isolated from unrelated work, stop.
+- Ambiguous ownership, scope, or target identity stops before commit or publication.
+
+Verify the full SHA, owned diff, and unchanged unrelated snapshot. Record `created`, `successor`, or `reused`. A later tracker or read-back failure retains the verified seal and reports its full SHA and exact partial state; do not amend, reset, or roll it back.
+
+## 4. Publish the Spec
+
+Publish the Spec only after the Planning Seal succeeds. In `primary` mode create the tracker record, then populate it with its real Spec ID and exact next command. In `revision` mode update the same record. Apply `ready-for-agent`, read the body and label back once, and require mode, full seal SHA/state, classification, all `AC-n` mappings, and next command to match.
+
+If tracker create or update, label application, or read-back fails, report the selected seal's full SHA with the exact partial state; do not amend, reset, or roll back that seal.
 
 <spec-template>
 
@@ -38,58 +53,49 @@ Verify the resulting full commit SHA, require the owned planning changes to be c
 
 - Mode: <primary or revision>
 - Commit: <full local target-branch commit SHA>
-- Seal: <created or reused>
+- Seal: <created, successor, or reused>
+
+## Delivery classification
+
+- Shape: <Single-Issue or Multi-Issue>
+- Rationale: <why this fits one execution cycle or requires independently executable children>
 
 ## Problem Statement
 
-The problem that the user is facing, from the user's perspective.
+<The observable problem and why it matters.>
 
-## Solution
+## Proposed Outcome
 
-The solution to the problem, from the user's perspective.
+<The settled behavior and boundaries.>
 
-## User Stories
+## User Outcomes
 
-A LONG, numbered list of user stories. Each user story should be in the format of:
+<Zero to three concise actor/value outcomes.>
 
-1. As an <actor>, I want a <feature>, so that <benefit>
+## Acceptance Criteria
 
-<user-story-example>
-1. As a mobile bank customer, I want to see balance on my accounts, so that I can make better informed decisions about my spending
-</user-story-example>
+- **AC-1 - <name>:** <Objectively verifiable condition.>
 
-This list of user stories should be extremely extensive and cover all aspects of the feature.
+## Implementation Plan
 
-## Implementation Decisions
+Expected touchpoints are non-exhaustive:
 
-A list of implementation decisions that were made. This can include:
+- `<path or symbol>`
 
-- The modules that will be built/modified
-- The interfaces of those modules that will be modified
-- Technical clarifications from the developer
-- Architectural decisions
-- Schema changes
-- API contracts
-- Specific interactions
+### Step 1: <outcome>
 
-Do NOT include specific file paths or code snippets. They may end up being outdated very quickly.
+<Source-grounded work.> **Covers: AC-1.**
 
-Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it within the relevant decision and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+## Verification
 
-## Testing Decisions
-
-A list of testing decisions that were made. Include:
-
-- A description of what makes a good test (only test external behavior, not implementation details)
-- Which modules will be tested
-- Prior art for the tests (i.e. similar types of tests in the codebase)
+- <Observable check and command where known.> **Covers: AC-1.**
 
 ## Out of Scope
 
-A description of the things that are out of scope for this spec.
+- <Explicit exclusion.>
 
-## Further Notes
+## Next command
 
-Any further notes about the feature.
+`/execute-issue <Spec-ID>` or `/to-tickets <Spec-ID>` (keep only the selected command)
 
 </spec-template>

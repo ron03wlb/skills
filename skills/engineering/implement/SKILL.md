@@ -1,15 +1,13 @@
 ---
 name: implement
-description: "Implement a piece of work based on a spec or set of tickets."
+description: Implement an approved Standalone Spec or explicit direct work on the current branch.
 disable-model-invocation: true
 ---
 
-Implement the work described by the user in the spec or tickets.
+# Implement
 
-Use /tdd where possible, at pre-agreed seams.
+Use this only for an approved **Standalone Spec** or explicitly requested direct current-branch work. A **Tracker Spec**, including a local-file tracker record, follows its `/to-spec` route through `/execute-issue`; do not implement it here.
 
-Run typechecking regularly, single test files regularly, and the full test suite once at the end.
+Treat the selected plan and Acceptance Criteria as scope. Use `/tdd` at pre-agreed seams where behavior can be captured, run focused checks regularly and the full required suite at the end, then invoke `/code-review` against the fixed baseline. Repair confirmed findings before committing only the intended current-branch changes.
 
-Once done, use /code-review to review the work.
-
-Commit your work to the current branch.
+Do not create tracker lifecycle state, a dedicated Issue worktree, integration receipts, push, or deploy.

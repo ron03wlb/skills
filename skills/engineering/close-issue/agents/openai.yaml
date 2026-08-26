@@ -1,7 +1,7 @@
 interface:
   display_name: "Close Issue"
-  short_description: "Integrate, clean up, and close one Issue"
-  default_prompt: "Use $close-issue to integrate one reviewed Issue worktree into its original local branch, remove the worktree, and close the Issue."
+  short_description: "Integrate an exact candidate and close one Issue"
+  default_prompt: "Use $close-issue to compose one exact reviewed candidate with its current local target, prove inclusion, remove the Issue worktree, and close the Issue."
 
 policy:
   allow_implicit_invocation: false

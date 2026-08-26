@@ -1,0 +1,7 @@
+interface:
+  display_name: "Verify Target Before Push"
+  short_description: "Gate one aggregate target before a separate push"
+  default_prompt: "Use $verify-target-before-push to prove all relevant closed candidates are present and the exact aggregate target is review/test clean without pushing."
+
+policy:
+  allow_implicit_invocation: false
