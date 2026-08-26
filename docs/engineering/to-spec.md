@@ -30,13 +30,13 @@ Reach for it after behavior and domain language are settled. Use [grill-with-doc
 
 A Single-Issue Spec carries at most three non-authoritative User Outcomes, stable `AC-n` Acceptance Criteria, non-exhaustive expected touchpoints, a mapped Implementation Plan, verification, exclusions, and `/execute-issue <Spec-ID>`. Every criterion is covered by a step and verification item; every step covers a criterion.
 
-A Multi-Issue Spec keeps the overall outcome and cross-Issue constraints and ends with `/to-tickets <Spec-ID>`. Classification follows executable outcomes and blocking edges, not file count or apparent size. Only material routing ambiguity permits one blocking question with a recommendation.
+A Multi-Issue parent keeps only the overall outcome, cross-Issue constraints, decomposition rationale, exclusions, and `/to-tickets <Spec-ID>` handoff. It does not duplicate child Acceptance Criteria, plans, touchpoints, or verification; `to-tickets` creates those executable authorities. Classification follows executable outcomes and blocking edges, not file count or apparent size. Only material routing ambiguity permits one blocking question with a recommendation.
 
 The Planning Seal commits only owned planning artifacts or reuses the current target when no relevant delta exists. Existing Specs are revised in place. Publication or read-back failure reports the full SHA. A retry verifies the prior partial-state report; missing or conflicting evidence stops instead of selecting a new seal.
 
 ## It's working if
 
-- The Spec contains mapped Acceptance Criteria and one copy-ready next command.
+- A Single-Issue Spec contains mapped Acceptance Criteria; a Multi-Issue parent contains only cross-Issue decomposition authority. Both end in one copy-ready next command.
 - Expected paths guide discovery without becoming an allowlist.
 - The published mode, classification, Planning Seal, label, and command all survive read-back.
 

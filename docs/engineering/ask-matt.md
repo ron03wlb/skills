@@ -36,7 +36,7 @@ Each completed Issue is locally integrated and closed through [close-issue](http
 
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 
-The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery.
+The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs.
 
 ## Where it fits
 

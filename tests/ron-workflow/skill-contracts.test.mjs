@@ -178,15 +178,17 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(spec, /existing Spec.*revision.*update the same tracker Spec.*do not create a duplicate/isu);
   assert.match(spec, /create or update.*label.*read-back.*full SHA.*partial state.*do not amend, reset, or roll back/isu);
   assert.match(specDocs, /failure.*full SHA.*retry.*prior partial-state report.*missing or conflicting evidence stops/isu);
-  const specTemplate = spec.match(/<spec-template>(.*?)<\/spec-template>/su)?.[1] ?? "";
-  assert.match(specTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Spec template omits revision lineage");
-  assert.match(specTemplate, /Delivery classification.*Shape: <Single-Issue or Multi-Issue>/su);
-  assert.match(specTemplate, /User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*Next command/su);
-  assert.doesNotMatch(specTemplate, /extremely extensive|## User Stories|## Implementation Decisions/iu);
+  const singleTemplate = spec.match(/<single-issue-template>(.*?)<\/single-issue-template>/su)?.[1] ?? "";
+  const multiTemplate = spec.match(/<multi-issue-template>(.*?)<\/multi-issue-template>/su)?.[1] ?? "";
+  assert.match(singleTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Single-Issue template omits revision lineage");
+  assert.match(singleTemplate, /Shape: Single-Issue.*User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*`\/execute-issue <Spec-ID>`/su);
+  assert.match(multiTemplate, /Shape: Multi-Issue.*Overall Outcome.*Cross-Issue Constraints.*Decomposition Rationale.*`\/to-tickets <Spec-ID>`/su);
+  assert.doesNotMatch(multiTemplate, /## Acceptance Criteria|## Implementation Plan|## Verification/u);
+  assert.doesNotMatch(singleTemplate + multiTemplate, /extremely extensive|## User Stories|## Implementation Decisions/iu);
   assert.match(spec, /sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.match(spec, /repository evidence.*automatic.*one blocking question.*recommendation/isu);
   assert.match(spec, /at most three.*User Outcomes/isu);
-  assert.match(spec, /every Acceptance Criterion.*plan step.*verification.*every plan step.*Acceptance Criterion/isu);
+  assert.match(spec, /every Acceptance Criterion.*Implementation Plan step.*Verification.*every Implementation Plan step.*Acceptance Criterion/isu);
   assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
 
   const ticketsSeal = tickets.indexOf("Planning Seal");
@@ -280,6 +282,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
 
   const close = read("skills/engineering/close-issue/SKILL.md");
   assert.match(close, /completion note/iu);
+  assert.match(close, /latest terminal execution state.*`E`.*no later blocked state/isu);
   assert.match(close, /original target branch/iu);
   assert.match(close, /capture.*target.*`T`.*reviewed candidate.*`C`/isu);
   assert.match(close, /isolated temporary integration worktree/iu);
@@ -300,6 +303,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /Parse.*NUL-safely.*case semantics/isu);
   assert.match(close, /dirty-target-preservation:v1/u);
   assert.match(close, /phase `PREPARED`.*`T`.*`C`.*`I`.*digest.*counts.*hook/isu);
+  assert.match(close, /receipt.*execution-state identity `E`/isu);
   assert.match(close, /Read back and verify those exact fields before continuing/iu);
   assert.match(close, /`VERIFIED`.*target-after.*`I`.*candidate reachable.*read back/isu);
   assert.match(close, /never automatically stash, commit, clean, reset/iu);
@@ -307,6 +311,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /never publish paths or file contents/iu);
   assert.match(close, /`FAILED`.*explicit human reconciliation.*preservation equality is not proven/isu);
   assert.match(close, /matching read-back `VERIFIED` or `RECONCILED`.*before cleanup.*before closing/isu);
+  assert.match(close, /both gates.*latest execution state identity `E`.*every blocker still closed/isu);
   assert.match(read("docs/engineering/close-issue.md"), /target may keep unrelated staged, unstaged, and untracked work/iu);
   assert.match(close, /already absent worktree means cleanup is complete/iu);
   const alreadyClosed = close.match(/If the Issue is already closed,[^\n]+/u)?.[0] ?? "";
@@ -316,7 +321,9 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
 
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   assert.match(verify, /capture.*verification baseline.*exact target `HEAD`/isu);
-  assert.match(verify, /closed Issue.*completion note.*original target/isu);
+  assert.match(verify, /closed Issues.*execution\/completion history.*original target/isu);
+  assert.match(verify, /union.*execution\/completion history.*closeout receipt.*missing completion note.*missing receipt/isu);
+  assert.match(verify, /latest terminal execution state.*no superseding blocked state.*identity.*closeout receipt/isu);
   assert.match(verify, /missing.*receipt.*candidate.*not reachable.*stop/isu);
   assert.match(verify, /code-review.*Standards.*Spec axis.*member Issue.*linked Specs/isu);
   assert.match(verify, /aggregate.*member/isu);
@@ -365,8 +372,113 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(historicalBanner, /uses one lifecycle authorization/iu);
 });
 
-test("Issue integration composes independently reviewed candidates in arbitrary close order", () => {
+test("Issue integration preserves dirty target state and composes candidates in arbitrary close order", () => {
   const repo = mkdtempSync(join(tmpdir(), "skills-integration-fixture-"));
+  const rawGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+  const git = (...args) => rawGit(...args).trim();
+  const isAncestor = (ancestor, descendant) => {
+    try {
+      git("merge-base", "--is-ancestor", ancestor, descendant);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  try {
+    git("init", "-b", "target");
+    git("config", "user.name", "Contract Test");
+    git("config", "user.email", "contract@example.test");
+    writeFileSync(join(repo, "base.txt"), "base\n");
+    writeFileSync(join(repo, "tracked-local.txt"), "tracked baseline\n");
+    git("add", "base.txt", "tracked-local.txt");
+    git("commit", "-m", "base");
+    const baseline = git("rev-parse", "HEAD");
+
+    git("checkout", "-b", "issue-a");
+    writeFileSync(join(repo, "a.txt"), "A\n");
+    git("add", "a.txt");
+    git("commit", "-m", "issue A");
+    const candidateA = git("rev-parse", "HEAD");
+    git("checkout", "target");
+    assert.equal(isAncestor(baseline, candidateA), true);
+    git("merge", "--ff-only", candidateA);
+    assert.equal(git("rev-parse", "HEAD"), candidateA, "direct close should fast-forward to the reviewed candidate");
+
+    git("checkout", "-b", "issue-conflict", baseline);
+    writeFileSync(join(repo, "base.txt"), "issue change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "conflicting issue");
+    const conflictingCandidate = git("rev-parse", "HEAD");
+    git("checkout", "target");
+    writeFileSync(join(repo, "base.txt"), "target change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "target conflict");
+    const targetBeforeB = git("rev-parse", "HEAD");
+    git("checkout", "-b", "integrate-conflict", targetBeforeB);
+    assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
+    git("merge", "--abort");
+    git("checkout", "target");
+    assert.equal(git("rev-parse", "HEAD"), targetBeforeB, "a conflict must not advance the real target");
+    assert.equal(isAncestor(conflictingCandidate, targetBeforeB), false);
+
+    git("checkout", "-b", "issue-b", baseline);
+    writeFileSync(join(repo, "b.txt"), "B\n");
+    git("add", "b.txt");
+    git("commit", "-m", "issue B");
+    const candidateB = git("rev-parse", "HEAD");
+    git("checkout", "-b", "integrate-b", targetBeforeB);
+    git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
+    const integrationB = git("rev-parse", "HEAD");
+    assert.equal(git("rev-list", "--parents", "-n", "1", integrationB).split(/\s+/u).length, 3);
+    assert.equal(isAncestor(targetBeforeB, integrationB), true);
+    assert.equal(isAncestor(candidateB, integrationB), true);
+
+    git("checkout", "target");
+    writeFileSync(join(repo, "tracked-local.txt"), "unstaged local edit\n");
+    writeFileSync(join(repo, "staged-local.txt"), "staged local work\n");
+    git("add", "staged-local.txt");
+    writeFileSync(join(repo, "untracked-local.txt"), "untracked local work\n");
+    const snapshot = () => ({
+      status: rawGit("status", "--porcelain=v1", "-z"),
+      tracked: readFileSync(join(repo, "tracked-local.txt"), "utf8"),
+      staged: readFileSync(join(repo, "staged-local.txt"), "utf8"),
+      stagedIndex: git("ls-files", "--stage", "staged-local.txt"),
+      untracked: readFileSync(join(repo, "untracked-local.txt"), "utf8"),
+    });
+    const dirtyBefore = snapshot();
+    assert.match(dirtyBefore.status, / M tracked-local\.txt\0/u);
+    assert.match(dirtyBefore.status, /A  staged-local\.txt\0/u);
+    assert.match(dirtyBefore.status, /\?\? untracked-local\.txt\0/u);
+    git("merge", "--ff-only", integrationB);
+    const aggregate = git("rev-parse", "HEAD");
+    assert.deepEqual(snapshot(), dirtyBefore, "fast-forward integration must preserve unrelated target dirt exactly");
+    assert.equal(isAncestor(candidateA, aggregate), true);
+    assert.equal(isAncestor(candidateB, aggregate), true);
+
+    const executionState = { id: "issue-b-success", kind: "implementation_complete", candidate: candidateB };
+    const closeReceipt = {
+      schema: "dirty-target-preservation:v1",
+      phase: "VERIFIED",
+      executionStateId: executionState.id,
+      targetBefore: targetBeforeB,
+      candidate: candidateB,
+      integration: integrationB,
+      targetAfter: aggregate,
+      candidateReachable: isAncestor(candidateB, aggregate),
+      dirtySnapshot: dirtyBefore,
+    };
+    const receiptReadBack = JSON.parse(JSON.stringify(closeReceipt));
+    assert.deepEqual(receiptReadBack, closeReceipt);
+    assert.equal(receiptReadBack.executionStateId, executionState.id);
+    assert.equal(receiptReadBack.candidateReachable, true);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("aggregate pre-push gate fails closed and binds readiness to exact target HEAD", () => {
+  const repo = mkdtempSync(join(tmpdir(), "skills-push-gate-fixture-"));
   const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
   const isAncestor = (ancestor, descendant) => {
     try {
@@ -391,50 +503,84 @@ test("Issue integration composes independently reviewed candidates in arbitrary 
     git("add", "a.txt");
     git("commit", "-m", "issue A");
     const candidateA = git("rev-parse", "HEAD");
-
     git("checkout", "target");
-    assert.equal(isAncestor(baseline, candidateA), true);
     git("merge", "--ff-only", candidateA);
-    assert.equal(git("rev-parse", "HEAD"), candidateA, "direct close should fast-forward to the reviewed candidate");
-
     git("checkout", "-b", "issue-b", baseline);
     writeFileSync(join(repo, "b.txt"), "B\n");
     git("add", "b.txt");
     git("commit", "-m", "issue B");
     const candidateB = git("rev-parse", "HEAD");
-
-    git("checkout", "target");
-    const targetAfterA = git("rev-parse", "HEAD");
-    git("checkout", "-b", "integrate-b", targetAfterA);
+    git("checkout", "-b", "integrate-b", candidateA);
     git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
     const integrationB = git("rev-parse", "HEAD");
-    assert.equal(git("rev-list", "--parents", "-n", "1", integrationB).split(/\s+/u).length, 3);
-    assert.equal(isAncestor(targetAfterA, integrationB), true);
-    assert.equal(isAncestor(candidateB, integrationB), true);
-
     git("checkout", "target");
     git("merge", "--ff-only", integrationB);
-    const aggregate = git("rev-parse", "HEAD");
-    assert.equal(isAncestor(candidateA, aggregate), true);
-    assert.equal(isAncestor(candidateB, aggregate), true);
+    const verifiedHead = git("rev-parse", "HEAD");
 
-    git("checkout", "-b", "issue-conflict", baseline);
-    writeFileSync(join(repo, "base.txt"), "issue change\n");
-    git("add", "base.txt");
-    git("commit", "-m", "conflicting issue");
-    const conflictingCandidate = git("rev-parse", "HEAD");
+    const successA = { id: "A-success", kind: "implementation_complete", target: "target", candidate: candidateA, commands: ["test:a"] };
+    const successB = { id: "B-success", kind: "implementation_complete", target: "target", candidate: candidateB, commands: ["test:b"] };
+    const receiptA = { phase: "VERIFIED", target: "target", executionStateId: successA.id, candidate: candidateA, integration: candidateA };
+    const receiptB = { phase: "VERIFIED", target: "target", executionStateId: successB.id, candidate: candidateB, integration: integrationB };
+    const completeIssues = [
+      { id: "A", execution: [successA], receipts: [receiptA] },
+      { id: "B", execution: [successB], receipts: [receiptB] },
+    ];
 
-    git("checkout", "target");
-    writeFileSync(join(repo, "base.txt"), "target change\n");
-    git("add", "base.txt");
-    git("commit", "-m", "target conflict");
-    const targetBeforeConflict = git("rev-parse", "HEAD");
-    git("checkout", "-b", "integrate-conflict", targetBeforeConflict);
-    assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
-    git("merge", "--abort");
-    git("checkout", "target");
-    assert.equal(git("rev-parse", "HEAD"), targetBeforeConflict, "a conflict must not advance the real target");
-    assert.equal(isAncestor(conflictingCandidate, targetBeforeConflict), false);
+    const runGate = ({ issues, reviewClean = true, verificationClean = true }) => {
+      const currentHead = git("rev-parse", "target");
+      assert.equal(currentHead, verifiedHead, "target movement invalidates verification evidence");
+      const relevant = issues.filter((issue) =>
+        issue.execution.some((state) => state.target === "target") ||
+        issue.receipts.some((receipt) => receipt.target === "target"));
+      assert.ok(relevant.length > 0, "the target must have a non-empty closed-Issue set");
+      const members = relevant.map((issue) => {
+        const latest = issue.execution.at(-1);
+        assert.equal(latest?.kind, "implementation_complete", `${issue.id}: missing completion or superseding blocked state`);
+        const receipt = issue.receipts.find((item) => item.target === "target");
+        assert.ok(receipt, `${issue.id}: missing closeout receipt`);
+        assert.equal(receipt.executionStateId, latest.id, `${issue.id}: execution-state mismatch`);
+        assert.equal(receipt.candidate, latest.candidate, `${issue.id}: candidate mismatch`);
+        assert.match(receipt.phase, /^(?:VERIFIED|RECONCILED)$/u);
+        assert.equal(isAncestor(receipt.candidate, currentHead), true, `${issue.id}: omitted candidate`);
+        assert.equal(isAncestor(receipt.integration, currentHead), true, `${issue.id}: omitted integration`);
+        return { issue: issue.id, candidate: receipt.candidate, integration: receipt.integration, executionStateId: latest.id };
+      });
+      assert.equal(reviewClean, true, "aggregate review failed");
+      assert.equal(verificationClean, true, "aggregate verification failed");
+      const commands = [...new Set(relevant.flatMap((issue) => issue.execution.at(-1).commands))];
+      const receipt = {
+        schema: "push_ready:v1",
+        target: "target",
+        baseline,
+        head: currentHead,
+        members,
+        standards: "clean",
+        spec: "clean",
+        commands: commands.map((command) => ({ command, result: "passed" })),
+      };
+      git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(receipt), currentHead);
+      return JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead));
+    };
+
+    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], receipts: [] }] }), /missing closeout receipt/u);
+    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [] }] }), /missing completion/u);
+    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [successA, { id: "A-blocked", kind: "blocked", target: "target" }] }] }), /superseding blocked state/u);
+    assert.throws(() => runGate({ issues: completeIssues, reviewClean: false }), /aggregate review failed/u);
+    assert.throws(() => runGate({ issues: completeIssues, verificationClean: false }), /aggregate verification failed/u);
+    assert.equal(git("notes", "--ref=refs/notes/matt-push-ready", "list"), "");
+
+    const ready = runGate({ issues: completeIssues });
+    assert.equal(ready.head, verifiedHead);
+    assert.deepEqual(ready.members.map(({ issue }) => issue), ["A", "B"]);
+    assert.deepEqual(ready.commands, [
+      { command: "test:a", result: "passed" },
+      { command: "test:b", result: "passed" },
+    ]);
+    writeFileSync(join(repo, "drift.txt"), "target moved\n");
+    git("add", "drift.txt");
+    git("commit", "-m", "target drift");
+    assert.notEqual(git("rev-parse", "target"), ready.head, "a stale receipt must not authorize the moved target");
+    assert.throws(() => runGate({ issues: completeIssues }), /target movement invalidates/u);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -501,6 +647,8 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
   assert.match(matt, /`\/verify-target-before-push/iu);
+  assert.match(matt, /`\/grilling`/u);
+  assert.match(matt, /`\/explain-decision`/u);
   assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*current local target.*close/isu);

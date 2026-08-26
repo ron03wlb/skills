@@ -28,6 +28,8 @@ The target advances once by fast-forward to an integration candidate that contai
 
 The target may keep unrelated staged, unstaged, and untracked work. Closeout fingerprints it, rejects same-path and path-prefix collisions, and preserves hook evidence. Failed preservation stops by default; a later explicitly authorized reconciliation retains the failed evidence and states that preservation equality is not proven.
 
+The receipt binds the latest successful execution-state identity. A newer blocked execution supersedes it, and closeout rechecks that identity plus every blocker before integration, cleanup, and tracker closure.
+
 Closeout never edits product code, reruns expensive verification, pushes, deploys, automatically reopens an Issue, or rolls back a successful local integration.
 
 ## Where it fits

@@ -34,6 +34,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - `/wiki` edits and reviews the repository Wiki independently of Issue delivery.
 - `/remove-ron` removes only the retired repository-local Ron footprint.
 - `/confirm-understanding` calibrates a mental model against named evidence.
+- `/explain-decision` compares one live choice without changing workflow state; `/grilling` pressure-tests a plan or decision without writing docs.
 - `/handoff` moves context to a fresh session; `/teach` runs a stateful learning workspace; `/writing-great-skills` is the skill-authoring reference.
 - `/resolving-merge-conflicts` handles an already in-progress merge or rebase conflict.
 

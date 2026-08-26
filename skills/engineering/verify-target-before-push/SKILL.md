@@ -14,15 +14,16 @@ Read repository instructions and tracker configuration. Resolve the named local 
 
 Create a clean verification worktree at exact `V`; do not use or clean a dirty target worktree. Record target, `B`, `V`, and worktree once.
 
-Query the configured tracker for every closed Issue whose latest completion note names this original target. Read each completion note and closeout receipt once. A candidate already reachable from `B` belongs to the baseline; every later candidate is an aggregate member.
+Query closed Issues and build the selected target's relevant set as the union of (a) Issues whose execution/completion history names this original target and (b) Issues whose closeout receipt names it. Never enumerate from only one artifact: an Issue present on either side must be validated on both sides, so a missing completion note or missing receipt cannot disappear during filtering. Read each ordered execution history and receipt once. A candidate already reachable from `B` belongs to the baseline; every later candidate is an aggregate member.
 
 For each member require:
 
 - exact Issue, parent/linked Spec, candidate `C`, integration candidate `I`, and target identities;
+- latest terminal execution state is the matching `implementation_complete` note, with no superseding blocked state, and its identity is bound by the closeout receipt;
 - a matching read-back `VERIFIED` or explicitly authorized `RECONCILED` integration receipt;
 - both `C` and `I` to exist locally and be ancestors of `V` but not silently substituted by another SHA.
 
-A missing or unreadable completion note or receipt, mismatched target, missing candidate, or candidate not reachable from `V` stops and identifies the closed Issue. Freeze the member set before review; do not infer completeness only from merge commit messages.
+A missing or unreadable execution history, completion note, or receipt, a superseding blocked state, mismatched target, missing candidate, or candidate not reachable from `V` stops and identifies the closed Issue. Freeze the member set before review; do not infer completeness only from merge commit messages.
 
 ## Review and verify the aggregate
 

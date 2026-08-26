@@ -10,7 +10,7 @@ Close exactly one executed Issue. Successful closure always means its exact revi
 
 ## Entry
 
-Read the open Issue and latest `execute-issue` completion note once. Require `implementation_complete`, original target branch/worktree, Issue worktree, topic branch, baseline, exact reviewed candidate, Planning Seal, clean Standards and Spec, passing final verification, and clean worktree evidence. Confirm blockers remain closed.
+Read the open Issue and its ordered `execute-issue` state history once. Record the latest terminal execution state as `E`; require `E` to be the `implementation_complete` Execution completion note, with no later blocked state, and require original target branch/worktree, Issue worktree, topic branch, baseline, exact reviewed candidate, Planning Seal, clean Standards and Spec, passing final verification, and clean worktree evidence. Confirm blockers remain closed.
 
 Capture the current original target commit as `T` and the unchanged reviewed candidate as `C`. Require `C` to equal the clean registered Issue worktree `HEAD`. The original target worktree does not need to be clean and may contain unrelated staged, unstaged, and untracked work. One human serializes integrations into the same target; no global queue or lock is added.
 
@@ -33,9 +33,9 @@ Snapshot path/status class, file type/mode, worktree content fingerprints, and i
 
 Compare the complete `T..I` delta with dirty paths. A collision is the same path or an ancestor/descendant path-prefix pair. Any collision stops with the Issue open; never automatically stash, commit, clean, reset, or move user work.
 
-Append a read-back `dirty-target-preservation:v1` receipt in phase `PREPARED` binding the Issue, target branch, `T`, `C`, `I`, dirty digest and counts, and hook evidence. Read back and verify those exact fields before continuing. Tracker failure or mismatch stops before integration.
+Append a read-back `dirty-target-preservation:v1` receipt in phase `PREPARED` binding the Issue, execution-state identity `E`, target branch, `T`, `C`, `I`, dirty digest and counts, and hook evidence. Read back and verify those exact fields before continuing. Tracker failure or mismatch stops before integration.
 
-Immediately re-read target `HEAD`, dirty snapshot, and hook evidence. Target, digest, or hook drift updates/read-backs the receipt as `FAILED` when possible and stops; never re-baseline inside the invocation.
+Immediately re-read target `HEAD`, latest execution state, blockers, dirty snapshot, and hook evidence. Target, `E`, blocker, digest, or hook drift updates/read-backs the receipt as `FAILED` when possible and stops; never re-baseline inside the invocation.
 
 ## Integrate and prove inclusion
 
@@ -49,7 +49,7 @@ Matching `PREPARED` may resume only from `T` with unchanged evidence or from `I`
 
 A `FAILED` receipt stops by default. A later explicit human reconciliation may accept only post-fast-forward dirty drift when the receipt preserves failure-time expected/observed evidence, reflog proves `T -> I`, `C` and `I` remain ancestors of current target, collision remains zero, the exact Issue worktree is clean, and hook evidence is sufficient. Legacy missing transition-time hook evidence additionally requires current hook absence and explicit acceptance that absence is not retroactively proven. Append and read back a separate `dirty-target-reconciliation:v1` receipt in phase `RECONCILED`; never replace `FAILED`, and state `preservation equality is not proven`.
 
-Require a matching read-back `VERIFIED` or `RECONCILED` receipt before cleanup and before closing. For an open Issue, re-read target `HEAD == I` at each gate. Remove the exact clean registered Issue worktree with `git worktree remove`; an already absent worktree means cleanup is complete only with matching receipt evidence. Prune only stale worktree metadata and never delete the topic branch.
+Require a matching read-back `VERIFIED` or `RECONCILED` receipt before cleanup and before closing. At both gates re-read target `HEAD == I`, latest execution state identity `E`, and every blocker still closed; any drift leaves the Issue open and reports the exact partial state. Remove the exact clean registered Issue worktree with `git worktree remove`; an already absent worktree means cleanup is complete only with matching receipt evidence. Prune only stale worktree metadata and never delete the topic branch.
 
 Close the Issue through the configured tracker and read it back once. Failure after integration reports exact partial state and resumes only through matching receipts; never roll back a successful integration automatically.
 

@@ -24,7 +24,7 @@ Reach for it after independently closing the Issues you want in a target and imm
 
 ## Aggregate gate
 
-The leading idea is **aggregate** proof: per-Issue review establishes each exact candidate, while this gate proves their composition. It enumerates closed Issues for the target, validates their integration receipts and reachability, reviews the combined diff against all member Specs, then runs deduplicated focused commands and the repository full suite in a clean isolated worktree.
+The leading idea is **aggregate** proof: per-Issue review establishes each exact candidate, while this gate proves their composition. It forms the target set from the union of closed-Issue execution histories and closeout receipts, so a missing artifact cannot hide an Issue. It rejects a newer blocked execution, validates receipt identity and reachability, reviews the combined diff against all member Specs, then runs deduplicated focused commands and the repository full suite in a clean isolated worktree.
 
 Failures withhold `push_ready` without rollback or automatic reopening. Correction goes through an explicit integration-repair Issue or an explicitly reopened owner Issue.
 

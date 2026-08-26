@@ -51,7 +51,7 @@ The local target-branch commit selected as the planning baseline before Spec or 
 _Avoid_: Dirty-doc commit, lifecycle authorization, execution checkpoint
 
 **Execution completion note**:
-The compact human-readable tracker record written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, original target, worktree, topic branch, baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately.
+The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, original target, worktree, topic branch, baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. A later blocked execution state supersedes it.
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 
 **Manual integration serialization**:
@@ -71,7 +71,7 @@ The exact commit prepared in an isolated temporary worktree from the current tar
 _Avoid_: Refreshed Issue candidate, conflict-resolution commit, aggregate verification
 
 **Issue integration receipt**:
-The read-back closeout record binding one Issue, target-before, reviewed candidate, **Integration candidate**, candidate ancestry, and dirty-target preservation evidence. A verified receipt proves local inclusion and gates exact worktree cleanup and Issue closure; it does not prove aggregate semantics.
+The read-back closeout record binding one Issue, its latest successful execution-state identity, target-before, reviewed candidate, **Integration candidate**, candidate ancestry, and dirty-target preservation evidence. A verified receipt proves local inclusion and gates exact worktree cleanup and Issue closure; it does not prove aggregate semantics.
 _Avoid_: Execution completion note, push authorization, test report
 
 **Push-ready receipt**:
