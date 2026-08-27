@@ -21,6 +21,7 @@ If the Issue is already closed, resume only when the recorded candidate and inte
 Create an isolated temporary integration worktree and branch from exact `T` without modifying the real target or Issue worktree.
 
 - If `T` is an ancestor of `C`, set `I = C`.
+- Otherwise, if `C` is an ancestor of `T`, stop as an already-contained candidate before real target mutation, receipt preparation, cleanup, or Issue closure.
 - Otherwise create `I` with a no-fast-forward merge of exact `C` into `T`, without rebasing. The merge commit may only compose those histories; do not edit or repair product code.
 
 Require both `T` and `C` to be ancestors of `I` and the temporary worktree to be clean. A merge conflict, changed candidate, ambiguous identity, scope change, or unexpected merge content stops before real target mutation, receipt preparation, Issue worktree cleanup, or Issue closure. Never auto-resolve conflicts. Remove only the temporary integration worktree when safe; otherwise report its exact retained state.

@@ -14,7 +14,7 @@ npx skills update close-issue
 
 `close-issue` integrates one unchanged reviewed candidate into the current local target, proves inclusion and dirty-target preservation, removes the exact Issue worktree, and closes the Issue.
 
-It does not refresh or re-review the candidate. If target and candidate histories diverge, an isolated no-fast-forward merge commit composes them; conflicts stop before the real target or tracker state changes.
+It does not refresh or re-review the candidate. A candidate that already contains the target is reused; a candidate already contained by a newer target stops as ambiguous. If their histories diverge, an isolated no-fast-forward merge commit composes them. Either ambiguity or conflict stops before the real target or tracker state changes.
 
 ## When to reach for it
 

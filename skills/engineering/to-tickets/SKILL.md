@@ -30,20 +30,20 @@ Before classifying the current delta on a retry, read prior partial-publication 
 
 Verify the selected full SHA, ancestry, exact owned diff, and unrelated-state preservation. If publication later fails, retain the seal and report its full SHA with the partial state; do not amend, reset, or roll it back.
 
-## 3. Publish the tickets as executable Issues
+## 3. Publish executable Issues
 
 Publish blockers before dependants:
 
 - **Local tracker:** one file per child under `.scratch/<feature>/issues/`, ordered blockers-first.
 - **A real issue tracker:** one child Issue per slice, using native parent/blocking relations when available and `ready-for-agent` only when the Issue itself is agent-ready.
 
-Read each published ticket back once and require its body, Acceptance Criteria mapping, Planning baseline, blocking relations, target, and ready state to match. A mismatch is a partial publication: report created identifiers and stop without modifying the parent or unrelated Issues.
+Read each published Issue back once and require its body, Acceptance Criteria mapping, Planning baseline, blocking relations, target, and ready state to match. A mismatch is a partial publication: report created identifiers and stop without modifying the parent or unrelated Issues.
 
 Output `/execute-issue <Issue-ID>` only for the dependency-ready frontier. Never output execution commands for blocked children.
 
-<local-ticket-template>
+<local-issue-template>
 
-# <NN> - <Ticket title>
+# <NN> - <Issue title>
 
 ## What to build
 
@@ -76,7 +76,7 @@ Output `/execute-issue <Issue-ID>` only for the dependency-ready frontier. Never
 
 <Original local target branch.>
 
-</local-ticket-template>
+</local-issue-template>
 
 <issue-template>
 

@@ -7,6 +7,25 @@ import test from "node:test";
 
 const read = (path) => readFileSync(path, "utf8").replace(/\r\n?/gu, "\n");
 
+const createGitFixture = (prefix) => {
+  const repo = mkdtempSync(join(tmpdir(), prefix));
+  const rawGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
+  const git = (...args) => rawGit(...args).trim();
+  const isAncestor = (ancestor, descendant) => {
+    try {
+      git("merge-base", "--is-ancestor", ancestor, descendant);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  git("init", "-b", "target");
+  git("config", "user.name", "Contract Test");
+  git("config", "user.email", "contract@example.test");
+  return { repo, rawGit, git, isAncestor };
+};
+
 test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () => {
   const manifest = JSON.parse(read(".claude-plugin/plugin.json")).skills.sort();
   const expected = [];
@@ -193,7 +212,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
 
   const ticketsSeal = tickets.indexOf("Planning Seal");
-  const ticketsPublish = tickets.indexOf("Publish the tickets", ticketsSeal);
+  const ticketsPublish = tickets.indexOf("Publish executable Issues", ticketsSeal);
   assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate or advance the seal before publish");
   assert.match(tickets, /no relevant planning-artifact delta.*reuse/isu);
   assert.match(tickets, /in-Spec.*successor Planning Seal/isu);
@@ -208,20 +227,21 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.equal(retryRecovery !== -1 && retryRecovery < noDeltaSelection, true, "to-tickets must recover a partial-publication seal before no-delta selection");
   assert.match(tickets, /partial-publication state.*verified Planning Seal.*reuse it.*never fall back to the inherited seal/isu);
   assert.match(tickets, /report its full SHA with the partial state/isu);
-  const localTicketTemplate = tickets.match(/<local-ticket-template>(.*?)<\/local-ticket-template>/su)?.[1] ?? "";
+  const localIssueTemplate = tickets.match(/<local-issue-template>(.*?)<\/local-issue-template>/su)?.[1] ?? "";
   const issueTemplate = tickets.match(/<issue-template>(.*?)<\/issue-template>/su)?.[1] ?? "";
-  for (const [name, template] of [["local", localTicketTemplate], ["tracker", issueTemplate]]) {
-    assert.match(template, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, `${name} ticket template has an incomplete Planning baseline`);
-    assert.match(template, /Acceptance Criteria.*Implementation Plan.*Verification.*Blocked by/su, `${name} ticket is not directly executable`);
-    assert.match(template, /Covers: AC-/u, `${name} ticket omits inline AC mapping`);
+  for (const [name, template] of [["local", localIssueTemplate], ["tracker", issueTemplate]]) {
+    assert.match(template, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, `${name} Issue template has an incomplete Planning baseline`);
+    assert.match(template, /Acceptance Criteria.*Implementation Plan.*Verification.*Blocked by/su, `${name} Issue is not directly executable`);
+    assert.match(template, /Covers: AC-/u, `${name} Issue omits inline AC mapping`);
   }
-  assert.match(tickets, /Read each published ticket back.*Planning baseline.*blocking/isu);
+  assert.match(localIssueTemplate, /# <NN> - <Issue title>/u);
+  assert.match(tickets, /Read each published Issue back.*Planning baseline.*blocking/isu);
   assert.match(tickets, /consume.*classification.*never reclassif.*Multi-Issue/isu);
   assert.match(tickets, /`\/execute-issue <Issue-ID>`.*only for the dependency-ready frontier/isu);
   assert.match(tickets, /does not need to know.*concurrent/isu);
   const realTrackerPublish = tickets.indexOf("- **A real issue tracker");
-  const ticketReadBack = tickets.indexOf("Read each published ticket back");
-  assert.equal(ticketReadBack > realTrackerPublish, true, "to-tickets must read back after selecting the publication mode");
+  const issueReadBack = tickets.indexOf("Read each published Issue back");
+  assert.equal(issueReadBack > realTrackerPublish, true, "to-tickets must read back after selecting the publication mode");
 
   assert.match(execute, /Planning Seal.*ancestor of the execution baseline/isu);
   assert.match(execute, /seal-currency check.*not scope authority/isu);
@@ -251,10 +271,10 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
 
 
   const fixedHeadings = new Set(["What it does", "When to reach for it", "Prerequisites", "It's working if", "Where it fits"]);
-  const ticketMiddleHeadings = [...ticketsDocs.matchAll(/^## (.+)$/gmu)]
+  const issueMiddleHeadings = [...ticketsDocs.matchAll(/^## (.+)$/gmu)]
     .map((match) => match[1])
     .filter((heading) => !fixedHeadings.has(heading));
-  assert.equal(ticketMiddleHeadings.length <= 3, true, "to-tickets docs exceed three free-form middle sections");
+  assert.equal(issueMiddleHeadings.length <= 3, true, "to-tickets docs exceed three free-form middle sections");
   for (const path of [
     "docs/engineering/to-spec.md",
     "docs/engineering/to-tickets.md",
@@ -288,6 +308,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /capture.*target.*`T`.*reviewed candidate.*`C`/isu);
   assert.match(close, /isolated temporary integration worktree/iu);
   assert.match(close, /`T`.*ancestor of `C`.*`I = C`/isu);
+  assert.match(close, /`C`.*ancestor of `T`.*stop.*before.*real target.*receipt.*cleanup.*Issue closure/isu);
   assert.match(close, /no-fast-forward merge.*`I`/isu);
   assert.match(close, /conflict.*before.*real target.*receipt.*Issue closure/isu);
   assert.match(close, /never invokes `execute-issue`.*never reruns.*Standards.*Spec.*full verification/isu);
@@ -374,22 +395,14 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
 });
 
 test("Issue integration preserves dirty target state and composes candidates in arbitrary close order", () => {
-  const repo = mkdtempSync(join(tmpdir(), "skills-integration-fixture-"));
-  const rawGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" });
-  const git = (...args) => rawGit(...args).trim();
-  const isAncestor = (ancestor, descendant) => {
-    try {
-      git("merge-base", "--is-ancestor", ancestor, descendant);
-      return true;
-    } catch {
-      return false;
-    }
+  const { repo, rawGit, git, isAncestor } = createGitFixture("skills-integration-fixture-");
+  const planIntegration = (target, candidate) => {
+    if (isAncestor(target, candidate)) return { kind: "reuse", integration: candidate };
+    if (isAncestor(candidate, target)) throw new Error("candidate is already contained in target");
+    return { kind: "merge" };
   };
 
   try {
-    git("init", "-b", "target");
-    git("config", "user.name", "Contract Test");
-    git("config", "user.email", "contract@example.test");
     writeFileSync(join(repo, "base.txt"), "base\n");
     writeFileSync(join(repo, "tracked-local.txt"), "tracked baseline\n");
     git("add", "base.txt", "tracked-local.txt");
@@ -403,6 +416,7 @@ test("Issue integration preserves dirty target state and composes candidates in 
     const candidateA = git("rev-parse", "HEAD");
     git("checkout", "target");
     assert.equal(isAncestor(baseline, candidateA), true);
+    assert.deepEqual(planIntegration(baseline, candidateA), { kind: "reuse", integration: candidateA });
     git("merge", "--ff-only", candidateA);
     assert.equal(git("rev-parse", "HEAD"), candidateA, "direct close should fast-forward to the reviewed candidate");
 
@@ -416,6 +430,7 @@ test("Issue integration preserves dirty target state and composes candidates in 
     git("add", "base.txt");
     git("commit", "-m", "target conflict");
     const targetBeforeB = git("rev-parse", "HEAD");
+    assert.throws(() => planIntegration(targetBeforeB, candidateA), /already contained/u);
     git("checkout", "-b", "integrate-conflict", targetBeforeB);
     assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
     git("merge", "--abort");
@@ -428,6 +443,7 @@ test("Issue integration preserves dirty target state and composes candidates in 
     git("add", "b.txt");
     git("commit", "-m", "issue B");
     const candidateB = git("rev-parse", "HEAD");
+    assert.deepEqual(planIntegration(targetBeforeB, candidateB), { kind: "merge" });
     git("checkout", "-b", "integrate-b", targetBeforeB);
     git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
     const integrationB = git("rev-parse", "HEAD");
@@ -502,21 +518,9 @@ test("Issue integration preserves dirty target state and composes candidates in 
 });
 
 test("aggregate pre-push gate fails closed and binds readiness to exact target HEAD", () => {
-  const repo = mkdtempSync(join(tmpdir(), "skills-push-gate-fixture-"));
-  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
-  const isAncestor = (ancestor, descendant) => {
-    try {
-      git("merge-base", "--is-ancestor", ancestor, descendant);
-      return true;
-    } catch {
-      return false;
-    }
-  };
+  const { repo, git, isAncestor } = createGitFixture("skills-push-gate-fixture-");
 
   try {
-    git("init", "-b", "target");
-    git("config", "user.name", "Contract Test");
-    git("config", "user.email", "contract@example.test");
     writeFileSync(join(repo, "base.txt"), "base\n");
     git("add", "base.txt");
     git("commit", "-m", "base");
