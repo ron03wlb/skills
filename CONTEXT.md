@@ -39,7 +39,7 @@ _Avoid_: Test score, source update, meeting minutes
 ### Issue delivery
 
 **Issue worktree**:
-A dedicated Git worktree and topic branch that contain the implementation for exactly one dependency-ready **Issue** before it is integrated into the original local target branch.
+A dedicated Git worktree and topic branch that contain prerequisite artifact preparation, when required, and the remaining implementation for exactly one dependency-ready **Issue** before integration into the original local target branch.
 _Avoid_: Shared execution lane, authorization workspace
 
 **Execution baseline**:
@@ -82,6 +82,42 @@ _Avoid_: Issue integration receipt, push command, production verification
 The state in which an open **Issue** has resolved blockers, clear acceptance and Spec scope, an identifiable original target, and no conflicting worktree owner.
 _Avoid_: Approved
 
+**Repository prerequisite**:
+A repository-declared condition that must be prepared and verified before affected `execute-issue` work may proceed. A repository that declares none retains the ordinary Issue execution route.
+_Avoid_: Generic mandatory preflight, consumer-specific policy
+
+**Prerequisite inspection**:
+The optional user-invoked check after a Tracker Spec or child Issue is written that determines whether a **Repository prerequisite** applies and may begin its preparation. It does not replace or change **Delivery routing**.
+_Avoid_: Mandatory delivery stage, Spec classification, automatic preflight
+
+**Prerequisite resolver**:
+The repository-owned interface named by repository instructions that discovers, prepares, and verifies that repository's **Repository prerequisites** without exposing consumer-specific rules to generic skills. No declaration means prerequisites are not required; a declared but unusable resolver is a blocker.
+_Avoid_: Universal workflow config, generic database runner, free-form fallback guess
+
+**Prerequisite resolver adoption**:
+The explicit, one-time `setup-pre-execute-issue` change that atomically adds or updates the minimum repository instructions, policy, resolver implementation, and test fixture needed for a consumer repository to declare a **Prerequisite resolver**. It performs only safe repository-local validation and never executes SQL, mutates a database, changes an Issue, or becomes a runtime router. If no concrete manual prerequisite exists, setup is unnecessary and the repository remains unchanged. If the complete resolver contract cannot be validated, no active declaration or placeholder adoption is left behind.
+_Avoid_: `ask-ron`, automatic setup, runtime prerequisite execution, generic resolver framework
+
+**Prerequisite artifact**:
+An Issue-owned repository artifact explicitly required to prepare a **Repository prerequisite** before the related **Manual prerequisite action**. It may begin the Issue candidate identity chain only when it can be prepared without crossing into the remaining product implementation and passes repository-defined static validation.
+_Avoid_: External-action evidence, full Issue implementation, generated scratch output
+
+**Manual prerequisite action**:
+An external mutation that the repository requires a human to perform after preparation and before prerequisite readiness can be verified. The Issue workflow may pause for and verify its evidence but never performs the action itself.
+_Avoid_: Agent-applied prerequisite, implementation step
+
+**Prerequisite target verification**:
+The single repository-defined read-only check that proves the declared outcome of a **Manual prerequisite action** on its non-sensitive target identity. Human attestation may trigger the check but cannot grant readiness by itself.
+_Avoid_: SQL replay, polling loop, full integration suite
+
+**Prerequisite receipt**:
+A minimal append-only `WAITING_MANUAL` or `READY` tracker record proving the current state of one Issue's **Repository prerequisite** against its **Protected prerequisite identity**. It is read back once when written, authorizes only prerequisite handoff, and becomes invalid when protected evidence drifts.
+_Avoid_: Execution completion note, Issue integration receipt, production credential
+
+**Protected prerequisite identity**:
+The exact Issue, prerequisite commit, artifact paths and hashes, resolver or policy identity, and non-sensitive manual target identity protected by a `READY` **Prerequisite receipt**. Later candidate commits are allowed while the prerequisite commit remains an ancestor and every protected value still matches.
+_Avoid_: Entire candidate HEAD, implementation commit, database credential
+
 **Executable Issue**:
 An open **Issue** that is one dependency-ready execution unit with numbered **Acceptance Criteria**, one embedded **Implementation Plan**, a valid **Planning Seal**, and the target identity needed by `execute-issue`. A **Single-Issue Spec** is executable itself; `/to-tickets` produces executable child Issues for a **Multi-Issue Spec**.
 _Avoid_: Parent Multi-Issue Spec, implementation prompt, ready label alone
@@ -97,6 +133,10 @@ _Avoid_: Necessary discovery, scope change, silent redesign
 **Scope change**:
 A discovery that changes behavior, **Acceptance Criteria**, target, exclusions, independently deliverable outcomes, or ownership. Execution stops and returns to `/to-spec` or `/to-tickets` instead of treating it as implementation freedom.
 _Avoid_: Material plan deviation, necessary dependency, review repair
+
+**Late prerequisite discovery**:
+Source evidence found after Entry that contradicts an earlier `NOT_REQUIRED` prerequisite result. It pauses execution for the same-worktree prerequisite flow when scope and schema outcome remain unchanged, or becomes a **Scope change** when they do not.
+_Avoid_: Silent migration, automatic pre-execution, schema-dependent verification
 
 **Tracker Spec**:
 A Spec published by `/to-spec` into the configured **Issue tracker**, including a tracker implemented as local `.scratch/` files. It participates in **Delivery routing**, Planning Seal, execution, and closeout regardless of storage medium.
@@ -229,6 +269,9 @@ _Avoid_: Reviewer opinion, Wiki finding, majority vote
 **Material repair wave**:
 One bounded pass in which the single writable owner addresses confirmed Standards or Spec findings inside the unchanged Issue scope, verifies the repair, and produces a new candidate. One `execute-issue` invocation permits at most ten waves; only an explicit later invocation starts a new limit, and no durable counter is maintained.
 
+**Prerequisite artifact repair wave**:
+One bounded pass in which `pre-execute-issue` repairs confirmed repository-defined syntax or static-validation failures inside the declared **Prerequisite artifact** and reruns the affected check. One invocation permits at most five waves; initial generation, retries without an artifact edit, and tool failures do not count.
+
 **Local checkpoint commit**:
 An Issue-owned local commit made after one coherent vertical slice or review repair passes its relevant verification. Push, target integration, deployment, and unrelated paths remain excluded during `execute-issue`.
 
@@ -242,8 +285,17 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **Decision ticket** is an **Issue** (a child of a `wayfinder:map`)
 - **Ron removal** deletes only the exact **Ron repository footprint** and leaves historical or active delivery objects intact
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
+- `pre-execute-issue` creates or reuses the **Issue worktree** only after `discover` returns `REQUIRED`; `NOT_REQUIRED` and discovery-time `BLOCKED` create no worktree
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/execute-issue <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`
+- After a Tracker Spec or child Issue is written, the human may invoke `pre-execute-issue` for **Prerequisite inspection** without making it a mandatory delivery stage
+- Authoritative `discover` runs only after the exact Tracker Spec or child Issue is fully published and before worktree creation or product implementation; planning may note a risk but never supplies a second prerequisite verdict
+- Repository instructions are the discovery seam for a **Prerequisite resolver**; generic skills neither require a universal workflow config nor guess a missing declared adapter
+- `setup-pre-execute-issue` owns **Prerequisite resolver adoption** only when explicitly invoked; existing repositories do not rerun `ask-matt`, and no parallel `ask-ron` router is introduced
+- **Prerequisite resolver adoption** is atomic: an incomplete `discover`/`prepare`/`verify` contract leaves no active repository declaration, placeholder resolver, or TODO adoption state
+- A repository without a concrete manual prerequisite performs no **Prerequisite resolver adoption** and follows the ordinary `execute-issue` route with an undeclared resolver yielding `NOT_REQUIRED`
+- A **Prerequisite resolver** exposes one repository-owned command with `discover`, `prepare`, and `verify` operations; `pre-execute-issue` and `execute-issue` share the same read-only `discover`, while only `pre-execute-issue` may use the other operations
+- `prepare` may write and repair only the declared **Prerequisite artifact**, and cannot produce `WAITING_MANUAL` until repository-defined syntax and static validation pass
 - `/to-spec` classifies automatically from Spec and source evidence; only material ambiguity that can change **Delivery routing** permits one blocking question with a recommendation, and uncertainty never defaults to either Single-Issue or Multi-Issue
 - `ask-matt`, `/to-tickets`, and `execute-issue` consume **Delivery routing** without duplicating or overriding its classification criteria
 - `/implement` accepts an explicitly selected **Standalone Spec** for direct-branch work, while every **Tracker Spec**, including a local-file tracker record, follows `/to-spec`-owned **Delivery routing**
@@ -254,10 +306,22 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **Acceptance Criteria**, **Implementation Plan** steps, and verification use compact many-to-many `Covers: AC-n` references: every criterion has at least one step and verification, every step covers at least one criterion, and no separate matrix or orphan is allowed
 - Before publication, `/to-spec` compares the criterion IDs with the IDs covered by plan steps and verification and stops on any missing ID or uncovered step; this is a prompt-level invariant backed by contract tests, not a separate parser or matrix artifact
 - `execute-issue` applies **Necessary discovery** automatically without duplicating the candidate's path list in tracker evidence, records only **Material plan deviations**, and returns every **Scope change** to planning
+- A **Late prerequisite discovery** preserves coherent checkpoints and stops before schema-dependent verification; unchanged scope routes to user-invoked `pre-execute-issue`, while changed schema outcome or acceptance returns to planning
 - A one-outcome Spec that cannot fit one execution and review cycle is still a **Multi-Issue Spec**; `/to-tickets` prefers independently verifiable vertical slices and uses expand-contract when no single wide change can remain green as a vertical slice
 - `/to-tickets` reuses that seal or creates one successor for approved in-Spec planning changes; public scope expansion returns to `/to-spec`
 - `execute-issue` verifies the **Planning Seal** is an ancestor of its execution baseline and never creates or repairs the seal
+- `execute-issue` performs read-only **Prerequisite inspection** at Entry: undeclared prerequisites preserve the ordinary route, a current required receipt permits execution, and missing or stale required evidence stops with an instruction to invoke `pre-execute-issue`
+- `execute-issue` never invokes `pre-execute-issue`, prepares its artifact, or performs its **Manual prerequisite action** automatically
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
+- A required **Repository prerequisite** reaches `execute-issue` only through a current read-back **Prerequisite receipt**; absence of repository declaration preserves the ordinary route
+- A **Prerequisite receipt** records only recovery-relevant transitions in the existing Issue tracker; Issue body and repository source never become mutable environment-state stores
+- `NOT_REQUIRED`, `REQUIRED`, and `BLOCKED` are transient resolver results, never empty or failure **Prerequisite receipts**
+- `READY` binds the **Protected prerequisite identity**, not the evolving candidate `HEAD`; unrelated implementation commits do not trigger repeated manual action or verification
+- `pre-execute-issue` may prepare a **Prerequisite artifact** but stops if doing so requires the remaining product implementation
+- A validated **Prerequisite artifact** is committed alone on the Issue topic branch before `WAITING_MANUAL`; later `execute-issue` reuses that exact worktree and candidate ancestry
+- `pre-execute-issue` permits at most five **Prerequisite artifact repair waves** and never hands an invalid artifact to the human
+- A **Manual prerequisite action** remains human-owned even when prerequisite preparation and verification are agent-assisted
+- `READY` requires one successful **Prerequisite target verification**; failure or unavailable access preserves `WAITING_MANUAL`, returns transient `BLOCKED`, and creates no failure receipt
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`
 - **Manual integration serialization** permits only one integration into the same target branch at a time; other target branches may proceed concurrently
