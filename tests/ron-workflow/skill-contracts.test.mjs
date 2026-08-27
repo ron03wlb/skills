@@ -210,6 +210,9 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(spec, /User Outcomes.*at most three/isu);
   assert.match(spec, /every Acceptance Criterion.*Implementation Plan step.*Verification.*every Implementation Plan step.*Acceptance Criterion/isu);
   assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
+  for (const [name, skill] of [["to-spec", spec], ["to-tickets", tickets]]) {
+    assert.match(skill, /otherwise stop.*tell the human to invoke `\/setup-matt-pocock-skills`/isu, `${name} must not invoke a user-invoked setup skill`);
+  }
 
   const ticketsSeal = tickets.indexOf("Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish executable Issues", ticketsSeal);
@@ -297,6 +300,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Standards/u);
   assert.match(execute, /Spec/u);
   assert.match(execute, /10 repair waves per invocation/iu);
+  assert.match(execute, /any blocked exit.*Entry.*implementation.*verification.*review.*`implementation_blocked`.*read.*back.*supersedes/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
@@ -308,12 +312,12 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /capture.*target.*`T`.*reviewed candidate.*`C`/isu);
   assert.match(close, /isolated temporary integration worktree/iu);
   assert.match(close, /`T`.*ancestor of `C`.*`I = C`/isu);
-  assert.match(close, /`C`.*ancestor of `T`.*stop.*before.*real target.*receipt.*cleanup.*Issue closure/isu);
+  assert.match(close, /`C`.*ancestor of `T`.*two-parent.*tree.*`T`.*parents.*`T`.*`C`/isu);
   assert.match(close, /no-fast-forward merge.*`I`/isu);
   assert.match(close, /conflict.*before.*real target.*receipt.*Issue closure/isu);
   assert.match(close, /never invokes `execute-issue`.*never reruns.*Standards.*Spec.*full verification/isu);
   assert.match(close, /git merge --ff-only/u);
-  assert.match(close, /target `HEAD`.*`I`.*`C`.*ancestor/isu);
+  assert.match(close, /target `HEAD == I`.*`C`.*ancestor/isu);
   assert.match(close, /git worktree remove/u);
   assert.match(close, /Close the Issue/iu);
   assert.match(close, /read it back once/iu);
@@ -331,8 +335,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /never automatically stash, commit, clean, reset/iu);
   assert.match(close, /target.*digest.*hook.*drift.*`FAILED`.*stop/isu);
   assert.match(close, /never publish paths or file contents/iu);
-  assert.match(close, /`FAILED`.*explicit human reconciliation.*preservation equality is not proven/isu);
-  assert.match(close, /matching read-back `VERIFIED` or `RECONCILED`.*before cleanup.*before closing/isu);
+  assert.match(close, /`FAILED`.*stops.*explicit recovery.*new.*execution or an integration-repair Issue/isu);
+  assert.doesNotMatch(close, /RECONCILED|preservation equality is not proven/iu);
   assert.match(close, /both gates.*latest execution state identity `E`.*every blocker still closed/isu);
   assert.match(read("docs/engineering/close-issue.md"), /target may keep unrelated staged, unstaged, and untracked work/iu);
   assert.match(close, /already absent worktree means cleanup is complete/iu);
@@ -347,6 +351,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(verify, /union.*execution\/completion history.*closeout receipt.*missing completion note.*missing receipt/isu);
   assert.match(verify, /latest terminal execution state.*no superseding blocked state.*identity.*closeout receipt/isu);
   assert.match(verify, /missing.*receipt.*candidate.*not reachable.*stop/isu);
+  assert.doesNotMatch(verify, /RECONCILED/iu);
   assert.match(verify, /code-review.*Standards.*Spec axis.*member Issue.*linked Specs/isu);
   assert.match(verify, /aggregate.*member/isu);
   assert.match(verify, /union-focused.*full verification/isu);
@@ -398,7 +403,11 @@ test("Issue integration preserves dirty target state and composes candidates in 
   const { repo, rawGit, git, isAncestor } = createGitFixture("skills-integration-fixture-");
   const planIntegration = (target, candidate) => {
     if (isAncestor(target, candidate)) return { kind: "reuse", integration: candidate };
-    if (isAncestor(candidate, target)) throw new Error("candidate is already contained in target");
+    if (isAncestor(candidate, target)) {
+      const tree = git("rev-parse", `${target}^{tree}`);
+      const integration = git("commit-tree", tree, "-p", target, "-p", candidate, "-m", "integrate contained candidate");
+      return { kind: "contained-merge", integration };
+    }
     return { kind: "merge" };
   };
 
@@ -430,7 +439,10 @@ test("Issue integration preserves dirty target state and composes candidates in 
     git("add", "base.txt");
     git("commit", "-m", "target conflict");
     const targetBeforeB = git("rev-parse", "HEAD");
-    assert.throws(() => planIntegration(targetBeforeB, candidateA), /already contained/u);
+    const contained = planIntegration(targetBeforeB, candidateA);
+    assert.equal(contained.kind, "contained-merge");
+    assert.deepEqual(git("rev-list", "--parents", "-n", "1", contained.integration).split(/\s+/u), [contained.integration, targetBeforeB, candidateA]);
+    assert.equal(git("rev-parse", `${contained.integration}^{tree}`), git("rev-parse", `${targetBeforeB}^{tree}`));
     git("checkout", "-b", "integrate-conflict", targetBeforeB);
     assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
     git("merge", "--abort");
@@ -576,7 +588,7 @@ test("aggregate pre-push gate fails closed and binds readiness to exact target H
         assert.ok(receipt, `${issue.id}: missing closeout receipt`);
         assert.equal(receipt.executionStateId, latest.id, `${issue.id}: execution-state mismatch`);
         assert.equal(receipt.candidate, latest.candidate, `${issue.id}: candidate mismatch`);
-        assert.match(receipt.phase, /^(?:VERIFIED|RECONCILED)$/u);
+        assert.equal(receipt.phase, "VERIFIED");
         assert.equal(isAncestor(receipt.candidate, currentHead), true, `${issue.id}: omitted candidate`);
         assert.equal(isAncestor(receipt.integration, currentHead), true, `${issue.id}: omitted integration`);
         return { issue: issue.id, candidate: receipt.candidate, integration: receipt.integration, executionStateId: latest.id };
@@ -600,7 +612,8 @@ test("aggregate pre-push gate fails closed and binds readiness to exact target H
 
     assert.throws(() => runGate({ issues: [{ ...completeIssues[0], receipts: [] }] }), /missing closeout receipt/u);
     assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [] }] }), /missing completion/u);
-    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [successA, { id: "A-blocked", kind: "blocked", target: "target" }] }] }), /superseding blocked state/u);
+    const blockedA = JSON.parse(JSON.stringify({ id: "A-blocked", kind: "implementation_blocked", target: "target", reason: "verification failed" }));
+    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [successA, blockedA] }] }), /superseding blocked state/u);
     assert.throws(() => runGate({ issues: [...completeIssues, { id: "O", execution: [successOmitted], receipts: [receiptOmitted] }] }), /omitted candidate/u);
     assert.throws(() => runGate({ issues: completeIssues, reviewClean: false }), /aggregate review failed/u);
     assert.throws(() => runGate({ issues: completeIssues, verificationClean: false }), /aggregate verification failed/u);

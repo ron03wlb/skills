@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Consume one `/to-spec` classification; never reclassify delivery shape. A Single-Issue Spec is already executable, so stop and return `/execute-issue <Spec-ID>`. For a Multi-Issue Spec, read its full body and comments and decompose only its approved scope.
 
-The configured issue tracker and triage labels must already exist; otherwise run `/setup-matt-pocock-skills`.
+The configured issue tracker and triage labels must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`.
 
 ## 1. Draft independent children
 

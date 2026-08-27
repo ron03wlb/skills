@@ -14,7 +14,7 @@ npx skills update close-issue
 
 `close-issue` integrates one unchanged reviewed candidate into the current local target, proves inclusion and dirty-target preservation, removes the exact Issue worktree, and closes the Issue.
 
-It does not refresh or re-review the candidate. A candidate that already contains the target is reused; a candidate already contained by a newer target stops as ambiguous. If their histories diverge, an isolated no-fast-forward merge commit composes them. Either ambiguity or conflict stops before the real target or tracker state changes.
+It does not refresh or re-review the candidate. A candidate that already contains the target is reused; a candidate already contained by a newer target gets a history-only two-parent merge commit with the target's exact tree. If their histories diverge, an isolated no-fast-forward merge commit composes them. Identity ambiguity or conflict stops before the real target or tracker state changes.
 
 ## When to reach for it
 
@@ -26,7 +26,7 @@ Independent Issues may close in any order. Only writes to one target branch are 
 
 The target advances once by fast-forward to an integration candidate that contains both the prior target and exact reviewed candidate. A read-back receipt proves candidate ancestry before cleanup and closure, so a successfully closed Issue cannot be omitted from its named local target.
 
-The target may keep unrelated staged, unstaged, and untracked work. Closeout fingerprints it, rejects same-path and path-prefix collisions, and preserves hook evidence. Failed preservation stops by default; a later explicitly authorized reconciliation retains the failed evidence and states that preservation equality is not proven.
+The target may keep unrelated staged, unstaged, and untracked work. Closeout fingerprints it, rejects same-path and path-prefix collisions, and preserves hook evidence. Failed or unproved preservation stops cleanup and closure; recovery needs a new successful execution or an integration-repair Issue.
 
 The receipt binds the latest successful execution-state identity. A newer blocked execution supersedes it, and closeout rechecks that identity plus every blocker before integration, cleanup, and tracker closure.
 

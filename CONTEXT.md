@@ -67,7 +67,7 @@ The explicit `/remove-ron` cleanup of one **Ron repository footprint**. It remov
 _Avoid_: Plugin uninstall, branch cleanup, Issue deletion, full purge
 
 **Integration candidate**:
-The exact commit prepared in an isolated temporary worktree from the current target and one unchanged reviewed Issue candidate. It is the reviewed candidate itself when that candidate contains the target, otherwise a no-fast-forward merge commit containing both histories.
+The exact commit prepared in an isolated temporary worktree from current target `T` and one unchanged reviewed Issue candidate `C`. It is `C` when `C` contains `T`; a history-only two-parent merge with `T`'s exact tree and parents `T`, `C` when `T` already contains `C`; otherwise it is a no-fast-forward merge commit containing both histories.
 _Avoid_: Refreshed Issue candidate, conflict-resolution commit, aggregate verification
 
 **Issue integration receipt**:

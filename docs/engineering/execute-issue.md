@@ -26,7 +26,7 @@ Reach for it when [to-spec](https://aihero.dev/skills-to-spec) or [to-tickets](h
 
 Necessary source-grounded dependencies continue automatically while Acceptance Criteria stay unchanged; behavior, target, exclusion, or ownership changes return to planning. Focused checks run through implementation, followed by required final verification and the repository full suite.
 
-Confirmed review findings are repaired for at most ten waves per invocation. `implementation_complete` is recorded only when final verification passes, both review axes are clean, the worktree is clean, and its `HEAD` equals the reviewed candidate. A later blocked execution state supersedes older success for that Issue only.
+Confirmed review findings are repaired for at most ten waves per invocation. Every blocked exit records and reads back an `implementation_blocked` terminal state, so a failed retry supersedes older success for that Issue only. `implementation_complete` is recorded only when final verification passes, both review axes are clean, the worktree is clean, and its `HEAD` equals the reviewed candidate.
 
 ## Where it fits
 

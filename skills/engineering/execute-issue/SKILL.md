@@ -12,6 +12,8 @@ Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicate
 
 Read the exact Issue, parent or linked Spec, comments, repository instructions, Acceptance Criteria, Implementation Plan, blockers, target, and exclusions. Consume the published Single-Issue or child classification without reclassifying it. Unresolved blockers or material ambiguity stops before writing.
 
+Before any blocked exit from Entry, implementation, verification, or review, append an `implementation_blocked` terminal state with the reason and current target, worktree, baseline, and candidate identities that exist. Read it back once; a successfully read-back blocked state supersedes older successful execution evidence for this Issue only. Tracker write or read-back failure reports unresolved tracker ambiguity and never claims supersession or completion.
+
 Capture the original target branch, worktree, and current `HEAD` once as the execution baseline. Preserve unrelated work and do not repeatedly re-confirm unchanged identities.
 
 Require any Planning Seal to exist locally and be an ancestor of the execution baseline. Perform a seal-currency check: the target must have no uncommitted planning-artifact delta owned by this Issue or Spec. This check is not scope authority. Missing, stale, unreachable, or ambiguously owned planning evidence stops; tell the human to invoke `/to-spec` or `/to-tickets`.
@@ -39,9 +41,7 @@ Commit the candidate and invoke Matt `code-review` against the recorded baseline
 - **Standards:** repository instructions and documented standards are satisfied.
 - **Spec:** every Acceptance Criterion and exclusion is satisfied without scope creep.
 
-Confirm findings against source, tests, and the Spec. Fix every confirmed in-scope finding, run affected verification, commit the repair, and rerun the full two-axis review. Allow at most 10 repair waves per invocation; a wave counts only when code repair begins. Tool failures, duplicates, and unsupported findings do not count. If wave 10 remains unclean, preserve the latest verified commit, record the blocked state, and leave the Issue open.
-
-Any later blocked execution state for this Issue supersedes older successful execution evidence; it does not affect other Issues.
+Confirm findings against source, tests, and the Spec. Fix every confirmed in-scope finding, run affected verification, commit the repair, and rerun the full two-axis review. Allow at most 10 repair waves per invocation; a wave counts only when code repair begins. Tool failures, duplicates, and unsupported findings do not count. If wave 10 remains unclean, preserve the latest verified commit, publish the blocked terminal state above, and leave the Issue open.
 
 ## Completion note
 

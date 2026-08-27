@@ -20,7 +20,7 @@ For each member require:
 
 - exact Issue, parent/linked Spec, candidate `C`, integration candidate `I`, and target identities;
 - latest terminal execution state is the matching `implementation_complete` note, with no superseding blocked state, and its identity is bound by the closeout receipt;
-- a matching read-back `VERIFIED` or explicitly authorized `RECONCILED` integration receipt;
+- a matching read-back `VERIFIED` integration receipt;
 - both `C` and `I` to exist locally and be ancestors of `V` but not silently substituted by another SHA.
 
 A missing or unreadable execution history, completion note, or receipt, a superseding blocked state, mismatched target, missing candidate, or candidate not reachable from `V` stops and identifies the closed Issue. Freeze the member set before review; do not infer completeness only from merge commit messages.

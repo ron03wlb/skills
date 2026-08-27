@@ -21,7 +21,7 @@ If the Issue is already closed, resume only when the recorded candidate and inte
 Create an isolated temporary integration worktree and branch from exact `T` without modifying the real target or Issue worktree.
 
 - If `T` is an ancestor of `C`, set `I = C`.
-- Otherwise, if `C` is an ancestor of `T`, stop as an already-contained candidate before real target mutation, receipt preparation, cleanup, or Issue closure.
+- Otherwise, if `C` is an ancestor of `T`, use `git commit-tree` to create `I` as a two-parent merge commit with the exact tree of `T` and exact parents `T` then `C`; verify that tree and parent list.
 - Otherwise create `I` with a no-fast-forward merge of exact `C` into `T`, without rebasing. The merge commit may only compose those histories; do not edit or repair product code.
 
 Require both `T` and `C` to be ancestors of `I` and the temporary worktree to be clean. A merge conflict, changed candidate, ambiguous identity, scope change, or unexpected merge content stops before real target mutation, receipt preparation, Issue worktree cleanup, or Issue closure. Never auto-resolve conflicts. Remove only the temporary integration worktree when safe; otherwise report its exact retained state.
@@ -48,9 +48,9 @@ Recompute dirty and hook evidence. Mismatch records expected and observed eviden
 
 Matching `PREPARED` may resume only from `T` with unchanged evidence or from `I` with proved candidate ancestry and unchanged evidence. Matching `VERIFIED` may resume at `I`. Missing, unreadable, mismatched, or third-SHA evidence stops.
 
-A `FAILED` receipt stops by default. A later explicit human reconciliation may accept only post-fast-forward dirty drift when the receipt preserves failure-time expected/observed evidence, reflog proves `T -> I`, `C` and `I` remain ancestors of current target, collision remains zero, the exact Issue worktree is clean, and hook evidence is sufficient. Legacy missing transition-time hook evidence additionally requires current hook absence and explicit acceptance that absence is not retroactively proven. Append and read back a separate `dirty-target-reconciliation:v1` receipt in phase `RECONCILED`; never replace `FAILED`, and state `preservation equality is not proven`.
+A `FAILED` receipt stops cleanup and closure. Explicit recovery requires a new successful execution or an integration-repair Issue; never convert unproved preservation into closure.
 
-Require a matching read-back `VERIFIED` or `RECONCILED` receipt before cleanup and before closing. At both gates re-read target `HEAD == I`, latest execution state identity `E`, and every blocker still closed; any drift leaves the Issue open and reports the exact partial state. Remove the exact clean registered Issue worktree with `git worktree remove`; an already absent worktree means cleanup is complete only with matching receipt evidence. Prune only stale worktree metadata and never delete the topic branch.
+Require a matching read-back `VERIFIED` receipt before cleanup and before closing. At both gates re-read target `HEAD == I`, latest execution state identity `E`, and every blocker still closed; any drift leaves the Issue open and reports the exact partial state. Remove the exact clean registered Issue worktree with `git worktree remove`; an already absent worktree means cleanup is complete only with matching receipt evidence. Prune only stale worktree metadata and never delete the topic branch.
 
 Close the Issue through the configured tracker and read it back once. Failure after integration reports exact partial state and resumes only through matching receipts; never roll back a successful integration automatically.
 

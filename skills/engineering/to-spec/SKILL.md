@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and prefer existing high-level verification seams.
 
-The configured issue tracker and triage labels must already exist; otherwise run `/setup-matt-pocock-skills`.
+The configured issue tracker and triage labels must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`.
 
 ## 1. Resolve the publication
 
