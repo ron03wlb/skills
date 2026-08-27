@@ -28,21 +28,25 @@ Require both `T` and `C` to be ancestors of `I` and the temporary worktree to be
 
 ## Protect unrelated target work
 
-Immediately before integration, require target `HEAD == T`. Build a canonical snapshot of every pre-existing staged, unstaged, and untracked target path. For candidate and dirty renames, include both source and destination. Parse machine-readable Git output NUL-safely and compare with repository/filesystem case semantics.
+Immediately before integration, require target `HEAD == T`. Create invocation-unique strict-UTF-8 JSON input and output paths, require the final output to be absent, and run:
 
-Snapshot path/status class, file type/mode, worktree content fingerprints, and index entries. Keep paths local; publish only a canonical SHA-256 digest and staged, unstaged, and untracked counts. Resolve and fingerprint effective post-merge hook state, keeping its path local. Never publish paths or file contents.
+`node <close-issue-skill>/scripts/preservation.mjs inspect <input-json-path> <output-json-path>`
 
-Compare the complete `T..I` delta with dirty paths. A collision is the same path or an ancestor/descendant path-prefix pair. Any collision stops with the Issue open; never automatically stash, commit, clean, reset, or move user work.
+The `closeout-preservation-inspection-input:v1` input supplies only the resolved target worktree, expected target identity, `T`, and `I`. Never precompute or pass dirty paths, candidate paths, fingerprints, case semantics, collision results, or hook evidence. The private read-only module derives them in one inspection: every staged, unstaged, and untracked path; both endpoints of candidate and dirty renames; path/status class, file type/mode, worktree fingerprints, and index entries; NUL-safe Git output; repository/filesystem case semantics; the complete `T..I` delta; same-path and ancestor/descendant path-prefix collisions; and effective post-merge hook evidence.
+
+Continue only when the command exits zero and the complete expected `closeout-preservation-inspection:v1` result is `SAFE`. Validate observed target, dirty SHA-256 and counts, hook fingerprints, collision outcome, reason code, and every required field. A classified `COLLISION` or `BLOCKED` result is diagnostic only and exits non-zero; command failure, missing output, stale output, malformed JSON, missing field, schema mismatch, or any untrusted state stops without inference. Any collision stops with the Issue open; never automatically stash, commit, clean, reset, or move user work.
+
+Keep paths local and publish only the canonical dirty digest, staged/unstaged/untracked counts, and hook evidence. Never publish paths or file contents. After validation, remove only this invocation's exact input/output and `<output-json-path>.tmp-*` files; never reuse a result path. Stdout and a reusable repository-local result file are not evidence transports.
 
 Append a read-back `dirty-target-preservation:v1` receipt in phase `PREPARED` binding the Issue, execution-state identity `E`, target branch, `T`, `C`, `I`, dirty digest and counts, and hook evidence. Read back and verify those exact fields before continuing. Tracker failure or mismatch stops before integration.
 
-Immediately re-read target `HEAD`, latest execution state, blockers, dirty snapshot, and hook evidence. Target, `E`, blocker, digest, or hook drift updates/read-backs the receipt as `FAILED` when possible and stops; never re-baseline inside the invocation.
+Immediately re-read target `HEAD`, latest execution state, and blockers, then rerun the same private inspection with expected target `T`. Target, `E`, blocker, digest, count, or hook drift updates/read-backs the receipt as `FAILED` when possible and stops; never re-baseline inside the invocation.
 
 ## Integrate and prove inclusion
 
 From the original target worktree run `git merge --ff-only <I>`. Verify target `HEAD == I` and `C` is an ancestor of `I`. Git refusal or any identity mismatch marks/read-backs `FAILED` when possible and stops with the Issue open; inspect actual state and never assume rollback.
 
-Recompute dirty and hook evidence. Mismatch records expected and observed evidence in `FAILED`, keeps the Issue open, and never triggers automatic repair or rollback. On equality, update the receipt to `VERIFIED` with target-after `I`, candidate reachable, the same digest/counts/hook evidence, then read back every field. Missing or mismatched proof stops before cleanup.
+Run the same private inspection with expected target `I`. Anything except a complete trusted `SAFE` result records available expected and observed evidence in `FAILED`, keeps the Issue open, and never triggers automatic repair or rollback. On equal dirty digest/counts and hook evidence, update the receipt to `VERIFIED` with target-after `I`, candidate reachable, the same evidence, then read back every field. Missing or mismatched proof stops before cleanup.
 
 ## Resume, clean up, and close
 

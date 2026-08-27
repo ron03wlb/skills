@@ -32,6 +32,12 @@ The receipt binds the latest successful execution-state identity. A newer blocke
 
 Closeout never edits product code, reruns expensive verification, pushes, deploys, automatically reopens an Issue, or rolls back a successful local integration.
 
+## One deep preservation seam
+
+Dirty-target inspection is a private read-only module inside `close-issue`, not another workflow step. The skill passes resolved local Git identities to the same atomic inspection before and after integration; the module owns NUL-safe status parsing, fingerprints, rename and path-prefix collision handling, filesystem case semantics, and post-merge hook evidence.
+
+Each invocation uses unique strict-UTF-8 input and output files. Only a complete `SAFE` result can continue closeout; classified collisions, blocked identity, stale or malformed output, and interrupted publication all stop without inference. The helper never reads Issues, writes receipts, integrates code, removes worktrees, or closes the Issue.
+
 ## Where it fits
 
 `close-issue` follows [execute-issue](https://aihero.dev/skills-execute-issue). After any desired Issues are closed, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) performs the aggregate gate on the exact target. See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

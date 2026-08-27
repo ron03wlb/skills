@@ -11,7 +11,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const INPUT_SCHEMA = "closeout-preservation-inspection-input:v1";
@@ -336,7 +336,7 @@ function readInput(path) {
 function publish(outputPath, result) {
   const finalPath = resolve(outputPath);
   if (existsSync(finalPath)) invalid("output JSON path must not already exist");
-  const temporaryPath = resolve(dirname(finalPath), `.${randomUUID()}.tmp-${process.pid}`);
+  const temporaryPath = `${finalPath}.tmp-${process.pid}-${randomUUID()}`;
   try {
     writeFileSync(temporaryPath, `${JSON.stringify(result)}\n`, { encoding: "utf8", flag: "wx" });
     renameSync(temporaryPath, finalPath);
