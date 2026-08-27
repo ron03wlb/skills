@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -249,14 +250,14 @@ test("file transport rejects stale output and does not publish incomplete eviden
   assert.equal(readdirSync(root).some((name) => name.includes(".tmp-")), false);
 
   const interruptedOutput = join(root, "interrupted-output.json");
-  const preloadPath = join(root, "interrupt-rename.cjs");
+  const preloadPath = join(root, "interrupt-publication.cjs");
   writeFileSync(preloadPath, `
 const fs = require("node:fs");
 const { syncBuiltinESMExports } = require("node:module");
-const originalRenameSync = fs.renameSync;
-fs.renameSync = function (source, destination) {
+const originalLinkSync = fs.linkSync;
+fs.linkSync = function (source, destination) {
   if (destination === process.env.PRESERVATION_INTERRUPT_OUTPUT) throw new Error("simulated publication interruption");
-  return originalRenameSync.apply(this, arguments);
+  return originalLinkSync.apply(this, arguments);
 };
 syncBuiltinESMExports();
 `, "utf8");
@@ -272,6 +273,30 @@ syncBuiltinESMExports();
   assert.match(interrupted.stderr, /simulated publication interruption/u);
   assert.equal(existsSync(interruptedOutput), false);
   assert.equal(readdirSync(root).some((name) => name.startsWith("interrupted-output.json.tmp-")), false);
+
+  const competingOutput = join(root, "competing-output.json");
+  const competingPreloadPath = join(root, "competing-publication.cjs");
+  writeFileSync(competingPreloadPath, `
+const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const originalLinkSync = fs.linkSync;
+fs.linkSync = function (source, destination) {
+  if (destination === process.env.PRESERVATION_COMPETING_OUTPUT) fs.writeFileSync(destination, "competing evidence\\n", "utf8");
+  return originalLinkSync.apply(this, arguments);
+};
+syncBuiltinESMExports();
+`, "utf8");
+  const competing = spawnSync(process.execPath, [script, "inspect", inputPath, competingOutput], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `--require=${competingPreloadPath.replaceAll("\\", "/")}`,
+      PRESERVATION_COMPETING_OUTPUT: competingOutput,
+    },
+  });
+  assert.equal(competing.status, 2);
+  assert.equal(readFileSync(competingOutput, "utf8"), "competing evidence\n");
+  assert.equal(readdirSync(root).some((name) => name.startsWith("competing-output.json.tmp-")), false);
 
   const bomInput = join(root, "bom-input.json");
   const bomOutput = join(root, "bom-output.json");
@@ -377,6 +402,7 @@ test("inspection fingerprints dirty submodule worktree content", (t) => {
   git("commit", "-m", "candidate");
   const integrationCandidate = git("rev-parse", "HEAD");
   git("checkout", "target");
+  git("config", "submodule.nested.ignore", "all");
 
   const input = {
     schema: "closeout-preservation-inspection-input:v1",
@@ -388,6 +414,7 @@ test("inspection fingerprints dirty submodule worktree content", (t) => {
   writeFileSync(join(repo, "nested", "nested.txt"), "first nested edit\n", "utf8");
   const first = inspect(root, repo, input);
   assert.equal(first.processResult.status, 0, first.processResult.stderr);
+  assert.deepEqual(first.output.dirty.counts, { staged: 0, unstaged: 1, untracked: 0 });
   writeFileSync(join(repo, "nested", "nested.txt"), "second nested edit\n", "utf8");
   const second = inspect(root, repo, input);
   assert.equal(second.processResult.status, 0, second.processResult.stderr);
@@ -422,4 +449,157 @@ test("inspection fingerprints dangling symlink targets when the filesystem suppo
   const second = inspect(root, repo, input);
   assert.equal(second.processResult.status, 0, second.processResult.stderr);
   assert.notEqual(second.output.dirty.sha256, first.output.dirty.sha256);
+});
+
+test("inspection rejects a dangling symlink as a pre-existing final output", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-dangling-output");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  const inputPath = join(root, "input.json");
+  const outputPath = join(root, "output.json");
+  writeFileSync(inputPath, JSON.stringify({
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  }), "utf8");
+  try {
+    symlinkSync("missing-output-target", outputPath, "file");
+  } catch (error) {
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      t.skip("fixture filesystem does not permit symlinks");
+      return;
+    }
+    throw error;
+  }
+
+  const result = spawnSync(process.execPath, [script, "inspect", inputPath, outputPath], { encoding: "utf8" });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /must not already exist/u);
+  assert.equal(lstatSync(outputPath).isSymbolicLink(), true);
+});
+
+test("inspection keeps POSIX backslashes as filename characters", (t) => {
+  if (process.platform === "win32") {
+    t.skip("Windows does not permit backslashes in filenames");
+    return;
+  }
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-backslash");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const targetBefore = git("rev-parse", "HEAD");
+  git("checkout", "-b", "candidate");
+  mkdirSync(join(repo, "a"));
+  writeFileSync(join(repo, "a", "b"), "candidate\n", "utf8");
+  git("add", "a/b");
+  git("commit", "-m", "candidate");
+  const integrationCandidate = git("rev-parse", "HEAD");
+  git("checkout", "target");
+  const dirtyPath = join(repo, "a\\b");
+  writeFileSync(dirtyPath, "first local state\n", "utf8");
+  const input = {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: targetBefore,
+    targetBefore,
+    integrationCandidate,
+  };
+  const first = inspect(root, repo, input);
+  assert.equal(first.processResult.status, 0, first.processResult.stderr);
+  assert.equal(first.output.collision.present, false);
+  writeFileSync(dirtyPath, "second local state\n", "utf8");
+  const second = inspect(root, repo, input);
+  assert.notEqual(second.output.dirty.sha256, first.output.dirty.sha256);
+});
+
+test("inspection fingerprints equal-content hook symlink retargeting when supported", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-hook-symlink");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  const hookPath = resolve(repo, git("rev-parse", "--git-path", "hooks/post-merge"));
+  const firstTarget = join(dirname(hookPath), "post-merge-first");
+  const secondTarget = join(dirname(hookPath), "post-merge-second");
+  writeFileSync(firstTarget, "same hook content\n", "utf8");
+  writeFileSync(secondTarget, "same hook content\n", "utf8");
+  try {
+    symlinkSync(firstTarget, hookPath, "file");
+  } catch (error) {
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      t.skip("fixture filesystem does not permit symlinks");
+      return;
+    }
+    throw error;
+  }
+  const input = {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  };
+  const first = inspect(root, repo, input);
+  unlinkSync(hookPath);
+  symlinkSync(secondTarget, hookPath, "file");
+  const second = inspect(root, repo, input);
+  assert.notEqual(second.output.hook.fingerprintSha256, first.output.hook.fingerprintSha256);
+});
+
+test("inspection disables configured fsmonitor side effects", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-fsmonitor");
+  writeFileSync(join(repo, "tracked.txt"), "baseline\n", "utf8");
+  git("add", "tracked.txt");
+  git("commit", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  const marker = join(root, "fsmonitor-invoked");
+  const hookPath = join(root, "fsmonitor-hook");
+  writeFileSync(hookPath, `#!/bin/sh\nprintf invoked > '${marker.replaceAll("'", "'\\''").replaceAll("\\", "/")}'\nprintf 'token\\0'\n`, "utf8");
+  chmodSync(hookPath, 0o755);
+  git("config", "core.fsmonitor", hookPath.replaceAll("\\", "/"));
+
+  const result = inspect(root, repo, {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  });
+  assert.equal(result.processResult.status, 0, result.processResult.stderr);
+  assert.equal(existsSync(marker), false);
+});
+
+test("inspection does not classify a Git ancestry command failure", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-ancestry-error");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  const inputPath = join(root, "input.json");
+  const outputPath = join(root, "output.json");
+  const preloadPath = join(root, "fail-ancestry.cjs");
+  writeFileSync(inputPath, JSON.stringify({
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  }), "utf8");
+  writeFileSync(preloadPath, `
+const childProcess = require("node:child_process");
+const { syncBuiltinESMExports } = require("node:module");
+const originalExecFileSync = childProcess.execFileSync;
+childProcess.execFileSync = function (file, args) {
+  if (file === "git" && args.includes("merge-base")) {
+    const error = new Error("simulated ancestry command failure");
+    error.status = 128;
+    throw error;
+  }
+  return originalExecFileSync.apply(this, arguments);
+};
+syncBuiltinESMExports();
+`, "utf8");
+  const result = spawnSync(process.execPath, [script, "inspect", inputPath, outputPath], {
+    encoding: "utf8",
+    env: { ...process.env, NODE_OPTIONS: `--require=${preloadPath.replaceAll("\\", "/")}` },
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /simulated ancestry command failure/u);
+  assert.equal(existsSync(outputPath), false);
 });

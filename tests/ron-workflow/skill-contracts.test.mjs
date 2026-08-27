@@ -456,7 +456,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(preservation, /closeout-preservation-inspection-input:v1/u);
   assert.match(preservation, /closeout-preservation-inspection:v1/u);
   assert.match(preservation, /GIT_OPTIONAL_LOCKS.*"0"/su);
-  assert.match(preservation, /status.*--porcelain=v2.*-z.*--untracked-files=all/su);
+  assert.match(preservation, /core\.fsmonitor=false/su);
+  assert.match(preservation, /status.*--porcelain=v2.*-z.*--untracked-files=all.*--ignore-submodules=none/su);
   assert.match(preservation, /ls-files.*--stage.*-z/su);
   assert.match(preservation, /diff.*--name-status.*-z.*--find-renames.*--find-copies/su);
   assert.match(preservation, /config.*core\.ignorecase/su);
@@ -464,7 +465,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(preservation, /submoduleWorktreeFingerprint/u);
   assert.match(preservation, /firstSnapshot.*secondSnapshot.*changed during inspection/su);
   assert.match(preservation, /hooks\/post-merge/u);
-  assert.match(preservation, /renameSync\(temporaryPath, finalPath\)/u);
+  assert.match(preservation, /linkSync\(temporaryPath, finalPath\).*unlinkSync\(temporaryPath\)/su);
   assert.match(preservation, /output JSON path must not already exist/u);
   assert.doesNotMatch(preservation, /process\.stdout\.write|\bgh\b|\bglab\b|dirty-target-preservation/u);
 

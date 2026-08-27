@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync,
+  linkSync,
   lstatSync,
   readFileSync,
   readlinkSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -35,7 +35,7 @@ function decode(buffer, label) {
 }
 
 function gitBuffer(worktree, ...args) {
-  return execFileSync("git", ["-C", worktree, ...args], {
+  return execFileSync("git", ["-c", "core.fsmonitor=false", "-C", worktree, ...args], {
     encoding: "buffer",
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     maxBuffer: 64 * 1024 * 1024,
@@ -69,7 +69,10 @@ function nulFields(buffer, label) {
 }
 
 function parseStatus(worktree) {
-  const fields = nulFields(gitBuffer(worktree, "status", "--porcelain=v2", "-z", "--untracked-files=all"), "Git status");
+  const fields = nulFields(
+    gitBuffer(worktree, "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignore-submodules=none"),
+    "Git status",
+  );
   const entries = [];
   const counts = { staged: 0, unstaged: 0, untracked: 0 };
   let unmerged = false;
@@ -166,8 +169,12 @@ function parseCandidatePaths(worktree, targetBefore, integrationCandidate) {
   return paths;
 }
 
+function normalizeGitPath(path) {
+  return process.platform === "win32" ? path.replaceAll("\\", "/") : path;
+}
+
 function comparisonPath(path, caseInsensitive) {
-  const normalized = path.replaceAll("\\", "/");
+  const normalized = normalizeGitPath(path);
   return caseInsensitive ? normalized.toLowerCase() : normalized;
 }
 
@@ -216,7 +223,7 @@ function submoduleWorktreeFingerprint(path, visited) {
 }
 
 function filesystemFingerprint(worktree, path, entry, visited) {
-  const candidate = resolve(worktree, ...path.replaceAll("\\", "/").split("/"));
+  const candidate = resolve(worktree, normalizeGitPath(path));
   if (!isPathInside(worktree, candidate)) invalid("Git path escapes the target worktree");
   const stat = tryLstat(candidate);
   if (stat === null) return { type: "absent", mode: null, sha256: "absent" };
@@ -239,7 +246,7 @@ function dirtyEvidence(worktree, status, caseInsensitive, visited = new Set([wor
       ? [{ role: "path", path: entry.path }]
       : [{ role: "destination", path: entry.path }, { role: "source", path: entry.originalPath }];
     for (const endpoint of endpoints) {
-      const normalized = endpoint.path.replaceAll("\\", "/");
+      const normalized = normalizeGitPath(endpoint.path);
       const compared = comparisonPath(normalized, caseInsensitive);
       collisionPaths.add(compared);
       records.push({
@@ -275,11 +282,13 @@ function hookEvidence(worktree, caseInsensitive) {
   const stat = tryLstat(hookPath);
   const present = stat !== null;
   let contentSha256 = "absent";
+  let linkTargetSha256 = "not-symlink";
   let type = "absent";
   let mode = null;
   if (present) {
     mode = (stat.mode & 0o777777).toString(8).padStart(6, "0");
     type = stat.isSymbolicLink() ? "symlink" : stat.isFile() ? "file" : stat.isDirectory() ? "directory" : "other";
+    if (stat.isSymbolicLink()) linkTargetSha256 = sha256(Buffer.from(readlinkSync(hookPath), "utf8"));
     if (stat.isFile() || stat.isSymbolicLink()) contentSha256 = sha256(readFileSync(hookPath));
   }
   const resolutionSha256 = sha256(normalized);
@@ -287,7 +296,7 @@ function hookEvidence(worktree, caseInsensitive) {
     present,
     resolutionSha256,
     contentSha256,
-    fingerprintSha256: sha256(JSON.stringify({ resolutionSha256, present, type, mode, contentSha256 })),
+    fingerprintSha256: sha256(JSON.stringify({ resolutionSha256, present, type, mode, linkTargetSha256, contentSha256 })),
   };
 }
 
@@ -322,6 +331,16 @@ function collisionOutcome(dirtyPaths, candidatePaths) {
     for (const candidatePath of candidatePaths) if (pathsCollide(dirtyPath, candidatePath)) count += 1;
   }
   return { present: count > 0, count };
+}
+
+function isAncestor(worktree, ancestor, descendant) {
+  try {
+    gitBuffer(worktree, "merge-base", "--is-ancestor", ancestor, descendant);
+    return true;
+  } catch (error) {
+    if (error.status === 1) return false;
+    throw error;
+  }
 }
 
 function inspect(input) {
@@ -367,9 +386,7 @@ function inspect(input) {
     statusName = "BLOCKED";
     reasonCode = "UNMERGED_TARGET_STATE";
   } else {
-    try {
-      gitBuffer(worktree, "merge-base", "--is-ancestor", input.targetBefore, input.integrationCandidate);
-    } catch {
+    if (!isAncestor(worktree, input.targetBefore, input.integrationCandidate)) {
       statusName = "BLOCKED";
       reasonCode = "INTEGRATION_ANCESTRY_INVALID";
     }
@@ -398,13 +415,14 @@ function readInput(path) {
 
 function publish(outputPath, result) {
   const finalPath = resolve(outputPath);
-  if (existsSync(finalPath)) invalid("output JSON path must not already exist");
+  if (tryLstat(finalPath) !== null) invalid("output JSON path must not already exist");
   const temporaryPath = `${finalPath}.tmp-${process.pid}-${randomUUID()}`;
   try {
     writeFileSync(temporaryPath, `${JSON.stringify(result)}\n`, { encoding: "utf8", flag: "wx" });
-    renameSync(temporaryPath, finalPath);
+    linkSync(temporaryPath, finalPath);
+    unlinkSync(temporaryPath);
   } finally {
-    if (existsSync(temporaryPath)) rmSync(temporaryPath, { force: true });
+    rmSync(temporaryPath, { force: true });
   }
 }
 
@@ -413,7 +431,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (process.argv[2] !== "inspect") invalid("unsupported preservation command");
     if (!process.argv[3] || !process.argv[4]) invalid("input and output JSON paths are required");
     if (resolve(process.argv[3]) === resolve(process.argv[4])) invalid("input and output JSON paths must differ");
-    if (existsSync(process.argv[4])) invalid("output JSON path must not already exist");
+    if (tryLstat(resolve(process.argv[4])) !== null) invalid("output JSON path must not already exist");
     const result = inspect(readInput(process.argv[3]));
     publish(process.argv[4], result);
     process.exitCode = result.status === "SAFE" ? 0 : result.status === "COLLISION" ? 3 : 4;
