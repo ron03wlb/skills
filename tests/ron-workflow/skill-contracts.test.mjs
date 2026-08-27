@@ -456,6 +456,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(preservation, /closeout-preservation-inspection-input:v1/u);
   assert.match(preservation, /closeout-preservation-inspection:v1/u);
   assert.match(preservation, /GIT_OPTIONAL_LOCKS.*"0"/su);
+  assert.match(preservation, /GIT_NO_LAZY_FETCH.*"1"/su);
   assert.match(preservation, /core\.fsmonitor=false/su);
   assert.match(preservation, /status.*--porcelain=v2.*-z.*--untracked-files=all.*--ignore-submodules=none/su);
   assert.match(preservation, /ls-files.*--stage.*-z/su);

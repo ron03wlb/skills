@@ -190,6 +190,26 @@ test("inspection returns classified identity and hook evidence without authorizi
   assert.notEqual(changed.output.hook.fingerprintSha256, firstHook);
 });
 
+test("inspection preserves whitespace in the effective hooks path", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-hook-path");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  git("config", "core.hooksPath", " hooks");
+  const hookPath = join(repo, " hooks", "post-merge");
+  mkdirSync(dirname(hookPath), { recursive: true });
+  writeFileSync(hookPath, "#!/bin/sh\n", "utf8");
+
+  const result = inspect(root, repo, {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  });
+  assert.equal(result.processResult.status, 0, result.processResult.stderr);
+  assert.equal(result.output.hook.present, true);
+});
+
 test("inspection includes unmerged paths in a classified blocked result", (t) => {
   const { root, repo, git } = createInspectionFixture(t, "close-preservation-unmerged");
 

@@ -37,13 +37,15 @@ function decode(buffer, label) {
 function gitBuffer(worktree, ...args) {
   return execFileSync("git", ["-c", "core.fsmonitor=false", "-C", worktree, ...args], {
     encoding: "buffer",
-    env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    env: { ...process.env, GIT_NO_LAZY_FETCH: "1", GIT_OPTIONAL_LOCKS: "0" },
     maxBuffer: 64 * 1024 * 1024,
   });
 }
 
 function gitText(worktree, ...args) {
-  return decode(gitBuffer(worktree, ...args), "Git output").trim();
+  const value = decode(gitBuffer(worktree, ...args), "Git output");
+  if (value.endsWith("\r\n")) return value.slice(0, -2);
+  return value.endsWith("\n") ? value.slice(0, -1) : value;
 }
 
 function optionalGitText(worktree, ...args) {
