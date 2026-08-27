@@ -176,6 +176,7 @@ Skills I use daily for code work.
 
 **User-invoked**
 
+- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Prove one exact aggregate target contains every relevant closed candidate and is review/test clean without pushing.

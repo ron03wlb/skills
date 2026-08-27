@@ -1,7 +1,7 @@
 interface:
   display_name: "Execute Issue"
   short_description: "Execute and fully verify one tracker Issue"
-  default_prompt: "Use $execute-issue to validate the Planning Seal, implement one tracker Issue in a worktree, run final verification, and repair review findings until Standards and Spec are clean."
+  default_prompt: "Use $execute-issue to validate the Planning Seal and read-only prerequisite gate, implement one tracker Issue in its worktree, run final verification, and repair review findings until Standards and Spec are clean."
 
 policy:
   allow_implicit_invocation: false

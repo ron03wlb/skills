@@ -292,6 +292,63 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
 });
 
 
+test("prerequisite preparation is optional, gated, and recoverable", () => {
+  const preExecute = read("skills/engineering/pre-execute-issue/SKILL.md");
+  const preExecuteMetadata = read("skills/engineering/pre-execute-issue/agents/openai.yaml");
+  const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(preExecute, /^disable-model-invocation:\s*true$/mu);
+  assert.match(preExecuteMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(preExecuteDocs, /agent won't reach for it on its own/iu);
+
+  assert.match(preExecute, /exact.*Issue.*published.*before.*worktree.*product implementation/isu);
+  assert.match(preExecute, /repository instructions.*exact.*resolver.*`discover`.*`prepare`.*`verify`/isu);
+  assert.match(preExecute, /no.*declaration.*`NOT_REQUIRED`.*no worktree/isu);
+  assert.match(preExecute, /declared.*missing.*unreadable.*ambiguous.*unparseable.*inconsistent.*`BLOCKED`.*no worktree/isu);
+  assert.match(preExecute, /repository owns.*transport.*field.*policy.*validation.*target/isu);
+
+  assert.match(preExecute, /only `REQUIRED`.*create or reuse.*Issue worktree.*topic branch/isu);
+  assert.match(preExecute, /`prepare`.*only.*declared.*Prerequisite artifact/isu);
+  assert.match(preExecute, /five.*repair waves.*initial generation.*no-edit retr.*tool failures.*do not count/isu);
+  assert.match(preExecute, /syntax.*static validation.*pass.*commit.*artifact alone.*worktree.*clean.*`WAITING_MANUAL`/isu);
+  assert.match(preExecute, /product implementation.*stop.*planning.*`execute-issue`/isu);
+
+  assert.match(preExecute, /append-only.*`WAITING_MANUAL`.*read.*back once/isu);
+  assert.match(preExecute, /Issue.*prerequisite commit.*artifact paths.*SHA-256.*resolver.*policy.*non-sensitive.*target.*ancestry/isu);
+  assert.match(preExecute, /`NOT_REQUIRED`.*`REQUIRED`.*`BLOCKED`.*transient.*no.*receipt/isu);
+  assert.match(preExecute, /never.*credentials.*manual.*action.*poll/isu);
+
+  assert.match(preExecute, /current `WAITING_MANUAL`.*`verify` exactly once.*read-only.*declared outcome.*non-sensitive target/isu);
+  assert.match(preExecute, /success.*append.*read.*back.*`READY`.*failure.*preserve.*`WAITING_MANUAL`.*transient `BLOCKED`/isu);
+  assert.match(preExecute, /current `READY`.*match.*report `READY`.*stop/isu);
+  assert.match(preExecute, /tracker write or read-back failure.*transient `BLOCKED`.*never.*`WAITING_MANUAL`.*`READY`/isu);
+  assert.match(preExecute, /later implementation commits.*prerequisite commit.*ancestor.*protected.*match/isu);
+  assert.match(preExecute, /artifact.*resolver.*policy.*manual target.*ancestry.*drift.*stale/isu);
+
+  assert.match(execute, /Entry.*read-only.*`discover`/isu);
+  assert.match(execute, /after.*exact.*Issue.*published.*before.*worktree.*product implementation/isu);
+  assert.match(execute, /no.*resolver declaration.*`NOT_REQUIRED`.*ordinary.*execution/isu);
+  assert.match(execute, /current.*`READY`.*same Issue worktree.*topic branch.*candidate ancestry/isu);
+  assert.match(execute, /`REQUIRED`.*missing or stale.*`implementation_blocked`.*invoke `\/pre-execute-issue/isu);
+  assert.match(execute, /resolver.*`BLOCKED`.*`implementation_blocked`/isu);
+  assert.match(execute, /never invokes `pre-execute-issue`.*never.*`prepare`.*manual prerequisite action/isu);
+  assert.match(execute, /Late prerequisite discovery.*before.*prerequisite-dependent verification.*unchanged.*Acceptance Criteria.*schema outcome.*same worktree.*changed.*behavior.*acceptance.*target.*exclusions.*ownership.*planning/isu);
+
+  for (const path of [
+    "docs/engineering/pre-execute-issue.md",
+    "docs/engineering/execute-issue.md",
+    "docs/engineering/ask-matt.md",
+  ]) assert.doesNotMatch(read(path), /\]\((?:\.\/|\.\.\/)/u, `${path} has a relative published link`);
+  assert.match(matt, /published.*Issue.*`\/pre-execute-issue.*optional.*`\/execute-issue`/isu);
+  assert.match(mattDocs, /pre-execute-issue.*optional.*execute-issue/isu);
+  assert.match(executeDocs, /read-only prerequisite discovery.*`NOT_REQUIRED`.*`READY`.*pre-execute-issue/isu);
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   assert.match(execute, /dedicated Git worktree/iu);
@@ -694,6 +751,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   assert.match(matt, /`\/wiki`/u);
   assert.match(matt, /`\/remove-ron`/u);
+  assert.match(matt, /`\/pre-execute-issue/u);
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
   assert.match(matt, /`\/verify-target-before-push/iu);
@@ -714,6 +772,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
     "ask-matt",
     "wiki",
     "remove-ron",
+    "pre-execute-issue",
     "execute-issue",
     "close-issue",
     "verify-target-before-push",
@@ -738,10 +797,12 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/ask-matt/SKILL.md",
     "skills/engineering/wiki/SKILL.md",
     "skills/engineering/remove-ron/SKILL.md",
+    "skills/engineering/pre-execute-issue/SKILL.md",
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
     "docs/engineering/implement.md",
+    "docs/engineering/pre-execute-issue.md",
     "docs/engineering/execute-issue.md",
     "docs/engineering/close-issue.md",
     "docs/engineering/verify-target-before-push.md",

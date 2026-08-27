@@ -15,8 +15,9 @@ Route the user's situation; do not perform the routed work.
 3. Follow the published command:
    - Single-Issue Tracker Spec → `/execute-issue <Spec-ID>`.
    - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>`, then `/execute-issue <Issue-ID>` for each dependency-ready child.
-4. After each clean execution, the human uses `/close-issue` with that Issue ID to integrate its exact candidate into the current local target and close it. Issue worktrees may run concurrently; one human serializes integration writes to the same target branch.
-5. Before push, the human invokes `/verify-target-before-push <target>` once on the exact aggregate target. Push remains separate.
+4. After the exact Issue is published, `/pre-execute-issue <Issue-ID>` is optional before `/execute-issue`; direct execution performs the same read-only discovery and stops if current prerequisite evidence is required.
+5. After each clean execution, the human uses `/close-issue` with that Issue ID to integrate its exact candidate into the current local target and close it. Issue worktrees may run concurrently; one human serializes integration writes to the same target branch.
+6. Before push, the human invokes `/verify-target-before-push <target>` once on the exact aggregate target. Push remains separate.
 
 A Tracker Spec, including a local-file tracker record, uses `/execute-issue`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
 

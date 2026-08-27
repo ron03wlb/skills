@@ -32,6 +32,8 @@ Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/sk
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
+[pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) is optional after an Issue is published. It may prepare and verify a repository-declared manual prerequisite before `execute-issue`; direct execution remains valid because it runs the same read-only discovery and stops when current `READY` evidence is required.
+
 Each completed Issue is locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). Independent Issue worktrees may execute concurrently and close in any order; writes to one target branch remain serialized. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) proves the exact aggregate target contains every relevant closed candidate and is review/test clean. It does not push.
 
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.

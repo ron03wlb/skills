@@ -1,0 +1,7 @@
+interface:
+  display_name: "Pre-Execute Issue"
+  short_description: "Prepare and verify one Issue prerequisite"
+  default_prompt: "Use $pre-execute-issue to inspect one published Issue, prepare only a declared prerequisite artifact when required, and stop at a read-back WAITING_MANUAL or READY receipt."
+
+policy:
+  allow_implicit_invocation: false
