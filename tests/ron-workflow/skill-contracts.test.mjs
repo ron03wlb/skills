@@ -349,6 +349,47 @@ test("prerequisite preparation is optional, gated, and recoverable", () => {
 });
 
 
+test("one-time prerequisite resolver adoption is explicit and no-op without a concrete need", () => {
+  const setup = read("skills/engineering/setup-pre-execute-issue/SKILL.md");
+  const metadata = read("skills/engineering/setup-pre-execute-issue/agents/openai.yaml");
+  const docs = read("docs/engineering/setup-pre-execute-issue.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(setup, /^disable-model-invocation:\s*true$/mu);
+  assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(docs, /agent won't reach for it on its own/iu);
+  assert.match(setup, /before writing.*inspect.*repository instructions.*code.*tests.*concrete manual prerequisite/isu);
+  assert.match(setup, /no concrete manual prerequisite.*setup.*unnecessary.*repository unchanged.*no resolver declaration.*placeholder.*TODO/isu);
+
+  assert.match(setup, /only.*minimum.*existing `AGENTS\.md` or `CLAUDE\.md`.*prerequisite policy.*repository-owned resolver implementation.*test fixture/isu);
+  assert.match(setup, /one exact.*command.*`discover`.*`prepare`.*`verify`.*machine-readable/isu);
+  assert.match(setup, /`discover`.*`NOT_REQUIRED`.*`REQUIRED`.*`BLOCKED`.*protected evidence/isu);
+  assert.match(setup, /`prepare`.*only.*declared.*Prerequisite artifact/isu);
+  assert.match(setup, /`verify`.*read-only.*declared outcome.*non-sensitive target/isu);
+  assert.match(setup, /repository owns.*transport.*field.*policy.*validation.*target semantics.*safe extensions/isu);
+  assert.match(setup, /never.*universal resolver.*configuration schema/isu);
+
+  assert.match(setup, /before writing.*capture.*intended adoption path.*staged.*unstaged.*untracked/isu);
+  assert.match(setup, /complete prospective adoption.*temporary.*syntax.*static.*fixture validation.*before.*active declaration/isu);
+  assert.match(setup, /validated.*one change set.*same validation.*post-apply/isu);
+  assert.match(setup, /failure.*no active declaration.*partial resolver.*placeholder.*TODO.*restore only.*setup-owned preimages/isu);
+  assert.match(setup, /preserve.*unrelated staged.*unstaged.*untracked.*never.*stash.*reset.*clean/isu);
+
+  assert.match(setup, /never.*execut(?:e|es) SQL.*mutat(?:e|es).*database.*external environment.*stor(?:e|es) credentials/isu);
+  assert.match(setup, /never.*chang(?:e|es).*Issue.*Prerequisite receipt/isu);
+  assert.match(setup, /never invoke.*`pre-execute-issue`.*`execute-issue`.*runtime skill/isu);
+  assert.match(setup, /never.*rerun `ask-matt`.*act as a router/isu);
+  assert.match(setup, /never.*push.*integrate.*deploy/isu);
+  assert.match(setup, /implementing.*generic skill.*never.*adopt.*consumer repository/isu);
+
+  assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
+  assert.match(docs, /concrete manual prerequisite.*no change.*run-once.*not.*runtime/isu);
+  assert.match(matt, /`\/setup-pre-execute-issue`.*concrete manual prerequisite.*run-once.*not.*runtime/isu);
+  assert.match(mattDocs, /setup-pre-execute-issue.*concrete manual prerequisite.*run-once.*not.*runtime/isu);
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   assert.match(execute, /dedicated Git worktree/iu);
@@ -751,6 +792,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   assert.match(matt, /`\/wiki`/u);
   assert.match(matt, /`\/remove-ron`/u);
+  assert.match(matt, /`\/setup-pre-execute-issue/u);
   assert.match(matt, /`\/pre-execute-issue/u);
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
@@ -772,6 +814,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
     "ask-matt",
     "wiki",
     "remove-ron",
+    "setup-pre-execute-issue",
     "pre-execute-issue",
     "execute-issue",
     "close-issue",
@@ -797,11 +840,13 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/ask-matt/SKILL.md",
     "skills/engineering/wiki/SKILL.md",
     "skills/engineering/remove-ron/SKILL.md",
+    "skills/engineering/setup-pre-execute-issue/SKILL.md",
     "skills/engineering/pre-execute-issue/SKILL.md",
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
     "docs/engineering/implement.md",
+    "docs/engineering/setup-pre-execute-issue.md",
     "docs/engineering/pre-execute-issue.md",
     "docs/engineering/execute-issue.md",
     "docs/engineering/close-issue.md",

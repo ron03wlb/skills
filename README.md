@@ -176,6 +176,7 @@ Skills I use daily for code work.
 
 **User-invoked**
 
+- **[setup-pre-execute-issue](./skills/engineering/setup-pre-execute-issue/SKILL.md)** — Adopt one repository-owned prerequisite resolver when a concrete manual prerequisite exists.
 - **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.

@@ -15,6 +15,7 @@ Route the user's situation; do not perform the routed work.
 3. Follow the published command:
    - Single-Issue Tracker Spec → `/execute-issue <Spec-ID>`.
    - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>`, then `/execute-issue <Issue-ID>` for each dependency-ready child.
+   - Repository adoption is separate: use `/setup-pre-execute-issue` once only when a consumer repository has a concrete Manual prerequisite. It is run-once setup, not a runtime step; without that concrete need it makes no change.
 4. After the exact Issue is published, `/pre-execute-issue <Issue-ID>` is optional before `/execute-issue`; direct execution performs the same read-only discovery and stops if current prerequisite evidence is required.
 5. After each clean execution, the human uses `/close-issue` with that Issue ID to integrate its exact candidate into the current local target and close it. Issue worktrees may run concurrently; one human serializes integration writes to the same target branch.
 6. Before push, the human invokes `/verify-target-before-push <target>` once on the exact aggregate target. Push remains separate.

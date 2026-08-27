@@ -6,6 +6,7 @@ Skills I use daily for code work.
 
 Reachable only when you type them (Claude Code: `disable-model-invocation: true`; Codex: `policy.allow_implicit_invocation: false` in `agents/openai.yaml`).
 
+- **[setup-pre-execute-issue](./setup-pre-execute-issue/SKILL.md)** — Adopt one repository-owned prerequisite resolver when a concrete manual prerequisite exists.
 - **[pre-execute-issue](./pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
 - **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
 - **[close-issue](./close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.

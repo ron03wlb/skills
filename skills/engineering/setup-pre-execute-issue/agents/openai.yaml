@@ -1,0 +1,7 @@
+interface:
+  display_name: "Setup Pre-Execute Issue"
+  short_description: "Adopt one repository prerequisite resolver"
+  default_prompt: "Use $setup-pre-execute-issue to adopt a repository-owned prerequisite resolver only when a concrete manual prerequisite exists."
+
+policy:
+  allow_implicit_invocation: false
