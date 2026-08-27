@@ -171,24 +171,66 @@ function comparisonPath(path, caseInsensitive) {
   return caseInsensitive ? normalized.toLowerCase() : normalized;
 }
 
-function inside(root, candidate) {
-  const path = relative(root, candidate);
+function isPathInside(root, candidatePath) {
+  const path = relative(root, candidatePath);
   return path === "" || (path !== ".." && !path.startsWith(`..${sep}`));
 }
 
-function filesystemFingerprint(worktree, path) {
+function tryLstat(path, options) {
+  try {
+    return lstatSync(path, options);
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
+    throw error;
+  }
+}
+
+function sameFilesystemEntry(left, right) {
+  const leftStat = lstatSync(left, { bigint: true });
+  const rightStat = tryLstat(right, { bigint: true });
+  if (rightStat === null) return false;
+  return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+}
+
+function filesystemIsCaseInsensitive(worktree) {
+  return sameFilesystemEntry(resolve(worktree, ".git"), resolve(worktree, ".GIT"));
+}
+
+function caseSemantics(worktree) {
+  const ignoreCase = optionalGitText(worktree, "config", "--get", "--bool", "core.ignorecase");
+  return ignoreCase === "true" || process.platform === "win32" || filesystemIsCaseInsensitive(worktree);
+}
+
+function submoduleWorktreeFingerprint(path, visited) {
+  const worktree = realpathSync(path);
+  if (visited.has(worktree)) invalid("nested submodule cycle detected");
+  visited.add(worktree);
+  try {
+    const observedTarget = gitText(worktree, "rev-parse", "HEAD");
+    const status = parseStatus(worktree);
+    const dirty = dirtyEvidence(worktree, status, caseSemantics(worktree), visited);
+    return sha256(JSON.stringify({ observedTarget, unmerged: status.unmerged, dirty: dirty.sha256, counts: dirty.counts }));
+  } finally {
+    visited.delete(worktree);
+  }
+}
+
+function filesystemFingerprint(worktree, path, entry, visited) {
   const candidate = resolve(worktree, ...path.replaceAll("\\", "/").split("/"));
-  if (!inside(worktree, candidate)) invalid("Git path escapes the target worktree");
-  if (!existsSync(candidate)) return { type: "absent", mode: null, sha256: "absent" };
-  const stat = lstatSync(candidate);
+  if (!isPathInside(worktree, candidate)) invalid("Git path escapes the target worktree");
+  const stat = tryLstat(candidate);
+  if (stat === null) return { type: "absent", mode: null, sha256: "absent" };
   const mode = (stat.mode & 0o777777).toString(8).padStart(6, "0");
   if (stat.isSymbolicLink()) return { type: "symlink", mode, sha256: sha256(Buffer.from(readlinkSync(candidate), "utf8")) };
   if (stat.isFile()) return { type: "file", mode, sha256: sha256(readFileSync(candidate)) };
+  if (stat.isDirectory() && entry.submodule?.startsWith("S")) {
+    return { type: "submodule", mode, sha256: submoduleWorktreeFingerprint(candidate, visited) };
+  }
   if (stat.isDirectory()) return { type: "directory", mode, sha256: "directory" };
   return { type: "other", mode, sha256: "other" };
 }
 
-function dirtyEvidence(worktree, status, caseInsensitive) {
+function dirtyEvidence(worktree, status, caseInsensitive, visited = new Set([worktree])) {
   const index = parseIndex(worktree);
   const records = [];
   const collisionPaths = new Set();
@@ -213,7 +255,7 @@ function dirtyEvidence(worktree, status, caseInsensitive) {
         headOid: entry.headOid ?? null,
         indexOid: entry.indexOid ?? null,
         conflict: entry.conflict ?? null,
-        filesystem: filesystemFingerprint(worktree, endpoint.path),
+        filesystem: filesystemFingerprint(worktree, endpoint.path, entry, visited),
         indexEntries: index.get(endpoint.path) ?? [],
       });
     }
@@ -230,12 +272,12 @@ function hookEvidence(worktree, caseInsensitive) {
   const configured = gitText(worktree, "rev-parse", "--git-path", "hooks/post-merge");
   const hookPath = isAbsolute(configured) ? configured : resolve(worktree, configured);
   const normalized = comparisonPath(resolve(hookPath), caseInsensitive);
-  const present = existsSync(hookPath);
+  const stat = tryLstat(hookPath);
+  const present = stat !== null;
   let contentSha256 = "absent";
   let type = "absent";
   let mode = null;
   if (present) {
-    const stat = lstatSync(hookPath);
     mode = (stat.mode & 0o777777).toString(8).padStart(6, "0");
     type = stat.isSymbolicLink() ? "symlink" : stat.isFile() ? "file" : stat.isDirectory() ? "directory" : "other";
     if (stat.isFile() || stat.isSymbolicLink()) contentSha256 = sha256(readFileSync(hookPath));
@@ -247,6 +289,27 @@ function hookEvidence(worktree, caseInsensitive) {
     contentSha256,
     fingerprintSha256: sha256(JSON.stringify({ resolutionSha256, present, type, mode, contentSha256 })),
   };
+}
+
+function preservationSnapshot(worktree) {
+  const observedTarget = gitText(worktree, "rev-parse", "HEAD");
+  const caseInsensitive = caseSemantics(worktree);
+  const status = parseStatus(worktree);
+  const dirty = dirtyEvidence(worktree, status, caseInsensitive);
+  const hook = hookEvidence(worktree, caseInsensitive);
+  return { observedTarget, caseInsensitive, unmerged: status.unmerged, dirty, hook };
+}
+
+function stableSnapshotIdentity(snapshot) {
+  return sha256(JSON.stringify({
+    observedTarget: snapshot.observedTarget,
+    caseInsensitive: snapshot.caseInsensitive,
+    unmerged: snapshot.unmerged,
+    dirty: snapshot.dirty.sha256,
+    counts: snapshot.dirty.counts,
+    collisionPaths: [...snapshot.dirty.collisionPaths].sort(),
+    hook: snapshot.hook,
+  }));
 }
 
 function pathsCollide(left, right) {
@@ -285,22 +348,22 @@ function inspect(input) {
   gitText(worktree, "rev-parse", "--verify", `${input.targetBefore}^{commit}`);
   gitText(worktree, "rev-parse", "--verify", `${input.integrationCandidate}^{commit}`);
 
-  const observedTarget = gitText(worktree, "rev-parse", "HEAD");
-  const ignoreCase = optionalGitText(worktree, "config", "--get", "--bool", "core.ignorecase");
-  const caseInsensitive = ignoreCase === "true" || (ignoreCase === "" && process.platform === "win32");
-  const status = parseStatus(worktree);
-  const dirty = dirtyEvidence(worktree, status, caseInsensitive);
+  const firstSnapshot = preservationSnapshot(worktree);
   const candidatePaths = parseCandidatePaths(worktree, input.targetBefore, input.integrationCandidate)
-    .map((path) => comparisonPath(path, caseInsensitive));
+    .map((path) => comparisonPath(path, firstSnapshot.caseInsensitive));
+  const secondSnapshot = preservationSnapshot(worktree);
+  if (stableSnapshotIdentity(firstSnapshot) !== stableSnapshotIdentity(secondSnapshot)) {
+    invalid("preservation state changed during inspection");
+  }
+  const { observedTarget, dirty, hook, unmerged } = secondSnapshot;
   const collision = collisionOutcome(dirty.collisionPaths, candidatePaths);
-  const hook = hookEvidence(worktree, caseInsensitive);
 
   let statusName = "SAFE";
   let reasonCode = "SAFE";
   if (observedTarget !== input.expectedTarget) {
     statusName = "BLOCKED";
     reasonCode = "TARGET_IDENTITY_MISMATCH";
-  } else if (status.unmerged) {
+  } else if (unmerged) {
     statusName = "BLOCKED";
     reasonCode = "UNMERGED_TARGET_STATE";
   } else {

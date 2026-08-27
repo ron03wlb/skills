@@ -460,6 +460,9 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(preservation, /ls-files.*--stage.*-z/su);
   assert.match(preservation, /diff.*--name-status.*-z.*--find-renames.*--find-copies/su);
   assert.match(preservation, /config.*core\.ignorecase/su);
+  assert.match(preservation, /filesystemIsCaseInsensitive.*\.git.*\.GIT/su);
+  assert.match(preservation, /submoduleWorktreeFingerprint/u);
+  assert.match(preservation, /firstSnapshot.*secondSnapshot.*changed during inspection/su);
   assert.match(preservation, /hooks\/post-merge/u);
   assert.match(preservation, /renameSync\(temporaryPath, finalPath\)/u);
   assert.match(preservation, /output JSON path must not already exist/u);

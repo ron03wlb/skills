@@ -28,13 +28,15 @@ Require both `T` and `C` to be ancestors of `I` and the temporary worktree to be
 
 ## Protect unrelated target work
 
-Immediately before integration, require target `HEAD == T`. Create invocation-unique strict-UTF-8 JSON input and output paths, require the final output to be absent, and run:
+Immediately before integration, require target `HEAD == T`. Create invocation-unique strict-UTF-8 JSON input and output paths, require the final output to be absent, resolve this `SKILL.md` to its real path, and run:
 
 `node <close-issue-skill>/scripts/preservation.mjs inspect <input-json-path> <output-json-path>`
 
 The `closeout-preservation-inspection-input:v1` input supplies only the resolved target worktree, expected target identity, `T`, and `I`. Never precompute or pass dirty paths, candidate paths, fingerprints, case semantics, collision results, or hook evidence. The private read-only module derives them in one inspection: every staged, unstaged, and untracked path; both endpoints of candidate and dirty renames; path/status class, file type/mode, worktree fingerprints, and index entries; NUL-safe Git output; repository/filesystem case semantics; the complete `T..I` delta; same-path and ancestor/descendant path-prefix collisions; and effective post-merge hook evidence.
 
 Continue only when the command exits zero and the complete expected `closeout-preservation-inspection:v1` result is `SAFE`. Validate observed target, dirty SHA-256 and counts, hook fingerprints, collision outcome, reason code, and every required field. A classified `COLLISION` or `BLOCKED` result is diagnostic only and exits non-zero; command failure, missing output, stale output, malformed JSON, missing field, schema mismatch, or any untrusted state stops without inference. Any collision stops with the Issue open; never automatically stash, commit, clean, reset, or move user work.
+
+The module must fail without publishing evidence when its observations do not form one stable snapshot.
 
 Keep paths local and publish only the canonical dirty digest, staged/unstaged/untracked counts, and hook evidence. Never publish paths or file contents. After validation, remove only this invocation's exact input/output and `<output-json-path>.tmp-*` files; never reuse a result path. Stdout and a reusable repository-local result file are not evidence transports.
 

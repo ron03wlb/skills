@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -18,6 +29,24 @@ function createGitFixture(prefix) {
   return { repo, git };
 }
 
+function createInspectionFixture(t, prefix) {
+  const root = mkdtempSync(join(tmpdir(), `${prefix}-transport-`));
+  const { repo, git } = createGitFixture(`${prefix}-repo-`);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  return { root, repo, git };
+}
+
+function sameFilesystemEntry(left, right) {
+  try {
+    const leftStat = lstatSync(left, { bigint: true });
+    const rightStat = lstatSync(right, { bigint: true });
+    return leftStat.dev === rightStat.dev && leftStat.ino === rightStat.ino;
+  } catch {
+    return false;
+  }
+}
+
 function inspect(root, repo, input) {
   const inputPath = join(root, `input-${randomUUID()}.json`);
   const outputPath = join(root, `output-${randomUUID()}.json`);
@@ -31,10 +60,7 @@ function inspect(root, repo, input) {
 }
 
 test("inspection preserves canonical dirty and hook evidence across a safe fast-forward", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "close-preservation-safe-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const { repo, git } = createGitFixture("close-preservation-repo-");
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-safe");
 
   writeFileSync(join(repo, "tracked-local.txt"), "baseline\n", "utf8");
   git("add", "tracked-local.txt");
@@ -87,10 +113,7 @@ test("inspection preserves canonical dirty and hook evidence across a safe fast-
 });
 
 test("inspection classifies dirty/candidate rename and case-insensitive path-prefix collisions without publishing paths", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "close-preservation-collision-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const { repo, git } = createGitFixture("close-preservation-repo-");
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-collision");
 
   writeFileSync(join(repo, "old.txt"), "baseline\n", "utf8");
   writeFileSync(join(repo, "local-old.txt"), "local baseline\n", "utf8");
@@ -130,10 +153,7 @@ test("inspection classifies dirty/candidate rename and case-insensitive path-pre
 });
 
 test("inspection returns classified identity and hook evidence without authorizing continuation", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "close-preservation-blocked-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const { repo, git } = createGitFixture("close-preservation-repo-");
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-blocked");
 
   writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
   git("add", "base.txt");
@@ -170,10 +190,7 @@ test("inspection returns classified identity and hook evidence without authorizi
 });
 
 test("inspection includes unmerged paths in a classified blocked result", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "close-preservation-unmerged-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const { repo, git } = createGitFixture("close-preservation-repo-");
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-unmerged");
 
   writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
   git("add", "base.txt");
@@ -203,10 +220,7 @@ test("inspection includes unmerged paths in a classified blocked result", (t) =>
 });
 
 test("file transport rejects stale output and does not publish incomplete evidence", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "close-preservation-transport-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const { repo, git } = createGitFixture("close-preservation-repo-");
-  t.after(() => rmSync(repo, { recursive: true, force: true }));
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-transport");
   writeFileSync(join(repo, "base.txt"), "base\n", "utf8");
   git("add", "base.txt");
   git("commit", "-m", "baseline");
@@ -234,6 +248,31 @@ test("file transport rejects stale output and does not publish incomplete eviden
   assert.equal(existsSync(missingParentOutput), false);
   assert.equal(readdirSync(root).some((name) => name.includes(".tmp-")), false);
 
+  const interruptedOutput = join(root, "interrupted-output.json");
+  const preloadPath = join(root, "interrupt-rename.cjs");
+  writeFileSync(preloadPath, `
+const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const originalRenameSync = fs.renameSync;
+fs.renameSync = function (source, destination) {
+  if (destination === process.env.PRESERVATION_INTERRUPT_OUTPUT) throw new Error("simulated publication interruption");
+  return originalRenameSync.apply(this, arguments);
+};
+syncBuiltinESMExports();
+`, "utf8");
+  const interrupted = spawnSync(process.execPath, [script, "inspect", inputPath, interruptedOutput], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `--require=${preloadPath.replaceAll("\\", "/")}`,
+      PRESERVATION_INTERRUPT_OUTPUT: interruptedOutput,
+    },
+  });
+  assert.equal(interrupted.status, 2);
+  assert.match(interrupted.stderr, /simulated publication interruption/u);
+  assert.equal(existsSync(interruptedOutput), false);
+  assert.equal(readdirSync(root).some((name) => name.startsWith("interrupted-output.json.tmp-")), false);
+
   const bomInput = join(root, "bom-input.json");
   const bomOutput = join(root, "bom-output.json");
   writeFileSync(bomInput, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(JSON.stringify(validInput), "utf8")]));
@@ -241,4 +280,146 @@ test("file transport rejects stale output and does not publish incomplete eviden
   assert.equal(bom.status, 2);
   assert.match(bom.stderr, /without BOM/u);
   assert.equal(existsSync(bomOutput), false);
+});
+
+test("inspection rejects a preservation snapshot that changes while it is being observed", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-drift");
+  writeFileSync(join(repo, "tracked.txt"), "baseline\n", "utf8");
+  git("add", "tracked.txt");
+  git("commit", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  writeFileSync(join(repo, "tracked.txt"), "first local state\n", "utf8");
+
+  const inputPath = join(root, "input.json");
+  const outputPath = join(root, "output.json");
+  const preloadPath = join(root, "mutate-between-snapshots.cjs");
+  writeFileSync(inputPath, JSON.stringify({
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  }), "utf8");
+  writeFileSync(preloadPath, `
+const childProcess = require("node:child_process");
+const fs = require("node:fs");
+const { syncBuiltinESMExports } = require("node:module");
+const originalExecFileSync = childProcess.execFileSync;
+let changed = false;
+childProcess.execFileSync = function (file, args) {
+  const result = originalExecFileSync.apply(this, arguments);
+  if (!changed && file === "git" && args.includes("--git-path") && args.includes("hooks/post-merge")) {
+    changed = true;
+    fs.writeFileSync(process.env.PRESERVATION_MUTATE_PATH, "second local state\\n", "utf8");
+  }
+  return result;
+};
+syncBuiltinESMExports();
+`, "utf8");
+
+  const result = spawnSync(process.execPath, [script, "inspect", inputPath, outputPath], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_OPTIONS: `--require=${preloadPath.replaceAll("\\", "/")}`,
+      PRESERVATION_MUTATE_PATH: join(repo, "tracked.txt"),
+    },
+  });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /changed during inspection/u);
+  assert.equal(existsSync(outputPath), false);
+});
+
+test("inspection combines filesystem and repository case semantics", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-filesystem-case");
+  if (!sameFilesystemEntry(join(repo, ".git"), join(repo, ".GIT"))) {
+    t.skip("fixture filesystem is case-sensitive");
+    return;
+  }
+
+  git("commit", "--allow-empty", "-m", "baseline");
+  const targetBefore = git("rev-parse", "HEAD");
+  git("checkout", "-b", "candidate");
+  writeFileSync(join(repo, "Config"), "candidate\n", "utf8");
+  git("add", "Config");
+  git("commit", "-m", "candidate");
+  const integrationCandidate = git("rev-parse", "HEAD");
+  git("checkout", "target");
+  git("config", "core.ignorecase", "false");
+  mkdirSync(join(repo, "config"));
+  writeFileSync(join(repo, "config", "local.txt"), "local\n", "utf8");
+
+  const result = inspect(root, repo, {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: targetBefore,
+    targetBefore,
+    integrationCandidate,
+  });
+  assert.equal(result.processResult.status, 3, result.processResult.stderr);
+  assert.equal(result.output.reasonCode, "DIRTY_CANDIDATE_PATH_COLLISION");
+});
+
+test("inspection fingerprints dirty submodule worktree content", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-submodule");
+  const { repo: submodule, git: subGit } = createGitFixture("close-preservation-nested-repo-");
+  t.after(() => rmSync(submodule, { recursive: true, force: true }));
+  writeFileSync(join(submodule, "nested.txt"), "nested baseline\n", "utf8");
+  subGit("add", "nested.txt");
+  subGit("commit", "-m", "nested baseline");
+
+  git("-c", "protocol.file.allow=always", "submodule", "add", submodule, "nested");
+  git("commit", "-m", "baseline");
+  const targetBefore = git("rev-parse", "HEAD");
+  git("checkout", "-b", "candidate");
+  writeFileSync(join(repo, "candidate.txt"), "candidate\n", "utf8");
+  git("add", "candidate.txt");
+  git("commit", "-m", "candidate");
+  const integrationCandidate = git("rev-parse", "HEAD");
+  git("checkout", "target");
+
+  const input = {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: targetBefore,
+    targetBefore,
+    integrationCandidate,
+  };
+  writeFileSync(join(repo, "nested", "nested.txt"), "first nested edit\n", "utf8");
+  const first = inspect(root, repo, input);
+  assert.equal(first.processResult.status, 0, first.processResult.stderr);
+  writeFileSync(join(repo, "nested", "nested.txt"), "second nested edit\n", "utf8");
+  const second = inspect(root, repo, input);
+  assert.equal(second.processResult.status, 0, second.processResult.stderr);
+  assert.notEqual(second.output.dirty.sha256, first.output.dirty.sha256);
+});
+
+test("inspection fingerprints dangling symlink targets when the filesystem supports them", (t) => {
+  const { root, repo, git } = createInspectionFixture(t, "close-preservation-symlink");
+  git("commit", "--allow-empty", "-m", "baseline");
+  const baseline = git("rev-parse", "HEAD");
+  const linkPath = join(repo, "local-link");
+  try {
+    symlinkSync("missing-first", linkPath, "file");
+  } catch (error) {
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      t.skip("fixture filesystem does not permit symlinks");
+      return;
+    }
+    throw error;
+  }
+  const input = {
+    schema: "closeout-preservation-inspection-input:v1",
+    worktree: repo,
+    expectedTarget: baseline,
+    targetBefore: baseline,
+    integrationCandidate: baseline,
+  };
+  const first = inspect(root, repo, input);
+  assert.equal(first.processResult.status, 0, first.processResult.stderr);
+  unlinkSync(linkPath);
+  symlinkSync("missing-second", linkPath, "file");
+  const second = inspect(root, repo, input);
+  assert.equal(second.processResult.status, 0, second.processResult.stderr);
+  assert.notEqual(second.output.dirty.sha256, first.output.dirty.sha256);
 });
