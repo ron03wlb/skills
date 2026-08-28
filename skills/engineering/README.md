@@ -19,7 +19,7 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[wiki](./wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
 - **[to-spec](./to-spec/SKILL.md)** — Classify and publish an execution-ready Spec with a Planning Seal, mapped Acceptance Criteria, and one exact next command.
-- **[to-tickets](./to-tickets/SKILL.md)** — Turn a Multi-Issue Spec into independently executable children and emit commands only for the ready frontier.
+- **[to-tickets](./to-tickets/SKILL.md)** — Reconcile one Issue decomposition, publish its Decomposition publication record, and emit commands only for the ready frontier.
 - **[implement](./implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./wayfinder/SKILL.md)** — Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on the issue tracker, resolved one at a time until the way to the destination is clear.
 
