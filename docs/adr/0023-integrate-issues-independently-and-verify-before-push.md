@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0038
 supersedes: ADR-0022 routing and closeout decisions
 ---
 

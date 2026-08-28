@@ -182,6 +182,8 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   const successorAdrPath = "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md";
   assert.equal(existsSync(successorAdrPath), true, "delivery routing needs a successor ADR");
   const successorAdr = read(successorAdrPath);
+  assert.match(deliveryAdr, /^status: superseded by ADR-0038$/mu, "ADR-0022 must defer to the current delivery workflow");
+  assert.match(successorAdr, /^status: superseded by ADR-0038$/mu, "ADR-0023 must defer to the current delivery workflow");
 
   const specSeal = spec.indexOf("Planning Seal");
   const specPublish = spec.indexOf("Publish the Spec", specSeal);
