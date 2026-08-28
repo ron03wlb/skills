@@ -178,8 +178,8 @@ Skills I use daily for code work.
 
 - **[setup-pre-execute-issue](./skills/engineering/setup-pre-execute-issue/SKILL.md)** — Adopt one repository-owned prerequisite resolver when a concrete manual prerequisite exists.
 - **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
-- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
-- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.
+- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Issue while preserving completion across recorded-target movement.
+- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Resume three idempotent actions against an Issue's recorded target, or close a verified Multi-Issue parent.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Prove one exact aggregate target contains every relevant closed candidate and is review/test clean without pushing.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.

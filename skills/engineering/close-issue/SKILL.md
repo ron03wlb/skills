@@ -1,63 +1,45 @@
 ---
 name: close-issue
-description: Integrate one exact reviewed candidate into its current local target, remove its worktree, and close the Issue.
+description: Close one executed Issue or completed Multi-Issue Spec against its recorded local target.
 disable-model-invocation: true
 ---
 
 # Close Issue
 
-Close exactly one executed Issue. Successful closure always means its exact reviewed candidate is locally integrated into the named target. This skill never repairs product code, never invokes `execute-issue`, and never reruns Standards/Spec review or expensive full verification.
+Close one Issue by ID. Dispatch by the authoritative Issue shape: an Executable Issue follows the three-action close path; a Multi-Issue Spec follows the parent-only path. This skill never repairs product code, invokes `execute-issue`, reruns Standards or Spec review, runs aggregate verification, pushes, or deploys.
 
 ## Entry
 
-Read the open Issue and its ordered `execute-issue` state history once. Record the latest terminal execution state as `E`; require `E` to be the `implementation_complete` Execution completion note, with no later blocked state, and require original target branch/worktree, Issue worktree, topic branch, baseline, exact reviewed candidate, Planning Seal, clean Standards and Spec, passing final verification, and clean worktree evidence. Confirm blockers remain closed.
+Read the Issue, parent or linked Spec, ordered execution history, blockers, recorded Issue target branch, and local Git worktree registrations. Resolve exact identities from tracker and Git evidence; never infer the target from the current checkout or substitute a different branch. One human runs only one `close-issue` writer per Issue target branch at a time. Other executions and closes to other targets may continue concurrently; no queue, daemon, or lock service is added.
 
-Capture the current original target commit as `T` and the unchanged reviewed candidate as `C`. Require `C` to equal the clean registered Issue worktree `HEAD`. The original target worktree does not need to be clean and may contain unrelated staged, unstaged, and untracked work. One human serializes integrations into the same target; no global queue or lock is added.
+For an Executable Issue, select the latest valid `implementation_complete` note and require its exact Issue, linked Spec, Issue target branch/worktree, topic branch/worktree, execution baseline, reviewed candidate `C`, Planning Seal, clean Standards and Spec, passing final verification, and clean Issue worktree evidence. A later state supersedes it only when read-back evidence invalidates `C` itself. Target movement, a close conflict, partial close progress, or aggregate-gate failure does not supersede completion and never sends the Issue back to `execute-issue`.
 
-If the Issue is already closed, resume only when the recorded candidate and integration candidate are ancestors of the current target, the Issue worktree is absent, identities and matching read-back receipt agree. Read back and confirm closed state, then report completion without closing it again; every other closed state stops without reopening.
+Require every blocker to remain closed. Require `C` to exist locally. When the registered Issue worktree is present, require its exact path and topic branch, clean state, and `HEAD == C`; when it is absent, accept cleanup as already satisfied only if `C` is reachable from the Issue target branch. Preserve unrelated work: if the target worktree is dirty, stop before mutation and never stash, commit, clean, reset, or move it.
 
-## Prepare the integration candidate
+## Executable Issue: three idempotent actions
 
-Create an isolated temporary integration worktree and branch from exact `T` without modifying the real target or Issue worktree.
+Perform exactly three ordered, idempotent actions: merge the unchanged candidate into the latest Issue target branch, remove the exact clean registered Issue worktree, and close the Issue. Before each action, derive current progress directly from Git ancestry, worktree registration, and tracker state; skip an action whose condition is already satisfied. Write no custom success or failure receipt.
 
-- If `T` is an ancestor of `C`, set `I = C`.
-- Otherwise, if `C` is an ancestor of `T`, use `git commit-tree` to create `I` as a two-parent merge commit with the exact tree of `T` and exact parents `T` then `C`; verify that tree and parent list.
-- Otherwise create `I` with a no-fast-forward merge of exact `C` into `T`, without rebasing. The merge commit may only compose those histories; do not edit or repair product code.
+### 1. Merge the candidate
 
-Require both `T` and `C` to be ancestors of `I` and the temporary worktree to be clean. A merge conflict, changed candidate, ambiguous identity, scope change, or unexpected merge content stops before real target mutation, receipt preparation, Issue worktree cleanup, or Issue closure. Never auto-resolve conflicts. Remove only the temporary integration worktree when safe; otherwise report its exact retained state.
+Read the latest target `HEAD` while holding the target-scoped single-writer discipline. If `C` is already an ancestor of the target, the merge is satisfied. Otherwise require the target worktree to be clean and merge exact `C` into the latest target without rebasing, refreshing, or editing the Issue candidate. Allow Git to fast-forward or create the ordinary merge commit.
 
-## Protect unrelated target work
+If the merge conflicts, run `git merge --abort`, verify the target returned to its pre-merge commit and is clean, and stop with the Issue worktree registered and the Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. An unexpected ref movement or abort failure reports the exact Git state and stops; a later `close-issue` retry starts from observable current state.
 
-Immediately before integration, require target `HEAD == T`. Create invocation-unique strict-UTF-8 JSON input and output paths, require the final output to be absent, resolve this `SKILL.md` to its real path, and run:
+After success, require `C` to be an ancestor of the current Issue target branch. A merge hook or other side effect that leaves the target worktree dirty stops before cleanup or closure and requires explicit human handling.
 
-`node <close-issue-skill>/scripts/preservation.mjs inspect <input-json-path> <output-json-path>`
+### 2. Remove the Issue worktree
 
-The `closeout-preservation-inspection-input:v1` input supplies only the resolved target worktree, expected target identity, `T`, and `I`. Never precompute or pass dirty paths, candidate paths, fingerprints, case semantics, collision results, or hook evidence. The private read-only module derives them in one inspection: every staged, unstaged, and untracked path; both endpoints of candidate and dirty renames; path/status class, file type/mode, worktree fingerprints, and index entries; NUL-safe Git output; repository/filesystem case semantics; the complete `T..I` delta; same-path and ancestor/descendant path-prefix collisions; and effective post-merge hook evidence.
+Require `C` to be reachable from the Issue target branch. If the exact registered Issue worktree remains, recheck its path, topic branch, clean state, and `HEAD == C`, then run `git worktree remove <exact-issue-worktree>`. Never delete the topic branch or any other worktree. If the worktree is already absent, this action is satisfied.
 
-Continue only when the command exits zero and the complete expected `closeout-preservation-inspection:v1` result is `SAFE`. Validate observed target, dirty SHA-256 and counts, hook fingerprints, collision outcome, reason code, and every required field. A classified `COLLISION` or `BLOCKED` result is diagnostic only and exits non-zero; command failure, missing output, stale output, malformed JSON, missing field, schema mismatch, or any untrusted state stops without inference. Any collision stops with the Issue open; never automatically stash, commit, clean, reset, or move user work.
+### 3. Close the Issue
 
-The module must fail without publishing evidence when its observations do not form one stable snapshot.
+Require `C` to remain reachable and the exact Issue worktree to be absent. If the Issue is open, close it through the configured tracker and read it back once. If it is already closed, read it back and treat closure as satisfied only when the same candidate is reachable and the worktree is absent; otherwise stop without reopening.
 
-Keep paths local and publish only the canonical dirty digest, staged/unstaged/untracked counts, and hook evidence. Never publish paths or file contents. After validation, remove only this invocation's exact input/output and `<output-json-path>.tmp-*` files; never reuse a result path. Stdout and a reusable repository-local result file are not evidence transports.
+A failure after merge reports which of the three observable actions remain. Retry skips completed actions and resumes the next one. Never roll back a successful merge automatically.
 
-Append a read-back `dirty-target-preservation:v1` receipt in phase `PREPARED` binding the Issue, execution-state identity `E`, target branch, `T`, `C`, `I`, dirty digest and counts, and hook evidence. Read back and verify those exact fields before continuing. Tracker failure or mismatch stops before integration.
+## Multi-Issue parent
 
-Immediately re-read target `HEAD`, latest execution state, and blockers, then rerun the same private inspection with expected target `T`. Target, `E`, blocker, digest, count, or hook drift updates/read-backs the receipt as `FAILED` when possible and stops; never re-baseline inside the invocation.
+A Multi-Issue Spec has no implementation candidate or Issue worktree. Require its matching read-back Decomposition publication record, exact child mapping, common Issue target branch, and current tracker state. Prove every exact child is closed and every child's unchanged completed candidate is reachable from that same target. Missing, unreadable, stale, duplicate, or conflicting publication evidence stops and returns to `/to-tickets <Parent-ID>` reconciliation; never infer completeness from visible children or use a legacy bypass.
 
-## Integrate and prove inclusion
-
-From the original target worktree run `git merge --ff-only <I>`. Verify target `HEAD == I` and `C` is an ancestor of `I`. Git refusal or any identity mismatch marks/read-backs `FAILED` when possible and stops with the Issue open; inspect actual state and never assume rollback.
-
-Run the same private inspection with expected target `I`. Anything except a complete trusted `SAFE` result records available expected and observed evidence in `FAILED`, keeps the Issue open, and never triggers automatic repair or rollback. On equal dirty digest/counts and hook evidence, update the receipt to `VERIFIED` with target-after `I`, candidate reachable, the same evidence, then read back every field. Missing or mismatched proof stops before cleanup.
-
-## Resume, clean up, and close
-
-Matching `PREPARED` may resume only from `T` with unchanged evidence or from `I` with proved candidate ancestry and unchanged evidence. Matching `VERIFIED` may resume at `I`. Missing, unreadable, mismatched, or third-SHA evidence stops.
-
-A `FAILED` receipt stops cleanup and closure. Explicit recovery requires a new successful execution or an integration-repair Issue; never convert unproved preservation into closure.
-
-Require a matching read-back `VERIFIED` receipt before cleanup and before closing. At both gates re-read target `HEAD == I`, latest execution state identity `E`, and every blocker still closed; any drift leaves the Issue open and reports the exact partial state. Remove the exact clean registered Issue worktree with `git worktree remove`; an already absent worktree means cleanup is complete only with matching receipt evidence. Prune only stale worktree metadata and never delete the topic branch.
-
-Close the Issue through the configured tracker and read it back once. Failure after integration reports exact partial state and resumes only through matching receipts; never roll back a successful integration automatically.
-
-Never push, remote-merge, deploy, delete unrelated files, or treat local integration as production verification.
+Close and read back only the parent. Closing the final child never closes it implicitly, and parent closure never claims `push_ready` or performs aggregate verification.

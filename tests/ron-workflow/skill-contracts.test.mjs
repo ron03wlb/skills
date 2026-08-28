@@ -452,77 +452,45 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Standards/u);
   assert.match(execute, /Spec/u);
   assert.match(execute, /10 repair waves per invocation/iu);
-  assert.match(execute, /any blocked exit.*Entry.*implementation.*verification.*review.*`implementation_blocked`.*read.*back.*supersedes/isu);
+  assert.match(execute, /Issue target branch.*only default merge destination/isu);
+  assert.match(execute, /Any number of Issue worktrees may execute concurrently/iu);
+  assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
+  assert.match(execute, /blocked state supersedes completion only when.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
+  assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
 
   const close = read("skills/engineering/close-issue/SKILL.md");
-  assert.match(close, /completion note/iu);
-  assert.match(close, /latest terminal execution state.*`E`.*no later blocked state/isu);
-  assert.match(close, /original target branch/iu);
-  assert.match(close, /capture.*target.*`T`.*reviewed candidate.*`C`/isu);
-  assert.match(close, /isolated temporary integration worktree/iu);
-  assert.match(close, /`T`.*ancestor of `C`.*`I = C`/isu);
-  assert.match(close, /`C`.*ancestor of `T`.*two-parent.*tree.*`T`.*parents.*`T`.*`C`/isu);
-  assert.match(close, /no-fast-forward merge.*`I`/isu);
-  assert.match(close, /conflict.*before.*real target.*receipt.*Issue closure/isu);
-  assert.match(close, /never invokes `execute-issue`.*never reruns.*Standards.*Spec.*full verification/isu);
-  assert.match(close, /git merge --ff-only/u);
-  assert.match(close, /target `HEAD == I`.*`C`.*ancestor/isu);
+  assert.match(close, /`implementation_complete` note/iu);
+  assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
+  assert.match(close, /one `close-issue` writer per Issue target branch/iu);
+  assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
+  assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
+  assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
+  assert.match(close, /merge conflicts.*git merge --abort.*Issue worktree registered.*Issue open/isu);
+  assert.match(close, /never.*append `implementation_blocked`.*invoke `execute-issue`/isu);
+  assert.match(close, /target worktree is dirty.*stop before mutation.*never stash.*commit.*clean.*reset.*move/isu);
+  assert.match(close, /derive current progress.*Git ancestry.*worktree registration.*tracker state/isu);
   assert.match(close, /git worktree remove/u);
-  assert.match(close, /Close the Issue/iu);
+  assert.match(close, /exact registered Issue worktree.*path.*topic branch.*clean state.*`HEAD == C`/isu);
+  assert.match(close, /If the Issue is open, close it/iu);
   assert.match(close, /read it back once/iu);
-  assert.match(close, /original target worktree does not need to be clean/iu);
-  assert.match(close, /staged, unstaged, and untracked/iu);
-  assert.match(close, /same-path and ancestor\/descendant path-prefix collisions/iu);
-  assert.match(close, /Any collision stops with the Issue open/iu);
-  assert.match(close, /both endpoints of candidate and dirty renames/iu);
-  assert.match(close, /NUL-safe Git output.*case semantics/isu);
-  assert.match(close, /scripts\/preservation\.mjs inspect <input-json-path> <output-json-path>/iu);
-  assert.match(close, /Never precompute or pass dirty paths.*candidate paths.*fingerprints.*case semantics.*collision results.*hook evidence/isu);
-  assert.match(close, /exits zero.*complete expected `closeout-preservation-inspection:v1` result is `SAFE`/isu);
-  assert.match(close, /classified `COLLISION` or `BLOCKED`.*non-zero.*missing output.*stale output.*malformed JSON.*schema mismatch.*stops without inference/isu);
-  assert.match(close, /unique strict-UTF-8 JSON input and output paths/iu);
-  assert.match(close, /<output-json-path>\.tmp-\*/u);
-  assert.match(close, /Stdout and a reusable repository-local result file are not evidence transports/iu);
-  assert.match(close, /dirty-target-preservation:v1/u);
-  assert.match(close, /phase `PREPARED`.*`T`.*`C`.*`I`.*digest.*counts.*hook/isu);
-  assert.match(close, /receipt.*execution-state identity `E`/isu);
-  assert.match(close, /Read back and verify those exact fields before continuing/iu);
-  assert.match(close, /`VERIFIED`.*target-after.*`I`.*candidate reachable.*read back/isu);
-  assert.match(close, /never automatically stash, commit, clean, reset/iu);
-  assert.match(close, /target.*digest.*hook.*drift.*`FAILED`.*stop/isu);
-  assert.match(close, /never publish paths or file contents/iu);
-  assert.match(close, /`FAILED`.*stops.*explicit recovery.*new.*execution or an integration-repair Issue/isu);
-  assert.doesNotMatch(close, /RECONCILED|preservation equality is not proven/iu);
-  assert.match(close, /both gates.*latest execution state identity `E`.*every blocker still closed/isu);
+  assert.match(close, /retry skips completed actions.*resumes the next one/isu);
+  assert.match(close, /Multi-Issue Spec.*Decomposition publication record.*every exact child is closed.*candidate.*reachable.*same target/isu);
+  assert.match(close, /returns to `\/to-tickets <Parent-ID>` reconciliation/iu);
+  assert.match(close, /parent closure never claims `push_ready`/iu);
+  assert.doesNotMatch(close, /closeout receipt|dirty-target-preservation|preservation\.mjs|`PREPARED`|`VERIFIED`|`FAILED`/iu);
   const closeDocs = read("docs/engineering/close-issue.md");
-  assert.match(closeDocs, /target may keep unrelated staged, unstaged, and untracked work/iu);
-  assert.match(closeDocs, /private read-only module inside `close-issue`, not another workflow step/iu);
-  assert.match(close, /already absent worktree means cleanup is complete/iu);
-  const alreadyClosed = close.match(/If the Issue is already closed,[^\n]+/u)?.[0] ?? "";
-  assert.match(alreadyClosed, /candidate.*integration candidate.*ancestors.*current target.*worktree.*absent/iu);
-  assert.match(close, /read back.*closed state.*without.*clos(?:e|ing).*again/isu);
+  assert.match(closeDocs, /three.*merge.*remove.*close/isu);
+  assert.doesNotMatch(closeDocs, /preservation|closeout receipt|integration receipt/iu);
+  assert.match(close, /If the worktree is already absent, this action is satisfied/iu);
+  const alreadyClosed = close.match(/If it is already closed,[^\n]+/u)?.[0] ?? "";
+  assert.match(alreadyClosed, /same candidate.*reachable.*worktree.*absent/iu);
   assert.match(close, /never repairs product code/iu);
 
-  const preservation = read("skills/engineering/close-issue/scripts/preservation.mjs");
-  assert.match(preservation, /closeout-preservation-inspection-input:v1/u);
-  assert.match(preservation, /closeout-preservation-inspection:v1/u);
-  assert.match(preservation, /GIT_OPTIONAL_LOCKS.*"0"/su);
-  assert.match(preservation, /GIT_NO_LAZY_FETCH.*"1"/su);
-  assert.match(preservation, /core\.fsmonitor=false/su);
-  assert.match(preservation, /status.*--porcelain=v2.*-z.*--untracked-files=all.*--ignore-submodules=none/su);
-  assert.match(preservation, /ls-files.*--stage.*-z/su);
-  assert.match(preservation, /diff.*--name-status.*-z.*--find-renames.*--find-copies/su);
-  assert.match(preservation, /config.*core\.ignorecase/su);
-  assert.match(preservation, /filesystemIsCaseInsensitive.*\.git.*\.GIT/su);
-  assert.match(preservation, /submoduleWorktreeFingerprint/u);
-  assert.match(preservation, /firstSnapshot.*secondSnapshot.*changed during inspection/su);
-  assert.match(preservation, /hooks\/post-merge/u);
-  assert.match(preservation, /linkSync\(temporaryPath, finalPath\).*unlinkSync\(temporaryPath\)/su);
-  assert.match(preservation, /output JSON path must not already exist/u);
-  assert.doesNotMatch(preservation, /process\.stdout\.write|\bgh\b|\bglab\b|dirty-target-preservation/u);
+  assert.equal(existsSync("skills/engineering/close-issue/scripts/preservation.mjs"), false);
+  assert.equal(existsSync("tests/ron-workflow/close-issue-preservation.test.mjs"), false);
 
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   assert.match(verify, /capture.*verification baseline.*exact target `HEAD`/isu);
@@ -578,131 +546,109 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(historicalBanner, /uses one lifecycle authorization/iu);
 });
 
-test("Issue integration preserves dirty target state and composes candidates in arbitrary close order", () => {
-  const { repo, rawGit, git, isAncestor } = createGitFixture("skills-integration-fixture-");
-  const planIntegration = (target, candidate) => {
-    if (isAncestor(target, candidate)) return { kind: "reuse", integration: candidate };
-    if (isAncestor(candidate, target)) {
-      const tree = git("rev-parse", `${target}^{tree}`);
-      const integration = git("commit-tree", tree, "-p", target, "-p", candidate, "-m", "integrate contained candidate");
-      return { kind: "contained-merge", integration };
+test("Issue closeout is direct, ordered, retryable, and conflict-safe", () => {
+  const { repo, git, isAncestor } = createGitFixture("skills-direct-close-fixture-");
+
+  const nextAction = ({ candidate, worktreeRegistered, issueState }) => {
+    const reachable = isAncestor(candidate, git("rev-parse", "target"));
+    if (issueState === "CLOSED" && (!reachable || worktreeRegistered)) throw new Error("contradictory close state");
+    if (!reachable) {
+      assert.equal(issueState, "OPEN", "only an open Issue may still need merge");
+      assert.equal(worktreeRegistered, true, "an unmerged candidate keeps its Issue worktree");
+      assert.equal(git("status", "--porcelain=v1"), "", "target dirt stops before merge");
+      return "merge";
     }
-    return { kind: "merge" };
+    assert.equal(git("status", "--porcelain=v1"), "", "target dirt stops the next ordered action");
+    if (worktreeRegistered) return "remove-worktree";
+    if (issueState === "OPEN") return "close-issue";
+    return "done";
+  };
+
+  const mergeCandidate = (state) => {
+    assert.equal(nextAction(state), "merge");
+    const targetBefore = git("rev-parse", "target");
+    try {
+      git("merge", "--no-edit", state.candidate);
+    } catch (error) {
+      git("merge", "--abort");
+      assert.equal(git("rev-parse", "target"), targetBefore, "conflict abort restores target HEAD");
+      assert.equal(git("status", "--porcelain=v1"), "", "conflict abort restores a clean target");
+      throw error;
+    }
+    assert.equal(isAncestor(state.candidate, git("rev-parse", "target")), true);
+    assert.equal(git("status", "--porcelain=v1"), "");
+    return git("rev-parse", "target");
   };
 
   try {
     writeFileSync(join(repo, "base.txt"), "base\n");
-    writeFileSync(join(repo, "tracked-local.txt"), "tracked baseline\n");
-    git("add", "base.txt", "tracked-local.txt");
+    git("add", "base.txt");
     git("commit", "-m", "base");
     const baseline = git("rev-parse", "HEAD");
 
-    git("checkout", "-b", "issue-a");
+    git("checkout", "-b", "issue-a", baseline);
     writeFileSync(join(repo, "a.txt"), "A\n");
     git("add", "a.txt");
     git("commit", "-m", "issue A");
     const candidateA = git("rev-parse", "HEAD");
-    git("checkout", "target");
-    assert.equal(isAncestor(baseline, candidateA), true);
-    assert.deepEqual(planIntegration(baseline, candidateA), { kind: "reuse", integration: candidateA });
-    git("merge", "--ff-only", candidateA);
-    assert.equal(git("rev-parse", "HEAD"), candidateA, "direct close should fast-forward to the reviewed candidate");
-
-    git("checkout", "-b", "issue-conflict", baseline);
-    writeFileSync(join(repo, "base.txt"), "issue change\n");
-    git("add", "base.txt");
-    git("commit", "-m", "conflicting issue");
-    const conflictingCandidate = git("rev-parse", "HEAD");
-    git("checkout", "target");
-    writeFileSync(join(repo, "base.txt"), "target change\n");
-    git("add", "base.txt");
-    git("commit", "-m", "target conflict");
-    const targetBeforeB = git("rev-parse", "HEAD");
-    const contained = planIntegration(targetBeforeB, candidateA);
-    assert.equal(contained.kind, "contained-merge");
-    assert.deepEqual(git("rev-list", "--parents", "-n", "1", contained.integration).split(/\s+/u), [contained.integration, targetBeforeB, candidateA]);
-    assert.equal(git("rev-parse", `${contained.integration}^{tree}`), git("rev-parse", `${targetBeforeB}^{tree}`));
-    git("checkout", "-b", "integrate-conflict", targetBeforeB);
-    assert.throws(() => git("merge", "--no-ff", "-m", "must conflict", conflictingCandidate));
-    git("merge", "--abort");
-    git("checkout", "target");
-    assert.equal(git("rev-parse", "HEAD"), targetBeforeB, "a conflict must not advance the real target");
-    assert.equal(isAncestor(conflictingCandidate, targetBeforeB), false);
 
     git("checkout", "-b", "issue-b", baseline);
     writeFileSync(join(repo, "b.txt"), "B\n");
     git("add", "b.txt");
     git("commit", "-m", "issue B");
     const candidateB = git("rev-parse", "HEAD");
-    assert.deepEqual(planIntegration(targetBeforeB, candidateB), { kind: "merge" });
-    git("checkout", "-b", "integrate-b", targetBeforeB);
-    git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
-    const integrationB = git("rev-parse", "HEAD");
-    assert.equal(git("rev-list", "--parents", "-n", "1", integrationB).split(/\s+/u).length, 3);
-    assert.equal(isAncestor(targetBeforeB, integrationB), true);
-    assert.equal(isAncestor(candidateB, integrationB), true);
+
+    git("checkout", "-b", "issue-conflict", baseline);
+    writeFileSync(join(repo, "base.txt"), "issue change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "conflicting issue");
+    const conflictingCandidate = git("rev-parse", "HEAD");
 
     git("checkout", "target");
-    writeFileSync(join(repo, "tracked-local.txt"), "unstaged local edit\n");
-    writeFileSync(join(repo, "staged-local.txt"), "staged local work\n");
-    git("add", "staged-local.txt");
-    writeFileSync(join(repo, "untracked-local.txt"), "untracked local work\n");
-    const snapshot = () => ({
-      status: rawGit("status", "--porcelain=v1", "-z"),
-      tracked: readFileSync(join(repo, "tracked-local.txt"), "utf8"),
-      staged: readFileSync(join(repo, "staged-local.txt"), "utf8"),
-      stagedIndex: git("ls-files", "--stage", "staged-local.txt"),
-      untracked: readFileSync(join(repo, "untracked-local.txt"), "utf8"),
-    });
-    const dirtyBefore = snapshot();
-    assert.match(dirtyBefore.status, / M tracked-local\.txt\0/u);
-    assert.match(dirtyBefore.status, /A  staged-local\.txt\0/u);
-    assert.match(dirtyBefore.status, /\?\? untracked-local\.txt\0/u);
-    git("merge", "--ff-only", integrationB);
-    const aggregate = git("rev-parse", "HEAD");
-    assert.deepEqual(snapshot(), dirtyBefore, "fast-forward integration must preserve unrelated target dirt exactly");
-    assert.equal(isAncestor(candidateA, aggregate), true);
-    assert.equal(isAncestor(candidateB, aggregate), true);
+    const issueA = { candidate: candidateA, worktreeRegistered: true, issueState: "OPEN" };
+    writeFileSync(join(repo, "dirty-before.txt"), "local dirt\n");
+    assert.throws(() => nextAction(issueA), /target dirt stops before merge/u);
+    assert.equal(git("rev-parse", "target"), baseline);
+    rmSync(join(repo, "dirty-before.txt"), { force: true });
 
-    const executionState = { id: "issue-b-success", kind: "implementation_complete", candidate: candidateB };
-    const closeReceipt = {
-      schema: "dirty-target-preservation:v1",
-      phase: "VERIFIED",
-      executionStateId: executionState.id,
-      targetBefore: targetBeforeB,
-      candidate: candidateB,
-      integration: integrationB,
-      targetAfter: aggregate,
-      candidateReachable: isAncestor(candidateB, aggregate),
-      dirtySnapshot: dirtyBefore,
-    };
-    const receiptReadBack = JSON.parse(JSON.stringify(closeReceipt));
-    assert.deepEqual(receiptReadBack, closeReceipt);
-    assert.equal(receiptReadBack.executionStateId, executionState.id);
-    assert.equal(receiptReadBack.candidateReachable, true);
+    assert.equal(mergeCandidate(issueA), candidateA, "first close fast-forwards directly to its candidate");
+    assert.equal(nextAction(issueA), "remove-worktree");
+    issueA.worktreeRegistered = false;
+    assert.equal(nextAction(issueA), "close-issue");
+    issueA.issueState = "CLOSED";
+    assert.equal(nextAction(issueA), "done");
 
-    const closeAndReadBack = ({ tracker, issueWorktree }) => {
-      assert.equal(tracker.state, "OPEN");
-      assert.equal(tracker.latestExecutionStateId, receiptReadBack.executionStateId, "execution state drift stops closure");
-      assert.equal(tracker.blockersClosed, true, "blocker drift stops closure");
-      assert.equal(receiptReadBack.phase, "VERIFIED");
-      assert.equal(receiptReadBack.targetAfter, git("rev-parse", "target"));
-      assert.equal(issueWorktree.registered && issueWorktree.clean, true, "only the exact clean Issue worktree may be removed");
-      issueWorktree.registered = false;
-      tracker.state = "CLOSED";
-      return JSON.parse(JSON.stringify({ state: tracker.state, worktreeRegistered: issueWorktree.registered }));
-    };
-    const blockerDrift = { state: "OPEN", latestExecutionStateId: executionState.id, blockersClosed: false };
-    const blockerWorktree = { registered: true, clean: true };
-    assert.throws(() => closeAndReadBack({ tracker: blockerDrift, issueWorktree: blockerWorktree }), /blocker drift/u);
-    assert.deepEqual({ state: blockerDrift.state, registered: blockerWorktree.registered }, { state: "OPEN", registered: true });
-    const executionDrift = { state: "OPEN", latestExecutionStateId: "issue-b-blocked", blockersClosed: true };
-    const executionWorktree = { registered: true, clean: true };
-    assert.throws(() => closeAndReadBack({ tracker: executionDrift, issueWorktree: executionWorktree }), /execution state drift/u);
-    assert.deepEqual({ state: executionDrift.state, registered: executionWorktree.registered }, { state: "OPEN", registered: true });
-    const tracker = { state: "OPEN", latestExecutionStateId: executionState.id, blockersClosed: true };
-    const issueWorktree = { registered: true, clean: true };
-    assert.deepEqual(closeAndReadBack({ tracker, issueWorktree }), { state: "CLOSED", worktreeRegistered: false });
+    writeFileSync(join(repo, "base.txt"), "target change\n");
+    git("add", "base.txt");
+    git("commit", "-m", "target conflict");
+    const targetBeforeConflict = git("rev-parse", "target");
+    const conflict = { candidate: conflictingCandidate, worktreeRegistered: true, issueState: "OPEN" };
+    assert.throws(() => mergeCandidate(conflict));
+    assert.equal(git("rev-parse", "target"), targetBeforeConflict);
+    assert.equal(conflict.worktreeRegistered, true);
+    assert.equal(conflict.issueState, "OPEN");
+
+    const issueB = { candidate: candidateB, worktreeRegistered: true, issueState: "OPEN" };
+    const mergedB = mergeCandidate(issueB);
+    assert.equal(git("rev-list", "--parents", "-n", "1", mergedB).split(/\s+/u).length, 3);
+    assert.equal(isAncestor(targetBeforeConflict, mergedB), true);
+    assert.equal(isAncestor(candidateB, mergedB), true);
+
+    writeFileSync(join(repo, "dirty-after.txt"), "post-merge dirt\n");
+    assert.throws(() => nextAction(issueB), /target dirt stops the next ordered action/u);
+    assert.equal(issueB.worktreeRegistered, true);
+    assert.equal(issueB.issueState, "OPEN");
+    rmSync(join(repo, "dirty-after.txt"), { force: true });
+
+    assert.equal(nextAction(issueB), "remove-worktree");
+    issueB.worktreeRegistered = false;
+    assert.equal(nextAction(issueB), "close-issue");
+    issueB.issueState = "CLOSED";
+    assert.equal(nextAction(issueB), "done");
+    assert.throws(
+      () => nextAction({ candidate: candidateB, worktreeRegistered: true, issueState: "CLOSED" }),
+      /contradictory close state/u,
+    );
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -882,10 +828,22 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/explain-decision`/u);
   assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
-  assert.match(matt, /close-issue.*exact candidate.*current local target.*close/isu);
+  assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
+  assert.match(matt, /serializes close writers per target/iu);
+  assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(matt, /Before push.*verify-target-before-push.*exact aggregate target/isu);
   assert.match(matt, /to-spec.*sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
+
+  const mattDocs = read("docs/engineering/ask-matt.md");
+  assert.match(mattDocs, /one writer per recorded target.*three idempotent close actions/isu);
+  assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    const readme = read(path);
+    assert.match(readme, /execute-issue.*preserving completion across recorded-target movement/iu);
+    assert.match(readme, /close-issue.*three idempotent actions.*recorded target.*Multi-Issue parent/iu);
+  }
 
   const context = read("CONTEXT.md");
   // Necessary discovery: Planning Seal f7c8a85 already changed this canonical operation from "integration" to "close-issue merge".

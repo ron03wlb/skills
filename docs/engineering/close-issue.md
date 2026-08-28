@@ -12,32 +12,26 @@ npx skills update close-issue
 
 ## What it does
 
-`close-issue` integrates one unchanged reviewed candidate into the current local target, proves inclusion and dirty-target preservation, removes the exact Issue worktree, and closes the Issue.
+`close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue.
 
-It does not refresh or re-review the candidate. A candidate that already contains the target is reused; a candidate already contained by a newer target gets a history-only two-parent merge commit with the target's exact tree. If their histories diverge, an isolated no-fast-forward merge commit composes them. Identity ambiguity or conflict stops before the real target or tracker state changes.
+The defining constraint is idempotent close progress. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
 
 ## When to reach for it
 
 You invoke this by typing `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete` — the agent won't reach for it on its own.
 
-Independent Issues may close in any order. Only writes to one target branch are serialized; the Issue does not need to know whether siblings ran concurrently.
+Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue, while keeping one writer at a time for each target branch. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 
-## Exact-candidate integration
+## Three observable actions
 
-The target advances once by fast-forward to an integration candidate that contains both the prior target and exact reviewed candidate. A read-back receipt proves candidate ancestry before cleanup and closure, so a successfully closed Issue cannot be omitted from its named local target.
+The merge uses the latest recorded target and exact reviewed candidate. An already reachable candidate makes that action complete; otherwise Git fast-forwards or creates the ordinary merge. A dirty target stops before mutation, and a conflict is aborted with the worktree and Issue left open for a later close retry.
 
-The target may keep unrelated staged, unstaged, and untracked work. Closeout fingerprints it, rejects same-path and path-prefix collisions, and preserves hook evidence. Failed or unproved preservation stops cleanup and closure; recovery needs a new successful execution or an integration-repair Issue.
+Cleanup removes only the registered clean Issue worktree after candidate reachability is proved. Tracker closure happens last and is read back. A partial run reports the remaining action without repairing product code, rerunning review, pushing, or rolling back a successful merge.
 
-The receipt binds the latest successful execution-state identity. A newer blocked execution supersedes it, and closeout rechecks that identity plus every blocker before integration, cleanup, and tracker closure.
+## Parent closure
 
-Closeout never edits product code, reruns expensive verification, pushes, deploys, automatically reopens an Issue, or rolls back a successful local integration.
-
-## One deep preservation seam
-
-Dirty-target inspection is a private read-only module inside `close-issue`, not another workflow step. The skill passes resolved local Git identities to the same atomic inspection before and after integration; the module owns NUL-safe status parsing, fingerprints, rename and path-prefix collision handling, filesystem case semantics, and post-merge hook evidence.
-
-The seam is deliberately narrow and fail-closed: it returns only non-sensitive preservation evidence to `close-issue`, while raw paths and tracker authority stay on their owning side. An unstable or incomplete inspection cannot authorize integration. The helper never reads Issues, writes receipts, integrates code, removes worktrees, or closes the Issue.
+A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Decomposition publication record, proves every exact child is closed and every child candidate reaches the same target, then closes only the parent. It does not claim aggregate `push_ready`.
 
 ## Where it fits
 
-`close-issue` follows [execute-issue](https://aihero.dev/skills-execute-issue). After any desired Issues are closed, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) performs the aggregate gate on the exact target. See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+`close-issue` follows [execute-issue](https://aihero.dev/skills-execute-issue). After the desired Issues are closed, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) performs the one aggregate gate on exact target `HEAD`. See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
