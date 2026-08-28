@@ -215,7 +215,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   }
 
   const ticketsSeal = tickets.indexOf("Planning Seal");
-  const ticketsPublish = tickets.indexOf("Publish executable Issues", ticketsSeal);
+  const ticketsPublish = tickets.indexOf("Publish Executable Issues", ticketsSeal);
   assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate or advance the seal before publish");
   assert.match(tickets, /no relevant planning-artifact delta.*reuse/isu);
   assert.match(tickets, /in-Spec.*successor Planning Seal/isu);
