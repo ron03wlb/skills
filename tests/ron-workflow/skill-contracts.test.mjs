@@ -506,7 +506,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(verify, /reachable member.*Issue.*open.*stops/isu);
   assert.match(verify, /For every member.*closed tracker state/isu);
   assert.match(verify, /For every member.*topic branch.*worktree.*Planning Seal.*prerequisite state.*Standards.*Spec review identities.*clean results/isu);
-  assert.match(verify, /review identity.*exact `C`/isu);
+  assert.match(verify, /completion note.*exact Issue identity.*verification identity.*commands.*passing results/isu);
+  assert.match(verify, /review and verification.*candidate identity.*exact `C`/isu);
   assert.match(verify, /open unreachable.*concurrent.*outside.*closed unreachable.*contradictory/isu);
   assert.match(verify, /later state supersedes.*only.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
   assert.match(verify, /completion notes.*sole Issue-to-commit mapping authority/isu);
@@ -709,6 +710,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const invalidating = issue.execution.slice(completionIndex + 1).find(({ invalidatesCandidate }) => invalidatesCandidate === true);
     assert.equal(invalidating, undefined, `${issue.id}: candidate-invalidating state supersedes completion`);
     for (const field of [
+      "issue",
       "target",
       "topicBranch",
       "worktree",
@@ -718,13 +720,26 @@ test("aggregate target verification selects exact ranges and covers completion-n
       "prerequisites",
       "standardsReview",
       "specReview",
-      "commands",
+      "verification",
     ]) assert.ok(completion[field], `${issue.id}: missing ${field}`);
-    assert.ok(Array.isArray(completion.commands) && completion.commands.length > 0, `${issue.id}: missing commands`);
+    assert.equal(completion.issue, issue.id, `${issue.id}: mismatched Issue identity`);
     for (const axis of ["standardsReview", "specReview"]) {
       assert.equal(completion[axis].candidate, completion.candidate, `${issue.id}: mismatched ${axis} candidate`);
       assert.equal(completion[axis].result, "clean", `${issue.id}: ${axis} is not clean`);
     }
+    assert.match(completion.prerequisites.status, /^(?:NOT_REQUIRED|READY)$/u, `${issue.id}: invalid prerequisite state`);
+    if (completion.prerequisites.status === "READY") {
+      assert.ok(Array.isArray(completion.prerequisites.commits) && completion.prerequisites.commits.length > 0, `${issue.id}: missing prerequisite identities`);
+    }
+    assert.equal(completion.verification.candidate, completion.candidate, `${issue.id}: mismatched verification candidate`);
+    assert.ok(Array.isArray(completion.verification.commands) && completion.verification.commands.length > 0, `${issue.id}: missing verification commands`);
+    assert.ok(Array.isArray(completion.verification.results), `${issue.id}: missing verification results`);
+    assert.deepEqual(
+      completion.verification.results.map(({ command }) => command),
+      completion.verification.commands,
+      `${issue.id}: mismatched verification results`,
+    );
+    assert.ok(completion.verification.results.every(({ result }) => result === "pass"), `${issue.id}: verification result is not passing`);
     return completion;
   };
 
@@ -743,7 +758,10 @@ test("aggregate target verification selects exact ranges and covers completion-n
 
   const proveCoverage = ({ range, members }) => {
     const contributionSets = members.map((member) => new Set(commits(`${member.baseline}..${member.candidate}`)));
-    const referenced = new Set(members.flatMap(({ planningSeal, prerequisite }) => [planningSeal, prerequisite]).filter(Boolean));
+    const referenced = new Set(members.flatMap(({ planningSeal, prerequisites }) => [
+      planningSeal,
+      ...(prerequisites.commits ?? []),
+    ]));
     for (const commit of commits(`${range.baseline}..${range.head}`)) {
       if (referenced.has(commit) || contributionSets.some((set) => set.has(commit))) continue;
       const parents = git("rev-list", "--parents", "-n", "1", commit).split(/\s+/u).slice(1);
@@ -763,7 +781,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     assert.equal(worktreeClean, true, "verification worktree is dirty");
     fullSuiteRuns += 1;
     assert.equal(fullClean, true, "full suite failed");
-    const commands = [...new Set(members.flatMap(({ commands: recorded }) => recorded))];
+    const commands = [...new Set(members.flatMap(({ verification }) => verification.commands))];
     const result = {
       mode: range.mode,
       source: range.source,
@@ -789,7 +807,12 @@ test("aggregate target verification selects exact ranges and covers completion-n
     git("commit", "-m", "planning seal");
     const planningSeal = git("rev-parse", "HEAD");
 
-    git("checkout", "-b", "issue-a", planningSeal);
+    writeFileSync(join(repo, "prerequisite.txt"), "ready\n");
+    git("add", "prerequisite.txt");
+    git("commit", "-m", "prerequisite");
+    const prerequisite = git("rev-parse", "HEAD");
+
+    git("checkout", "-b", "issue-a", prerequisite);
     writeFileSync(join(repo, "a.txt"), "A\n");
     git("add", "a.txt");
     git("commit", "-m", "issue A");
@@ -817,21 +840,28 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const closedCandidate = git("rev-parse", "HEAD");
     git("checkout", "target");
 
-    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands }) => ({
+    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands, prerequisiteCommits = [] }) => ({
       kind: "implementation_complete",
+      issue,
       target: "target",
       topicBranch: `issue-${issue.toLowerCase()}`,
       worktree: `C:/tmp/issue-${issue.toLowerCase()}`,
       baseline: issueBaseline,
       candidate,
       planningSeal,
-      prerequisites: { status: "NOT_REQUIRED" },
+      prerequisites: prerequisiteCommits.length > 0
+        ? { status: "READY", commits: prerequisiteCommits }
+        : { status: "NOT_REQUIRED", commits: [] },
       standardsReview: { candidate, result: "clean" },
       specReview: { candidate, result: "clean" },
-      commands,
+      verification: {
+        candidate,
+        commands,
+        results: commands.map((command) => ({ command, result: "pass" })),
+      },
     });
-    const successA = completion({ candidate: candidateA, issue: "A", baseline: planningSeal, commands: ["test:shared", "test:a"] });
-    const successB = completion({ candidate: candidateB, issue: "B", baseline: planningSeal, commands: ["test:shared", "test:b"] });
+    const successA = completion({ candidate: candidateA, issue: "A", baseline: prerequisite, commands: ["test:shared", "test:a"], prerequisiteCommits: [prerequisite] });
+    const successB = completion({ candidate: candidateB, issue: "B", baseline: prerequisite, commands: ["test:shared", "test:b"], prerequisiteCommits: [prerequisite] });
     const successOpen = completion({ candidate: openCandidate, issue: "OPEN-OUTSIDE", commands: ["test:open"] });
     const successClosed = completion({ candidate: closedCandidate, issue: "CLOSED-OUTSIDE", commands: ["test:closed"] });
     const completeIssues = [
@@ -877,7 +907,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, baseline: undefined }] }], range: localRange }),
       /missing baseline/u,
     );
-    for (const field of ["worktree", "planningSeal", "standardsReview", "specReview"]) {
+    for (const field of ["issue", "worktree", "planningSeal", "prerequisites", "standardsReview", "specReview", "verification"]) {
       assert.throws(
         () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, [field]: undefined }] }], range: localRange }),
         new RegExp(`missing ${field}`, "u"),
@@ -889,6 +919,17 @@ test("aggregate target verification selects exact ranges and covers completion-n
         range: localRange,
       }),
       /mismatched standardsReview candidate/u,
+    );
+    assert.throws(
+      () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, issue: "OTHER" }] }], range: localRange }),
+      /mismatched Issue identity/u,
+    );
+    assert.throws(
+      () => freezeMembers({
+        issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, verification: { ...successA.verification, candidate: candidateB } }] }],
+        range: localRange,
+      }),
+      /mismatched verification candidate/u,
     );
     assert.doesNotThrow(() => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [successA, { kind: "aggregate_blocked", invalidatesCandidate: false }] }], range: localRange }));
 
