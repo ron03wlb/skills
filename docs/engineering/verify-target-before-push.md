@@ -28,11 +28,13 @@ The leading idea is **aggregate coverage**. Completion notes plus Git reachabili
 
 Overlapping Issue contributions are valid. Reachable open Issues, closed unreachable candidates, invalidated completion evidence, or unexplained commits stop the gate without repair.
 
+**Successor verification evidence** handles one narrow retirement case. A later member may retire an earlier path-specific command only when its candidate descends from the earlier candidate, its Acceptance Criteria own every required path, its completion proves those paths absent and names passing current-behavior commands, those commands run at the final target, and the paths remain absent there. Partial ownership, inferred deletion or rename, missing proof, ambiguous ancestry, or a non-path-specific command makes the gate fail closed.
+
 ## Honest results
 
 A `push_ready` result belongs only to local-ahead mode and exact current target `HEAD`. A **Range verification result** belongs only to the explicit already-pushed comparison and never grants retroactive push readiness.
 
-Both results bind exact baseline, target, members, coverage, review, and verification evidence. Target movement invalidates local readiness but never sends an Issue back to execution.
+Both results bind exact baseline, target, members, coverage, review, executed verification, and every accepted successor disposition. The disposition preserves the old completion note and records the superseded command, retired paths, successor Issue and candidate, Acceptance Criteria, absence proof, and current-behavior results. Target movement invalidates local readiness but never sends an Issue back to execution.
 
 ## It's working if
 

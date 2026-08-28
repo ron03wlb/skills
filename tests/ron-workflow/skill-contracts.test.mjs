@@ -517,6 +517,10 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(verify, /overlap.*valid.*no unique owner/isu);
   assert.match(verify, /code-review.*Standards.*Spec axis.*every member Issue.*parent.*linked Spec/isu);
   assert.match(verify, /focused verification commands.*deduplicate.*full suite exactly once.*exact `V`/isu);
+  assert.match(verify, /Successor verification evidence.*path-specific.*later member candidate.*descends.*earlier candidate/isu);
+  assert.match(verify, /partial.*non-path-specific.*stops/isu);
+  assert.match(verify, /ambiguous.*stops/isu);
+  assert.match(verify, /result.*superseded command.*exact successor proof/isu);
   assert.match(verify, /gate, not a repair loop/iu);
   assert.match(verify, /local-ahead.*push_ready:v1.*`B`.*`V`.*member Issue.*candidate.*commands/isu);
   assert.match(verify, /already-pushed.*Range verification result.*never.*push_ready/isu);
@@ -526,10 +530,14 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(verify, /matching read-back `VERIFIED`|candidate `I`|union of .*closeout receipt|RECONCILED/iu);
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   assert.match(verifyMetadata, /local-ahead.*already-pushed.*completion-note.*range/isu);
+  assert.match(verifyMetadata, /successor verification evidence/iu);
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   assert.match(verifyDocs, /two evidence modes.*local-ahead.*unique upstream.*already-pushed.*explicit.*range/isu);
   assert.match(verifyDocs, /completion notes.*reachability.*coverage.*aggregate/isu);
+  assert.match(verifyDocs, /Successor verification evidence.*retire.*path-specific.*fail closed/isu);
   assert.match(verifyDocs, /push_ready.*local-ahead.*Range verification result.*already-pushed/isu);
+  assert.match(read("CONTEXT.md"), /Successor verification evidence.*later member.*path-specific.*never waives/isu);
+  assert.match(read("docs/adr/0038-separate-execution-closeout-and-push-verification.md"), /Successor verification evidence.*partial ownership.*stops the gate/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     assert.match(read(path), /verify-target-before-push.*local-ahead.*already-pushed.*completion-note/iu);
@@ -772,25 +780,79 @@ test("aggregate target verification selects exact ranges and covers completion-n
     return contributionSets;
   };
 
+  const collectFocusedEvidence = ({ members, issues, successorInspections = [] }) => {
+    const commands = [...new Set(members.flatMap(({ verification }) => verification.commands))];
+    const issueById = new Map(issues.map((issue) => [issue.id, issue]));
+    const seen = new Set();
+    const successorDispositions = successorInspections.map(({ command, requiredPaths }) => {
+      assert.equal(commands.includes(command), true, `unknown focused command ${command}`);
+      assert.equal(seen.has(command), false, `duplicate successor disposition ${command}`);
+      seen.add(command);
+      assert.ok(Array.isArray(requiredPaths) && requiredPaths.length > 0, `missing or ambiguous path extraction for ${command}`);
+      assert.equal(new Set(requiredPaths).size, requiredPaths.length, `ambiguous path extraction for ${command}`);
+
+      const origins = members.filter(({ verification }) => verification.commands.includes(command));
+      const successors = members.flatMap((member) => {
+        if (!origins.every((origin) => origin.candidate !== member.candidate && isAncestor(origin.candidate, member.candidate))) return [];
+        const issue = issueById.get(member.issue);
+        const retirement = issue?.retirements?.find(({ paths }) => requiredPaths.every((path) => paths.includes(path)));
+        return retirement ? [{ member, retirement }] : [];
+      });
+      assert.equal(successors.length, 1, `missing or ambiguous explicit successor retirement for ${command}`);
+
+      const [{ member: successor, retirement }] = successors;
+      assert.match(retirement.criterion ?? "", /^AC-\d+$/u, `missing retirement Acceptance Criteria for ${command}`);
+      const proof = successor.verification.successorEvidence;
+      assert.ok(proof, `missing successor proof for ${command}`);
+      assert.ok(Array.isArray(proof.absentPaths) && requiredPaths.every((path) => proof.absentPaths.includes(path)), `missing absence proof for ${command}`);
+      assert.ok(requiredPaths.every((path) => !existsSync(join(repo, path))), `retired path still exists at V for ${command}`);
+      assert.ok(Array.isArray(proof.currentBehaviorCommands) && proof.currentBehaviorCommands.length > 0, `missing current-behavior proof for ${command}`);
+      const currentBehaviorResults = proof.currentBehaviorCommands.map((currentCommand) => {
+        const result = successor.verification.results.find(({ command: candidate }) => candidate === currentCommand);
+        assert.equal(result?.result, "pass", `current-behavior command is not passing: ${currentCommand}`);
+        return result;
+      });
+      return {
+        issue: origins.map(({ issue }) => issue),
+        candidate: origins.map(({ candidate }) => candidate),
+        command,
+        retiredPaths: requiredPaths,
+        successorIssue: successor.issue,
+        successorCandidate: successor.candidate,
+        acceptanceCriteria: retirement.criterion,
+        absenceProof: proof.absentPaths,
+        currentBehaviorResults,
+      };
+    });
+    for (const { currentBehaviorResults } of successorDispositions) {
+      assert.ok(currentBehaviorResults.every(({ command }) => !seen.has(command)), "current-behavior command must remain applicable");
+    }
+    return {
+      commands: commands.filter((command) => !seen.has(command)),
+      successorDispositions,
+    };
+  };
+
   let fullSuiteRuns = 0;
-  const runGate = ({ range, issues, standardsClean = true, specClean = true, focusedClean = true, fullClean = true, worktreeClean = true }) => {
+  const runGate = ({ range, issues, successorInspections = [], standardsClean = true, specClean = true, focusedClean = true, fullClean = true, worktreeClean = true }) => {
     const members = freezeMembers({ issues, range });
     assert.ok(members.length > 0, "target verification set must not be empty");
     const contributionSets = proveCoverage({ range, members });
     assert.equal(standardsClean, true, "aggregate Standards review failed");
     assert.equal(specClean, true, "aggregate Spec review failed");
+    const focusedEvidence = collectFocusedEvidence({ members, issues, successorInspections });
     assert.equal(focusedClean, true, "focused verification failed");
     assert.equal(worktreeClean, true, "verification worktree is dirty");
     fullSuiteRuns += 1;
     assert.equal(fullClean, true, "full suite failed");
-    const commands = [...new Set(members.flatMap(({ verification }) => verification.commands))];
     const result = {
       mode: range.mode,
       source: range.source,
       baseline: range.baseline,
       head: range.head,
       members: members.map(({ issue, candidate }) => ({ issue, candidate })),
-      commands,
+      commands: focusedEvidence.commands,
+      successorDispositions: focusedEvidence.successorDispositions,
     };
     if (range.mode === "already-pushed") return { schema: "range_verified:v1", ...result };
     const ready = { schema: "push_ready:v1", ...result };
@@ -814,15 +876,23 @@ test("aggregate target verification selects exact ranges and covers completion-n
     git("commit", "-m", "prerequisite");
     const prerequisite = git("rev-parse", "HEAD");
 
+    const retiredScript = "retired-preservation.mjs";
+    const retiredTest = "retired-preservation.test.mjs";
+    const retiredScriptCommand = `node --check ${retiredScript}`;
+    const retiredTestCommand = `node --check ${retiredTest}`;
     git("checkout", "-b", "issue-a", prerequisite);
     writeFileSync(join(repo, "a.txt"), "A\n");
-    git("add", "a.txt");
+    writeFileSync(join(repo, retiredScript), "export const preserved = true;\n");
+    writeFileSync(join(repo, retiredTest), "export const covered = true;\n");
+    git("add", "a.txt", retiredScript, retiredTest);
     git("commit", "-m", "issue A");
     const candidateA = git("rev-parse", "HEAD");
 
     git("checkout", "-b", "issue-b", candidateA);
     writeFileSync(join(repo, "b.txt"), "B\n");
-    git("add", "b.txt");
+    rmSync(join(repo, retiredScript));
+    rmSync(join(repo, retiredTest));
+    git("add", "-A");
     git("commit", "-m", "issue B");
     const candidateB = git("rev-parse", "HEAD");
     git("checkout", "target");
@@ -842,7 +912,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const closedCandidate = git("rev-parse", "HEAD");
     git("checkout", "target");
 
-    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands, prerequisiteCommits = [] }) => ({
+    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands, prerequisiteCommits = [], successorEvidence }) => ({
       kind: "implementation_complete",
       issue,
       target: "target",
@@ -860,15 +930,29 @@ test("aggregate target verification selects exact ranges and covers completion-n
         candidate,
         commands,
         results: commands.map((command) => ({ command, result: "pass" })),
+        ...(successorEvidence ? { successorEvidence } : {}),
       },
     });
-    const successA = completion({ candidate: candidateA, issue: "A", baseline: prerequisite, commands: ["test:shared", "test:a"], prerequisiteCommits: [prerequisite] });
-    const successB = completion({ candidate: candidateB, issue: "B", baseline: prerequisite, commands: ["test:shared", "test:b"], prerequisiteCommits: [prerequisite] });
+    const successA = completion({
+      candidate: candidateA,
+      issue: "A",
+      baseline: prerequisite,
+      commands: ["test:shared", "test:a", retiredScriptCommand, retiredTestCommand],
+      prerequisiteCommits: [prerequisite],
+    });
+    const successB = completion({
+      candidate: candidateB,
+      issue: "B",
+      baseline: prerequisite,
+      commands: ["test:shared", "test:b"],
+      prerequisiteCommits: [prerequisite],
+      successorEvidence: { absentPaths: [retiredScript, retiredTest], currentBehaviorCommands: ["test:b"] },
+    });
     const successOpen = completion({ candidate: openCandidate, issue: "OPEN-OUTSIDE", commands: ["test:open"] });
     const successClosed = completion({ candidate: closedCandidate, issue: "CLOSED-OUTSIDE", commands: ["test:closed"] });
     const completeIssues = [
       { id: "A", state: "CLOSED", execution: [successA] },
-      { id: "B", state: "CLOSED", execution: [successB] },
+      { id: "B", state: "CLOSED", retirements: [{ criterion: "AC-6", paths: [retiredScript, retiredTest] }], execution: [successB] },
       { id: "OPEN-OUTSIDE", state: "OPEN", execution: [successOpen] },
     ];
 
@@ -882,9 +966,29 @@ test("aggregate target verification selects exact ranges and covers completion-n
       assert.equal(selected.head, verifiedHead);
     }
 
+    const successorInspections = [
+      { command: retiredScriptCommand, requiredPaths: [retiredScript] },
+      { command: retiredTestCommand, requiredPaths: [retiredTest] },
+    ];
     const explicitRange = selectRange({ mode: "already-pushed", source: "exact-range", base: baseline, head: verifiedHead });
-    const rangeResult = runGate({ range: explicitRange, issues: completeIssues });
+    const rangeResult = runGate({ range: explicitRange, issues: completeIssues, successorInspections });
     assert.equal(rangeResult.schema, "range_verified:v1");
+    assert.deepEqual(rangeResult.commands, ["test:shared", "test:a", "test:b"]);
+    assert.equal(rangeResult.successorDispositions.length, 2);
+    assert.deepEqual(
+      rangeResult.successorDispositions[0],
+      {
+        issue: ["A"],
+        candidate: [candidateA],
+        command: retiredScriptCommand,
+        retiredPaths: [retiredScript],
+        successorIssue: "B",
+        successorCandidate: candidateB,
+        acceptanceCriteria: "AC-6",
+        absenceProof: [retiredScript, retiredTest],
+        currentBehaviorResults: [{ command: "test:b", result: "pass" }],
+      },
+    );
     assert.equal(git("notes", "--ref=refs/notes/matt-push-ready", "list"), "", "already-pushed mode must not write push_ready");
     assert.equal(fullSuiteRuns, 1, "one invocation runs the full suite once");
 
@@ -940,6 +1044,58 @@ test("aggregate target verification selects exact ranges and covers completion-n
     assert.throws(() => runGate({ range: localRange, issues: completeIssues, focusedClean: false }), /focused verification failed/u);
     assert.throws(() => runGate({ range: localRange, issues: completeIssues, fullClean: false }), /full suite failed/u);
     assert.throws(() => runGate({ range: localRange, issues: completeIssues, worktreeClean: false }), /worktree is dirty/u);
+    assert.throws(
+      () => runGate({ range: localRange, issues: completeIssues, successorInspections: [{ command: retiredScriptCommand }] }),
+      /missing or ambiguous path extraction/u,
+    );
+    assert.throws(
+      () => runGate({ range: localRange, issues: completeIssues, successorInspections: [{ command: retiredScriptCommand, requiredPaths: [retiredScript, "still-active.mjs"] }] }),
+      /missing or ambiguous explicit successor retirement/u,
+    );
+    assert.throws(
+      () => collectFocusedEvidence({
+        members: freezeMembers({ issues: completeIssues, range: localRange }).map((member) => member.issue === "B"
+          ? { ...member, candidate: planningSeal, verification: { ...member.verification, candidate: planningSeal } }
+          : member),
+        issues: completeIssues,
+        successorInspections: [{ command: retiredScriptCommand, requiredPaths: [retiredScript] }],
+      }),
+      /missing or ambiguous explicit successor retirement/u,
+    );
+    assert.throws(
+      () => runGate({ range: localRange, issues: completeIssues, successorInspections: [{ command: "test:shared", requiredPaths: [] }] }),
+      /missing or ambiguous path extraction/u,
+    );
+    assert.throws(
+      () => runGate({
+        range: localRange,
+        issues: completeIssues.map((issue) => issue.id === "B"
+          ? { ...issue, execution: [{ ...successB, verification: { ...successB.verification, successorEvidence: undefined } }] }
+          : issue),
+        successorInspections: [{ command: retiredScriptCommand, requiredPaths: [retiredScript] }],
+      }),
+      /missing successor proof/u,
+    );
+    assert.throws(
+      () => runGate({
+        range: localRange,
+        issues: completeIssues.map((issue) => issue.id === "B"
+          ? { ...issue, execution: [{ ...successB, verification: { ...successB.verification, successorEvidence: { ...successB.verification.successorEvidence, absentPaths: [] } } }] }
+          : issue),
+        successorInspections: [{ command: retiredScriptCommand, requiredPaths: [retiredScript] }],
+      }),
+      /missing absence proof/u,
+    );
+    assert.throws(
+      () => runGate({
+        range: localRange,
+        issues: completeIssues.map((issue) => issue.id === "B"
+          ? { ...issue, execution: [{ ...successB, verification: { ...successB.verification, successorEvidence: { ...successB.verification.successorEvidence, currentBehaviorCommands: [] } } }] }
+          : issue),
+        successorInspections: [{ command: retiredScriptCommand, requiredPaths: [retiredScript] }],
+      }),
+      /missing current-behavior proof/u,
+    );
 
     git("checkout", "-b", "unexplained", verifiedHead);
     writeFileSync(join(repo, "unexplained.txt"), "not covered\n");
@@ -950,11 +1106,12 @@ test("aggregate target verification selects exact ranges and covers completion-n
     assert.throws(() => runGate({ range: unexplainedRange, issues: completeIssues }), /unexplained material commit/u);
     git("checkout", "target");
 
-    const ready = runGate({ range: localRange, issues: completeIssues });
+    const ready = runGate({ range: localRange, issues: completeIssues, successorInspections });
     assert.equal(ready.schema, "push_ready:v1");
     assert.equal(ready.head, verifiedHead);
     assert.deepEqual(ready.members.map(({ issue }) => issue), ["A", "B"]);
     assert.deepEqual(ready.commands, ["test:shared", "test:a", "test:b"]);
+    assert.deepEqual(ready.successorDispositions.map(({ command }) => command), [retiredScriptCommand, retiredTestCommand]);
     writeFileSync(join(repo, "drift.txt"), "target moved\n");
     git("add", "drift.txt");
     git("commit", "-m", "target drift");
