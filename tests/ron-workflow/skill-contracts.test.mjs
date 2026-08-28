@@ -793,6 +793,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       assert.notEqual(commandFact?.kind, "non-path", `non-path-specific command cannot be superseded: ${command}`);
       assert.equal(commandFact?.kind, "path", `missing or ambiguous path extraction for ${command}`);
       const { requiredPaths } = commandFact;
+      assert.ok(requiredPaths.length > 0, `missing or ambiguous path extraction for ${command}`);
       assert.equal(new Set(requiredPaths).size, requiredPaths.length, `ambiguous path extraction for ${command}`);
 
       const origins = members.filter(({ verification }) => verification.commands.includes(command));
@@ -817,12 +818,10 @@ test("aggregate target verification selects exact ranges and covers completion-n
         return result;
       });
       return {
-        originIssues: origins.map(({ issue }) => issue),
-        originCandidates: origins.map(({ candidate }) => candidate),
+        origins: origins.map(({ issue, candidate }) => ({ issue, candidate })),
         command,
         retiredPaths: requiredPaths,
-        successorIssue: successor.issue,
-        successorCandidate: successor.candidate,
+        successor: { issue: successor.issue, candidate: successor.candidate },
         acceptanceCriteria: retirement.criterion,
         absenceProof: proof.absentPaths,
         currentBehaviorCommands: currentBehaviorResults.map(({ command: currentCommand }) => currentCommand),
@@ -893,11 +892,13 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const retiredTestCommand = `node --check ${retiredTest}`;
     const mixedRetirementCommand = `node --test ${retiredTest} ${activeTest}`;
     const ambiguousPathCommand = "node --check $TARGET";
+    const emptyPathCommand = "node --check $EMPTY_PATH";
     for (const command of ["test:shared", "test:a", "test:b"]) commandFacts.set(command, { kind: "non-path" });
     commandFacts.set(retiredScriptCommand, { kind: "path", requiredPaths: [retiredScript] });
     commandFacts.set(retiredTestCommand, { kind: "path", requiredPaths: [retiredTest] });
     commandFacts.set(mixedRetirementCommand, { kind: "path", requiredPaths: [retiredTest, activeTest] });
     commandFacts.set(ambiguousPathCommand, { kind: "ambiguous" });
+    commandFacts.set(emptyPathCommand, { kind: "path", requiredPaths: [] });
     git("checkout", "-b", "issue-a", prerequisite);
     writeFileSync(join(repo, "a.txt"), "A\n");
     writeFileSync(join(repo, retiredScript), "export const preserved = true;\n");
@@ -956,7 +957,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       candidate: candidateA,
       issue: "A",
       baseline: prerequisite,
-      commands: ["test:shared", "test:a", retiredScriptCommand, retiredTestCommand, mixedRetirementCommand, ambiguousPathCommand],
+      commands: ["test:shared", "test:a", retiredScriptCommand, retiredTestCommand, mixedRetirementCommand, ambiguousPathCommand, emptyPathCommand],
       prerequisiteCommits: [prerequisite],
     });
     const successB = completion({
@@ -995,18 +996,16 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const explicitRange = selectRange({ mode: "already-pushed", source: "exact-range", base: baseline, head: verifiedHead });
     const rangeResult = runGate({ range: explicitRange, issues: completeIssues, successorInspections });
     assert.equal(rangeResult.schema, "range_verified:v1");
-    assert.deepEqual(rangeResult.commands, ["test:shared", "test:a", mixedRetirementCommand, ambiguousPathCommand, "test:b"]);
+    assert.deepEqual(rangeResult.commands, ["test:shared", "test:a", mixedRetirementCommand, ambiguousPathCommand, emptyPathCommand, "test:b"]);
     assert.deepEqual(rangeResult.results, rangeResult.commands.map((command) => ({ command, result: "pass" })));
     assert.equal(rangeResult.successorDispositions.length, 2);
     assert.deepEqual(
       rangeResult.successorDispositions[0],
       {
-        originIssues: ["A"],
-        originCandidates: [candidateA],
+        origins: [{ issue: "A", candidate: candidateA }],
         command: retiredScriptCommand,
         retiredPaths: [retiredScript],
-        successorIssue: "B",
-        successorCandidate: candidateB,
+        successor: { issue: "B", candidate: candidateB },
         acceptanceCriteria: "AC-6",
         absenceProof: [retiredScript, retiredTest],
         currentBehaviorCommands: ["test:b"],
@@ -1073,6 +1072,10 @@ test("aggregate target verification selects exact ranges and covers completion-n
       /missing or ambiguous path extraction/u,
     );
     assert.throws(
+      () => runGate({ range: localRange, issues: completeIssues, successorInspections: [{ command: emptyPathCommand }] }),
+      /missing or ambiguous path extraction/u,
+    );
+    assert.throws(
       () => runGate({ range: localRange, issues: completeIssues, successorInspections: [{ command: mixedRetirementCommand }] }),
       /missing or ambiguous explicit successor retirement/u,
     );
@@ -1128,7 +1131,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     assert.equal(ready.schema, "push_ready:v1");
     assert.equal(ready.head, verifiedHead);
     assert.deepEqual(ready.members.map(({ issue }) => issue), ["A", "B"]);
-    assert.deepEqual(ready.commands, ["test:shared", "test:a", mixedRetirementCommand, ambiguousPathCommand, "test:b"]);
+    assert.deepEqual(ready.commands, ["test:shared", "test:a", mixedRetirementCommand, ambiguousPathCommand, emptyPathCommand, "test:b"]);
     assert.deepEqual(ready.results, ready.commands.map((command) => ({ command, result: "pass" })));
     assert.deepEqual(ready.successorDispositions.map(({ command }) => command), [retiredScriptCommand, retiredTestCommand]);
     writeFileSync(join(repo, "drift.txt"), "target moved\n");
