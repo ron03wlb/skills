@@ -1,6 +1,6 @@
 ---
 name: to-tickets
-description: Reconcile one stable child decomposition, publish its completeness record, and emit only the ready frontier.
+description: Reconcile one Issue decomposition, publish its Decomposition publication record, and emit only the ready frontier.
 disable-model-invocation: true
 ---
 
@@ -37,10 +37,14 @@ Derive the complete expected key set, canonical child contracts, owned blocker e
 Classify every expected key in one preflight:
 
 - **Zero matches:** create exactly one child later, blockers before dependants.
-- **One matching Issue:** reuse it without per-child authorization only when every supported identity source and the complete canonical contract match.
+- **One matching Issue:** reuse it without per-child authorization when every supported identity source and the complete canonical contract match. The only incomplete match allowed is an absent native relationship recorded by a prior partial-publication read-back with this exact child, key, and expected relation.
 - **More than one match:** stop without mutation and report the duplicate key and Issue identities.
 
-Any conflict in key, parent, target, Planning Seal, executable contract, body, or tracker-native relationship evidence must stop without mutation; never automatically repair conflicting evidence. Validate all existing matches, the owned acyclic graph, and every External blocker before creating any missing child. This preflight makes a retry recover partial publication by stable key instead of duplicating children.
+Any conflict in key, parent, target, Planning Seal, executable contract, body, or tracker-native relationship evidence must stop without mutation; never automatically repair conflicting evidence. An expected native relationship that points elsewhere is a conflict, not an incomplete match. Validate all existing matches, the owned acyclic graph, and every External blocker before creating any missing child. This preflight makes a retry recover partial publication by Decomposition key instead of duplicating children.
+
+### Complete a recorded partial publication
+
+Before creating a missing child, complete only an absent native relationship whose exact child identity, Decomposition key, expected relation, and failed read-back are bound by the prior partial-publication state. Read that relation back once. Missing partial-state identity or any conflicting relation stops without mutation; body, contract, key, target, and Planning Seal mismatches are never repairable here.
 
 ### Publish missing children
 
@@ -68,11 +72,11 @@ blocker edges:
 
 </decomposition-publication-record>
 
-With no current record, write exactly one. With one matching record, reuse it. Conflicting or multiple records stop without mutation. The record proves decomposition completeness and is never a child identity source. Read the written or reused record back once before changing `ready-for-agent` or emitting any execution command.
+With no current record, write exactly one. With one matching record, reuse it. Conflicting or multiple records stop without mutation. The Decomposition publication record proves Issue decomposition completeness and is never a child identity source. Read the written or reused record back once before changing `ready-for-agent` or emitting any execution command.
 
 A failure before or during record publication is recoverable partial publication by key: report the full mapping and edge state plus the selected seal. On retry, reuse a verified successor Planning Seal and never fall back to the inherited seal. A bootstrap rerun must reuse all matching children and publish only the missing parent record.
 
-Compute readiness only after record read-back. An open child whose every owned and External blocker is closed belongs to the dependency-ready frontier. Apply `ready-for-agent` only to those children, and output `/execute-issue <Issue-ID>` only for the dependency-ready frontier; remove a stale ready label from an open blocked child. Blocked or closed children receive neither `ready-for-agent` nor an `/execute-issue <Issue-ID>` command. Read every resulting child ready state back once.
+Compute readiness only after record read-back. An open child whose every owned and External blocker is closed belongs to the dependency-ready frontier. Apply `ready-for-agent` only to those children, and output `/execute-issue <Issue-ID>` only for the dependency-ready frontier; remove a stale ready label from every open blocked or closed child. Blocked or closed children receive neither `ready-for-agent` nor an `/execute-issue <Issue-ID>` command. Read every resulting child ready state back once.
 
 <child-contract>
 

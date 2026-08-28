@@ -12,7 +12,7 @@ npx skills update to-tickets
 
 ## What it does
 
-`to-tickets` is re-entrant: it reconciles one stable child decomposition for an approved Multi-Issue Spec. Every child owns an immutable Decomposition key plus Acceptance Criteria, a mapped Implementation Plan, verification, blockers, target, and Planning baseline.
+`to-tickets` is re-entrant: it reconciles one Issue decomposition for an approved Multi-Issue Spec. Every child owns an immutable Decomposition key plus Acceptance Criteria, a mapped Implementation Plan, verification, blockers, target, and Planning baseline.
 
 Its defining idea is the **tracer bullet**: each child is a narrow, verifiable vertical outcome. After every child and blocker passes read-back, the skill publishes one Decomposition publication record and emits commands only for the dependency-ready frontier; it never reclassifies the parent.
 
@@ -30,16 +30,16 @@ Reach for it only when [to-spec](https://aihero.dev/skills-to-spec) published a 
 
 Every child is self-contained and depends only on its parent constraints and explicit blockers; it does not need to know whether sibling Issues execute concurrently. Inline `Covers: AC-n` references keep plan and verification traceable without a separate matrix or parser.
 
-For each expected Decomposition key, zero matches create one child, one exact match is reused, and a duplicate or conflicting identity source must stop without mutation. Owned blockers must be acyclic; readable external blockers affect readiness but remain read-only. One canonical child contract is rendered through tracker-specific local or native relations.
+Decomposition keys make retries stable: exact tracker evidence is reused, while duplicate or conflicting identity sources fail closed. Owned blockers must be acyclic, and readable External blockers affect readiness while remaining read-only.
 
-Only after all child and blocker evidence matches does the skill write or reuse the parent completeness record. It then applies `ready-for-agent` and emits `/execute-issue <Issue-ID>` only for open children whose blockers are all closed. A wide mechanical refactor that cannot stay green as vertical slices uses expand-contract instead.
+A complete, read-back Issue decomposition gains one Decomposition publication record and an exact dependency-ready frontier. A wide mechanical refactor that cannot stay green as vertical slices uses expand-contract instead.
 
 Exact in-Spec planning refinements may create one successor Planning Seal. Changes to behavior, acceptance, target, or exclusions return to `to-spec`; child publication never silently expands or edits the parent.
 
 ## It's working if
 
 - A retry reuses matching child keys instead of creating duplicates.
-- The parent record binds the exact key mapping and blocker edges only after complete read-back.
+- The Decomposition publication record binds the exact key mapping and blocker edges only after complete read-back.
 - Blocked or closed children receive neither a ready label nor an execution command.
 
 ## Where it fits

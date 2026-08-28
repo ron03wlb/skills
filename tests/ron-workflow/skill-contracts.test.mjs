@@ -289,7 +289,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   ]) assert.match(read(path), /Planning Seal/u, `${path} omits the Planning Seal contract`);
 });
 
-test("to-tickets reconciles one stable child decomposition before tracker mutation", () => {
+test("to-tickets reconciles one Issue decomposition before tracker mutation", () => {
   const tickets = read("skills/engineering/to-tickets/SKILL.md");
 
   assert.match(tickets, /immutable `<Spec-ID>\/<NN>` Decomposition key.*titles are never identity/isu);
@@ -302,6 +302,7 @@ test("to-tickets reconciles one stable child decomposition before tracker mutati
   assert.match(tickets, /owned blocker graph.*acyclic.*before any mutation/isu);
   assert.match(tickets, /External blocker.*readable.*never creates, edits, closes, or assumes ownership/isu);
   assert.match(tickets, /one canonical child contract.*Local tracker.*real issue tracker.*native parent.*blocking/isu);
+  assert.match(tickets, /prior partial-publication state.*exact child.*key.*expected relation.*Complete.*only an absent native relationship.*conflicting relation.*stops without mutation/isu);
 });
 
 test("to-tickets publishes one recoverable decomposition record and the exact ready frontier", () => {
@@ -317,6 +318,7 @@ test("to-tickets publishes one recoverable decomposition record and the exact re
   assert.match(tickets, /bootstrap rerun.*reuse.*matching children.*publish only the missing parent record/isu);
   assert.match(tickets, /open child.*every owned and External blocker.*closed.*dependency-ready frontier/isu);
   assert.match(tickets, /blocked or closed children.*neither `ready-for-agent`.*nor.*`\/execute-issue <Issue-ID>`/isu);
+  assert.match(tickets, /remove a stale ready label from every open blocked or closed child/iu);
   assert.match(tickets, /read.*record back.*before.*ready-for-agent.*execution command/isu);
 });
 
@@ -327,17 +329,17 @@ test("re-entrant to-tickets behavior stays synchronized across promoted surfaces
   const router = read("skills/engineering/ask-matt/SKILL.md");
   const routerDocs = read("docs/engineering/ask-matt.md");
 
-  assert.match(skill, /^description: Reconcile one stable child decomposition.*ready frontier\.$/mu);
-  assert.match(metadata, /short_description: "Reconcile a stable child decomposition"/u);
+  assert.match(skill, /^description: Reconcile one Issue decomposition.*Decomposition publication record.*ready frontier\.$/mu);
+  assert.match(metadata, /short_description: "Reconcile one Issue decomposition"/u);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(docs, /re-entrant.*Decomposition key.*Decomposition publication record.*dependency-ready frontier/isu);
-  assert.match(docs, /zero.*create.*one.*reuse.*duplicate.*stop without mutation/isu);
-  assert.match(router, /Multi-Issue Tracker Spec.*to-tickets.*reconcile.*stable decomposition.*completeness record.*dependency-ready/isu);
-  assert.match(routerDocs, /Multi-Issue Tracker Spec.*to-tickets.*reconcile.*stable decomposition.*completeness record.*ready/isu);
+  assert.doesNotMatch(docs, /zero matches|one exact match|Publish missing children/iu);
+  assert.match(router, /Multi-Issue Tracker Spec.*to-tickets.*reconcile.*Issue decomposition.*Decomposition publication record.*dependency-ready/isu);
+  assert.match(routerDocs, /Multi-Issue Tracker Spec.*to-tickets.*reconcile.*Issue decomposition.*Decomposition publication record.*ready/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     const entry = read(path).match(/^- \*\*\[to-tickets\][^\n]*/mu)?.[0] ?? "";
-    assert.match(entry, /reconcile.*stable decomposition.*completeness record.*ready frontier/iu, `${path} has a stale to-tickets description`);
+    assert.match(entry, /reconcile.*Issue decomposition.*Decomposition publication record.*ready frontier/iu, `${path} has a stale to-tickets description`);
   }
 });
 
@@ -884,6 +886,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
   const context = read("CONTEXT.md");
+  // Necessary discovery: Planning Seal f7c8a85 already changed this canonical operation from "integration" to "close-issue merge".
   assert.match(context, /Manual integration serialization.*one `close-issue` merge into the same .*Issue target branch.*other target branches.*concurrently/isu);
   assert.doesNotMatch(context, /checks once|parallel target writers/iu);
 
