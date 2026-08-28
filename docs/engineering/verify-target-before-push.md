@@ -12,28 +12,34 @@ npx skills update verify-target-before-push
 
 ## What it does
 
-`verify-target-before-push` proves one exact aggregate local target contains every relevant closed-Issue candidate, passes Standards and multi-Spec review, and passes focused plus full verification.
+`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing.
 
-It emits a current-HEAD `push_ready` receipt but never pushes. Any target movement invalidates that receipt.
+It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison.
 
 ## When to reach for it
 
-You invoke this by typing `/verify-target-before-push <target>` — the agent won't reach for it on its own.
+You invoke this by typing `/verify-target-before-push <target-or-explicit-range>` — the agent won't reach for it on its own.
 
-Reach for it after independently closing the Issues you want in a target and immediately before a separate push. It does not wait for unrelated Issues to finish.
+Reach for it after Issue closeout when you need aggregate evidence for a local push or an explicit range that has already been pushed. It does not replace [close-issue](https://aihero.dev/skills-close-issue) and never changes Issue state.
 
-## Aggregate gate
+## Completion-note coverage
 
-The leading idea is **aggregate** proof: per-Issue review establishes each exact candidate, while this gate proves their composition. It forms the target set from the union of closed-Issue execution histories and closeout receipts, so a missing artifact cannot hide an Issue. It rejects a newer blocked execution, validates receipt identity and reachability, reviews the combined diff against all member Specs, then runs deduplicated focused commands and the repository full suite in a clean isolated worktree.
+The leading idea is **aggregate coverage**. Completion notes plus Git reachability derive the member set; every material range commit must be covered by a member contribution, its Planning Seal or prerequisite, or necessary merge topology before aggregate review begins.
 
-Failures withhold `push_ready` without rollback or automatic reopening. Correction goes through an explicit integration-repair Issue or an explicitly reopened owner Issue.
+Overlapping Issue contributions are valid. Reachable open Issues, closed unreachable candidates, invalidated completion evidence, or unexplained commits stop the gate without repair.
+
+## Honest results
+
+A `push_ready` result belongs only to local-ahead mode and exact current target `HEAD`. A **Range verification result** belongs only to the explicit already-pushed comparison and never grants retroactive push readiness.
+
+Both results bind exact baseline, target, members, coverage, review, and verification evidence. Target movement invalidates local readiness but never sends an Issue back to execution.
 
 ## It's working if
 
-- Missing or omitted closed candidates stop the gate.
-- The receipt names the exact target SHA and every member candidate/integration commit.
-- Moving the target requires a fresh gate.
+- A local-ahead run rejects a missing, ambiguous, or empty upstream range.
+- An already-pushed run requires an explicit immutable comparison and writes no `push_ready` note.
+- Completion-note membership and every material commit are proved before one aggregate gate runs.
 
 ## Where it fits
 
-This is the pre-push gate after one or more [close-issue](https://aihero.dev/skills-close-issue) runs. It consumes evidence originating in [execute-issue](https://aihero.dev/skills-execute-issue) and performs aggregate [code-review](https://aihero.dev/skills-code-review). Push remains outside the skill; see [ask-matt](https://aihero.dev/skills-ask-matt) for the whole flow.
+This is the pre-push or explicit-range aggregate gate after [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue). It uses [code-review](https://aihero.dev/skills-code-review) but never repairs findings. Push remains a separate human action; see [ask-matt](https://aihero.dev/skills-ask-matt) for the whole flow.

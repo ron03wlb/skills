@@ -497,20 +497,38 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.equal(existsSync("tests/ron-workflow/close-issue-preservation.test.mjs"), false);
 
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
-  assert.match(verify, /capture.*verification baseline.*exact target `HEAD`/isu);
-  assert.match(verify, /closed Issues.*execution\/completion history.*original target/isu);
-  assert.match(verify, /union.*execution\/completion history.*closeout receipt.*missing completion note.*missing receipt/isu);
-  assert.match(verify, /latest terminal execution state.*no superseding blocked state.*identity.*closeout receipt/isu);
-  assert.match(verify, /missing.*receipt.*candidate.*not reachable.*stop/isu);
-  assert.doesNotMatch(verify, /RECONCILED/iu);
-  assert.match(verify, /code-review.*Standards.*Spec axis.*member Issue.*linked Specs/isu);
-  assert.match(verify, /aggregate.*member/isu);
-  assert.match(verify, /union-focused.*full verification/isu);
-  assert.match(verify, /clean verification worktree/iu);
-  assert.match(verify, /push_ready:v1.*exact target `HEAD`.*member Issue.*candidate.*integration/isu);
-  assert.match(verify, /target movement.*invalidates/iu);
-  assert.match(verify, /never closes Issues.*changes product code.*pushes.*deploys/isu);
-  assert.match(verify, /integration-repair Issue.*explicit.*reopen/isu);
+  assert.match(verify, /two evidence modes.*local-ahead.*already-pushed/isu);
+  assert.match(verify, /local-ahead.*unique configured upstream tracking tip.*`B\.\.V`.*non-empty.*guess/isu);
+  assert.match(verify, /already-pushed.*explicit merge request.*pull request.*exact base\/head range.*never guess/isu);
+  assert.match(verify, /clean verification worktree.*exact `V`/isu);
+  assert.match(verify, /open and closed Issues.*Execution completion note.*exact Issue target.*read each.*once/isu);
+  assert.match(verify, /candidate `C`.*reachable from `V`.*not.*`B`.*member/isu);
+  assert.match(verify, /reachable member.*Issue.*open.*stops/isu);
+  assert.match(verify, /For every member.*closed tracker state/isu);
+  assert.match(verify, /open unreachable.*concurrent.*outside.*closed unreachable.*contradictory/isu);
+  assert.match(verify, /later state supersedes.*only.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
+  assert.match(verify, /completion notes.*sole Issue-to-commit mapping authority/isu);
+  assert.match(verify, /every material commit.*`B\.\.V`.*member.*baseline.*candidate.*Planning Seal.*prerequisite.*merge topology/isu);
+  assert.match(verify, /overlap.*valid.*no unique owner/isu);
+  assert.match(verify, /code-review.*Standards.*Spec axis.*every member Issue.*parent.*linked Spec/isu);
+  assert.match(verify, /focused verification commands.*deduplicate.*full suite exactly once.*exact `V`/isu);
+  assert.match(verify, /gate, not a repair loop/iu);
+  assert.match(verify, /local-ahead.*push_ready:v1.*`B`.*`V`.*member Issue.*candidate.*commands/isu);
+  assert.match(verify, /already-pushed.*Range verification result.*never.*push_ready/isu);
+  assert.match(verify, /target movement.*invalidates.*aggregate evidence.*never `execute-issue`/isu);
+  assert.match(verify, /never repairs product code.*closes or reopens Issues.*changes other tracker state.*pushes.*remote-merges.*deploys/isu);
+  assert.match(verify, /Do not use.*closeout receipt.*integration candidate.*commit-message Issue.*merge-message parsing.*manually repeated Issue list/isu);
+  assert.doesNotMatch(verify, /matching read-back `VERIFIED`|candidate `I`|union of .*closeout receipt|RECONCILED/iu);
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  assert.match(verifyMetadata, /local-ahead.*already-pushed.*completion-note.*range/isu);
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  assert.match(verifyDocs, /two evidence modes.*local-ahead.*unique upstream.*already-pushed.*explicit.*range/isu);
+  assert.match(verifyDocs, /completion notes.*reachability.*coverage.*aggregate/isu);
+  assert.match(verifyDocs, /push_ready.*local-ahead.*Range verification result.*already-pushed/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /verify-target-before-push.*local-ahead.*already-pushed.*completion-note/iu);
+  }
 
   for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
     const skill = read(`skills/engineering/${name}/SKILL.md`);
@@ -660,8 +678,88 @@ test("Issue closeout is direct, ordered, retryable, and conflict-safe", () => {
   }
 });
 
-test("aggregate pre-push gate fails closed and binds readiness to exact target HEAD", () => {
-  const { repo, git, isAncestor } = createGitFixture("skills-push-gate-fixture-");
+test("aggregate target verification selects exact ranges and covers completion-note contributions", () => {
+  const { repo, git, isAncestor } = createGitFixture("skills-target-range-fixture-");
+  const commits = (range) => {
+    const output = git("rev-list", "--reverse", range);
+    return output === "" ? [] : output.split(/\s+/u);
+  };
+
+  const selectRange = ({ mode, targetRef = "target", upstreamTips = [], source, base, head }) => {
+    if (mode === "local-ahead") {
+      assert.equal(upstreamTips.length, 1, "local-ahead requires one unique upstream tracking tip");
+      const selected = { mode, source: targetRef, baseline: upstreamTips[0], head: git("rev-parse", targetRef), targetRef };
+      assert.equal(isAncestor(selected.baseline, selected.head), true, "upstream must be an ancestor of local HEAD");
+      assert.ok(commits(`${selected.baseline}..${selected.head}`).length > 0, "local-ahead range must be non-empty");
+      return selected;
+    }
+    assert.equal(mode, "already-pushed");
+    assert.match(source ?? "", /^(?:merge-request|pull-request|exact-range)$/u, "already-pushed evidence must be explicit");
+    assert.ok(base && head, "already-pushed evidence requires exact base and head");
+    assert.equal(isAncestor(base, head), true, "explicit base must be an ancestor of head");
+    return { mode, source, baseline: base, head };
+  };
+
+  const currentCompletion = (issue) => {
+    const completionIndex = issue.execution.findLastIndex(({ kind }) => kind === "implementation_complete");
+    assert.notEqual(completionIndex, -1, `${issue.id}: missing completion note`);
+    const completion = issue.execution[completionIndex];
+    const invalidating = issue.execution.slice(completionIndex + 1).find(({ invalidatesCandidate }) => invalidatesCandidate === true);
+    assert.equal(invalidating, undefined, `${issue.id}: candidate-invalidating state supersedes completion`);
+    for (const field of ["target", "baseline", "candidate", "commands"]) assert.ok(completion[field], `${issue.id}: missing ${field}`);
+    return completion;
+  };
+
+  const freezeMembers = ({ issues, range }) => issues.flatMap((issue) => {
+    const completion = currentCompletion(issue);
+    if (completion.target !== "target") return [];
+    const inHead = isAncestor(completion.candidate, range.head);
+    const inBaseline = isAncestor(completion.candidate, range.baseline);
+    if (!inHead) {
+      assert.equal(issue.state, "OPEN", `${issue.id}: closed candidate is unreachable`);
+      return [];
+    }
+    if (inBaseline) return [];
+    assert.equal(issue.state, "CLOSED", `${issue.id}: reachable member is still open`);
+    return [{ issue: issue.id, ...completion }];
+  });
+
+  const proveCoverage = ({ range, members }) => {
+    const contributionSets = members.map((member) => new Set(commits(`${member.baseline}..${member.candidate}`)));
+    const referenced = new Set(members.flatMap(({ planningSeal, prerequisite }) => [planningSeal, prerequisite]).filter(Boolean));
+    for (const commit of commits(`${range.baseline}..${range.head}`)) {
+      if (referenced.has(commit) || contributionSets.some((set) => set.has(commit))) continue;
+      const parents = git("rev-list", "--parents", "-n", "1", commit).split(/\s+/u).slice(1);
+      assert.ok(parents.length > 1 && parents.every((parent) => isAncestor(parent, range.head)), `unexplained material commit ${commit}`);
+    }
+    return contributionSets;
+  };
+
+  let fullSuiteRuns = 0;
+  const runGate = ({ range, issues, standardsClean = true, specClean = true, focusedClean = true, fullClean = true, worktreeClean = true }) => {
+    const members = freezeMembers({ issues, range });
+    assert.ok(members.length > 0, "target verification set must not be empty");
+    const contributionSets = proveCoverage({ range, members });
+    assert.equal(standardsClean, true, "aggregate Standards review failed");
+    assert.equal(specClean, true, "aggregate Spec review failed");
+    assert.equal(focusedClean, true, "focused verification failed");
+    assert.equal(worktreeClean, true, "verification worktree is dirty");
+    fullSuiteRuns += 1;
+    assert.equal(fullClean, true, "full suite failed");
+    const commands = [...new Set(members.flatMap(({ commands: recorded }) => recorded))];
+    const result = {
+      mode: range.mode,
+      source: range.source,
+      baseline: range.baseline,
+      head: range.head,
+      members: members.map(({ issue, candidate }) => ({ issue, candidate })),
+      commands,
+    };
+    if (range.mode === "already-pushed") return { schema: "range_verified:v1", ...result };
+    const ready = { schema: "push_ready:v1", ...result };
+    git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(ready), range.head);
+    return JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", range.head));
+  };
 
   try {
     writeFileSync(join(repo, "base.txt"), "base\n");
@@ -669,99 +767,112 @@ test("aggregate pre-push gate fails closed and binds readiness to exact target H
     git("commit", "-m", "base");
     const baseline = git("rev-parse", "HEAD");
 
-    git("checkout", "-b", "issue-a");
+    writeFileSync(join(repo, "plan.md"), "sealed plan\n");
+    git("add", "plan.md");
+    git("commit", "-m", "planning seal");
+    const planningSeal = git("rev-parse", "HEAD");
+
+    git("checkout", "-b", "issue-a", planningSeal);
     writeFileSync(join(repo, "a.txt"), "A\n");
     git("add", "a.txt");
     git("commit", "-m", "issue A");
     const candidateA = git("rev-parse", "HEAD");
-    git("checkout", "target");
-    git("merge", "--ff-only", candidateA);
-    git("checkout", "-b", "issue-b", baseline);
+
+    git("checkout", "-b", "issue-b", candidateA);
     writeFileSync(join(repo, "b.txt"), "B\n");
     git("add", "b.txt");
     git("commit", "-m", "issue B");
     const candidateB = git("rev-parse", "HEAD");
-    git("checkout", "-b", "integrate-b", candidateA);
-    git("merge", "--no-ff", "-m", "integrate issue B", candidateB);
-    const integrationB = git("rev-parse", "HEAD");
     git("checkout", "target");
-    git("merge", "--ff-only", integrationB);
-    const verifiedHead = git("rev-parse", "HEAD");
-    git("checkout", "-b", "issue-omitted", baseline);
-    writeFileSync(join(repo, "omitted.txt"), "not integrated\n");
-    git("add", "omitted.txt");
-    git("commit", "-m", "omitted issue");
-    const omittedCandidate = git("rev-parse", "HEAD");
+    git("merge", "--ff-only", candidateB);
+    const verifiedHead = git("rev-parse", "target");
+
+    git("checkout", "-b", "open-outside", baseline);
+    writeFileSync(join(repo, "open.txt"), "concurrent\n");
+    git("add", "open.txt");
+    git("commit", "-m", "open outside range");
+    const openCandidate = git("rev-parse", "HEAD");
+
+    git("checkout", "-b", "closed-outside", baseline);
+    writeFileSync(join(repo, "closed.txt"), "missing\n");
+    git("add", "closed.txt");
+    git("commit", "-m", "closed outside range");
+    const closedCandidate = git("rev-parse", "HEAD");
     git("checkout", "target");
 
-    const successA = { id: "A-success", kind: "implementation_complete", target: "target", candidate: candidateA, commands: ["test:a"] };
-    const successB = { id: "B-success", kind: "implementation_complete", target: "target", candidate: candidateB, commands: ["test:b"] };
-    const successOmitted = { id: "O-success", kind: "implementation_complete", target: "target", candidate: omittedCandidate, commands: ["test:o"] };
-    const receiptA = { phase: "VERIFIED", target: "target", executionStateId: successA.id, candidate: candidateA, integration: candidateA };
-    const receiptB = { phase: "VERIFIED", target: "target", executionStateId: successB.id, candidate: candidateB, integration: integrationB };
-    const receiptOmitted = { phase: "VERIFIED", target: "target", executionStateId: successOmitted.id, candidate: omittedCandidate, integration: omittedCandidate };
+    const successA = { kind: "implementation_complete", target: "target", baseline: planningSeal, candidate: candidateA, planningSeal, commands: ["test:shared", "test:a"] };
+    const successB = { kind: "implementation_complete", target: "target", baseline: planningSeal, candidate: candidateB, planningSeal, commands: ["test:shared", "test:b"] };
+    const successOpen = { kind: "implementation_complete", target: "target", baseline, candidate: openCandidate, planningSeal, commands: ["test:open"] };
+    const successClosed = { kind: "implementation_complete", target: "target", baseline, candidate: closedCandidate, planningSeal, commands: ["test:closed"] };
     const completeIssues = [
-      { id: "A", execution: [successA], receipts: [receiptA] },
-      { id: "B", execution: [successB], receipts: [receiptB] },
+      { id: "A", state: "CLOSED", execution: [successA] },
+      { id: "B", state: "CLOSED", execution: [successB] },
+      { id: "OPEN-OUTSIDE", state: "OPEN", execution: [successOpen] },
     ];
 
-    const runGate = ({ issues, reviewClean = true, verificationClean = true }) => {
-      const currentHead = git("rev-parse", "target");
-      assert.equal(currentHead, verifiedHead, "target movement invalidates verification evidence");
-      const relevant = issues.filter((issue) =>
-        issue.execution.some((state) => state.target === "target") ||
-        issue.receipts.some((receipt) => receipt.target === "target"));
-      assert.ok(relevant.length > 0, "the target must have a non-empty closed-Issue set");
-      const members = relevant.map((issue) => {
-        const latest = issue.execution.at(-1);
-        assert.equal(latest?.kind, "implementation_complete", `${issue.id}: missing completion or superseding blocked state`);
-        const receipt = issue.receipts.find((item) => item.target === "target");
-        assert.ok(receipt, `${issue.id}: missing closeout receipt`);
-        assert.equal(receipt.executionStateId, latest.id, `${issue.id}: execution-state mismatch`);
-        assert.equal(receipt.candidate, latest.candidate, `${issue.id}: candidate mismatch`);
-        assert.equal(receipt.phase, "VERIFIED");
-        assert.equal(isAncestor(receipt.candidate, currentHead), true, `${issue.id}: omitted candidate`);
-        assert.equal(isAncestor(receipt.integration, currentHead), true, `${issue.id}: omitted integration`);
-        return { issue: issue.id, candidate: receipt.candidate, integration: receipt.integration, executionStateId: latest.id };
-      });
-      assert.equal(reviewClean, true, "aggregate review failed");
-      assert.equal(verificationClean, true, "aggregate verification failed");
-      const commands = [...new Set(relevant.flatMap((issue) => issue.execution.at(-1).commands))];
-      const receipt = {
-        schema: "push_ready:v1",
-        target: "target",
-        baseline,
-        head: currentHead,
-        members,
-        standards: "clean",
-        spec: "clean",
-        commands: commands.map((command) => ({ command, result: "passed" })),
-      };
-      git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(receipt), currentHead);
-      return JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead));
-    };
+    assert.throws(() => selectRange({ mode: "local-ahead", upstreamTips: [] }), /unique upstream/u);
+    assert.throws(() => selectRange({ mode: "local-ahead", upstreamTips: [baseline, planningSeal] }), /unique upstream/u);
+    assert.throws(() => selectRange({ mode: "local-ahead", upstreamTips: [verifiedHead] }), /non-empty/u);
+    assert.throws(() => selectRange({ mode: "already-pushed", base: baseline, head: verifiedHead }), /must be explicit/u);
 
-    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], receipts: [] }] }), /missing closeout receipt/u);
-    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [] }] }), /missing completion/u);
-    const blockedA = JSON.parse(JSON.stringify({ id: "A-blocked", kind: "implementation_blocked", target: "target", reason: "verification failed" }));
-    assert.throws(() => runGate({ issues: [{ ...completeIssues[0], execution: [successA, blockedA] }] }), /superseding blocked state/u);
-    assert.throws(() => runGate({ issues: [...completeIssues, { id: "O", execution: [successOmitted], receipts: [receiptOmitted] }] }), /omitted candidate/u);
-    assert.throws(() => runGate({ issues: completeIssues, reviewClean: false }), /aggregate review failed/u);
-    assert.throws(() => runGate({ issues: completeIssues, verificationClean: false }), /aggregate verification failed/u);
-    assert.equal(git("notes", "--ref=refs/notes/matt-push-ready", "list"), "");
+    for (const source of ["merge-request", "pull-request", "exact-range"]) {
+      const selected = selectRange({ mode: "already-pushed", source, base: baseline, head: verifiedHead });
+      assert.equal(selected.head, verifiedHead);
+    }
 
-    const ready = runGate({ issues: completeIssues });
+    const explicitRange = selectRange({ mode: "already-pushed", source: "exact-range", base: baseline, head: verifiedHead });
+    const rangeResult = runGate({ range: explicitRange, issues: completeIssues });
+    assert.equal(rangeResult.schema, "range_verified:v1");
+    assert.equal(git("notes", "--ref=refs/notes/matt-push-ready", "list"), "", "already-pushed mode must not write push_ready");
+    assert.equal(fullSuiteRuns, 1, "one invocation runs the full suite once");
+
+    const localRange = selectRange({ mode: "local-ahead", upstreamTips: [baseline] });
+    const members = freezeMembers({ issues: completeIssues, range: localRange });
+    const [contributionA, contributionB] = proveCoverage({ range: localRange, members });
+    assert.ok([...contributionA].some((commit) => contributionB.has(commit)), "overlapping contributions are valid");
+
+    assert.throws(
+      () => freezeMembers({ issues: [{ id: "A", state: "OPEN", execution: [successA] }], range: localRange }),
+      /reachable member is still open/u,
+    );
+    assert.throws(
+      () => freezeMembers({ issues: [...completeIssues, { id: "CLOSED-OUTSIDE", state: "CLOSED", execution: [successClosed] }], range: localRange }),
+      /closed candidate is unreachable/u,
+    );
+    assert.throws(
+      () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [successA, { kind: "implementation_blocked", invalidatesCandidate: true }] }], range: localRange }),
+      /candidate-invalidating state/u,
+    );
+    assert.throws(
+      () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, baseline: undefined }] }], range: localRange }),
+      /missing baseline/u,
+    );
+    assert.doesNotThrow(() => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [successA, { kind: "aggregate_blocked", invalidatesCandidate: false }] }], range: localRange }));
+
+    assert.throws(() => runGate({ range: localRange, issues: completeIssues, standardsClean: false }), /Standards review failed/u);
+    assert.throws(() => runGate({ range: localRange, issues: completeIssues, specClean: false }), /Spec review failed/u);
+    assert.throws(() => runGate({ range: localRange, issues: completeIssues, focusedClean: false }), /focused verification failed/u);
+    assert.throws(() => runGate({ range: localRange, issues: completeIssues, fullClean: false }), /full suite failed/u);
+    assert.throws(() => runGate({ range: localRange, issues: completeIssues, worktreeClean: false }), /worktree is dirty/u);
+
+    git("checkout", "-b", "unexplained", verifiedHead);
+    writeFileSync(join(repo, "unexplained.txt"), "not covered\n");
+    git("add", "unexplained.txt");
+    git("commit", "-m", "unexplained material commit");
+    const unexplainedHead = git("rev-parse", "HEAD");
+    const unexplainedRange = selectRange({ mode: "already-pushed", source: "exact-range", base: baseline, head: unexplainedHead });
+    assert.throws(() => runGate({ range: unexplainedRange, issues: completeIssues }), /unexplained material commit/u);
+    git("checkout", "target");
+
+    const ready = runGate({ range: localRange, issues: completeIssues });
+    assert.equal(ready.schema, "push_ready:v1");
     assert.equal(ready.head, verifiedHead);
     assert.deepEqual(ready.members.map(({ issue }) => issue), ["A", "B"]);
-    assert.deepEqual(ready.commands, [
-      { command: "test:a", result: "passed" },
-      { command: "test:b", result: "passed" },
-    ]);
+    assert.deepEqual(ready.commands, ["test:shared", "test:a", "test:b"]);
     writeFileSync(join(repo, "drift.txt"), "target moved\n");
     git("add", "drift.txt");
     git("commit", "-m", "target drift");
-    assert.notEqual(git("rev-parse", "target"), ready.head, "a stale receipt must not authorize the moved target");
-    assert.throws(() => runGate({ issues: completeIssues }), /target movement invalidates/u);
+    assert.notEqual(git("rev-parse", "target"), ready.head, "target movement invalidates push readiness");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
@@ -837,13 +948,14 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
   assert.match(matt, /serializes close writers per target/iu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
-  assert.match(matt, /Before push.*verify-target-before-push.*exact aggregate target/isu);
+  assert.match(matt, /Before push.*verify-target-before-push.*local-ahead.*completion notes.*already-pushed.*explicit.*range.*aggregate review.*verification once/isu);
   assert.match(matt, /to-spec.*sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
   const mattDocs = read("docs/engineering/ask-matt.md");
   assert.match(mattDocs, /one writer per recorded target.*three idempotent close actions/isu);
   assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
+  assert.match(mattDocs, /verify-target-before-push.*local-ahead.*completion-note.*already-pushed.*explicit.*range.*aggregate/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     const readme = read(path);
