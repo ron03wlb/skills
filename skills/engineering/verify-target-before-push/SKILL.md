@@ -19,7 +19,7 @@ Capture the mode, target identity, `B`, and `V` once. Create a clean verificatio
 
 ## Derive the Target verification set
 
-Query open and closed Issues whose ordered history contains an Execution completion note naming this exact Issue target. Read each history once. Select the latest valid `implementation_complete` note; a later state supersedes it only when read-back evidence invalidates that candidate's implementation, Standards or Spec review, or verification. Target movement, close conflict, partial close progress, and an aggregate-gate failure do not supersede completion.
+Query open and closed Issues whose ordered history contains an Execution completion note. Read each history once without pre-filtering by Issue target. Select the latest valid `implementation_complete` note; a later state supersedes it only when read-back evidence invalidates that candidate's implementation, Standards or Spec review, or verification. Target movement, close conflict, partial close progress, and an aggregate-gate failure do not supersede completion.
 
 Execution completion notes are the sole Issue-to-commit mapping authority. Derive membership only from their exact candidates and Git ancestry:
 
@@ -29,7 +29,7 @@ Execution completion notes are the sole Issue-to-commit mapping authority. Deriv
 - a closed unreachable candidate is contradictory delivery evidence and stops;
 - a reachable member whose Issue is open also stops before review.
 
-For every member require exact Issue, parent or linked Spec, Issue target branch, Execution baseline, candidate `C`, Planning Seal or prerequisite identities, recorded verification commands, and a closed tracker state. Require `C` to exist locally and remain an ancestor of `V`. Missing, unreadable, duplicate, ambiguous, mismatched, or candidate-invalidating evidence stops without substitution.
+For every member require exact Issue, parent or linked Spec, Issue target branch, topic branch and worktree, Execution baseline, candidate `C`, Planning Seal, prerequisite state and any required identities, Standards and Spec review identities and clean results, recorded verification commands, and a closed tracker state. Require every recorded review identity to bind exact `C`; require `C` to exist locally and remain an ancestor of `V`. Missing, unreadable, duplicate, ambiguous, mismatched, or candidate-invalidating evidence stops without substitution.
 
 Do not use a closeout receipt, integration candidate, commit-message Issue identity, merge-message parsing, or a manually repeated Issue list. Freeze the member set before review.
 
