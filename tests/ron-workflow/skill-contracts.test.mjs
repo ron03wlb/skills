@@ -456,6 +456,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Any number of Issue worktrees may execute concurrently/iu);
   assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
   assert.match(execute, /blocked state supersedes completion only when.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
+  assert.match(execute, /explicit conflict-resolution rerun.*same topic branch.*Issue worktree.*latest target.*new attempt baseline.*merge.*baseline.*topic branch.*without rebasing or resetting.*Acceptance Criteria.*unchanged.*new candidate.*contain.*baseline.*new `implementation_complete`.*current/isu);
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
@@ -468,15 +469,18 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
   assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
+  assert.match(close, /target.*ancestor of `C`.*git merge --ff-only <C>.*diverged histories.*git merge --no-ff --no-edit <C>.*merge\.ff/isu);
   assert.match(close, /merge conflicts.*git merge --abort.*Issue worktree registered.*Issue open/isu);
   assert.match(close, /never.*append `implementation_blocked`.*invoke `execute-issue`/isu);
   assert.match(close, /target worktree is dirty.*stop before mutation.*never stash.*commit.*clean.*reset.*move/isu);
   assert.match(close, /derive current progress.*Git ancestry.*worktree registration.*tracker state/isu);
+  assert.match(close, /Before any action.*Issue.*already closed.*worktree.*registered.*contradictory.*stop/isu);
   assert.match(close, /git worktree remove/u);
   assert.match(close, /exact registered Issue worktree.*path.*topic branch.*clean state.*`HEAD == C`/isu);
   assert.match(close, /If the Issue is open, close it/iu);
   assert.match(close, /read it back once/iu);
   assert.match(close, /retry skips completed actions.*resumes the next one/isu);
+  assert.match(close, /human may explicitly rerun `execute-issue`.*same topic branch.*Issue worktree.*latest target.*original Acceptance Criteria.*Scope change.*planning/isu);
   assert.match(close, /Multi-Issue Spec.*Decomposition publication record.*every exact child is closed.*candidate.*reachable.*same target/isu);
   assert.match(close, /returns to `\/to-tickets <Parent-ID>` reconciliation/iu);
   assert.match(close, /parent closure never claims `push_ready`/iu);
@@ -568,7 +572,8 @@ test("Issue closeout is direct, ordered, retryable, and conflict-safe", () => {
     assert.equal(nextAction(state), "merge");
     const targetBefore = git("rev-parse", "target");
     try {
-      git("merge", "--no-edit", state.candidate);
+      if (isAncestor(targetBefore, state.candidate)) git("merge", "--ff-only", state.candidate);
+      else git("merge", "--no-ff", "--no-edit", state.candidate);
     } catch (error) {
       git("merge", "--abort");
       assert.equal(git("rev-parse", "target"), targetBefore, "conflict abort restores target HEAD");
@@ -605,6 +610,7 @@ test("Issue closeout is direct, ordered, retryable, and conflict-safe", () => {
     const conflictingCandidate = git("rev-parse", "HEAD");
 
     git("checkout", "target");
+    git("config", "merge.ff", "false");
     const issueA = { candidate: candidateA, worktreeRegistered: true, issueState: "OPEN" };
     writeFileSync(join(repo, "dirty-before.txt"), "local dirt\n");
     assert.throws(() => nextAction(issueA), /target dirt stops before merge/u);

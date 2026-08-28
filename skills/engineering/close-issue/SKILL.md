@@ -16,15 +16,17 @@ For an Executable Issue, select the latest valid `implementation_complete` note 
 
 Require every blocker to remain closed. Require `C` to exist locally. When the registered Issue worktree is present, require its exact path and topic branch, clean state, and `HEAD == C`; when it is absent, accept cleanup as already satisfied only if `C` is reachable from the Issue target branch. Preserve unrelated work: if the target worktree is dirty, stop before mutation and never stash, commit, clean, reset, or move it.
 
+Before any action, if the Issue is already closed while `C` is not reachable or its exact Issue worktree remains registered, classify the state as contradictory and out of order and stop. Never merge, remove the worktree, reopen the Issue, or repair that state automatically.
+
 ## Executable Issue: three idempotent actions
 
 Perform exactly three ordered, idempotent actions: merge the unchanged candidate into the latest Issue target branch, remove the exact clean registered Issue worktree, and close the Issue. Before each action, derive current progress directly from Git ancestry, worktree registration, and tracker state; skip an action whose condition is already satisfied. Write no custom success or failure receipt.
 
 ### 1. Merge the candidate
 
-Read the latest target `HEAD` while holding the target-scoped single-writer discipline. If `C` is already an ancestor of the target, the merge is satisfied. Otherwise require the target worktree to be clean and merge exact `C` into the latest target without rebasing, refreshing, or editing the Issue candidate. Allow Git to fast-forward or create the ordinary merge commit.
+Read the latest target `HEAD` while holding the target-scoped single-writer discipline. If `C` is already an ancestor of the target, the merge is satisfied. Otherwise require the target worktree to be clean and merge exact `C` into the latest target without rebasing, refreshing, or editing the Issue candidate. If the target is an ancestor of `C`, run `git merge --ff-only <C>`; only for diverged histories run `git merge --no-ff --no-edit <C>` to create the ordinary merge commit. Do not depend on repository `merge.ff` configuration.
 
-If the merge conflicts, run `git merge --abort`, verify the target returned to its pre-merge commit and is clean, and stop with the Issue worktree registered and the Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. An unexpected ref movement or abort failure reports the exact Git state and stops; a later `close-issue` retry starts from observable current state.
+If the merge conflicts, run `git merge --abort`, verify the target returned to its pre-merge commit and is clean, and stop with the Issue worktree registered and the Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. An unexpected ref movement or abort failure reports the exact Git state and stops; a later `close-issue` retry starts from observable current state. The human may explicitly rerun `execute-issue` in the same topic branch and Issue worktree from the latest target only within the original Acceptance Criteria; a Scope change returns to planning.
 
 After success, require `C` to be an ancestor of the current Issue target branch. A merge hook or other side effect that leaves the target worktree dirty stops before cleanup or closure and requires explicit human handling.
 
