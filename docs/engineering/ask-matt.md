@@ -27,7 +27,7 @@ Reach for it when you do not know where to enter or resume a flow. If you alread
 Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs) to [to-spec](https://aihero.dev/skills-to-spec), which commits or reuses the Planning Seal and publishes one route:
 
 - Single-Issue Tracker Spec → [execute-issue](https://aihero.dev/skills-execute-issue).
-- Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets), then `execute-issue` for each ready child.
+- Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets) to reconcile one stable decomposition and publish its completeness record, then `execute-issue` for each ready child.
 - Standalone Spec or explicit direct current-branch work → [implement](https://aihero.dev/skills-implement).
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.

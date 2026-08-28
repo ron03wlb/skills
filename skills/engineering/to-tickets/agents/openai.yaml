@@ -1,5 +1,5 @@
 interface:
   display_name: "To Tickets"
-  short_description: "Publish executable children from a multi-issue spec"
+  short_description: "Reconcile a stable child decomposition"
 policy:
   allow_implicit_invocation: false
