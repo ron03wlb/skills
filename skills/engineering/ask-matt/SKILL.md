@@ -15,8 +15,7 @@ Route the user's situation; do not perform the routed work.
 3. Follow the published command:
    - Single-Issue Tracker Spec → `/execute-issue <Spec-ID>`.
    - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>` to reconcile one Issue decomposition and publish its Decomposition publication record, then `/execute-issue <Issue-ID>` for each dependency-ready child.
-   - Repository adoption is separate: use `/setup-pre-execute-issue` once only when a consumer repository has a concrete Manual prerequisite. It is run-once setup, not a runtime step; without that concrete need it makes no change.
-4. After the exact Issue is published, `/pre-execute-issue <Issue-ID>` is optional before `/execute-issue`; direct execution performs the same read-only discovery and stops if current prerequisite evidence is required.
+4. After the exact Issue is published, a human who already executed a Manual prerequisite uses `/pre-execute-issue <Issue-ID> <artifact-path>` once. It records one attestation without resolver setup or target verification; `/execute-issue` consumes that Issue-and-path note.
 5. After each clean execution, the human uses `/close-issue` with that Issue ID. It merges the exact candidate into the recorded Issue target branch, removes the clean worktree, and closes the Issue; retries resume from observable Git, worktree, and tracker state. Issue worktrees may run concurrently while one human serializes close writers per target. Use the same command on a Multi-Issue parent only after every exact child is closed and reachable.
 6. Before push, the human invokes `/verify-target-before-push <target>` in local-ahead mode to derive members from completion notes. For already-pushed work, the human supplies an explicit merge request, pull request, or exact range. Both modes run aggregate review and verification once; only local-ahead may emit push readiness. Push remains separate.
 

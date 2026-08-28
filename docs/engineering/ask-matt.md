@@ -32,9 +32,7 @@ Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/sk
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
-[setup-pre-execute-issue](https://aihero.dev/skills-setup-pre-execute-issue) is explicit repository adoption used once only when a consumer repository has a concrete manual prerequisite. It is run-once setup, not a runtime step; without that concrete need it makes no change.
-
-[pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) is optional after an Issue is published. It may prepare and verify a repository-declared manual prerequisite before `execute-issue`; direct execution remains valid because it runs the same read-only discovery and stops when current `READY` evidence is required.
+[pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) is optional after an Issue is published. The human names one artifact they already executed; the skill records that attestation once, and `execute-issue` accepts it without resolver setup or target verification.
 
 Each completed Issue is locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). Independent Issue worktrees may execute concurrently; one writer per recorded target performs the three idempotent close actions, and advancing that target does not invalidate other completions. The same command closes a Multi-Issue parent only after every exact child is closed and reachable. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) uses local-ahead completion-note reachability; already-pushed work requires an explicit merge request, pull request, or exact range. Both modes run the aggregate gate once. It does not push.
 

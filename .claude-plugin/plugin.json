@@ -32,7 +32,6 @@
     "./skills/engineering/to-tickets",
     "./skills/engineering/wayfinder",
     "./skills/engineering/implement",
-    "./skills/engineering/setup-pre-execute-issue",
     "./skills/engineering/pre-execute-issue",
     "./skills/engineering/execute-issue",
     "./skills/engineering/close-issue",

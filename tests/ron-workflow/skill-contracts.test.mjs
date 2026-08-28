@@ -348,7 +348,7 @@ test("re-entrant to-tickets behavior stays synchronized across promoted surfaces
 });
 
 
-test("prerequisite preparation is optional, gated, and recoverable", () => {
+test("manual prerequisite attestation is one-step and sufficient", () => {
   const preExecute = read("skills/engineering/pre-execute-issue/SKILL.md");
   const preExecuteMetadata = read("skills/engineering/pre-execute-issue/agents/openai.yaml");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
@@ -361,88 +361,30 @@ test("prerequisite preparation is optional, gated, and recoverable", () => {
   assert.match(preExecuteMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(preExecuteDocs, /agent won't reach for it on its own/iu);
 
-  assert.match(preExecute, /exact.*Issue.*published.*before.*worktree.*product implementation/isu);
-  assert.match(preExecute, /repository instructions.*exact.*resolver.*`discover`.*`prepare`.*`verify`/isu);
-  assert.match(preExecute, /no.*declaration.*`NOT_REQUIRED`.*no worktree/isu);
-  assert.match(preExecute, /declared.*missing.*unreadable.*ambiguous.*unparseable.*inconsistent.*`BLOCKED`.*no worktree/isu);
-  assert.match(preExecute, /repository owns.*transport.*field.*policy.*validation.*target/isu);
+  assert.match(preExecute, /Require only.*exact Issue ID.*exact repository-relative artifact path/isu);
+  assert.match(preExecute, /human explicitly says.*already executed or applied/isu);
+  assert.match(preExecute, /manual_prerequisite_complete:v1.*issue:.*artifact:.*attested_by: human.*statement: executed/isu);
+  assert.match(preExecute, /same Issue.*normalized artifact path.*without writing a duplicate/isu);
+  assert.match(preExecute, /Do not require.*resolver.*setup step.*target environment.*database identity.*credentials.*artifact hash.*worktree.*artifact-only commit.*postflight.*DB access.*external verification.*`WAITING_MANUAL`.*`READY`.*second invocation/isu);
+  assert.match(preExecute, /Tracker write or read-back failure.*unresolved persistence.*never claim/isu);
+  assert.match(preExecute, /Never execute or replay the artifact/iu);
+  assert.match(preExecute, /Never create or modify a worktree.*mutate an external environment/isu);
 
-  assert.match(preExecute, /only `REQUIRED`.*create or reuse.*Issue worktree.*topic branch/isu);
-  assert.match(preExecute, /`prepare`.*only.*declared.*Prerequisite artifact/isu);
-  assert.match(preExecute, /five.*repair waves.*initial generation.*no-edit retr.*tool failures.*do not count/isu);
-  assert.match(preExecute, /syntax.*static validation.*pass.*commit.*artifact alone.*worktree.*clean.*`WAITING_MANUAL`/isu);
-  assert.match(preExecute, /product implementation.*stop.*planning.*`execute-issue`/isu);
-
-  assert.match(preExecute, /append-only.*`WAITING_MANUAL`.*read.*back once/isu);
-  assert.match(preExecute, /Issue.*prerequisite commit.*artifact paths.*SHA-256.*resolver.*policy.*non-sensitive.*target.*ancestry/isu);
-  assert.match(preExecute, /`NOT_REQUIRED`.*`REQUIRED`.*`BLOCKED`.*transient.*no.*receipt/isu);
-  assert.match(preExecute, /never.*credentials.*manual.*action.*poll/isu);
-
-  assert.match(preExecute, /current `WAITING_MANUAL`.*`verify` exactly once.*read-only.*declared outcome.*non-sensitive target/isu);
-  assert.match(preExecute, /success.*append.*read.*back.*`READY`.*failure.*preserve.*`WAITING_MANUAL`.*transient `BLOCKED`/isu);
-  assert.match(preExecute, /current `READY`.*match.*report `READY`.*stop/isu);
-  assert.match(preExecute, /tracker write or read-back failure.*transient `BLOCKED`.*never.*`WAITING_MANUAL`.*`READY`/isu);
-  assert.match(preExecute, /later implementation commits.*prerequisite commit.*ancestor.*protected.*match/isu);
-  assert.match(preExecute, /artifact.*resolver.*policy.*manual target.*ancestry.*drift.*stale/isu);
-
-  assert.match(execute, /Entry.*read-only.*`discover`/isu);
-  assert.match(execute, /after.*exact.*Issue.*published.*before.*worktree.*product implementation/isu);
-  assert.match(execute, /no.*resolver declaration.*`NOT_REQUIRED`.*ordinary.*execution/isu);
-  assert.match(execute, /current.*`READY`.*same Issue worktree.*topic branch.*candidate ancestry/isu);
-  assert.match(execute, /`REQUIRED`.*missing or stale.*`implementation_blocked`.*invoke `\/pre-execute-issue/isu);
-  assert.match(execute, /resolver.*`BLOCKED`.*`implementation_blocked`/isu);
-  assert.match(execute, /never invokes `pre-execute-issue`.*never.*`prepare`.*manual prerequisite action/isu);
-  assert.match(execute, /Late prerequisite discovery.*before.*prerequisite-dependent verification.*unchanged.*Acceptance Criteria.*schema outcome.*same worktree.*changed.*behavior.*acceptance.*target.*exclusions.*ownership.*planning/isu);
+  assert.match(execute, /No declared Manual prerequisite.*ordinary Issue execution/isu);
+  assert.match(execute, /manual_prerequisite_complete:v1.*same Issue.*normalized repository-relative path.*sufficient/isu);
+  assert.match(execute, /missing.*exact command `\/pre-execute-issue <Issue-ID> <artifact-path>`/isu);
+  assert.match(execute, /later matching attestation.*resolves.*prerequisite-only blocked state.*resume.*existing Issue lane/isu);
+  assert.match(execute, /Late prerequisite discovery.*exact artifact path.*matching attestation.*resume the same worktree and candidate lane/isu);
+  assert.doesNotMatch(execute, /`discover`|`prepare`|`verify`|`NOT_REQUIRED`|`REQUIRED`/u);
 
   for (const path of [
     "docs/engineering/pre-execute-issue.md",
     "docs/engineering/execute-issue.md",
     "docs/engineering/ask-matt.md",
   ]) assert.doesNotMatch(read(path), /\]\((?:\.\/|\.\.\/)/u, `${path} has a relative published link`);
-  assert.match(matt, /published.*Issue.*`\/pre-execute-issue.*optional.*`\/execute-issue`/isu);
-  assert.match(mattDocs, /pre-execute-issue.*optional.*execute-issue/isu);
-  assert.match(executeDocs, /read-only prerequisite discovery.*`NOT_REQUIRED`.*`READY`.*pre-execute-issue/isu);
-});
-
-
-test("one-time prerequisite resolver adoption is explicit and no-op without a concrete need", () => {
-  const setup = read("skills/engineering/setup-pre-execute-issue/SKILL.md");
-  const metadata = read("skills/engineering/setup-pre-execute-issue/agents/openai.yaml");
-  const docs = read("docs/engineering/setup-pre-execute-issue.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
-  const mattDocs = read("docs/engineering/ask-matt.md");
-
-  assert.match(setup, /^disable-model-invocation:\s*true$/mu);
-  assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
-  assert.match(docs, /agent won't reach for it on its own/iu);
-  assert.match(setup, /before writing.*inspect.*repository instructions.*code.*tests.*concrete manual prerequisite/isu);
-  assert.match(setup, /no concrete manual prerequisite.*setup.*unnecessary.*repository unchanged.*no resolver declaration.*placeholder.*TODO/isu);
-
-  assert.match(setup, /only.*minimum.*existing `AGENTS\.md` or `CLAUDE\.md`.*prerequisite policy.*repository-owned resolver implementation.*test fixture/isu);
-  assert.match(setup, /one exact.*command.*`discover`.*`prepare`.*`verify`.*machine-readable/isu);
-  assert.match(setup, /`discover`.*`NOT_REQUIRED`.*`REQUIRED`.*`BLOCKED`.*protected evidence/isu);
-  assert.match(setup, /`prepare`.*only.*declared.*Prerequisite artifact/isu);
-  assert.match(setup, /`verify`.*read-only.*declared outcome.*non-sensitive target/isu);
-  assert.match(setup, /repository owns.*transport.*field.*policy.*validation.*target semantics.*safe extensions/isu);
-  assert.match(setup, /never.*universal resolver.*configuration schema/isu);
-
-  assert.match(setup, /before writing.*capture.*intended adoption path.*staged.*unstaged.*untracked/isu);
-  assert.match(setup, /complete prospective adoption.*temporary.*syntax.*static.*fixture validation.*before.*active declaration/isu);
-  assert.match(setup, /validated.*one change set.*same validation.*post-apply/isu);
-  assert.match(setup, /failure.*no active declaration.*partial resolver.*placeholder.*TODO.*restore only.*setup-owned preimages/isu);
-  assert.match(setup, /preserve.*unrelated staged.*unstaged.*untracked.*never.*stash.*reset.*clean/isu);
-
-  assert.match(setup, /never.*execut(?:e|es) SQL.*mutat(?:e|es).*database.*external environment.*stor(?:e|es) credentials/isu);
-  assert.match(setup, /never.*chang(?:e|es).*Issue.*Prerequisite receipt/isu);
-  assert.match(setup, /never invoke.*`pre-execute-issue`.*`execute-issue`.*runtime skill/isu);
-  assert.match(setup, /never.*rerun `ask-matt`.*act as a router/isu);
-  assert.match(setup, /never.*push.*integrate.*deploy/isu);
-  assert.match(setup, /implementing.*generic skill.*never.*adopt.*consumer repository/isu);
-
-  assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
-  assert.match(docs, /concrete manual prerequisite.*no change.*run-once.*not.*runtime/isu);
-  assert.match(matt, /`\/setup-pre-execute-issue`.*concrete manual prerequisite.*run-once.*not.*runtime/isu);
-  assert.match(mattDocs, /setup-pre-execute-issue.*concrete manual prerequisite.*run-once.*not.*runtime/isu);
+  assert.match(matt, /published.*Issue.*`\/pre-execute-issue.*artifact-path.*once.*attestation.*`\/execute-issue`/isu);
+  assert.match(mattDocs, /pre-execute-issue.*names one artifact.*records that attestation once.*execute-issue/isu);
+  assert.match(executeDocs, /one human attestation.*exact executed artifact.*pre-execute-issue/isu);
 });
 
 
@@ -507,13 +449,13 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(verify, /candidate `C`.*reachable from `V`.*not.*`B`.*member/isu);
   assert.match(verify, /reachable member.*Issue.*open.*stops/isu);
   assert.match(verify, /For every member.*closed tracker state/isu);
-  assert.match(verify, /For every member.*topic branch.*worktree.*Planning Seal.*prerequisite state.*Standards.*Spec review identities.*clean results/isu);
+  assert.match(verify, /For every member.*topic branch.*worktree.*Planning Seal.*`manualAttestations` artifact paths.*empty list.*Standards.*Spec review identities.*clean results/isu);
   assert.match(verify, /completion note.*exact Issue identity.*verification identity.*commands.*passing results/isu);
   assert.match(verify, /review and verification.*candidate identity.*exact `C`/isu);
   assert.match(verify, /open unreachable.*concurrent.*outside.*closed unreachable.*contradictory/isu);
   assert.match(verify, /later state supersedes.*only.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
   assert.match(verify, /completion notes.*sole Issue-to-commit mapping authority/isu);
-  assert.match(verify, /every material commit.*`B\.\.V`.*member.*baseline.*candidate.*Planning Seal.*prerequisite.*merge topology/isu);
+  assert.match(verify, /every material commit.*`B\.\.V`.*member.*baseline.*candidate.*Planning Seal.*merge topology/isu);
   assert.match(verify, /overlap.*valid.*no unique owner/isu);
   assert.match(verify, /code-review.*Standards.*Spec axis.*every member Issue.*parent.*linked Spec/isu);
   assert.match(verify, /focused verification commands.*deduplicate.*full suite exactly once.*exact `V`/isu);
@@ -727,7 +669,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       "baseline",
       "candidate",
       "planningSeal",
-      "prerequisites",
+      "manualAttestations",
       "standardsReview",
       "specReview",
       "verification",
@@ -737,10 +679,9 @@ test("aggregate target verification selects exact ranges and covers completion-n
       assert.equal(completion[axis].candidate, completion.candidate, `${issue.id}: mismatched ${axis} candidate`);
       assert.equal(completion[axis].result, "clean", `${issue.id}: ${axis} is not clean`);
     }
-    assert.match(completion.prerequisites.status, /^(?:NOT_REQUIRED|READY)$/u, `${issue.id}: invalid prerequisite state`);
-    if (completion.prerequisites.status === "READY") {
-      assert.ok(Array.isArray(completion.prerequisites.commits) && completion.prerequisites.commits.length > 0, `${issue.id}: missing prerequisite identities`);
-    }
+    assert.ok(Array.isArray(completion.manualAttestations), `${issue.id}: missing manual attestation list`);
+    assert.equal(new Set(completion.manualAttestations).size, completion.manualAttestations.length, `${issue.id}: duplicate manual attestation`);
+    assert.ok(completion.manualAttestations.every((path) => typeof path === "string" && path.length > 0), `${issue.id}: invalid manual attestation path`);
     assert.equal(completion.verification.candidate, completion.candidate, `${issue.id}: mismatched verification candidate`);
     assert.ok(Array.isArray(completion.verification.commands) && completion.verification.commands.length > 0, `${issue.id}: missing verification commands`);
     assert.ok(Array.isArray(completion.verification.results), `${issue.id}: missing verification results`);
@@ -768,10 +709,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
 
   const proveCoverage = ({ range, members }) => {
     const contributionSets = members.map((member) => new Set(commits(`${member.baseline}..${member.candidate}`)));
-    const referenced = new Set(members.flatMap(({ planningSeal, prerequisites }) => [
-      planningSeal,
-      ...(prerequisites.commits ?? []),
-    ]));
+    const referenced = new Set(members.map(({ planningSeal }) => planningSeal));
     for (const commit of commits(`${range.baseline}..${range.head}`)) {
       if (referenced.has(commit) || contributionSets.some((set) => set.has(commit))) continue;
       const parents = git("rev-list", "--parents", "-n", "1", commit).split(/\s+/u).slice(1);
@@ -880,11 +818,6 @@ test("aggregate target verification selects exact ranges and covers completion-n
     git("commit", "-m", "planning seal");
     const planningSeal = git("rev-parse", "HEAD");
 
-    writeFileSync(join(repo, "prerequisite.txt"), "ready\n");
-    git("add", "prerequisite.txt");
-    git("commit", "-m", "prerequisite");
-    const prerequisite = git("rev-parse", "HEAD");
-
     const retiredScript = "retired-preservation.mjs";
     const retiredTest = "retired-preservation.test.mjs";
     const activeTest = "active-contract.test.mjs";
@@ -899,7 +832,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     commandFacts.set(mixedRetirementCommand, { kind: "path", requiredPaths: [retiredTest, activeTest] });
     commandFacts.set(ambiguousPathCommand, { kind: "ambiguous" });
     commandFacts.set(emptyPathCommand, { kind: "path", requiredPaths: [] });
-    git("checkout", "-b", "issue-a", prerequisite);
+    git("checkout", "-b", "issue-a", planningSeal);
     writeFileSync(join(repo, "a.txt"), "A\n");
     writeFileSync(join(repo, retiredScript), "export const preserved = true;\n");
     writeFileSync(join(repo, retiredTest), "export const covered = true;\n");
@@ -932,7 +865,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const closedCandidate = git("rev-parse", "HEAD");
     git("checkout", "target");
 
-    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands, prerequisiteCommits = [], successorEvidence }) => ({
+    const completion = ({ candidate, issue, baseline: issueBaseline = baseline, commands, manualAttestations = [], successorEvidence }) => ({
       kind: "implementation_complete",
       issue,
       target: "target",
@@ -941,9 +874,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       baseline: issueBaseline,
       candidate,
       planningSeal,
-      prerequisites: prerequisiteCommits.length > 0
-        ? { status: "READY", commits: prerequisiteCommits }
-        : { status: "NOT_REQUIRED", commits: [] },
+      manualAttestations,
       standardsReview: { candidate, result: "clean" },
       specReview: { candidate, result: "clean" },
       verification: {
@@ -956,16 +887,16 @@ test("aggregate target verification selects exact ranges and covers completion-n
     const successA = completion({
       candidate: candidateA,
       issue: "A",
-      baseline: prerequisite,
+      baseline: planningSeal,
       commands: ["test:shared", "test:a", retiredScriptCommand, retiredTestCommand, mixedRetirementCommand, ambiguousPathCommand, emptyPathCommand],
-      prerequisiteCommits: [prerequisite],
+      manualAttestations: ["sql/a.sql"],
     });
     const successB = completion({
       candidate: candidateB,
       issue: "B",
-      baseline: prerequisite,
+      baseline: planningSeal,
       commands: ["test:shared", "test:b"],
-      prerequisiteCommits: [prerequisite],
+      manualAttestations: [],
       successorEvidence: { absentPaths: [retiredScript, retiredTest], currentBehaviorCommands: ["test:b"] },
     });
     const successOpen = completion({ candidate: openCandidate, issue: "OPEN-OUTSIDE", commands: ["test:open"] });
@@ -1036,7 +967,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
       () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, baseline: undefined }] }], range: localRange }),
       /missing baseline/u,
     );
-    for (const field of ["issue", "worktree", "planningSeal", "prerequisites", "standardsReview", "specReview", "verification"]) {
+    for (const field of ["issue", "worktree", "planningSeal", "manualAttestations", "standardsReview", "specReview", "verification"]) {
       assert.throws(
         () => freezeMembers({ issues: [{ id: "A", state: "CLOSED", execution: [{ ...successA, [field]: undefined }] }], range: localRange }),
         new RegExp(`missing ${field}`, "u"),
@@ -1201,7 +1132,6 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   assert.match(matt, /`\/wiki`/u);
   assert.match(matt, /`\/remove-ron`/u);
-  assert.match(matt, /`\/setup-pre-execute-issue/u);
   assert.match(matt, /`\/pre-execute-issue/u);
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
@@ -1237,7 +1167,6 @@ test("router exposes the Issue worktree flow and independent controls", () => {
     "ask-matt",
     "wiki",
     "remove-ron",
-    "setup-pre-execute-issue",
     "pre-execute-issue",
     "execute-issue",
     "close-issue",
@@ -1263,13 +1192,11 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/ask-matt/SKILL.md",
     "skills/engineering/wiki/SKILL.md",
     "skills/engineering/remove-ron/SKILL.md",
-    "skills/engineering/setup-pre-execute-issue/SKILL.md",
     "skills/engineering/pre-execute-issue/SKILL.md",
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
     "docs/engineering/implement.md",
-    "docs/engineering/setup-pre-execute-issue.md",
     "docs/engineering/pre-execute-issue.md",
     "docs/engineering/execute-issue.md",
     "docs/engineering/close-issue.md",

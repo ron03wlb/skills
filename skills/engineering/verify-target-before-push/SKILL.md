@@ -29,7 +29,7 @@ Execution completion notes are the sole Issue-to-commit mapping authority. Deriv
 - a closed unreachable candidate is contradictory delivery evidence and stops;
 - a reachable member whose Issue is open also stops before review.
 
-For every member require the completion note's exact Issue identity, parent or linked Spec, Issue target branch, topic branch and worktree, Execution baseline, candidate `C`, Planning Seal, prerequisite state and any required identities, Standards and Spec review identities and clean results, verification identity, exact commands and passing results, and a closed tracker state. Require every recorded review and verification candidate identity to bind exact `C`; require `C` to exist locally and remain an ancestor of `V`. Missing, unreadable, duplicate, ambiguous, mismatched, or candidate-invalidating evidence stops without substitution.
+For every member require the completion note's exact Issue identity, parent or linked Spec, Issue target branch, topic branch and worktree, Execution baseline, candidate `C`, Planning Seal, `manualAttestations` artifact paths including an empty list when none were consumed, Standards and Spec review identities and clean results, verification identity, exact commands and passing results, and a closed tracker state. Require every recorded review and verification candidate identity to bind exact `C`; require `C` to exist locally and remain an ancestor of `V`. Missing, unreadable, duplicate, ambiguous, mismatched, or candidate-invalidating evidence stops without substitution.
 
 Do not use a closeout receipt, integration candidate, commit-message Issue identity, merge-message parsing, or a manually repeated Issue list. Freeze the member set before review.
 
@@ -38,7 +38,7 @@ Do not use a closeout receipt, integration candidate, commit-message Issue ident
 Enumerate every material commit in `B..V`. Explain each one through at least one of these exact, read-back sources:
 
 - a member's Execution baseline-to-candidate contribution;
-- a referenced Planning Seal or prerequisite commit;
+- a referenced Planning Seal;
 - necessary merge topology connecting otherwise covered histories.
 
 Issue contributions are many-to-many: overlapping contribution ranges are valid and require no unique owner. A commit with no valid explanation stops before aggregate review. Never infer ownership from commit or merge messages, and never accept an unexplained material commit.

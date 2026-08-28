@@ -176,8 +176,7 @@ Skills I use daily for code work.
 
 **User-invoked**
 
-- **[setup-pre-execute-issue](./skills/engineering/setup-pre-execute-issue/SKILL.md)** — Adopt one repository-owned prerequisite resolver when a concrete manual prerequisite exists.
-- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
+- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Issue while preserving completion across recorded-target movement.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Resume three idempotent actions against an Issue's recorded target, or close a verified Multi-Issue parent.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range without pushing.

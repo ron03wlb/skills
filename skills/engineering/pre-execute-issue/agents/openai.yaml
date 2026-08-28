@@ -1,7 +1,7 @@
 interface:
   display_name: "Pre-Execute Issue"
-  short_description: "Prepare and verify one Issue prerequisite"
-  default_prompt: "Use $pre-execute-issue to inspect one published Issue, prepare only a declared prerequisite artifact when required, and stop at a read-back WAITING_MANUAL or READY receipt."
+  short_description: "Record one executed Issue artifact"
+  default_prompt: "Use $pre-execute-issue to record that sql/v0.4.20.sql was already executed for Issue #108."
 
 policy:
   allow_implicit_invocation: false

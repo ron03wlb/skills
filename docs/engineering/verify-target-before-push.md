@@ -24,7 +24,7 @@ Reach for it after Issue closeout when you need aggregate evidence for a local p
 
 ## Completion-note coverage
 
-The leading idea is **aggregate coverage**. Completion notes plus Git reachability derive the member set; every material range commit must be covered by a member contribution, its Planning Seal or prerequisite, or necessary merge topology before aggregate review begins.
+The leading idea is **aggregate coverage**. Completion notes plus Git reachability derive the member set; every material range commit must be covered by a member contribution, its Planning Seal, or necessary merge topology before aggregate review begins. Manual prerequisite attestations remain artifact-path metadata and do not create a separate commit range.
 
 Overlapping Issue contributions are valid. Reachable open Issues, closed unreachable candidates, invalidated completion evidence, or unexplained commits stop the gate without repair.
 
