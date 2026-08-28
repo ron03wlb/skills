@@ -1,7 +1,7 @@
 interface:
   display_name: "Verify Target Before Push"
-  short_description: "Gate one aggregate target before a separate push"
-  default_prompt: "Use $verify-target-before-push to prove all relevant closed candidates are present and the exact aggregate target is review/test clean without pushing."
+  short_description: "Verify local or pushed exact ranges"
+  default_prompt: "Use $verify-target-before-push to select a local-ahead or already-pushed completion-note range, prove contribution coverage, and run one aggregate gate without pushing."
 
 policy:
   allow_implicit_invocation: false

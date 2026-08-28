@@ -1,0 +1,7 @@
+---
+status: accepted
+---
+
+# Reconcile one stable Issue decomposition
+
+`/to-tickets <Spec-ID>` owns one re-entrant **Issue decomposition** rather than creating a new child set on every invocation. Each child stores one immutable **Decomposition key** in the form `<Spec-ID>/<NN>`; the tracker Issue ID remains the public `/execute-issue <Issue-ID>` input, and the child resolves its parent Spec. Reconciliation creates a missing key, reuses one matching child, and stops without mutation when a key is duplicated or its parent, target, Planning Seal, or executable contract conflicts. Every tracker-supported identity source is validated automatically within the invocation, so matching children need no per-child approval; conflicting native relation, body, or key evidence stops before repair. Owned blocking edges must be acyclic; an existing readable **External blocker** may gate the frontier, but `/to-tickets` never creates or mutates it. After every child and edge passes read-back, the skill writes and reads back one minimal versioned **Decomposition publication record** on the parent, binding the seal, target, key-to-Issue mapping, and blocker edges. That record proves completeness for parent closeout but never replaces child-owned keys as identity; a record-write failure remains a recoverable partial publication. This keeps recovery tracker-independent without making titles stable identities or introducing a dependency engine or generic receipt framework.

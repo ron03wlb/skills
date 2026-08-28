@@ -14,9 +14,11 @@ Route the user's situation; do not perform the routed work.
 2. Use `/to-spec` to synthesize the settled context and create or reuse its Planning Seal. `to-spec` is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue.
 3. Follow the published command:
    - Single-Issue Tracker Spec → `/execute-issue <Spec-ID>`.
-   - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>`, then `/execute-issue <Issue-ID>` for each dependency-ready child.
-4. After each clean execution, the human uses `/close-issue` with that Issue ID to integrate its exact candidate into the current local target and close it. Issue worktrees may run concurrently; one human serializes integration writes to the same target branch.
-5. Before push, the human invokes `/verify-target-before-push <target>` once on the exact aggregate target. Push remains separate.
+   - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>` to reconcile one Issue decomposition and publish its Decomposition publication record, then `/execute-issue <Issue-ID>` for each dependency-ready child.
+   - Repository adoption is separate: use `/setup-pre-execute-issue` once only when a consumer repository has a concrete Manual prerequisite. It is run-once setup, not a runtime step; without that concrete need it makes no change.
+4. After the exact Issue is published, `/pre-execute-issue <Issue-ID>` is optional before `/execute-issue`; direct execution performs the same read-only discovery and stops if current prerequisite evidence is required.
+5. After each clean execution, the human uses `/close-issue` with that Issue ID. It merges the exact candidate into the recorded Issue target branch, removes the clean worktree, and closes the Issue; retries resume from observable Git, worktree, and tracker state. Issue worktrees may run concurrently while one human serializes close writers per target. Use the same command on a Multi-Issue parent only after every exact child is closed and reachable.
+6. Before push, the human invokes `/verify-target-before-push <target>` in local-ahead mode to derive members from completion notes. For already-pushed work, the human supplies an explicit merge request, pull request, or exact range. Both modes run aggregate review and verification once; only local-ahead may emit push readiness. Push remains separate.
 
 A Tracker Spec, including a local-file tracker record, uses `/execute-issue`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
 

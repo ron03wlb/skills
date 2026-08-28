@@ -1,7 +1,7 @@
 interface:
   display_name: "Close Issue"
-  short_description: "Integrate an exact candidate and close one Issue"
-  default_prompt: "Use $close-issue to compose one exact reviewed candidate with its current local target, prove inclusion, remove the Issue worktree, and close the Issue."
+  short_description: "Resume an idempotent three-action close"
+  default_prompt: "Use $close-issue to merge one unchanged completed candidate into its recorded target, remove its exact clean worktree, and close the Issue, or close a verified Multi-Issue parent."
 
 policy:
   allow_implicit_invocation: false

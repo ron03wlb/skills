@@ -27,12 +27,16 @@ Reach for it when you do not know where to enter or resume a flow. If you alread
 Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs) to [to-spec](https://aihero.dev/skills-to-spec), which commits or reuses the Planning Seal and publishes one route:
 
 - Single-Issue Tracker Spec → [execute-issue](https://aihero.dev/skills-execute-issue).
-- Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets), then `execute-issue` for each ready child.
+- Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets) to reconcile one Issue decomposition and publish its Decomposition publication record, then `execute-issue` for each ready child.
 - Standalone Spec or explicit direct current-branch work → [implement](https://aihero.dev/skills-implement).
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
-Each completed Issue is locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). Independent Issue worktrees may execute concurrently and close in any order; writes to one target branch remain serialized. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) proves the exact aggregate target contains every relevant closed candidate and is review/test clean. It does not push.
+[setup-pre-execute-issue](https://aihero.dev/skills-setup-pre-execute-issue) is explicit repository adoption used once only when a consumer repository has a concrete manual prerequisite. It is run-once setup, not a runtime step; without that concrete need it makes no change.
+
+[pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) is optional after an Issue is published. It may prepare and verify a repository-declared manual prerequisite before `execute-issue`; direct execution remains valid because it runs the same read-only discovery and stops when current `READY` evidence is required.
+
+Each completed Issue is locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). Independent Issue worktrees may execute concurrently; one writer per recorded target performs the three idempotent close actions, and advancing that target does not invalidate other completions. The same command closes a Multi-Issue parent only after every exact child is closed and reachable. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) uses local-ahead completion-note reachability; already-pushed work requires an explicit merge request, pull request, or exact range. Both modes run the aggregate gate once. It does not push.
 
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 

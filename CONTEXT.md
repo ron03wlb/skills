@@ -39,11 +39,15 @@ _Avoid_: Test score, source update, meeting minutes
 ### Issue delivery
 
 **Issue worktree**:
-A dedicated Git worktree and topic branch that contain the implementation for exactly one dependency-ready **Issue** before it is integrated into the original local target branch.
+A dedicated Git worktree and topic branch that contain prerequisite artifact preparation, when required, and the remaining implementation for exactly one dependency-ready **Issue** before integration into the original local target branch.
 _Avoid_: Shared execution lane, authorization workspace
 
+**Issue target branch**:
+The local branch recorded in an **Issue** when its **Issue worktree** is created, identifying the branch from which the Issue work began. It is the default and only implicit merge destination for `close-issue`; choosing another destination requires an explicit workflow decision rather than inference.
+_Avoid_: Current checked-out branch, latest moving branch, inferred merge destination
+
 **Execution baseline**:
-The original target-branch commit captured once when `execute-issue` starts. It is the fixed point for the first Standards and Spec review, not an authorization hash.
+The exact target-branch commit captured once when one explicit `execute-issue` attempt starts. It is that attempt's fixed point for Standards and Spec review; a human-authorized rerun after a real merge conflict starts a new attempt from the latest target without creating another Issue branch or worktree.
 _Avoid_: Per-wave hash confirmation, lifecycle Grant
 
 **Planning Seal**:
@@ -51,12 +55,20 @@ The local target-branch commit selected as the planning baseline before Spec or 
 _Avoid_: Dirty-doc commit, lifecycle authorization, execution checkpoint
 
 **Execution completion note**:
-The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, original target, worktree, topic branch, baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. A later blocked execution state supersedes it.
+The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, **Issue target branch**, worktree, topic branch, attempt baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. Target-branch movement alone does not supersede it; a later successful explicit attempt publishes the new current note.
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 
+**Issue contribution**:
+The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
+_Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping
+
 **Manual integration serialization**:
-The operating rule that a human starts only one `close-issue` integration into the same target branch at a time; Issue execution and integrations into other target branches may proceed concurrently. The skill protects the target through isolated composition, collision checks, preservation evidence, and current-target gates; it does not add a queue or lock.
+The target-scoped operating rule that a human starts only one `close-issue` merge into the same **Issue target branch** at a time. Any number of Issue executions and merges into other target branches may proceed concurrently; advancing the target does not invalidate their successful execution state. The workflow adds no queue, daemon, or lock service.
 _Avoid_: Automatic closeout chain, workflow scheduler, concurrent writers for the same target branch
+
+**Workflow interface**:
+The user-visible skills and explicit handoffs that represent distinct human-owned authority transitions in the development flow. A user invokes `close-issue` with an Issue ID; `close-issue` resolves the tracker state and local identities before calling its internal module. Interface size is judged by the decisions the human must own, not by skill count or Markdown length.
+_Avoid_: Workflow implementation, internal helper layout, shortest command chain
 
 **Ron repository footprint**:
 The repository-local Ron configuration, Ron-only instruction text, and inactive or completed `.git/ron-workflow/` metadata left by the retired setup or prior runs. It excludes a current recoverable draft, the Canonical Wiki, tracker history, branches, worktrees, and installed skills.
@@ -66,25 +78,81 @@ _Avoid_: All Ron-related history, Wiki content, execution branches
 The explicit `/remove-ron` cleanup of one **Ron repository footprint**. It removes only owned local artifacts, commits an actual tracked cleanup diff, and stops on active execution, dirty overlap, or ambiguous ownership without touching external history or delivery state.
 _Avoid_: Plugin uninstall, branch cleanup, Issue deletion, full purge
 
-**Integration candidate**:
-The exact commit prepared in an isolated temporary worktree from current target `T` and one unchanged reviewed Issue candidate `C`. It is `C` when `C` contains `T`; a history-only two-parent merge with `T`'s exact tree and parents `T`, `C` when `T` already contains `C`; otherwise it is a no-fast-forward merge commit containing both histories.
-_Avoid_: Refreshed Issue candidate, conflict-resolution commit, aggregate verification
+**Close progress**:
+The directly observable ordered progress of one idempotent `close-issue`: the reviewed candidate is reachable from the **Issue target branch**, the registered clean **Issue worktree** is absent, and the Issue is closed. A retry skips only the satisfied prefix and stops on contradictory or out-of-order state without writing a custom success or failure receipt.
+_Avoid_: Issue integration receipt, closeout journal, retry checkpoint
 
-**Issue integration receipt**:
-The read-back closeout record binding one Issue, its latest successful execution-state identity, target-before, reviewed candidate, **Integration candidate**, candidate ancestry, and dirty-target preservation evidence. A verified receipt proves local inclusion and gates exact worktree cleanup and Issue closure; it does not prove aggregate semantics.
-_Avoid_: Execution completion note, push authorization, test report
+**Target verification set**:
+The aggregate Issue set frozen by `verify-target-before-push` from one exact baseline `B`, target `V`, and Issue **Execution completion notes**. The default source is the target's local unpushed range from its unique upstream tip to local `HEAD`; already-pushed work requires an explicit merge request, pull request, or exact base/head comparison. A candidate reachable from `V` but not `B` is a member and must belong to a closed Issue; an open unreachable candidate remains concurrent work outside the set, while a closed unreachable candidate is contradictory delivery evidence that blocks verification. Every material range commit must be covered by a member **Issue contribution**, its referenced Planning Seal or prerequisite, or necessary merge topology.
+_Avoid_: Closeout receipt union, explicit Issue manifest, merge-message discovery
 
 **Push-ready receipt**:
-The local read-back `push_ready` record produced only after aggregate Standards/multi-Spec review, required verification, and closed-candidate reachability all pass on one exact target `HEAD`. Any target movement invalidates it.
+The local read-back `push_ready` record produced only when a non-empty local unpushed **Target verification set**, aggregate Standards/multi-Spec review, required verification, and closed-candidate reachability all pass on one exact target `HEAD`. It is never issued retroactively for an already-pushed range, and later target movement invalidates it.
 _Avoid_: Issue integration receipt, push command, production verification
+
+**Range verification result**:
+The non-push-readiness result produced when `verify-target-before-push` validates one explicit already-pushed merge request, pull request, or exact base/head range. It proves only that frozen range and never retroactively grants a **Push-ready receipt**.
+_Avoid_: Retroactive push-ready receipt, guessed comparison, unbounded branch review
 
 **Execution readiness**:
 The state in which an open **Issue** has resolved blockers, clear acceptance and Spec scope, an identifiable original target, and no conflicting worktree owner.
 _Avoid_: Approved
 
+**Repository prerequisite**:
+A repository-declared condition that must be prepared and verified before affected `execute-issue` work may proceed. A repository that declares none retains the ordinary Issue execution route.
+_Avoid_: Generic mandatory preflight, consumer-specific policy
+
+**Prerequisite inspection**:
+The optional user-invoked check after a Tracker Spec or child Issue is written that determines whether a **Repository prerequisite** applies and may begin its preparation. It does not replace or change **Delivery routing**.
+_Avoid_: Mandatory delivery stage, Spec classification, automatic preflight
+
+**Prerequisite resolver**:
+The repository-owned interface named by repository instructions that discovers, prepares, and verifies that repository's **Repository prerequisites** without exposing consumer-specific rules to generic skills. No declaration means prerequisites are not required; a declared but unusable resolver is a blocker.
+_Avoid_: Universal workflow config, generic database runner, free-form fallback guess
+
+**Prerequisite resolver adoption**:
+The explicit, one-time `setup-pre-execute-issue` change that atomically adds or updates the minimum repository instructions, policy, resolver implementation, and test fixture needed for a consumer repository to declare a **Prerequisite resolver**. It performs only safe repository-local validation and never executes SQL, mutates a database, changes an Issue, or becomes a runtime router. If no concrete manual prerequisite exists, setup is unnecessary and the repository remains unchanged. If the complete resolver contract cannot be validated, no active declaration or placeholder adoption is left behind.
+_Avoid_: `ask-ron`, automatic setup, runtime prerequisite execution, generic resolver framework
+
+**Prerequisite artifact**:
+An Issue-owned repository artifact explicitly required to prepare a **Repository prerequisite** before the related **Manual prerequisite action**. It may begin the Issue candidate identity chain only when it can be prepared without crossing into the remaining product implementation and passes repository-defined static validation.
+_Avoid_: External-action evidence, full Issue implementation, generated scratch output
+
+**Manual prerequisite action**:
+An external mutation that the repository requires a human to perform after preparation and before prerequisite readiness can be verified. The Issue workflow may pause for and verify its evidence but never performs the action itself.
+_Avoid_: Agent-applied prerequisite, implementation step
+
+**Prerequisite target verification**:
+The single repository-defined read-only check that proves the declared outcome of a **Manual prerequisite action** on its non-sensitive target identity. Human attestation may trigger the check but cannot grant readiness by itself.
+_Avoid_: SQL replay, polling loop, full integration suite
+
+**Prerequisite receipt**:
+A minimal append-only `WAITING_MANUAL` or `READY` tracker record proving the current state of one Issue's **Repository prerequisite** against its **Protected prerequisite identity**. It is read back once when written, authorizes only prerequisite handoff, and becomes invalid when protected evidence drifts.
+_Avoid_: Execution completion note, Issue integration receipt, production credential
+
+**Protected prerequisite identity**:
+The exact Issue, prerequisite commit, artifact paths and hashes, resolver or policy identity, and non-sensitive manual target identity protected by a `READY` **Prerequisite receipt**. Later candidate commits are allowed while the prerequisite commit remains an ancestor and every protected value still matches.
+_Avoid_: Entire candidate HEAD, implementation commit, database credential
+
 **Executable Issue**:
 An open **Issue** that is one dependency-ready execution unit with numbered **Acceptance Criteria**, one embedded **Implementation Plan**, a valid **Planning Seal**, and the target identity needed by `execute-issue`. A **Single-Issue Spec** is executable itself; `/to-tickets` produces executable child Issues for a **Multi-Issue Spec**.
 _Avoid_: Parent Multi-Issue Spec, implementation prompt, ready label alone
+
+**Issue decomposition**:
+The stable mapping from one **Multi-Issue Spec** to its exact child **Executable Issues**, blocking edges, and current dependency-ready frontier. Repeated publication reconciles the same mapping instead of creating another set of children.
+_Avoid_: One-shot ticket split, duplicate child publication
+
+**Decomposition key**:
+The immutable child-owned `<Spec-ID>/<NN>` identity of one **Executable Issue** within an **Issue decomposition**. It lets `/to-tickets` reconcile the same child across retries and trackers; execution still uses the tracker Issue ID.
+_Avoid_: Tracker Issue ID, Issue title, execution command
+
+**Decomposition publication record**:
+The minimal versioned parent record written and read back only after one **Issue decomposition** is fully published. It binds the parent, Planning Seal, target, exact **Decomposition key** to Issue mapping, and blocking edges so parent closeout can prove completeness without making the record a child identity authority.
+_Avoid_: Child identity source, mutable implementation plan, push-ready receipt
+
+**External blocker**:
+An existing readable **Issue** outside one **Issue decomposition** whose open state prevents a child from entering the dependency-ready frontier. `/to-tickets` verifies the reference but never creates, edits, or closes that Issue.
+_Avoid_: Sibling blocker, guessed dependency, cross-Spec mutation
 
 **Necessary discovery**:
 An unplanned caller, test, configuration, migration companion, generated file, or similar dependency proved necessary to complete an existing plan step and unchanged **Acceptance Criterion**. `execute-issue` includes it automatically, and the candidate diff remains the path evidence.
@@ -97,6 +165,10 @@ _Avoid_: Necessary discovery, scope change, silent redesign
 **Scope change**:
 A discovery that changes behavior, **Acceptance Criteria**, target, exclusions, independently deliverable outcomes, or ownership. Execution stops and returns to `/to-spec` or `/to-tickets` instead of treating it as implementation freedom.
 _Avoid_: Material plan deviation, necessary dependency, review repair
+
+**Late prerequisite discovery**:
+Source evidence found after Entry that contradicts an earlier `NOT_REQUIRED` prerequisite result. It pauses execution for the same-worktree prerequisite flow when scope and schema outcome remain unchanged, or becomes a **Scope change** when they do not.
+_Avoid_: Silent migration, automatic pre-execution, schema-dependent verification
 
 **Tracker Spec**:
 A Spec published by `/to-spec` into the configured **Issue tracker**, including a tracker implemented as local `.scratch/` files. It participates in **Delivery routing**, Planning Seal, execution, and closeout regardless of storage medium.
@@ -229,6 +301,9 @@ _Avoid_: Reviewer opinion, Wiki finding, majority vote
 **Material repair wave**:
 One bounded pass in which the single writable owner addresses confirmed Standards or Spec findings inside the unchanged Issue scope, verifies the repair, and produces a new candidate. One `execute-issue` invocation permits at most ten waves; only an explicit later invocation starts a new limit, and no durable counter is maintained.
 
+**Prerequisite artifact repair wave**:
+One bounded pass in which `pre-execute-issue` repairs confirmed repository-defined syntax or static-validation failures inside the declared **Prerequisite artifact** and reruns the affected check. One invocation permits at most five waves; initial generation, retries without an artifact edit, and tool failures do not count.
+
 **Local checkpoint commit**:
 An Issue-owned local commit made after one coherent vertical slice or review repair passes its relevant verification. Push, target integration, deployment, and unrelated paths remain excluded during `execute-issue`.
 
@@ -242,34 +317,75 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **Decision ticket** is an **Issue** (a child of a `wayfinder:map`)
 - **Ron removal** deletes only the exact **Ron repository footprint** and leaves historical or active delivery objects intact
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
+- `pre-execute-issue` creates or reuses the **Issue worktree** only after `discover` returns `REQUIRED`; `NOT_REQUIRED` and discovery-time `BLOCKED` create no worktree
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/execute-issue <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`
+- After a Tracker Spec or child Issue is written, the human may invoke `pre-execute-issue` for **Prerequisite inspection** without making it a mandatory delivery stage
+- Authoritative `discover` runs only after the exact Tracker Spec or child Issue is fully published and before worktree creation or product implementation; planning may note a risk but never supplies a second prerequisite verdict
+- Repository instructions are the discovery seam for a **Prerequisite resolver**; generic skills neither require a universal workflow config nor guess a missing declared adapter
+- `setup-pre-execute-issue` owns **Prerequisite resolver adoption** only when explicitly invoked; existing repositories do not rerun `ask-matt`, and no parallel `ask-ron` router is introduced
+- **Prerequisite resolver adoption** is atomic: an incomplete `discover`/`prepare`/`verify` contract leaves no active repository declaration, placeholder resolver, or TODO adoption state
+- A repository without a concrete manual prerequisite performs no **Prerequisite resolver adoption** and follows the ordinary `execute-issue` route with an undeclared resolver yielding `NOT_REQUIRED`
+- A **Prerequisite resolver** exposes one repository-owned command with `discover`, `prepare`, and `verify` operations; `pre-execute-issue` and `execute-issue` share the same read-only `discover`, while only `pre-execute-issue` may use the other operations
+- `prepare` may write and repair only the declared **Prerequisite artifact**, and cannot produce `WAITING_MANUAL` until repository-defined syntax and static validation pass
 - `/to-spec` classifies automatically from Spec and source evidence; only material ambiguity that can change **Delivery routing** permits one blocking question with a recommendation, and uncertainty never defaults to either Single-Issue or Multi-Issue
 - `ask-matt`, `/to-tickets`, and `execute-issue` consume **Delivery routing** without duplicating or overriding its classification criteria
 - `/implement` accepts an explicitly selected **Standalone Spec** for direct-branch work, while every **Tracker Spec**, including a local-file tracker record, follows `/to-spec`-owned **Delivery routing**
 - A **Single-Issue Spec** owns one embedded **Implementation Plan** in the same tracker record; no separate plan artifact or comment carries execution authority
 - A **Multi-Issue Spec** keeps only the overall outcome, cross-Issue constraints, and decomposition rationale; `/to-tickets` gives each child **Executable Issue** its own compact **Acceptance Criteria**, **Implementation Plan**, verification, blocking edges, and Planning baseline
+- Each child in an **Issue decomposition** owns one immutable **Decomposition key**; `/to-tickets` reconciles by that key, while `/execute-issue <Issue-ID>` resolves the parent and key from the child
+- Reconciliation creates a missing **Decomposition key**, reuses one matching child, and stops without mutation on duplicate keys or conflicting parent, target, Planning Seal, or executable contract evidence
+- One `/to-tickets <Spec-ID>` invocation automatically validates every tracker-supported identity source; matching evidence needs no per-child approval, while conflicting native relation, body, or **Decomposition key** evidence stops before repair
+- Owned blocking edges in an **Issue decomposition** are acyclic; a child may reference a verified **External blocker**, whose state gates the frontier without becoming `/to-tickets`-owned work
+- `/to-tickets` writes and reads back one **Decomposition publication record** only after every child and blocking edge matches; publication failure before that record remains recoverable through child-owned **Decomposition keys**
 - `/to-tickets` outputs `/execute-issue <Issue-ID>` only for the dependency-ready frontier and never prompts execution of blocked Issues
 - A Spec may contain at most three non-authoritative **User Outcomes**, while its numbered **Acceptance Criteria** are the only done and traceability authority
 - **Acceptance Criteria**, **Implementation Plan** steps, and verification use compact many-to-many `Covers: AC-n` references: every criterion has at least one step and verification, every step covers at least one criterion, and no separate matrix or orphan is allowed
 - Before publication, `/to-spec` compares the criterion IDs with the IDs covered by plan steps and verification and stops on any missing ID or uncovered step; this is a prompt-level invariant backed by contract tests, not a separate parser or matrix artifact
 - `execute-issue` applies **Necessary discovery** automatically without duplicating the candidate's path list in tracker evidence, records only **Material plan deviations**, and returns every **Scope change** to planning
+- A **Late prerequisite discovery** preserves coherent checkpoints and stops before schema-dependent verification; unchanged scope routes to user-invoked `pre-execute-issue`, while changed schema outcome or acceptance returns to planning
 - A one-outcome Spec that cannot fit one execution and review cycle is still a **Multi-Issue Spec**; `/to-tickets` prefers independently verifiable vertical slices and uses expand-contract when no single wide change can remain green as a vertical slice
 - `/to-tickets` reuses that seal or creates one successor for approved in-Spec planning changes; public scope expansion returns to `/to-spec`
 - `execute-issue` verifies the **Planning Seal** is an ancestor of its execution baseline and never creates or repairs the seal
+- `execute-issue` performs read-only **Prerequisite inspection** at Entry: undeclared prerequisites preserve the ordinary route, a current required receipt permits execution, and missing or stale required evidence stops with an instruction to invoke `pre-execute-issue`
+- `execute-issue` never invokes `pre-execute-issue`, prepares its artifact, or performs its **Manual prerequisite action** automatically
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
+- A required **Repository prerequisite** reaches `execute-issue` only through a current read-back **Prerequisite receipt**; absence of repository declaration preserves the ordinary route
+- A **Prerequisite receipt** records only recovery-relevant transitions in the existing Issue tracker; Issue body and repository source never become mutable environment-state stores
+- `NOT_REQUIRED`, `REQUIRED`, and `BLOCKED` are transient resolver results, never empty or failure **Prerequisite receipts**
+- `READY` binds the **Protected prerequisite identity**, not the evolving candidate `HEAD`; unrelated implementation commits do not trigger repeated manual action or verification
+- `pre-execute-issue` may prepare a **Prerequisite artifact** but stops if doing so requires the remaining product implementation
+- A validated **Prerequisite artifact** is committed alone on the Issue topic branch before `WAITING_MANUAL`; later `execute-issue` reuses that exact worktree and candidate ancestry
+- `pre-execute-issue` permits at most five **Prerequisite artifact repair waves** and never hands an invalid artifact to the human
+- A **Manual prerequisite action** remains human-owned even when prerequisite preparation and verification are agent-assisted
+- `READY` requires one successful **Prerequisite target verification**; failure or unavailable access preserves `WAITING_MANUAL`, returns transient `BLOCKED`, and creates no failure receipt
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`
-- **Manual integration serialization** permits only one integration into the same target branch at a time; other target branches may proceed concurrently
-- `close-issue` prepares one **Integration candidate** without changing the reviewed Issue candidate, fast-forwards the target, proves the **Issue integration receipt**, removes the clean registered **Issue worktree**, and closes the Issue without repairing product code
-- `/verify-target-before-push` proves all relevant closed candidates are reachable, performs aggregate review and verification on exact target `HEAD`, and writes a current **Push-ready receipt** without pushing
+- An **Execution completion note** is the sole Issue-to-commit mapping authority and binds one **Issue contribution** through exact Issue, **Execution baseline**, candidate SHA, and ancestry; commit-message text is never used as identity or fallback
+- **Issue contribution** coverage is many-to-many: every material range commit needs at least one valid explanation, but overlapping candidate ancestry never requires a unique commit owner
+- The **Workflow interface** keeps distinct human-owned authority transitions explicit; optimization deepens internal implementation rather than merging transitions only to reduce skill count or Markdown length
+- The public `close-issue` invocation accepts an Issue ID, resolves its **Issue target branch**, latest valid **Execution completion note**, unchanged candidate, and registered **Issue worktree**, requires the target worktree to be clean, then owns exactly three ordered actions: merge the candidate, remove the clean Issue worktree, and close the Issue
+- **Manual integration serialization** permits one `close-issue` writer per **Issue target branch** while any number of `execute-issue` runs continue; target movement alone never supersedes their successful execution state
+- A merge conflict is aborted and leaves the worktree and Issue open; `close-issue` writes no failure receipt and never reruns execution, while the human may explicitly start a new `execute-issue` attempt in the same branch and worktree from the latest target when resolution stays within the original Acceptance Criteria
+- A successful conflict-repair attempt publishes a new **Execution completion note** whose latest-target **Execution baseline** and candidate become current authority; ordinary target movement creates neither a new attempt nor a superseding state
+- Conflict resolution that changes behavior, Acceptance Criteria, target, exclusions, or ownership returns to `/to-spec` or `/to-tickets` instead of being treated as integration repair
+- A dirty target worktree stops the next ordered closeout action without stash, cleanup, or candidate invalidation; after the human makes it clean, retry resumes through `close-issue` rather than `execute-issue`
+- **Close progress** is derived from Git ancestry, worktree registration, and tracker state; retry skips only a satisfied ordered prefix, while missing identities, a dirty Issue worktree, or contradictory and out-of-order state stops without automatic repair
+- `close-issue` performs no aggregate review, test suite, push-readiness proof, product-code repair, queueing, or target-drift gate
+- `/close-issue <Parent-ID>` dispatches a **Multi-Issue Spec** to a parent-only path with no candidate integration; it requires the matching **Decomposition publication record**, every exact child closed, and every child candidate reachable from the same target before closing and reading back the parent
+- A missing, unreadable, stale, or conflicting **Decomposition publication record** stops parent closeout and returns to `/to-tickets <Parent-ID>` reconciliation; `close-issue` never infers completeness from visible children or grants a legacy bypass
+- Closing the final child never closes its parent implicitly, and parent closure never claims aggregate `push_ready`
+- `/verify-target-before-push` keeps one public name: by default it freezes the non-empty local unpushed range from the target's unique upstream tip to local `HEAD`, while already-pushed work requires an explicit merge request, pull request, or exact base/head comparison and never uses a guessed baseline
+- `/verify-target-before-push` derives one **Target verification set** from completion notes plus candidate reachability; a reachable member still open or a closed candidate no longer reachable stops before review, while open unreachable work remains outside the selected range
+- Every material commit in a **Target verification set** must be explained by a member **Issue contribution**, referenced Planning Seal or prerequisite, or necessary merge topology; an uncovered commit stops without guessing from commit messages
+- `/verify-target-before-push` performs aggregate Standards, every member Spec, deduplicated focused verification, and the repository full suite once on exact target `V`; local-ahead mode writes a current **Push-ready receipt**, while explicit already-pushed mode returns only a **Range verification result**
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**
 - A **Decision Explanation Packet** produces a non-authoritative **Decision Card**
 - A **Wiki validation result** combines a deterministic **Wiki validation pipeline** result with an independent **Wiki semantic review** result without merging their proof authority
 - The **Wiki control skill** resolves a root, validates and semantically reviews bounded Wiki-only edits, and commits only a clean Wiki diff
 - Issue delivery does not invoke the **Wiki control skill** or inherit its validation and review obligations
 - A **Wiki auxiliary tool** may consume the **Canonical Wiki** but never inherits Wiki mutation or review authority
-- Final execution review and the **Execution completion note** bind the unchanged reviewed Issue candidate; closeout separately binds the resulting **Integration candidate**
+- Final execution review and the **Execution completion note** bind the unchanged reviewed Issue candidate; closeout merges that exact candidate directly and proves it reachable from the **Issue target branch**
 - **Execution code review** supplies the Standards and Spec results used by `execute-issue`
 - `execute-issue` owns implementation, Standards/Spec review, and the **Material repair wave** loop for one Issue
 

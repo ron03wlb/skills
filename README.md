@@ -176,9 +176,11 @@ Skills I use daily for code work.
 
 **User-invoked**
 
-- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Tracker Spec or child Issue in a worktree, repairing Standards and Spec findings until clean.
-- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Integrate one exact reviewed candidate into its current local target, remove its worktree, and close it.
-- **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Prove one exact aggregate target contains every relevant closed candidate and is review/test clean without pushing.
+- **[setup-pre-execute-issue](./skills/engineering/setup-pre-execute-issue/SKILL.md)** — Adopt one repository-owned prerequisite resolver when a concrete manual prerequisite exists.
+- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Optionally prepare and verify one repository-declared prerequisite before Issue execution.
+- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Issue while preserving completion across recorded-target movement.
+- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Resume three idempotent actions against an Issue's recorded target, or close a verified Multi-Issue parent.
+- **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range without pushing.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
 - **[triage](./skills/engineering/triage/SKILL.md)** — Move issues through a state machine of triage roles.
@@ -187,7 +189,7 @@ Skills I use daily for code work.
 - **[wiki](./skills/engineering/wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./skills/engineering/remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
 - **[to-spec](./skills/engineering/to-spec/SKILL.md)** — Classify and publish an execution-ready Spec with a Planning Seal, mapped Acceptance Criteria, and one exact next command.
-- **[to-tickets](./skills/engineering/to-tickets/SKILL.md)** — Turn a Multi-Issue Spec into independently executable children and emit commands only for the ready frontier.
+- **[to-tickets](./skills/engineering/to-tickets/SKILL.md)** — Reconcile one Issue decomposition, publish its Decomposition publication record, and emit commands only for the ready frontier.
 - **[implement](./skills/engineering/implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./skills/engineering/wayfinder/SKILL.md)** — Plan a huge chunk of work, more than one agent session can hold, as a shared map of investigation tickets on the issue tracker — resolve them one at a time until the way to the destination is clear.
 
