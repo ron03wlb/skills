@@ -296,12 +296,14 @@ test("to-tickets reconciles one Issue decomposition before tracker mutation", ()
   const discovery = tickets.indexOf("Discover every tracker-supported identity source");
   const mutation = tickets.indexOf("Publish missing children");
   assert.equal(discovery !== -1 && mutation > discovery, true, "identity discovery must finish before publication mutation");
+  assert.match(tickets, /## 3\. Reconcile and Publish Executable Issues/u);
   assert.match(tickets, /zero matches.*create exactly one.*one matching Issue.*reuse.*more than one.*stop without mutation/isu);
   assert.match(tickets, /body.*parent.*target.*Planning Seal.*executable contract.*native parent.*blocking relation.*all.*agree/isu);
   assert.match(tickets, /conflict.*stop without mutation.*never automatically repair/isu);
   assert.match(tickets, /owned blocker graph.*acyclic.*before any mutation/isu);
   assert.match(tickets, /External blocker.*readable.*never creates, edits, closes, or assumes ownership/isu);
   assert.match(tickets, /one canonical child contract.*Local tracker.*real issue tracker.*native parent.*blocking/isu);
+  assert.match(tickets, /native relationship write or read-back failure.*bind.*exact child identity.*Decomposition key.*expected absent relationship.*failed read-back/isu);
   assert.match(tickets, /prior partial-publication state.*exact child.*key.*expected relation.*Complete.*only an absent native relationship.*conflicting relation.*stops without mutation/isu);
 });
 

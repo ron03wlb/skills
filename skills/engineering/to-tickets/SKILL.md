@@ -30,7 +30,7 @@ Before classifying the current delta on a retry, read prior partial-publication 
 
 Verify the selected full SHA, ancestry, exact owned diff, and unrelated-state preservation. If publication later fails, retain the seal and report its full SHA with the partial state; do not amend, reset, or roll it back.
 
-## 3. Reconcile and Publish executable Issues
+## 3. Reconcile and Publish Executable Issues
 
 Derive the complete expected key set, canonical child contracts, owned blocker edges, and readable External blockers from the approved parent before touching the tracker. Discover every tracker-supported identity source for every expected key and parent before any mutation. Body parent, target, Planning Seal, executable contract, native parent, and blocking relation evidence must all agree wherever the tracker supports them; titles are ignored.
 
@@ -53,7 +53,7 @@ Render one canonical child contract through the configured adapter:
 - **Local tracker:** write one file per missing child under `.scratch/<feature>/issues/`, using the Decomposition key for stable discovery and local parent/blocker references.
 - **A real issue tracker:** create one Issue per missing child and render the same body, then add every tracker-supported native parent and blocking relation. The adapter changes only local title, body wrapper or filename, and native relationship syntax; it does not fork the child semantics.
 
-Read each published Issue back once and require its Decomposition key, body, Acceptance Criteria mapping, Planning baseline, parent, blocking relations, and target to match. A mismatch is a recoverable partial publication: report created identifiers, selected Planning Seal, and exact matched or missing keys, then stop without modifying the parent or unrelated Issues.
+Read each published Issue back once and require its Decomposition key, body, Acceptance Criteria mapping, Planning baseline, parent, blocking relations, and target to match. A native relationship write or read-back failure must bind the exact child identity, Decomposition key, expected absent relationship, and failed read-back in partial-publication state. For every mismatch, report created identifiers, selected Planning Seal, and exact matched or missing keys, then stop without modifying the parent or unrelated Issues.
 
 ## 4. Publish completeness and the ready frontier
 
