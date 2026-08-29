@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -33,15 +43,21 @@ const grant = {
   runIdentity: {
     runId: "run-12",
     specId: "12",
+    approvedScopeHash: "sha256:scope-12",
     target: "features/ron",
     classification: "MULTI",
+    decompositionIdentity: "decomposition:12:01-05",
   },
   maxParallel: 3,
 };
 
 const grantFor = (classification = "SINGLE") => ({
   ...grant,
-  runIdentity: { ...grant.runIdentity, classification },
+  runIdentity: {
+    ...grant.runIdentity,
+    classification,
+    decompositionIdentity: classification === "MULTI" ? grant.runIdentity.decompositionIdentity : null,
+  },
 });
 
 const dispatchEvent = (issueId, attempt = 1, sequence = 2) => ({
@@ -59,11 +75,14 @@ const facts = (nodes) => ({
   run: {
     runId: "run-12",
     specId: "12",
+    approvedScopeHash: "sha256:scope-12",
     target: "features/ron",
     classification: "MULTI",
+    decompositionIdentity: "decomposition:12:01-05",
     reconciled: true,
     trackerAvailable: true,
     targetState: "CLEAN",
+    closeWriterRunId: null,
     parentTrackerState: "OPEN",
   },
   nodes,
@@ -109,6 +128,13 @@ test("the same normalized evidence yields the same ready frontier", () => {
     { type: "dispatch_issue", issueId: "13", attempt: 1 },
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
   ]);
+
+  const defaulted = reduceRun({
+    ...facts([node("13"), node("14"), node("15"), node("16")]),
+    journal: [{ ...grant, maxParallel: undefined }],
+  });
+  assert.equal(defaulted.run.maxParallel, 3);
+  assert.equal(defaulted.legalActions.length, 3);
 });
 
 test("node lifecycle follows task, completion, Git, worktree, and tracker evidence", () => {
@@ -117,11 +143,14 @@ test("node lifecycle follows task, completion, Git, worktree, and tracker eviden
     run: {
       runId: "run-12",
       specId: "12",
+      approvedScopeHash: "sha256:scope-12",
       target: "features/ron",
       classification: "SINGLE",
+      decompositionIdentity: null,
       reconciled: true,
       trackerAvailable: true,
       targetState: "CLEAN",
+      closeWriterRunId: null,
       parentTrackerState: "NOT_APPLICABLE",
     },
     nodes: [{ ...node("12"), ...nodeFacts }],
@@ -225,6 +254,10 @@ test("missing authority and malformed DAG facts fail closed", () => {
     [{ ...facts([node("13")]), journal: [] }, "grant_missing"],
     [facts([]), "empty_dag"],
     [{ ...facts([node("13")]), journal: [{ ...grant, maxParallel: 0 }] }, "grant_invalid"],
+    [{
+      ...facts([{ ...node("13"), taskState: "ENVIRONMENT_FAILURE" }]),
+      journal: [grant, dispatchEvent("13")],
+    }, "insufficient_evidence"],
     [facts([node("13", ["missing"])]), "unknown_blocker"],
     [facts([node("13", ["14"]), node("14", ["13"])]), "dependency_cycle"],
     [{ ...facts([node("13"), node("13")]) }, "duplicate_node"],
@@ -238,6 +271,18 @@ test("missing authority and malformed DAG facts fail closed", () => {
     assert.deepEqual(first.legalActions, []);
     assert.equal(first.diagnoses[0].reasonCode, reasonCode);
   }
+
+  const changedScope = reduceRun({
+    ...facts([node("13")]),
+    run: { ...facts([]).run, approvedScopeHash: "sha256:changed-scope" },
+  });
+  assert.equal(changedScope.diagnoses[0].reasonCode, "grant_identity_conflict");
+
+  const changedDecomposition = reduceRun({
+    ...facts([node("13")]),
+    run: { ...facts([]).run, decompositionIdentity: "decomposition:changed" },
+  });
+  assert.equal(changedDecomposition.diagnoses[0].reasonCode, "grant_identity_conflict");
 });
 
 test("impossible owning-source combinations are reducer contradictions", () => {
@@ -370,6 +415,14 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.equal(closeConflict.run.state, "BLOCKED");
   assert.equal(closeConflict.diagnoses[0].reasonCode, "close_writer_conflict");
   assert.deepEqual(closeConflict.legalActions, []);
+
+  const targetCloseConflict = reduceRun({
+    ...facts([{ ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" }]),
+    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+  });
+  assert.equal(targetCloseConflict.run.state, "BLOCKED");
+  assert.equal(targetCloseConflict.diagnoses[0].reasonCode, "close_writer_conflict");
+  assert.deepEqual(targetCloseConflict.legalActions, []);
 });
 
 test("Pause, Resume, and Stop are revisioned and idempotent with no Start control", () => {
@@ -410,7 +463,7 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   assert.equal(stop.event.revision, 2);
   const stopping = reduceRun({
     ...facts([node("13")]),
-    journal: [...pausedJournal(paused, pause), { ...stop.event, schema: "dag-run-event:v1", sequence: 4 }],
+    journal: [...pausedJournal(pause), { ...stop.event, schema: "dag-run-event:v1", sequence: 4 }],
   });
   assert.equal(stopping.run.state, "STOPPING");
   assert.deepEqual(stopping.legalActions, [{ type: "settle_stop", revision: 2 }]);
@@ -418,7 +471,7 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   const stopped = reduceRun({
     ...facts([node("13")]),
     journal: [
-      ...pausedJournal(paused, pause),
+      ...pausedJournal(pause),
       { ...stop.event, schema: "dag-run-event:v1", sequence: 4 },
       {
         schema: "dag-run-event:v1",
@@ -470,7 +523,7 @@ test("reconciliation, tracker, target, and parent gates fail closed at their own
   assert.deepEqual(parentOpen.legalActions, [{ type: "close_parent", issueId: "12" }]);
 });
 
-function pausedJournal(_status, pause) {
+function pausedJournal(pause) {
   return [
     grant,
     { ...pause.event, schema: "dag-run-event:v1", sequence: 2 },
@@ -495,7 +548,6 @@ test("the single writer appends ordered control events and atomically rebuilds d
       type: "grant.recorded",
       at: "2026-08-30T00:00:00.000Z",
       runIdentity: grant.runIdentity,
-      maxParallel: 3,
     });
     const storedDispatch = writer.append({
       type: "dispatch.recorded",
@@ -505,6 +557,7 @@ test("the single writer appends ordered control events and atomically rebuilds d
       taskRef: { threadId: "thread-13", hostId: "local" },
     });
     assert.equal(storedGrant.sequence, 1);
+    assert.equal(storedGrant.maxParallel, 3);
     assert.equal(storedDispatch.sequence, 2);
     assert.deepEqual(store.readEvents("run-12"), [storedGrant, storedDispatch]);
     assert.throws(() => writer.append({ type: "run.started", at: "2026-08-30T00:02:00.000Z" }), /event type/u);
@@ -536,6 +589,11 @@ test("the single writer appends ordered control events and atomically rebuilds d
       attempt: 3,
       taskRef: { threadId: "thread-13", hostId: "local" },
     }), /next dispatch attempt/u);
+    assert.throws(() => writer.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:02:00.000Z",
+      runIdentity: { ...grant.runIdentity, approvedScopeHash: "sha256:changed-scope" },
+    }), /preserve the Run identity/u);
     assert.throws(() => writer.append({
       type: "pause.transitioned",
       at: "2026-08-30T00:02:00.000Z",
@@ -569,6 +627,24 @@ test("the single writer appends ordered control events and atomically rebuilds d
     assert.equal(readdirSync(join(gitCommonDir, "matt-workflow-control", "runs", "run-12")).some((name) => name.includes(".tmp-")), false);
 
     writer.release();
+
+    const closeWriter = store.acquireCloseWriter({ target: "features/ron", runId: "run-12" });
+    assert.equal(store.readCloseWriter("features/ron"), "run-12");
+    assert.throws(
+      () => store.acquireCloseWriter({ target: "features/ron", runId: "another-run" }),
+      /TARGET_CLOSE_WRITER_LOCKED/u,
+    );
+    store.acquireCloseWriter({ target: "another-target", runId: "another-run" }).release();
+    closeWriter.release();
+    assert.equal(store.readCloseWriter("features/ron"), null);
+    store.acquireCloseWriter({ target: "features/ron", runId: "another-run" }).release();
+
+    const controlRoot = join(gitCommonDir, "matt-workflow-control");
+    const cleanupLock = join(controlRoot, "cleanup.lock");
+    mkdirSync(controlRoot, { recursive: true });
+    mkdirSync(cleanupLock);
+    assert.throws(() => store.acquireWriter("cleanup-race"), /CLEANUP_IN_PROGRESS/u);
+    rmdirSync(cleanupLock);
     store.acquireWriter("run-12").release();
   } finally {
     rmSync(root, { recursive: true, force: true });

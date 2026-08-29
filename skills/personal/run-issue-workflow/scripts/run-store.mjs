@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -32,9 +32,18 @@ export const RUN_EVENT_TYPES = Object.freeze([
 const allowedEventTypes = new Set(RUN_EVENT_TYPES);
 const runIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
 const controlCommands = new Set(CONTROL_COMMANDS);
+const immutableRunIdentityKeys = [
+  "runId",
+  "specId",
+  "approvedScopeHash",
+  "target",
+  "classification",
+  "decompositionIdentity",
+];
+const defaultMaxParallel = 3;
 
 const assertSafeRunId = (runId) => {
-  if (!runIdPattern.test(runId) || runId === "." || runId === "..") {
+  if (typeof runId !== "string" || !runIdPattern.test(runId) || runId === "." || runId === "..") {
     throw new TypeError("runId must be one safe path segment");
   }
 };
@@ -77,10 +86,18 @@ const validateEventDraft = (event) => {
   }
   switch (event.type) {
     case "grant.recorded":
-      for (const key of ["runId", "specId", "target", "classification"]) {
+      for (const key of ["runId", "specId", "approvedScopeHash", "target", "classification"]) {
         requireText(event.runIdentity?.[key], `grant runIdentity.${key}`);
       }
-      requirePositiveInteger(event.maxParallel, "maxParallel");
+      if (!["SINGLE", "MULTI"].includes(event.runIdentity.classification)) {
+        throw new TypeError("grant runIdentity.classification must be SINGLE or MULTI");
+      }
+      if (event.runIdentity.classification === "MULTI") {
+        requireText(event.runIdentity.decompositionIdentity, "grant runIdentity.decompositionIdentity");
+      } else if (event.runIdentity.decompositionIdentity !== null) {
+        throw new TypeError("A SINGLE Run must bind decompositionIdentity as null");
+      }
+      if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
       break;
     case "control.revised":
       requirePositiveInteger(event.revision, "control revision");
@@ -116,8 +133,7 @@ const validateEventSemantics = (events, event) => {
   if (event.type === "grant.recorded") {
     const previous = events.findLast(({ type }) => type === "grant.recorded");
     if (previous) {
-      const keys = ["runId", "specId", "target", "classification"];
-      if (keys.some((key) => previous.runIdentity[key] !== event.runIdentity[key])) {
+      if (immutableRunIdentityKeys.some((key) => previous.runIdentity[key] !== event.runIdentity[key])) {
         throw new TypeError("A renewed grant must preserve the Run identity");
       }
     }
@@ -168,6 +184,7 @@ export function createRunStore({ gitCommonDir }) {
   const runsRoot = join(controlRoot, "runs");
   const cleanupPath = join(controlRoot, "cleanup.jsonl");
   const cleanupLock = join(controlRoot, "cleanup.lock");
+  const closeWritersRoot = join(controlRoot, "close-writers");
 
   const pathsFor = (runId) => {
     assertSafeRunId(runId);
@@ -264,7 +281,6 @@ export function createRunStore({ gitCommonDir }) {
   };
 
   const applyCleanup = ({ now, runs }) => {
-    const preview = previewCleanup({ now, runs });
     mkdirSync(controlRoot, { recursive: true });
     try {
       mkdirSync(cleanupLock);
@@ -273,7 +289,9 @@ export function createRunStore({ gitCommonDir }) {
       throw error;
     }
     const removed = [];
+    let preview;
     try {
+      preview = previewCleanup({ now, runs });
       let sequence = readCleanupRecords().length;
       for (const eligible of preview.eligible) {
         const record = {
@@ -297,12 +315,21 @@ export function createRunStore({ gitCommonDir }) {
 
   const acquireWriter = (runId) => {
     const paths = pathsFor(runId);
+    if (existsSync(cleanupLock)) throw new Error("CLEANUP_IN_PROGRESS");
     mkdirSync(paths.runDir, { recursive: true });
     try {
       mkdirSync(paths.lock);
     } catch (error) {
       if (error?.code === "EEXIST") throw new Error("RUN_WRITER_LOCKED");
       throw error;
+    }
+    if (existsSync(cleanupLock) || !existsSync(paths.lock)) {
+      try {
+        rmdirSync(paths.lock);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      throw new Error("CLEANUP_IN_PROGRESS");
     }
     let active = true;
     const requireActive = () => {
@@ -319,11 +346,14 @@ export function createRunStore({ gitCommonDir }) {
         if (typeof eventDraft.at !== "string" || Number.isNaN(Date.parse(eventDraft.at))) {
           throw new TypeError("Journal events require an ISO timestamp");
         }
-        validateEventDraft(eventDraft);
+        const normalizedDraft = eventDraft.type === "grant.recorded" && eventDraft.maxParallel === undefined
+          ? { ...eventDraft, maxParallel: defaultMaxParallel }
+          : eventDraft;
+        validateEventDraft(normalizedDraft);
         const events = readEvents(runId);
-        validateEventSemantics(events, eventDraft);
+        validateEventSemantics(events, normalizedDraft);
         const event = {
-          ...eventDraft,
+          ...normalizedDraft,
           schema: EVENT_SCHEMA,
           sequence: events.length + 1,
         };
@@ -360,7 +390,68 @@ export function createRunStore({ gitCommonDir }) {
     };
   };
 
-  return { acquireWriter, readEvents, readStatus, readCleanupRecords, previewCleanup, applyCleanup };
+  const acquireCloseWriter = ({ target, runId }) => {
+    requireText(target, "close writer target");
+    assertSafeRunId(runId);
+    const targetKey = createHash("sha256").update(target).digest("hex");
+    const lock = join(closeWritersRoot, `${targetKey}.lock`);
+    const owner = join(lock, "owner");
+    mkdirSync(closeWritersRoot, { recursive: true });
+    try {
+      mkdirSync(lock);
+    } catch (error) {
+      if (error?.code === "EEXIST") throw new Error("TARGET_CLOSE_WRITER_LOCKED");
+      throw error;
+    }
+    try {
+      const descriptor = openSync(owner, "wx");
+      try {
+        writeSync(descriptor, `${runId}\n`, null, "utf8");
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+    } catch (error) {
+      rmSync(lock, { recursive: true, force: true });
+      throw error;
+    }
+    let active = true;
+    return {
+      target,
+      runId,
+      release() {
+        if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
+        unlinkSync(owner);
+        rmdirSync(lock);
+        active = false;
+      },
+    };
+  };
+
+  const readCloseWriter = (target) => {
+    requireText(target, "close writer target");
+    const targetKey = createHash("sha256").update(target).digest("hex");
+    const lock = join(closeWritersRoot, `${targetKey}.lock`);
+    if (!existsSync(lock)) return null;
+    try {
+      const runId = readFileSync(join(lock, "owner"), "utf8").trim();
+      assertSafeRunId(runId);
+      return runId;
+    } catch {
+      return "UNKNOWN";
+    }
+  };
+
+  return {
+    acquireWriter,
+    acquireCloseWriter,
+    readCloseWriter,
+    readEvents,
+    readStatus,
+    readCleanupRecords,
+    previewCleanup,
+    applyCleanup,
+  };
 }
 
 const compareRunIds = (left, right) => String(left).localeCompare(String(right), "en");

@@ -35,6 +35,7 @@ export const REASON_CODES = Object.freeze({
   evidenceContradiction: "evidence_contradiction",
   insufficientEvidence: "insufficient_evidence",
   failedDependency: "failed_dependency",
+  workerFailed: "worker_failed",
   implementationBlocked: "implementation_blocked",
   dispatchAttemptsExhausted: "dispatch_attempts_exhausted",
   environmentUnresolved: "environment_unresolved",
@@ -48,6 +49,7 @@ export const REASON_CODES = Object.freeze({
 });
 
 const compareIds = (left, right) => String(left).localeCompare(String(right), "en");
+const isText = (value) => typeof value === "string" && value.length > 0;
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
   if (node.completionState === "BLOCKED") return "BLOCKED";
@@ -93,8 +95,10 @@ const diagnosis = ({
 const publicRun = (run = {}, state, maxParallel = 3) => ({
   runId: run.runId ?? null,
   specId: run.specId ?? null,
+  approvedScopeHash: run.approvedScopeHash ?? null,
   target: run.target ?? null,
   classification: run.classification ?? null,
+  decompositionIdentity: run.decompositionIdentity ?? null,
   state,
   maxParallel,
   controlRevision: run.controlRevision ?? 0,
@@ -157,8 +161,13 @@ export function reduceRun(input) {
   if (input.nodes.length === 0) {
     return blockedResult(input, REASON_CODES.emptyDag, ["A DAG Run requires at least one executable Issue."]);
   }
-  if (!input.nodes.every((node) => typeof node.issueId === "string" && Array.isArray(node.blockers))
-    || !["SINGLE", "MULTI"].includes(input.run.classification)) {
+  if (!input.nodes.every((node) => isText(node.issueId) && Array.isArray(node.blockers)
+      && node.blockers.every(isText))
+    || !isText(input.run.runId) || !isText(input.run.specId) || !isText(input.run.approvedScopeHash)
+    || !isText(input.run.target) || !["SINGLE", "MULTI"].includes(input.run.classification)
+    || (input.run.classification === "MULTI" && !isText(input.run.decompositionIdentity))
+    || (input.run.classification === "SINGLE" && input.run.decompositionIdentity !== null)
+    || (input.run.closeWriterRunId !== null && !isText(input.run.closeWriterRunId))) {
     return blockedResult(input, REASON_CODES.invalidFactSchema, ["Run identity and node facts are malformed."]);
   }
   const grant = input.journal.findLast(({ type }) => type === "grant.recorded");
@@ -167,10 +176,13 @@ export function reduceRun(input) {
   }
   const identity = grant.runIdentity ?? {};
   if (identity.runId !== input.run.runId || identity.specId !== input.run.specId
-    || identity.target !== input.run.target || identity.classification !== input.run.classification) {
+    || identity.approvedScopeHash !== input.run.approvedScopeHash || identity.target !== input.run.target
+    || identity.classification !== input.run.classification
+    || identity.decompositionIdentity !== input.run.decompositionIdentity) {
     return blockedResult(input, REASON_CODES.grantIdentityConflict, ["The current grant does not bind the normalized Run identity."]);
   }
-  if (!Number.isInteger(grant.maxParallel) || grant.maxParallel < 1) {
+  const maxParallel = grant.maxParallel === undefined ? 3 : grant.maxParallel;
+  if (!Number.isInteger(maxParallel) || maxParallel < 1) {
     return blockedResult(input, REASON_CODES.grantInvalid, ["The Run Grant maxParallel must be a positive integer."]);
   }
   const seen = new Set();
@@ -228,7 +240,7 @@ export function reduceRun(input) {
     if (failedBlockers.length > 0) {
       state = "BLOCKED";
       failedDependencyDiagnoses.push(diagnosis({
-        reasonCode: "failed_dependency",
+        reasonCode: REASON_CODES.failedDependency,
         evidence: failedBlockers.map((blocker) => `Issue ${blocker} cannot release its blocker edge.`),
         noAutomaticTransition: "A failed dependency cannot release this node.",
         affectedNodes: [issueId],
@@ -297,7 +309,7 @@ export function reduceRun(input) {
     }
     if (state === "FAILED" && node.taskState === "FAILED") {
       return [diagnosis({
-        reasonCode: "worker_failed",
+        reasonCode: REASON_CODES.workerFailed,
         evidence: node.failure?.evidence ?? ["The worker reported a non-transient failure."],
         noAutomaticTransition: "Semantic worker failure is not retryable.",
         affectedNodes: [node.issueId],
@@ -308,19 +320,27 @@ export function reduceRun(input) {
     return [];
   });
   const derivedContradictions = normalizedNodes.flatMap((node) => {
-    const known = [
+    const stateFieldChecks = [
       [["OPEN", "CLOSED"], node.trackerState, "trackerState"],
       [["NONE", "DISPATCHED", "EXECUTING", "TRANSIENT_FAILURE", "ENVIRONMENT_FAILURE", "FAILED"], node.taskState, "taskState"],
       [["NONE", "COMPLETE", "BLOCKED"], node.completionState, "completionState"],
       [["PRESENT", "ABSENT"], node.worktreeState, "worktreeState"],
     ];
-    const unknown = known.find(([allowed, value]) => !allowed.includes(value));
-    if (unknown || typeof node.candidateReachable !== "boolean") {
-      const field = unknown?.[2] ?? "candidateReachable";
+    const invalidStateField = stateFieldChecks.find(([allowed, value]) => !allowed.includes(value));
+    if (invalidStateField || typeof node.candidateReachable !== "boolean") {
+      const field = invalidStateField?.[2] ?? "candidateReachable";
       return [{
         code: `unknown_${field}`,
         reasonCode: REASON_CODES.insufficientEvidence,
         evidence: [`Issue ${node.issueId} has unknown or invalid ${field} evidence.`],
+        affectedNodes: [node.issueId],
+      }];
+    }
+    if (node.taskState === "ENVIRONMENT_FAILURE" && !isText(node.failure?.fingerprint)) {
+      return [{
+        code: "environment_failure_without_fingerprint",
+        reasonCode: REASON_CODES.insufficientEvidence,
+        evidence: [`Issue ${node.issueId} has environment-failure evidence without a stable fingerprint.`],
         affectedNodes: [node.issueId],
       }];
     }
@@ -381,7 +401,6 @@ export function reduceRun(input) {
       allNodes: allNodeIds,
       resumePredicates: [`resolve_contradiction:${contradiction.code}`],
     }));
-  const maxParallel = grant?.maxParallel ?? 3;
   const ready = nodes.filter(({ state }) => state === "READY").map(({ issueId }) => issueId);
   const retrying = nodes.filter(({ state }) => state === "RETRYING").map(({ issueId }) => issueId);
   const active = nodes
@@ -397,12 +416,15 @@ export function reduceRun(input) {
   );
   const slots = Math.max(0, maxParallel - active.length);
   const normalActions = [];
-  if (closing.length === 0 && closeable.length > 0) {
+  const targetCloseWriterConflict = input.run.closeWriterRunId !== null
+    && input.run.closeWriterRunId !== input.run.runId;
+  if (closing.length === 0 && !targetCloseWriterConflict && closeable.length > 0) {
     normalActions.push({ type: "close_issue", issueId: closeable[0] });
   }
   const remediations = retrying.flatMap((issueId) => {
     const node = byId.get(issueId);
     if (node.taskState !== "ENVIRONMENT_FAILURE") return [];
+    if (!isText(node.failure?.fingerprint)) return [];
     return [{
       type: "remediate_environment",
       issueId,
@@ -423,13 +445,15 @@ export function reduceRun(input) {
   if (allSucceeded && input.run.classification === "MULTI" && input.run.parentTrackerState === "OPEN") {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
   }
-  const closeWriterDiagnoses = closing.length > 1
+  const closeWriterDiagnoses = closing.length > 1 || targetCloseWriterConflict
     ? [diagnosis({
       reasonCode: REASON_CODES.closeWriterConflict,
       limitationClass: "unresolved-evidence",
-      evidence: [`Multiple close writers are active for target ${input.run.target}: ${closing.join(", ")}.`],
+      evidence: targetCloseWriterConflict
+        ? [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`]
+        : [`Multiple close writers are active for target ${input.run.target}: ${closing.join(", ")}.`],
       noAutomaticTransition: "Only one close writer may act on one target.",
-      affectedNodes: closing,
+      affectedNodes: targetCloseWriterConflict ? [...new Set([...closing, ...closeable])].sort(compareIds) : closing,
       allNodes: allNodeIds,
       resumePredicates: ["prove_single_close_writer"],
     })]
