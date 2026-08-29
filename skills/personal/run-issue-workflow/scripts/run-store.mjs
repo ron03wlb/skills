@@ -41,6 +41,23 @@ const immutableRunIdentityKeys = [
   "decompositionIdentity",
 ];
 const defaultMaxParallel = 3;
+const eventFields = new Map([
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel"])],
+  ["control.revised", new Set(["type", "at", "revision", "command"])],
+  ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
+  ["retry.recorded", new Set(["type", "at", "issueId", "attempt", "reason"])],
+  ["remediation.recorded", new Set(["type", "at", "issueId", "fingerprint", "cycle", "adapter"])],
+  ["pause.transitioned", new Set(["type", "at", "revision"])],
+  ["stop.transitioned", new Set(["type", "at", "revision"])],
+]);
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+const assertExactFields = (value, allowed, label) => {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
+};
 
 const assertSafeRunId = (runId) => {
   if (typeof runId !== "string" || !runIdPattern.test(runId) || runId === "." || runId === "..") {
@@ -60,10 +77,20 @@ const assertNoToken = (value, seen = new WeakSet()) => {
   }
 };
 
+const writeAll = (descriptor, text) => {
+  const content = Buffer.from(text, "utf8");
+  let offset = 0;
+  while (offset < content.length) {
+    const written = writeSync(descriptor, content, offset, content.length - offset, null);
+    if (written <= 0) throw new Error("Unable to complete durable write");
+    offset += written;
+  }
+};
+
 const durableAppend = (path, text) => {
   const descriptor = openSync(path, "a");
   try {
-    writeSync(descriptor, text, null, "utf8");
+    writeAll(descriptor, text);
     fsyncSync(descriptor);
   } finally {
     closeSync(descriptor);
@@ -81,11 +108,19 @@ const requireText = (value, label) => {
 };
 
 const validateEventDraft = (event) => {
+  if (!isRecord(event)) throw new TypeError("Journal event must be an object");
   if (Object.hasOwn(event, "schema") || Object.hasOwn(event, "sequence")) {
     throw new TypeError("Journal schema and sequence are store-owned");
   }
+  const allowedFields = eventFields.get(event.type);
+  if (!allowedFields) throw new TypeError(`Unsupported event type: ${event.type}`);
+  assertExactFields(event, allowedFields, `${event.type} event`);
+  if (typeof event.at !== "string" || Number.isNaN(Date.parse(event.at))) {
+    throw new TypeError("Journal events require an ISO timestamp");
+  }
   switch (event.type) {
     case "grant.recorded":
+      assertExactFields(event.runIdentity, new Set(immutableRunIdentityKeys), "grant runIdentity");
       for (const key of ["runId", "specId", "approvedScopeHash", "target", "classification"]) {
         requireText(event.runIdentity?.[key], `grant runIdentity.${key}`);
       }
@@ -104,6 +139,7 @@ const validateEventDraft = (event) => {
       if (!controlCommands.has(event.command)) throw new TypeError("Unsupported control command");
       break;
     case "dispatch.recorded":
+      assertExactFields(event.taskRef, new Set(["threadId", "hostId"]), "dispatch taskRef");
       requireText(event.issueId, "dispatch issueId");
       requirePositiveInteger(event.attempt, "dispatch attempt", 3);
       requireText(event.taskRef?.threadId, "dispatch taskRef.threadId");
@@ -136,12 +172,19 @@ const validateEventSemantics = (events, event) => {
       if (immutableRunIdentityKeys.some((key) => previous.runIdentity[key] !== event.runIdentity[key])) {
         throw new TypeError("A renewed grant must preserve the Run identity");
       }
+      if ((previous.maxParallel ?? defaultMaxParallel) !== (event.maxParallel ?? defaultMaxParallel)) {
+        throw new TypeError("A renewed grant must preserve maxParallel until a revisioned setting exists");
+      }
     }
   }
   if (event.type === "control.revised") {
-    const previousRevision = events.findLast(({ type }) => type === "control.revised")?.revision ?? 0;
+    const previousControl = events.findLast(({ type }) => type === "control.revised");
+    const previousRevision = previousControl?.revision ?? 0;
     if (event.revision !== previousRevision + 1) {
       throw new TypeError(`Expected next control revision ${previousRevision + 1}`);
+    }
+    if (previousControl?.command === event.command) {
+      throw new TypeError(`Repeated ${event.command} control is idempotent and must not create a revision`);
     }
   }
   if (event.type === "dispatch.recorded") {
@@ -205,7 +248,8 @@ export function createRunStore({ gitCommonDir }) {
     for (const [index, line] of lines.entries()) {
       const event = JSON.parse(line);
       assertNoToken(event);
-      if (event.schema !== EVENT_SCHEMA || event.sequence !== index + 1 || !allowedEventTypes.has(event.type)) {
+      if (!isRecord(event) || event.schema !== EVENT_SCHEMA || event.sequence !== index + 1
+        || !allowedEventTypes.has(event.type)) {
         throw new Error(`Invalid journal event at sequence ${index + 1}`);
       }
       const { schema: _schema, sequence: _sequence, ...draft } = event;
@@ -243,6 +287,15 @@ export function createRunStore({ gitCommonDir }) {
     const evaluatedAt = Date.parse(now);
     if (!Number.isFinite(evaluatedAt) || !Array.isArray(runs)) {
       throw new TypeError("Cleanup preview requires an ISO time and normalized Run evidence");
+    }
+    const seenRunIds = new Set();
+    for (const run of runs) {
+      if (!isRecord(run)) throw new TypeError("Cleanup evidence entries must be objects");
+      assertSafeRunId(run.runId);
+      if (seenRunIds.has(run.runId)) {
+        throw new TypeError(`Cleanup evidence contains duplicate runId ${run.runId}`);
+      }
+      seenRunIds.add(run.runId);
     }
     const knownRuns = [...runs].sort((left, right) => compareRunIds(left.runId, right.runId));
     const terminal = knownRuns
@@ -343,9 +396,6 @@ export function createRunStore({ gitCommonDir }) {
         if (!allowedEventTypes.has(eventDraft.type)) {
           throw new TypeError(`Unsupported event type: ${eventDraft.type}`);
         }
-        if (typeof eventDraft.at !== "string" || Number.isNaN(Date.parse(eventDraft.at))) {
-          throw new TypeError("Journal events require an ISO timestamp");
-        }
         const normalizedDraft = eventDraft.type === "grant.recorded" && eventDraft.maxParallel === undefined
           ? { ...eventDraft, maxParallel: defaultMaxParallel }
           : eventDraft;
@@ -367,14 +417,14 @@ export function createRunStore({ gitCommonDir }) {
         const projection = reduceRun({ ...currentFacts, journal: readEvents(runId) });
         assertNoToken(projection);
         const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
-        const descriptor = openSync(temporary, "wx");
         try {
-          writeSync(descriptor, `${JSON.stringify(projection, null, 2)}\n`, null, "utf8");
-          fsyncSync(descriptor);
-        } finally {
-          closeSync(descriptor);
-        }
-        try {
+          const descriptor = openSync(temporary, "wx");
+          try {
+            writeAll(descriptor, `${JSON.stringify(projection, null, 2)}\n`);
+            fsyncSync(descriptor);
+          } finally {
+            closeSync(descriptor);
+          }
           renameSync(temporary, paths.status);
         } finally {
           if (existsSync(temporary)) unlinkSync(temporary);
@@ -406,7 +456,7 @@ export function createRunStore({ gitCommonDir }) {
     try {
       const descriptor = openSync(owner, "wx");
       try {
-        writeSync(descriptor, `${runId}\n`, null, "utf8");
+        writeAll(descriptor, `${runId}\n`);
         fsyncSync(descriptor);
       } finally {
         closeSync(descriptor);

@@ -50,6 +50,7 @@ export const REASON_CODES = Object.freeze({
 
 const compareIds = (left, right) => String(left).localeCompare(String(right), "en");
 const isText = (value) => typeof value === "string" && value.length > 0;
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
   if (node.completionState === "BLOCKED") return "BLOCKED";
@@ -92,21 +93,22 @@ const diagnosis = ({
   resumePredicates,
 });
 
-const publicRun = (run = {}, state, maxParallel = 3) => ({
-  runId: run.runId ?? null,
-  specId: run.specId ?? null,
-  approvedScopeHash: run.approvedScopeHash ?? null,
-  target: run.target ?? null,
-  classification: run.classification ?? null,
-  decompositionIdentity: run.decompositionIdentity ?? null,
+const publicRun = (run, state, maxParallel = 3) => ({
+  runId: isRecord(run) ? run.runId ?? null : null,
+  specId: isRecord(run) ? run.specId ?? null : null,
+  approvedScopeHash: isRecord(run) ? run.approvedScopeHash ?? null : null,
+  target: isRecord(run) ? run.target ?? null : null,
+  classification: isRecord(run) ? run.classification ?? null : null,
+  decompositionIdentity: isRecord(run) ? run.decompositionIdentity ?? null : null,
   state,
   maxParallel,
-  controlRevision: run.controlRevision ?? 0,
+  controlRevision: isRecord(run) ? run.controlRevision ?? 0 : 0,
+  controlCommand: isRecord(run) ? run.controlCommand ?? null : null,
 });
 
 const blockedResult = (input, reasonCode, evidence, affectedNodes = []) => {
   const allNodes = Array.isArray(input?.nodes)
-    ? [...new Set(input.nodes.map(({ issueId }) => issueId).filter(Boolean))].sort(compareIds)
+    ? [...new Set(input.nodes.filter(isRecord).map(({ issueId }) => issueId).filter(isText))].sort(compareIds)
     : [];
   const affected = affectedNodes.length > 0 ? [...affectedNodes].sort(compareIds) : allNodes;
   return {
@@ -154,15 +156,21 @@ const findDependencyCycle = (nodes) => {
 };
 
 export function reduceRun(input) {
-  if (input?.schema !== FACT_SCHEMA || !input.run || !Array.isArray(input.nodes)
+  if (input?.schema !== FACT_SCHEMA || !isRecord(input.run) || !Array.isArray(input.nodes)
     || !Array.isArray(input.contradictions) || !Array.isArray(input.journal)) {
     return blockedResult(input, REASON_CODES.invalidFactSchema, ["Expected dag-run-facts:v1 normalized input."]);
   }
   if (input.nodes.length === 0) {
     return blockedResult(input, REASON_CODES.emptyDag, ["A DAG Run requires at least one executable Issue."]);
   }
-  if (!input.nodes.every((node) => isText(node.issueId) && Array.isArray(node.blockers)
+  if (!input.nodes.every((node) => isRecord(node) && isText(node.issueId) && Array.isArray(node.blockers)
       && node.blockers.every(isText))
+    || !input.contradictions.every((contradiction) => isRecord(contradiction)
+      && isText(contradiction.code) && Array.isArray(contradiction.evidence)
+      && contradiction.evidence.every(isText) && Array.isArray(contradiction.affectedNodes)
+      && contradiction.affectedNodes.every(isText)
+      && (contradiction.reasonCode === undefined || isText(contradiction.reasonCode)))
+    || !input.journal.every((event) => isRecord(event) && isText(event.type))
     || !isText(input.run.runId) || !isText(input.run.specId) || !isText(input.run.approvedScopeHash)
     || !isText(input.run.target) || !["SINGLE", "MULTI"].includes(input.run.classification)
     || (input.run.classification === "MULTI" && !isText(input.run.decompositionIdentity))
@@ -407,9 +415,8 @@ export function reduceRun(input) {
     .filter(({ state }) => ["DISPATCHED", "EXECUTING"].includes(state))
     .map(({ issueId }) => issueId);
   const closeable = nodes
-    .filter(({ state }) => state === "IMPLEMENTATION_COMPLETE")
+    .filter(({ state }) => ["IMPLEMENTATION_COMPLETE", "CLOSING"].includes(state))
     .map(({ issueId }) => issueId);
-  const closing = nodes.filter(({ state }) => state === "CLOSING").map(({ issueId }) => issueId);
   const allSucceeded = nodes.length > 0 && nodes.every(({ state }) => state === "SUCCEEDED");
   const deliverySucceeded = allSucceeded && (
     input.run.classification === "SINGLE" || input.run.parentTrackerState === "CLOSED"
@@ -418,7 +425,9 @@ export function reduceRun(input) {
   const normalActions = [];
   const targetCloseWriterConflict = input.run.closeWriterRunId !== null
     && input.run.closeWriterRunId !== input.run.runId;
-  if (closing.length === 0 && !targetCloseWriterConflict && closeable.length > 0) {
+  const targetCloseWriterOwned = input.run.closeWriterRunId === input.run.runId;
+  const targetCloseWriterAvailable = input.run.closeWriterRunId === null;
+  if (targetCloseWriterAvailable && closeable.length > 0) {
     normalActions.push({ type: "close_issue", issueId: closeable[0] });
   }
   const remediations = retrying.flatMap((issueId) => {
@@ -442,18 +451,18 @@ export function reduceRun(input) {
     issueId,
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
   })));
-  if (allSucceeded && input.run.classification === "MULTI" && input.run.parentTrackerState === "OPEN") {
+  const needsParentClose = allSucceeded && input.run.classification === "MULTI"
+    && input.run.parentTrackerState === "OPEN";
+  if (needsParentClose && targetCloseWriterAvailable) {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
   }
-  const closeWriterDiagnoses = closing.length > 1 || targetCloseWriterConflict
+  const closeWriterDiagnoses = targetCloseWriterConflict && (closeable.length > 0 || needsParentClose)
     ? [diagnosis({
       reasonCode: REASON_CODES.closeWriterConflict,
       limitationClass: "unresolved-evidence",
-      evidence: targetCloseWriterConflict
-        ? [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`]
-        : [`Multiple close writers are active for target ${input.run.target}: ${closing.join(", ")}.`],
+      evidence: [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
       noAutomaticTransition: "Only one close writer may act on one target.",
-      affectedNodes: targetCloseWriterConflict ? [...new Set([...closing, ...closeable])].sort(compareIds) : closing,
+      affectedNodes: closeable,
       allNodes: allNodeIds,
       resumePredicates: ["prove_single_close_writer"],
     })]
@@ -501,9 +510,8 @@ export function reduceRun(input) {
     }));
   }
   const hasContradiction = contradictionDiagnoses.length > 0
-    || closeWriterDiagnoses.length > 0
     || globalGateDiagnoses.length > 0;
-  const hasActiveWork = active.length > 0 || closing.length === 1;
+  const hasActiveWork = active.length > 0 || targetCloseWriterOwned;
   const noProgress = !deliverySucceeded && !hasContradiction && normalActions.length === 0 && !hasActiveWork;
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
@@ -523,11 +531,12 @@ export function reduceRun(input) {
   let legalActions = state === "RECONCILING" ? [{ type: "reconcile_run" }] : normalActions;
   const controlDiagnoses = [];
   if (!deliverySucceeded && latestControl?.command === "PAUSE") {
-    state = hasPauseTransition ? "PAUSED" : "PAUSING";
+    const pauseSettled = hasPauseTransition && !hasActiveWork;
+    state = pauseSettled ? "PAUSED" : "PAUSING";
     legalActions = !hasPauseTransition && !hasActiveWork
       ? [{ type: "settle_pause", revision: controlRevision }]
       : [];
-    if (hasPauseTransition) {
+    if (pauseSettled) {
       controlDiagnoses.push(diagnosis({
         reasonCode: REASON_CODES.pausedByUser,
         evidence: [`Pause revision ${controlRevision} is settled.`],
@@ -539,11 +548,12 @@ export function reduceRun(input) {
     }
   }
   if (!deliverySucceeded && latestControl?.command === "STOP") {
-    state = hasStopTransition ? "STOPPED" : "STOPPING";
+    const stopSettled = hasStopTransition && !hasActiveWork;
+    state = stopSettled ? "STOPPED" : "STOPPING";
     legalActions = !hasStopTransition && !hasActiveWork
       ? [{ type: "settle_stop", revision: controlRevision }]
       : [];
-    if (hasStopTransition) {
+    if (stopSettled) {
       controlDiagnoses.push(diagnosis({
         reasonCode: REASON_CODES.stoppedByUser,
         evidence: [`Stop revision ${controlRevision} is settled.`],
@@ -572,6 +582,7 @@ export function reduceRun(input) {
     run: {
       ...publicRun(input.run, state, maxParallel),
       controlRevision,
+      controlCommand: latestControl?.command ?? null,
     },
     nodes,
     frontier: {
@@ -601,6 +612,14 @@ export function planControl(status, command, at) {
       event: null,
       revision: status.run.controlRevision,
       reason: "unsupported_control",
+    };
+  }
+  if (status.run.controlCommand === command) {
+    return {
+      accepted: true,
+      changed: false,
+      event: null,
+      revision: status.run.controlRevision,
     };
   }
   const idempotentStates = {

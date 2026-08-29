@@ -254,6 +254,8 @@ test("missing authority and malformed DAG facts fail closed", () => {
     [{ ...facts([node("13")]), journal: [] }, "grant_missing"],
     [facts([]), "empty_dag"],
     [{ ...facts([node("13")]), journal: [{ ...grant, maxParallel: 0 }] }, "grant_invalid"],
+    [{ ...facts([node("13")]), nodes: [null] }, "invalid_fact_schema"],
+    [{ ...facts([node("13")]), contradictions: [{}] }, "invalid_fact_schema"],
     [{
       ...facts([{ ...node("13"), taskState: "ENVIRONMENT_FAILURE" }]),
       journal: [grant, dispatchEvent("13")],
@@ -349,11 +351,12 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
   ]);
 
-  const activeCloseDoesNotConsumeExecution = reduceRun(facts([
+  const partialCloseDoesNotConsumeExecution = reduceRun(facts([
     { ...node("13"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" },
     node("14"),
   ]));
-  assert.deepEqual(activeCloseDoesNotConsumeExecution.legalActions, [
+  assert.deepEqual(partialCloseDoesNotConsumeExecution.legalActions, [
+    { type: "close_issue", issueId: "13" },
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
   ]);
 
@@ -408,13 +411,21 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.equal(unresolved.nodes[0].state, "FAILED");
   assert.equal(unresolved.diagnoses[0].reasonCode, "environment_unresolved");
 
-  const closeConflict = reduceRun(facts([
+  const partialCloseouts = reduceRun(facts([
     { ...node("13"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" },
     { ...node("14"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" },
   ]));
-  assert.equal(closeConflict.run.state, "BLOCKED");
-  assert.equal(closeConflict.diagnoses[0].reasonCode, "close_writer_conflict");
-  assert.deepEqual(closeConflict.legalActions, []);
+  assert.equal(partialCloseouts.run.state, "RUNNING");
+  assert.deepEqual(partialCloseouts.legalActions, [{ type: "close_issue", issueId: "13" }]);
+
+  const resumedCloseout = reduceRun(facts([{
+    ...node("13"),
+    completionState: "COMPLETE",
+    candidateReachable: true,
+    worktreeState: "ABSENT",
+  }]));
+  assert.equal(resumedCloseout.nodes[0].state, "CLOSING");
+  assert.deepEqual(resumedCloseout.legalActions, [{ type: "close_issue", issueId: "13" }]);
 
   const targetCloseConflict = reduceRun({
     ...facts([{ ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" }]),
@@ -423,6 +434,25 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.equal(targetCloseConflict.run.state, "BLOCKED");
   assert.equal(targetCloseConflict.diagnoses[0].reasonCode, "close_writer_conflict");
   assert.deepEqual(targetCloseConflict.legalActions, []);
+
+  const serializedCloseWithIndependentExecution = reduceRun({
+    ...facts([
+      { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+      node("14"),
+    ]),
+    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+  });
+  assert.equal(serializedCloseWithIndependentExecution.run.state, "RUNNING");
+  assert.deepEqual(serializedCloseWithIndependentExecution.legalActions, [
+    { type: "dispatch_issue", issueId: "14", attempt: 1 },
+  ]);
+
+  const unrelatedExecution = reduceRun({
+    ...facts([node("13")]),
+    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+  });
+  assert.equal(unrelatedExecution.run.state, "RUNNING");
+  assert.deepEqual(unrelatedExecution.legalActions, [{ type: "dispatch_issue", issueId: "13", attempt: 1 }]);
 });
 
 test("Pause, Resume, and Stop are revisioned and idempotent with no Start control", () => {
@@ -459,6 +489,24 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   assert.equal(planControl(paused, "RESUME", "2026-08-30T00:03:00.000Z").event.revision, 2);
   assert.equal(planControl(paused, "START", "2026-08-30T00:03:00.000Z").accepted, false);
 
+  const prematurePause = reduceRun({
+    ...facts([{ ...node("13"), taskState: "EXECUTING" }]),
+    journal: [
+      grant,
+      dispatchEvent("13", 1, 2),
+      { ...pause.event, schema: "dag-run-event:v1", sequence: 3 },
+      {
+        schema: "dag-run-event:v1",
+        sequence: 4,
+        type: "pause.transitioned",
+        at: "2026-08-30T00:02:00.000Z",
+        revision: 1,
+      },
+    ],
+  });
+  assert.equal(prematurePause.run.state, "PAUSING");
+  assert.deepEqual(prematurePause.frontier.active, ["13"]);
+
   const stop = planControl(paused, "STOP", "2026-08-30T00:04:00.000Z");
   assert.equal(stop.event.revision, 2);
   const stopping = reduceRun({
@@ -484,6 +532,47 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   });
   assert.equal(stopped.run.state, "STOPPED");
   assert.deepEqual(stopped.legalControls, ["REFRESH"]);
+
+  const prematureStop = reduceRun({
+    ...facts([{ ...node("13"), taskState: "EXECUTING" }]),
+    journal: [
+      grant,
+      dispatchEvent("13", 1, 2),
+      {
+        schema: "dag-run-event:v1",
+        sequence: 3,
+        type: "control.revised",
+        at: "2026-08-30T00:03:00.000Z",
+        revision: 1,
+        command: "STOP",
+      },
+      {
+        schema: "dag-run-event:v1",
+        sequence: 4,
+        type: "stop.transitioned",
+        at: "2026-08-30T00:04:00.000Z",
+        revision: 1,
+      },
+    ],
+  });
+  assert.equal(prematureStop.run.state, "STOPPING");
+  assert.deepEqual(prematureStop.frontier.active, ["13"]);
+
+  const resumedButStillBlocked = reduceRun({
+    ...facts([node("13")]),
+    run: { ...facts([]).run, targetState: "DIRTY" },
+    journal: [grant, {
+      schema: "dag-run-event:v1",
+      sequence: 2,
+      type: "control.revised",
+      at: "2026-08-30T00:06:00.000Z",
+      revision: 1,
+      command: "RESUME",
+    }],
+  });
+  const repeatedResume = planControl(resumedButStillBlocked, "RESUME", "2026-08-30T00:07:00.000Z");
+  assert.equal(repeatedResume.changed, false);
+  assert.equal(repeatedResume.revision, 1);
 });
 
 test("reconciliation, tracker, target, and parent gates fail closed at their owning seam", () => {
@@ -595,6 +684,18 @@ test("the single writer appends ordered control events and atomically rebuilds d
       runIdentity: { ...grant.runIdentity, approvedScopeHash: "sha256:changed-scope" },
     }), /preserve the Run identity/u);
     assert.throws(() => writer.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:02:00.000Z",
+      runIdentity: grant.runIdentity,
+      maxParallel: 9,
+    }), /maxParallel/u);
+    assert.throws(() => writer.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:02:00.000Z",
+      runIdentity: grant.runIdentity,
+      credential: "must-not-persist",
+    }), /unknown field/u);
+    assert.throws(() => writer.append({
       type: "pause.transitioned",
       at: "2026-08-30T00:02:00.000Z",
       revision: 1,
@@ -625,6 +726,19 @@ test("the single writer appends ordered control events and atomically rebuilds d
     writeFileSync(statusPath, "{corrupt", "utf8");
     assert.equal(writer.rebuildStatus(currentFacts).run.state, "RUNNING");
     assert.equal(readdirSync(join(gitCommonDir, "matt-workflow-control", "runs", "run-12")).some((name) => name.includes(".tmp-")), false);
+
+    writer.append({
+      type: "control.revised",
+      at: "2026-08-30T00:03:00.000Z",
+      revision: 1,
+      command: "PAUSE",
+    });
+    assert.throws(() => writer.append({
+      type: "control.revised",
+      at: "2026-08-30T00:04:00.000Z",
+      revision: 2,
+      command: "PAUSE",
+    }), /idempotent/u);
 
     writer.release();
 
@@ -717,6 +831,40 @@ test("cleanup append failure preserves every eligible Run directory", () => {
     assert.equal(existsSync(join(gitCommonDir, "matt-workflow-control", "runs", "failure-10")), true);
   } finally {
     if (existsSync(cleanupPath)) chmodSync(cleanupPath, 0o666);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cleanup rejects duplicate Run evidence before destructive retention", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-cleanup-duplicate-");
+  const store = createRunStore({ gitCommonDir });
+  const runId = "duplicate-run";
+  const now = "2026-08-30T00:00:00.000Z";
+  try {
+    store.acquireWriter(runId).release();
+    const runs = [
+      {
+        runId,
+        specId: "400",
+        state: "SUCCEEDED",
+        terminalAt: "2026-06-01T00:00:00.000Z",
+        engineLock: "RELEASED",
+        activeTasks: "ABSENT",
+      },
+      {
+        runId,
+        specId: "400",
+        state: "RUNNING",
+        terminalAt: null,
+        engineLock: "RELEASED",
+        activeTasks: "PRESENT",
+      },
+    ];
+    assert.throws(() => store.previewCleanup({ now, runs }), /duplicate runId/u);
+    assert.throws(() => store.applyCleanup({ now, runs }), /duplicate runId/u);
+    assert.equal(existsSync(join(gitCommonDir, "matt-workflow-control", "runs", runId)), true);
+    assert.deepEqual(store.readCleanupRecords(), []);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
