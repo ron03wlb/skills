@@ -400,6 +400,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Any number of Issue worktrees may execute concurrently/iu);
   assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
   assert.match(execute, /blocked state supersedes completion only when.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
+  assert.match(execute, /dirty target.*partial close.*not.*conflict-resolution rerun.*cheap read-only.*identity.*evidence.*do not run.*baseline.*focused.*final.*full suite.*review.*commit.*tracker note.*`\/close-issue <Issue-ID>`/isu);
   assert.match(execute, /explicit conflict-resolution rerun.*same topic branch.*Issue worktree.*latest target.*new attempt baseline.*merge.*baseline.*topic branch.*without rebasing or resetting.*Acceptance Criteria.*unchanged.*new candidate.*contain.*baseline.*new `implementation_complete`.*current/isu);
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
@@ -417,6 +418,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /merge conflicts.*git merge --abort.*Issue worktree registered.*Issue open/isu);
   assert.match(close, /never.*append `implementation_blocked`.*invoke `execute-issue`/isu);
   assert.match(close, /target worktree is dirty.*stop before mutation.*never stash.*commit.*clean.*reset.*move/isu);
+  assert.match(close, /dirty.*human.*preserve.*resolve.*retry.*`\/close-issue <Issue-ID>`.*never needs.*execution review.*full suite/isu);
   assert.match(close, /derive current progress.*Git ancestry.*worktree registration.*tracker state/isu);
   assert.match(close, /Before any action.*Issue.*already closed.*worktree.*registered.*contradictory.*stop/isu);
   assert.match(close, /git worktree remove/u);
@@ -430,7 +432,10 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /parent closure never claims `push_ready`/iu);
   assert.doesNotMatch(close, /closeout receipt|dirty-target-preservation|preservation\.mjs|`PREPARED`|`VERIFIED`|`FAILED`/iu);
   const closeDocs = read("docs/engineering/close-issue.md");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  assert.match(executeDocs, /target is dirty.*partial.*only checks.*identities.*evidence.*does not rerun.*baseline.*focused.*final.*full suite.*review.*commits.*tracker writes.*`\/close-issue <Issue-ID>`/isu);
   assert.match(closeDocs, /three.*merge.*remove.*close/isu);
+  assert.match(closeDocs, /dirty target.*make.*target.*clean.*retr(?:y|ies).*`\/close-issue <Issue-ID>`.*does not rerun.*execution.*full suite/isu);
   assert.doesNotMatch(closeDocs, /preservation|closeout receipt|integration receipt/iu);
   assert.match(close, /If the worktree is already absent, this action is satisfied/iu);
   const alreadyClosed = close.match(/If it is already closed,[^\n]+/u)?.[0] ?? "";

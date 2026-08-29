@@ -24,7 +24,7 @@ Any number of Issue worktrees may execute concurrently. Reach for this once per 
 
 ## Three observable actions
 
-The merge uses the latest recorded target and exact reviewed candidate. An already reachable candidate makes that action complete; otherwise Git deterministically fast-forwards when possible and creates the ordinary merge only for diverged histories. A dirty target stops before mutation, and a conflict is aborted with the worktree and Issue left open. The human may then retry close, or explicitly rerun execution in the same lane when resolution stays inside the original Acceptance Criteria.
+The merge uses the latest recorded target and exact reviewed candidate. An already reachable candidate makes that action complete; otherwise Git deterministically fast-forwards when possible and creates the ordinary merge only for diverged histories. A dirty target stops before mutation; after preserving that work, the human makes the target clean and retries `/close-issue <Issue-ID>`. This does not rerun execution or the full suite. A conflict is aborted with the worktree and Issue left open; only then may the human explicitly rerun execution in the same lane when resolution stays inside the original Acceptance Criteria.
 
 Cleanup removes only the registered clean Issue worktree after candidate reachability is proved. Tracker closure happens last and is read back. A partial run reports the remaining action without repairing product code, rerunning review, pushing, or rolling back a successful merge.
 
