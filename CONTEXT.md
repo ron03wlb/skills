@@ -62,9 +62,133 @@ _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
 _Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping
 
-**Manual integration serialization**:
-The target-scoped operating rule that a human starts only one `close-issue` merge into the same **Issue target branch** at a time. Any number of Issue executions and merges into other target branches may proceed concurrently; advancing the target does not invalidate their successful execution state. The workflow adds no queue, daemon, or lock service.
-_Avoid_: Automatic closeout chain, workflow scheduler, concurrent writers for the same target branch
+**Target integration serialization**:
+The target-scoped rule that permits only one `close-issue` writer for the same **Issue target branch** at a time, whether started directly by a human or by an authorized **DAG Run**. Issue executions and writers for other targets may proceed concurrently; advancing the target does not invalidate successful execution state.
+_Avoid_: Global execution lock, concurrent writers for the same target branch
+
+**DAG Run**:
+A bounded orchestration attempt for one **Tracker Spec** and exact **Issue target branch**. A Single-Issue Spec forms one node bound directly to the Spec; a Multi-Issue Spec uses one read-back **Decomposition publication record**, dispatches its dependency-ready frontier in parallel, serializes closeout per target, and recomputes readiness after every **DAG node success**.
+_Avoid_: Separate Single-Issue runner, background repository automation, unbounded worker pool, UI session
+
+**DAG Run Grant**:
+The explicit human authority binding one **DAG Run** to its **Tracker Spec**, **Issue target branch**, and **Decomposition publication record** when the Spec is Multi-Issue. It permits automatic Issue execution and closeout until success or a defined stop, but never grants push, deploy, external-prerequisite execution, scope expansion, or ambiguous-state repair.
+_Avoid_: Per-child close approval, push authorization, blanket repository authority
+
+**DAG node success**:
+The child state in which its reviewed candidate is reachable from the **Issue target branch**, its registered **Issue worktree** is absent, and its Issue is closed. Only this state releases its outgoing blocker edges; `implementation_complete` or `worker_done` alone does not.
+_Avoid_: Execution completion, worker completion, passing tests alone
+
+**DAG run state**:
+The run-level lifecycle value `RECONCILING`, `RUNNING`, `PAUSING`, `PAUSED`, `BLOCKED`, `STOPPING`, `STOPPED`, or `SUCCEEDED`. It describes coordinator progress and control authority without replacing any Issue's **DAG node state**.
+_Avoid_: Aggregate child status, panel status, worker status
+
+**DAG node state**:
+The Issue-level lifecycle value `PENDING`, `READY`, `DISPATCHED`, `EXECUTING`, `RETRYING`, `IMPLEMENTATION_COMPLETE`, `CLOSING`, `SUCCEEDED`, `BLOCKED`, or `FAILED`. It is reduced from blocker, dispatch, execution-note, close-progress, Git, worktree, and tracker evidence rather than inherited from the **DAG run state**.
+_Avoid_: Run state, UI badge, worker claim
+
+**DAG delivery success**:
+The terminal delivery state of one **DAG Run**: a Single-Issue Spec has **DAG node success**, or a Multi-Issue Spec has every child at **DAG node success** and its parent closed after read-back validation. It does not imply aggregate target verification, a **Push-ready receipt**, push, or deployment.
+_Avoid_: Last child closed, push ready, deployed
+
+**DAG branch isolation**:
+The failure rule that keeps a failed child and its descendants blocked while independent dependency-ready children continue in the same **DAG Run**. A dirty target, merge conflict, changed or expired authority, contract drift, or ambiguous tracker or Git evidence pauses the whole run instead of guessing or repairing state.
+_Avoid_: Fail-fast whole run, ignoring failed dependencies, inferred recovery
+
+**DAG scheduling authority**:
+The published blocker edges that alone determine which Issues are dependency-ready during a **DAG Run**. Expected path, symbol, or module overlap may be reported as a warning but never creates an inferred edge or changes execution order.
+_Avoid_: Path-overlap dependency, scheduler-invented blocker, title-based ordering
+
+**DAG retry budget**:
+The maximum of three dispatch attempts allowed for one Issue after transient worker or terminal failure inside a **DAG Run**. `implementation_blocked`, merge conflict, Scope change, authority or contract mismatch, and ambiguous evidence stop immediately and never consume or trigger an automatic retry.
+_Avoid_: Review repair wave, semantic retry, unlimited restart
+
+**DAG concurrency limit**:
+The **DAG Run Grant** value `max_parallel` limiting simultaneous Issue execution dispatches, with a default of three. Serialized `close-issue` work does not consume an execution slot and still permits only one writer per **Issue target branch**.
+_Avoid_: Worker count guess, close-writer limit, unlimited fan-out
+
+**DAG control revision**:
+A monotonic read-back record of a deliberate control-setting change made while a **DAG Run** is paused. `max_parallel` and other mutable run controls never change silently while the run is active.
+_Avoid_: Live configuration drift, UI-local setting, unrecorded override
+
+**DAG run reconciliation**:
+The re-entrant entry behavior of `/run-issue-workflow <Spec-ID>` or an unambiguous no-argument resume that rebuilds one run's current state from the Spec, any **Decomposition publication record**, tracker history, Git ancestry, registered worktrees, and Codex task evidence. It recognizes valid manual progress, resumes partial closeout, skips **DAG node success**, and selects only the current dependency-ready unfinished Issues without trusting stale worker or UI state.
+_Avoid_: Run reset, replay from the first Issue, stale task-status resume
+
+**DAG run selection**:
+The entry rule that `/run-issue-workflow <Spec-ID>` starts or resumes that exact Spec, while no-argument `/run-issue-workflow` resumes only the repository's unique non-terminal Run. Zero candidates require a Spec ID, and multiple candidates require explicit selection; the command never guesses a new Spec from the global `ready-for-agent` set.
+_Avoid_: Global queue picker, most-recent guess, title-based selection
+
+**DAG run identity**:
+The immutable tuple binding a **DAG Run** to one Spec ID and approved scope, one **Issue target branch**, one Single-Issue or Multi-Issue classification, and, for Multi-Issue, one exact **Decomposition publication record** with its child mapping and blocker edges. Any tuple change invalidates the current **DAG Run Grant** rather than mixing work across revisions.
+_Avoid_: Run title, current UI selection, latest tracker contents
+
+**DAG cooperative pause**:
+The control state that immediately prevents new Issue dispatches and new `close-issue` actions while allowing already-dispatched workers to reach a stable completion, blocked, or failed result. It never kills a worker or removes a worktree; Resume re-reads Git, tracker, grant, and DAG evidence before taking another action.
+_Avoid_: Forced cancellation, process suspension, UI-only pause
+
+**DAG graceful stop**:
+The terminal control transition that revokes the current **DAG Run Grant**, starts no new execution or closeout, and lets already-dispatched workers settle before the control engine records stopped state and closes its **DAG control bridge**. It never kills workers, removes worktrees or branches, rolls back candidates, or closes unfinished Issues; a later explicit invocation may reconcile the evidence and create a new grant.
+_Avoid_: Force abort, repository cleanup, permanent cancellation
+
+**DAG stop diagnosis**:
+The read-back explanation attached to every blocked, failed, or run-paused state, binding a stable reason code, exact evidence, attempted recovery and retry count, why no legal automatic transition remains, affected and unaffected nodes, the next owner, and the predicates required for Resume.
+_Avoid_: Free-form error log, red status alone, agent guess
+
+**Workflow limitation class**:
+The **DAG stop diagnosis** classification that distinguishes an instance blocker, control-engine defect, skill-contract gap, or unresolved evidence. It decides whether the remedy belongs to the current Issue, the control engine, the shared skills, or a human evidence decision.
+_Avoid_: Generic failure, automatic skill rewrite, UI diagnosis
+
+**Shared workflow repair isolation**:
+The rule that a `skill-contract-gap` or control-engine defect pauses the product **DAG Run** and is repaired through a separate scoped, reviewed, and verified workflow change. Product workers never edit or install their own governing skills or coordinator; after the repaired version is installed, the original Run may continue only through explicit **DAG run reconciliation**.
+_Avoid_: Self-modifying run, product-worktree skill repair, silent coordinator patch
+
+**Codex-native coordinator**:
+The active Codex task that owns DAG reduction and uses Codex-native task create, read, wait, and message capabilities to dispatch and observe the child Codex tasks explicitly authorized by one **DAG Run Grant**. It does not require Orca or a Codex App Server client in v1; re-entry reconstructs state through **DAG run reconciliation** instead of treating the coordinator task's memory as durable authority.
+_Avoid_: Orca runtime, standalone Node task client, UI task list as scheduler
+
+**Coordinator liveness boundary**:
+The v1 rule that automatic scheduling and closeout exist only while the **Codex-native coordinator** task is actively running. If that task or the Codex app execution disappears, no new Issue is dispatched or closed; already-created child Codex tasks may settle, but their evidence is adopted only by a later explicit `/run-issue-workflow <Spec-ID>` reconciliation. Independent execution after coordinator loss requires a future Codex App Server design.
+_Avoid_: Hidden daemon authority, panel-owned execution, assumed background continuation
+
+**Codex Issue lane**:
+The one-to-one binding between an executable Issue and one sidebar-visible child Codex task running in the saved project's local environment. The child invokes `execute-issue`, which alone creates or reuses the dedicated **Issue worktree** and performs every product edit, verification, and candidate commit there; the shared checkout remains read-only except for ordinary worktree registration. A transient retry reuses the same child task when reachable, and a replacement requires proof that the prior task cannot continue plus a journaled supersession link.
+_Avoid_: Codex-managed nested worktree, product edits in shared checkout, duplicate Issue task
+
+**Workflow evidence ownership**:
+The rule that each workflow fact is decided only by its owning source: tracker and decomposition evidence for scope and blockers, completion notes for Issue-to-candidate review evidence, Git and worktree state for integration and cleanup, Codex task lifecycle evidence for dispatch liveness, and the control engine for grants and controls. Cross-source contradiction pauses the run; no source wins outside its domain, and UI state owns no fact.
+_Avoid_: Global source priority, last-write-wins, panel authority
+
+**Bounded environment remediation**:
+The automatic use of one named recovery skill or adapter after an exact environment-failure fingerprint, limited to reversible process-local changes and followed by rerunning the exact failed command. It never changes persistent project or machine configuration, expands workflow authority, or converts a real build or test failure into success.
+_Avoid_: Generic auto-fix, persistent environment repair, ignored command failure
+
+**Environment remediation cycle**:
+The single fingerprint-bound **Bounded environment remediation** allowed within one Issue dispatch attempt, followed by the exact command rerun. It does not consume the **DAG retry budget**; a repeated fingerprint becomes `environment_unresolved`, while a different real failure is classified on its own evidence.
+_Avoid_: Workaround loop, hidden retry, successful wrapper means successful build
+
+**Tracker outage gate**:
+The fail-closed suspension of new dispatch and closeout when current tracker evidence cannot be read. The engine makes three health/read probes after 5, 15, and 30 seconds without consuming the **DAG retry budget**; recovery triggers full evidence reconciliation, while continued failure yields run-level `BLOCKED` with reason `tracker_unavailable`. Already-running workers may settle local work, but no candidate becomes authoritative `IMPLEMENTATION_COMPLETE` and no new close step starts without tracker read-back.
+_Avoid_: Cached tracker authority, worker retry, offline Issue close
+
+**DAG control panel**:
+The Codex browser-panel projection of one **DAG Run**'s authoritative status and named Pause, Resume, Stop, and Refresh controls. It renders DAG progress, child Codex task state, close progress, and **DAG stop diagnosis** records through the **DAG control bridge** but never starts a Run or owns workflow state, scheduling authority, or failure classification.
+_Avoid_: Workflow source of truth, scheduler, permanent sidebar
+
+**DAG control bridge**:
+The active control engine's ephemeral `127.0.0.1` HTTP interface, protected by one random per-run control token and limited to status plus named Pause, Resume, Stop, and Refresh commands. It exposes no Start authority, arbitrary shell execution, persistent database, or remote listener.
+_Avoid_: Public API, daemon database, command console
+
+**DAG run journal**:
+The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, bounded-remediation records, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
+_Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint
+
+**DAG status snapshot**:
+The atomically replaced, versioned `status.json` projection derived from one **DAG run journal** plus current authoritative evidence for the **DAG control panel**. It is disposable and rebuildable, owns no workflow fact, and never contains the per-run control token.
+_Avoid_: Resume authority, append-only audit record, UI-owned state
+
+**DAG run-state cleanup**:
+An auditable startup retention sweep that may remove eligible terminal-run journals and snapshots from `${git-common-dir}/matt-workflow-control/runs/`. A Run is eligible only when it is `SUCCEEDED` or `STOPPED`, is older than 30 days, and is outside the newest ten terminal Runs; uncertain engine-lock or active Codex task evidence makes it ineligible. Each deletion is first recorded in append-only `cleanup.jsonl`, while `--cleanup-preview` reports the same selection without deleting. It never deletes an active, pausing, paused, blocked, or stopping Run, and it never touches tracker history, branches, worktrees, candidates, or product files.
+_Avoid_: Automatic active-run deletion, repository cleanup, tracker-history retention
 
 **Workflow interface**:
 The user-visible skills and explicit handoffs that represent distinct human-owned authority transitions in the development flow. A user invokes `close-issue` with an Issue ID; `close-issue` resolves the tracker state and local identities before calling its internal module. Interface size is judged by the decisions the human must own, not by skill count or Markdown length.
@@ -314,6 +438,52 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Owned blocking edges in an **Issue decomposition** are acyclic; a child may reference a verified **External blocker**, whose state gates the frontier without becoming `/to-tickets`-owned work
 - `/to-tickets` writes and reads back one **Decomposition publication record** only after every child and blocking edge matches; publication failure before that record remains recoverable through child-owned **Decomposition keys**
 - `/to-tickets` outputs `/execute-issue <Issue-ID>` only for the dependency-ready frontier and never prompts execution of blocked Issues
+- A **DAG Run Grant** authorizes one **DAG Run** to dispatch every dependency-ready Issue, invoke `close-issue` after valid `implementation_complete`, and continue without per-Issue approval while its bound Spec, any required decomposition record, target, and scope remain unchanged
+- A Single-Issue **Tracker Spec** is a one-node **DAG Run**: the coordinator invokes `execute-issue`, validates `implementation_complete`, invokes `close-issue`, and requires **DAG node success** without a **Decomposition publication record**
+- A child releases its outgoing blocker edges only after **DAG node success**; a coordinator recomputes the dependency-ready frontier from read-back tracker and Git evidence rather than trusting worker or UI state
+- A **DAG run state** remains `RUNNING` while any unaffected legal execution or closeout can progress, even when other nodes are `BLOCKED` or `FAILED`; it becomes `BLOCKED` only when unfinished nodes remain and no legal work is active or available
+- `PAUSING`, `PAUSED`, `STOPPING`, and `STOPPED` never overwrite a node's **DAG node state**; `SUCCEEDED` at either level requires authoritative Git, worktree, and tracker read-back rather than a worker or UI declaration
+- After every child of a Multi-Issue Spec reaches **DAG node success**, the same **DAG Run Grant** authorizes the coordinator to invoke parent-only `close-issue`, validate the publication record and child reachability again, and require the parent to be closed before declaring **DAG delivery success**
+- A v1 **DAG Run** enters run-level `SUCCEEDED` at **DAG delivery success** and stops; `/verify-target-before-push`, aggregate target review and verification, **Push-ready receipt**, push, and deployment remain outside its grant and lifecycle
+- **DAG branch isolation** keeps unrelated ready branches eligible after one child fails, while that child and every descendant remain blocked
+- A target-wide dirty state, merge conflict, authority mismatch, contract drift, or ambiguous tracker or Git evidence pauses the entire **DAG Run** and requires human resolution before resumption
+- **DAG scheduling authority** comes only from published blocker edges; path, symbol, or module overlap never creates an inferred dependency or blocks an otherwise ready Issue
+- A transient worker or terminal failure may consume one **DAG retry budget** attempt and retry the same Issue, but the third failed attempt marks that node failed, blocks its descendants, and leaves unrelated ready branches eligible
+- `implementation_blocked`, merge conflict, Scope change, authority or contract mismatch, and ambiguous evidence bypass the **DAG retry budget** and enter their defined blocked or run-paused state immediately
+- A **DAG Run** dispatches ready Issues only while active execution dispatches are below its **DAG concurrency limit**; the default `max_parallel` is three
+- Changing `max_parallel` requires a paused run and a read-back **DAG control revision** before Resume; running-state UI or process-local values never alter scheduling authority
+- A **DAG cooperative pause** starts no new execution or closeout, lets current workers settle without force, and holds completed candidates until Resume revalidates all authoritative evidence
+- A **DAG graceful stop** revokes the active grant, lets current workers settle without destructive cleanup, records terminal stopped state, and requires a later explicit invocation plus **DAG run reconciliation** before work can continue
+- `/run-issue-workflow <Spec-ID>` is the exact user-facing start or resume entrypoint; every invocation performs **DAG run reconciliation** before renewing authority or taking an action
+- No-argument `/run-issue-workflow` applies **DAG run selection**: it automatically resumes one unique non-terminal Run, but zero candidates require a Spec ID and multiple candidates require explicit selection
+- After no-argument selection, reconciliation adopts valid manual completion and partial close progress, then automatically dispatches only the selected Run's remaining dependency-ready frontier
+- Invoking `/run-issue-workflow <Spec-ID>` is the sole Start authority: after a valid Single-Issue classification or Multi-Issue **Decomposition publication record** is reconciled, it opens the panel and immediately begins automatic execution without a second confirmation
+- **DAG run reconciliation** skips manually completed nodes only after proving **DAG node success**, resumes an existing valid `implementation_complete` or partial **Close progress**, and dispatches only the remaining dependency-ready frontier without duplicating Issues, workers, or execution lanes
+- **DAG run reconciliation** resumes the same run only when its **DAG run identity** is unchanged; identity drift invalidates the old grant and reports `contract_drift` without selecting a mixed frontier
+- After new planning or decomposition resolves identity drift, only another explicit `/run-issue-workflow <Spec-ID>` invocation may create the next run revision and grant
+- Every blocked, failed, or run-paused state requires a **DAG stop diagnosis**; the Codex panel renders that record but never invents, weakens, or repairs its evidence
+- A **Workflow limitation class** identifies whether progress requires instance resolution, control-engine repair, shared-skill contract change, or a human decision on unresolved evidence
+- **Shared workflow repair isolation** requires every skill-contract or control-engine repair to occur outside the affected product Run with its own scope, review, verification, and installation; the product Run resumes only through a later explicit reconciliation
+- The **Codex-native coordinator** is the v1 execution adapter for a **DAG Run**; the Run Grant's explicit child-task authority permits native Codex task creation, while Orca and Codex App Server remain outside v1
+- The **Coordinator liveness boundary** keeps the **DAG Run** automatic only while its coordinator task is active; coordinator loss is fail-closed and a later explicit invocation reconciles settled child-task evidence without duplicate dispatch
+- The **DAG control bridge** may record bounded panel commands while the coordinator is active, but it never continues scheduling or closeout after coordinator loss
+- Each executable Issue has one **Codex Issue lane**: its child task runs against the saved project while `execute-issue` owns one separate dedicated **Issue worktree**, so `close-issue` retains its existing exact merge, worktree-removal, and tracker-close sequence
+- A **Codex Issue lane** performs no product-file write in the shared checkout; replacement is legal only after the prior task is proved unable to continue and the **DAG run journal** records their supersession relationship
+- **Workflow evidence ownership** assigns scope and blocker facts to tracker/decomposition read-back, candidate and review facts to completion notes, integration and cleanup facts to Git/worktrees, dispatch liveness to Codex task lifecycle read-back, and grant or control facts to the control engine; contradiction across these domains pauses instead of choosing a winner
+- **Bounded environment remediation** is allowed only for an exact recognized fingerprint, records the selected skill and process-local action, reruns the exact failed command, and preserves the command's real result
+- One **Environment remediation cycle** is allowed per Issue dispatch attempt and exact fingerprint; it consumes no **DAG retry budget**, never repeats for the same fingerprint, and records `environment_unresolved` when the exact rerun still fails
+- A different failure after remediation is classified independently, and only a later worker or terminal restart consumes another **DAG retry budget** attempt
+- On Windows, `gradle-loopback-safe` may remediate only a `Selector.open()` probe that returns `java.io.IOException: Unable to establish loopback connection`; every other Gradle or JVM failure remains untouched and follows ordinary diagnosis
+- The **Tracker outage gate** forbids cached tracker state from authorizing dispatch, `implementation_complete`, or closeout; after three failed probes at 5, 15, and 30 seconds, the Run becomes `BLOCKED` with `tracker_unavailable`
+- While the **Tracker outage gate** is active, already-running workers may preserve local candidates and worktrees but must stop at the next tracker-dependent evidence boundary; tracker recovery causes full reconciliation before automatic progress resumes
+- Tracker health probes do not consume the **DAG retry budget**; Resume or a new `/run-issue-workflow` invocation repeats current evidence acquisition rather than trusting the earlier outage result
+- The **DAG control panel** is a replaceable projection over the control engine's versioned status interface; opening, closing, or reopening it never starts a **DAG Run**, while its explicit Pause, Resume, and Stop actions create idempotent control events and Refresh is read-only
+- The **DAG control bridge** binds only to loopback for the active run, requires its per-run token for Pause, Resume, or Stop, and offers no Start endpoint, arbitrary command execution, or durable state of its own
+- Each **DAG Run** has one **DAG run journal** under the repository's common Git directory; `/run-issue-workflow` reconstructs current state from that journal plus live tracker, Git, worktree, and Codex task evidence instead of replaying a mutable checkpoint
+- The **DAG status snapshot** is an atomic, disposable panel projection; deleting or corrupting it cannot authorize, resume, or complete a Run because the engine must rebuild it from the journal and owning evidence sources
+- **DAG run-state cleanup** runs only when `/run-issue-workflow` is explicitly invoked, retains every terminal Run from the last 30 days and at least the newest ten terminal Runs, and skips any Run whose terminal state, engine-lock release, or absence of active Codex tasks cannot be proved
+- Before deleting an eligible Run directory, **DAG run-state cleanup** appends its Run ID, Spec ID, terminal state, deletion time, and retention reason to `cleanup.jsonl`; `--cleanup-preview` performs the same proof and selection without deletion
+- **DAG run-state cleanup** never runs as a side effect of Stop, Issue closeout, repository cleanup, or panel closure
 - A Spec may contain at most three non-authoritative **User Outcomes**, while its numbered **Acceptance Criteria** are the only done and traceability authority
 - **Acceptance Criteria**, **Implementation Plan** steps, and verification use compact many-to-many `Covers: AC-n` references: every criterion has at least one step and verification, every step covers at least one criterion, and no separate matrix or orphan is allowed
 - Before publication, `/to-spec` compares the criterion IDs with the IDs covered by plan steps and verification and stops on any missing ID or uncovered step; this is a prompt-level invariant backed by contract tests, not a separate parser or matrix artifact
@@ -335,7 +505,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **Issue contribution** coverage is many-to-many: every material range commit needs at least one valid explanation, but overlapping candidate ancestry never requires a unique commit owner
 - The **Workflow interface** keeps distinct human-owned authority transitions explicit; optimization deepens internal implementation rather than merging transitions only to reduce skill count or Markdown length
 - The public `close-issue` invocation accepts an Issue ID, resolves its **Issue target branch**, latest valid **Execution completion note**, unchanged candidate, and registered **Issue worktree**, requires the target worktree to be clean, then owns exactly three ordered actions: merge the candidate, remove the clean Issue worktree, and close the Issue
-- **Manual integration serialization** permits one `close-issue` writer per **Issue target branch** while any number of `execute-issue` runs continue; target movement alone never supersedes their successful execution state
+- **Target integration serialization** permits one `close-issue` writer per **Issue target branch** while any number of `execute-issue` runs continue; target movement alone never supersedes their successful execution state
 - A merge conflict is aborted and leaves the worktree and Issue open; `close-issue` writes no failure receipt and never reruns execution, while the human may explicitly start a new `execute-issue` attempt in the same branch and worktree from the latest target when resolution stays within the original Acceptance Criteria
 - A successful conflict-repair attempt publishes a new **Execution completion note** whose latest-target **Execution baseline** and candidate become current authority; ordinary target movement creates neither a new attempt nor a superseding state
 - Conflict resolution that changes behavior, Acceptance Criteria, target, exclusions, or ownership returns to `/to-spec` or `/to-tickets` instead of being treated as integration repair
