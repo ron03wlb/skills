@@ -1,5 +1,6 @@
+import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
+
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
-const DEFAULT_MAX_PARALLEL = 3;
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
   "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
 const RUN_IDENTITY_KEYS = Object.freeze([
@@ -18,10 +19,9 @@ const requireMethod = (owner, name) => {
   if (typeof owner?.[name] !== "function") throw new TypeError(`Coordinator adapter requires ${name}()`);
 };
 
-const assertSameIdentity = (expected, actual) => {
-  const mismatch = RUN_IDENTITY_KEYS.find((key) => expected[key] !== actual?.[key]);
-  if (mismatch) throw new Error(`RUN_IDENTITY_DRIFT:${mismatch}`);
-};
+const identityMismatch = (expected, actual) => (
+  RUN_IDENTITY_KEYS.find((key) => expected?.[key] !== actual?.[key]) ?? null
+);
 
 const initialTrackerUnavailable = (request, attempts) => ({
   schema: "dag-run-status:v1",
@@ -69,6 +69,41 @@ const runSelectionRequired = (candidateCount) => ({
   }],
 });
 
+const preflightConflict = (current, { reasonCode, evidence, resumePredicates }) => {
+  const runIdentity = current?.runIdentity ?? {};
+  const allNodes = Array.isArray(current?.facts?.nodes)
+    ? current.facts.nodes.map(({ issueId }) => issueId).filter(isText)
+    : [];
+  return {
+    schema: "dag-run-status:v1",
+    run: {
+      ...runIdentity,
+      closeWriterRunId: null,
+      closeWriterState: "ABSENT",
+      state: "BLOCKED",
+      maxParallel: current?.grant?.maxParallel ?? DEFAULT_MAX_PARALLEL,
+      controlRevision: 0,
+      controlCommand: null,
+    },
+    nodes: allNodes.map((issueId) => ({ issueId, blockers: [], state: "BLOCKED" })),
+    frontier: { ready: [], active: [], closeable: [] },
+    legalActions: [],
+    legalControls: ["REFRESH"],
+    diagnoses: [{
+      reasonCode,
+      limitationClass: "contract-blocker",
+      evidence,
+      attemptedRecovery: [],
+      retryCount: 0,
+      noAutomaticTransition: "Selection and reconciled Run authority must match exactly.",
+      affectedNodes: allNodes,
+      unaffectedNodes: [],
+      nextOwner: "human",
+      resumePredicates,
+    }],
+  };
+};
+
 const diagnosedStop = (status, {
   reasonCode,
   limitationClass = "instance-blocker",
@@ -104,6 +139,30 @@ const diagnosedStop = (status, {
 };
 
 const trackerUnavailable = (request, attempts, status) => {
+  if (!status && request.runIdentity) {
+    const issueIds = Array.isArray(request.issueIds) && request.issueIds.every(isText)
+      ? [...new Set(request.issueIds)]
+      : request.runIdentity.classification === "SINGLE"
+        ? [request.runIdentity.specId]
+        : [];
+    status = {
+      schema: "dag-run-status:v1",
+      run: {
+        ...request.runIdentity,
+        closeWriterRunId: null,
+        closeWriterState: "UNKNOWN",
+        state: "BLOCKED",
+        maxParallel: request.maxParallel ?? DEFAULT_MAX_PARALLEL,
+        controlRevision: 0,
+        controlCommand: null,
+      },
+      nodes: issueIds.map((issueId) => ({ issueId, blockers: [], state: "BLOCKED" })),
+      frontier: { ready: [], active: [], closeable: [] },
+      legalActions: [],
+      legalControls: ["RESUME", "STOP", "REFRESH"],
+      diagnoses: [],
+    };
+  }
   if (!status) return initialTrackerUnavailable(request, attempts);
   const affectedNodes = status.nodes
     .filter(({ state }) => state !== "SUCCEEDED")
@@ -254,10 +313,21 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
   const closeIssue = async ({ action, current }) => {
     const taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) throw new Error("CLOSE_TASK_REFERENCE_MISSING");
-    const closeWriter = store.acquireCloseWriter({
-      target: current.runIdentity.target,
-      runId: current.runIdentity.runId,
-    });
+    let closeWriter;
+    if (current.closeWriterReclaimProof) {
+      requireMethod(store, "reclaimCloseWriter");
+      closeWriter = store.reclaimCloseWriter({
+        target: current.runIdentity.target,
+        runId: current.runIdentity.runId,
+        staleProof: current.closeWriterReclaimProof,
+      });
+    } else {
+      closeWriter = store.acquireCloseWriter({
+        target: current.runIdentity.target,
+        runId: current.runIdentity.runId,
+      });
+    }
+    let settled = false;
     try {
       const task = await tasks.read(taskRef);
       const accepted = task?.closeRequest?.state === "ACCEPTED"
@@ -270,9 +340,10 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
         );
       }
       const waited = await tasks.wait([taskRef]);
-      return waited?.coordinatorActive !== false;
+      settled = waited?.taskSettled === true;
+      return settled && waited?.coordinatorActive !== false;
     } finally {
-      closeWriter.release();
+      if (settled) closeWriter.release();
     }
   };
 
@@ -320,17 +391,40 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
       let selectedRequest = request;
       if (!isText(request.specId)) {
         requireMethod(selector, "listNonTerminalRuns");
-        const candidates = await selector.listNonTerminalRuns({ store, tasks });
+        const candidates = await selector.listNonTerminalRuns({ store, tasks, specId: null });
         if (!Array.isArray(candidates) || candidates.length !== 1) {
           return runSelectionRequired(Array.isArray(candidates) ? candidates.length : 0);
         }
-        const selectedRun = candidates[0];
+        const selectedCandidate = candidates[0];
+        const selectedRun = selectedCandidate.runIdentity ?? selectedCandidate;
         if (!RUN_IDENTITY_KEYS.every((key) => key === "decompositionIdentity"
           ? selectedRun?.[key] === null || isText(selectedRun?.[key])
           : isText(selectedRun?.[key]))) {
           return runSelectionRequired(candidates.length);
         }
-        selectedRequest = { ...request, specId: selectedRun.specId, runIdentity: selectedRun };
+        selectedRequest = {
+          ...request,
+          specId: selectedRun.specId,
+          runIdentity: selectedRun,
+          issueIds: selectedCandidate.issueIds,
+          maxParallel: selectedCandidate.maxParallel,
+        };
+      } else if (typeof selector?.listNonTerminalRuns === "function") {
+        const candidates = await selector.listNonTerminalRuns({ store, tasks, specId: request.specId });
+        if (!Array.isArray(candidates)) return runSelectionRequired(0);
+        const matching = candidates.filter((candidate) => (
+          (candidate.runIdentity ?? candidate)?.specId === request.specId
+        ));
+        if (matching.length > 1) return runSelectionRequired(matching.length);
+        if (matching.length === 1) {
+          const selectedCandidate = matching[0];
+          selectedRequest = {
+            ...request,
+            runIdentity: selectedCandidate.runIdentity ?? selectedCandidate,
+            issueIds: selectedCandidate.issueIds,
+            maxParallel: selectedCandidate.maxParallel,
+          };
+        }
       }
       let runIdentity;
       let writer;
@@ -347,14 +441,51 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             journal,
             tasks,
           });
+          if (current.runIdentity?.specId !== selectedRequest.specId) {
+            return preflightConflict(current, {
+              reasonCode: "spec_selection_conflict",
+              evidence: [
+                `Entry selected Spec ${selectedRequest.specId}; reconciliation returned Spec ${current.runIdentity?.specId ?? "unknown"}.`,
+              ],
+              resumePredicates: ["selected_and_reconciled_spec_match"],
+            });
+          }
           if (!runIdentity) {
             runIdentity = current.runIdentity;
-            if (selectedRequest.runIdentity) assertSameIdentity(selectedRequest.runIdentity, runIdentity);
-            assertSameIdentity(runIdentity, current.grant?.runIdentity);
-            writer = store.acquireWriter(runIdentity.runId);
+            const selectedMismatch = selectedRequest.runIdentity
+              ? identityMismatch(selectedRequest.runIdentity, runIdentity)
+              : null;
+            const grantMismatch = identityMismatch(runIdentity, current.grant?.runIdentity);
+            if (selectedMismatch || grantMismatch) {
+              const mismatch = selectedMismatch ?? grantMismatch;
+              return preflightConflict(current, {
+                reasonCode: "grant_identity_conflict",
+                evidence: [`Run identity differs at ${mismatch}.`],
+                resumePredicates: ["grant_and_selected_run_identity_match"],
+              });
+            }
+            if (current.writerReclaimProof) {
+              requireMethod(store, "reclaimWriter");
+              writer = store.reclaimWriter({
+                runId: runIdentity.runId,
+                staleProof: current.writerReclaimProof,
+              });
+            } else {
+              writer = store.acquireWriter(runIdentity.runId);
+            }
           } else {
-            assertSameIdentity(runIdentity, current.runIdentity);
-            assertSameIdentity(runIdentity, current.grant?.runIdentity);
+            const mismatch = identityMismatch(runIdentity, current.runIdentity)
+              ?? identityMismatch(runIdentity, current.grant?.runIdentity);
+            if (mismatch) {
+              return diagnosedStop(lastStatus, {
+                reasonCode: "grant_identity_conflict",
+                limitationClass: "contract-blocker",
+                evidence: [`Run identity changed at ${mismatch} during reconciliation.`],
+                noAutomaticTransition: "A live Run cannot change its bound authority.",
+                affectedNodes: lastStatus.nodes.map(({ issueId }) => issueId),
+                resumePredicates: ["grant_and_reconciled_run_identity_match"],
+              });
+            }
           }
           if (!grantRecorded) {
             const previousGrant = store.readEvents(runIdentity.runId)
@@ -397,13 +528,17 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             continue;
           }
 
+          let deferredStop = null;
           for (const action of lastStatus.legalActions) {
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
               if (stopped) return stopped;
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
-              if (!remediated) return environmentUnresolved(lastStatus, action);
+              if (!remediated) {
+                deferredStop ??= environmentUnresolved(lastStatus, action);
+                continue;
+              }
             } else if (action.type === "close_issue") {
               const active = await closeIssue({ action, current });
               if (!active) return lastStatus;
@@ -421,6 +556,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
           }
+          if (deferredStop) return deferredStop;
         }
       } finally {
         if (writer) writer.release();

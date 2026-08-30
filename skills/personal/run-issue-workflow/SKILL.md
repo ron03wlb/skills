@@ -32,6 +32,8 @@ Normalize those owning-source facts for `run-core.mjs`; use `run-store.mjs` to r
 
 Re-entry adopts valid manual node success, a settled task with valid completion evidence, an existing clean candidate, partial close progress, and unchanged completed nodes. It then continues from the current legal action without duplicate Codex tasks, duplicate `execute-issue`, duplicate close actions, or replay from the first node. Coordinator loss is fail-closed: no new dispatch or close occurs until a later explicit invocation reacquires every live source.
 
+Reclaim a stale engine writer only from exact reconciled `INACTIVE` owner evidence with no unaccounted active operation. Otherwise leave the writer fenced and stop.
+
 Treat an exact accepted `close-issue` follow-up proven by the Issue lane's task history as already in flight. Wait on that lane and reacquire tracker, Git, and worktree evidence; never send the same close request again from coordinator memory alone.
 
 ## Bind one Codex Issue lane
@@ -55,7 +57,7 @@ Repeat reconciliation and execute only the returned legal actions:
 - `reconcile_run`: reacquire every owning source and rebuild status. It is read-only until a valid Grant exists.
 - `dispatch_issue`: create or continue the Issue's one Codex task, then let that task invoke `execute-issue`. Journal the exact attempt and task reference.
 - `remediate_environment`: apply only the exact recognized adapter once for that Issue attempt and fingerprint, journal it, rerun the exact failed command in the same lane, and preserve its real result.
-- `close_issue`: require a valid `implementation_complete`, acquire the target close writer, send the same Issue lane a `close-issue` follow-up under the unchanged Grant, wait for it to settle, reacquire tracker/Git/worktree evidence, then release the writer.
+- `close_issue`: require a valid `implementation_complete`, acquire the target close writer, send the same Issue lane a `close-issue` follow-up under the unchanged Grant, wait for it to settle, reacquire tracker/Git/worktree evidence, then release the writer. A timeout or coordinator loss retains durable close-writer ownership; only exact reconciled stale-owner evidence may reclaim it, and release still waits for task settlement.
 - `close_parent`: after every exact child has node success, acquire the same target close writer and invoke parent-only `close-issue` in the coordinator task. Re-read parent state before declaring delivery success.
 - `settle_pause` or `settle_stop`: append only the reducer-authorized transition after active workers and the close writer have settled. These actions create no worker cancellation or cleanup authority.
 
@@ -70,6 +72,8 @@ A transient worker or task failure permits at most three dispatch attempts for t
 Before sending a same-task retry, reacquire that lane's task history. An exact accepted retry follow-up for the same Run, Issue, and next attempt is already in flight; journal the recovered retry relationship without sending the prompt again.
 
 Cached tracker data never authorizes dispatch, completion, or closeout. After an initial tracker read failure, wait and make 5, 15, and 30 second tracker probes. Those probes do not consume the Issue retry budget. Already-running workers may settle locally, but stop at the next tracker-dependent boundary. On recovery, discard the outage snapshot and perform full reconciliation. After all three probes fail, return `tracker_unavailable` with the attempted probe schedule, affected nodes, next owner, and Resume predicates.
+
+On restart, resolve any exact selector-known Run identity and node set from local authority before the first Tracker read. If that read and all probes fail, preserve the known Run and affected nodes in the diagnosis instead of returning an anonymous outage.
 
 The only recognized automatic environment adapter in v1 is the Windows Gradle case: a `Selector.open()` probe whose exact result includes `java.io.IOException: Unable to establish loopback connection` may invoke `gradle-loopback-safe` for one reversible, process-local remediation cycle. Every other Gradle, JVM, tool, or environment failure remains untouched. A repeated exact fingerprint becomes `environment_unresolved`; a different failure is classified independently.
 

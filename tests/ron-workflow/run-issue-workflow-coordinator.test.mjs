@@ -18,7 +18,8 @@ const createStoreFixture = () => {
     cwd: root,
     encoding: "utf8",
   }).trim();
-  return { root, store: createRunStore({ gitCommonDir: resolve(root, common) }) };
+  const gitCommonDir = resolve(root, common);
+  return { root, gitCommonDir, store: createRunStore({ gitCommonDir }) };
 };
 
 const identity = {
@@ -111,7 +112,7 @@ test("a Single-Issue Run creates one lane and closes only after implementation c
         trackerState.worktreeState = "ABSENT";
       }
       taskStates.set(taskRefs[0].threadId, "SETTLED");
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
 
@@ -196,7 +197,7 @@ test("a transient failure retries the same reachable Issue lane", async () => {
         trackerState.worktreeState = "ABSENT";
       }
       trackerState.taskState = "NONE";
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -284,7 +285,7 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
         trackerState.candidateReachable = true;
         trackerState.worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -437,7 +438,7 @@ test("the exact Windows Gradle loopback fingerprint gets one process-local remed
         trackerState.candidateReachable = true;
         trackerState.worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -518,7 +519,7 @@ test("re-entry adopts a settled task and partial close after coordinator loss", 
       if (!coordinatorActive) return { coordinatorActive: false };
       trackerState.trackerState = "CLOSED";
       taskState = "NONE";
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -596,7 +597,7 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
         trackerState.nodes[15].candidateReachable = true;
         trackerState.nodes[15].worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = {
@@ -891,7 +892,7 @@ test("ambiguous Codex Issue lanes fail closed with a structured diagnosis", asyn
 });
 
 test("re-entry observes an accepted close request instead of sending a duplicate", async () => {
-  const { root, store } = createStoreFixture();
+  const { root, gitCommonDir, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   const trackerState = {
     trackerState: "OPEN",
@@ -900,6 +901,7 @@ test("re-entry observes an accepted close request instead of sending a duplicate
     worktreeState: "PRESENT",
   };
   let closeRequest = null;
+  let closeWriterReclaimProof = null;
   let messageCalls = 0;
   let waitCalls = 0;
   let clockMinute = 0;
@@ -922,25 +924,48 @@ test("re-entry observes an accepted close request instead of sending a duplicate
       trackerState.trackerState = "CLOSED";
       trackerState.candidateReachable = true;
       trackerState.worktreeState = "ABSENT";
-      return { coordinatorActive: true };
+      return { coordinatorActive: true, taskSettled: true };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
-  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
-    taskRefs: { 15: taskRef },
-    run: { parentTrackerState: currentTracker.trackerState },
-    nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState: "NONE" }],
+  const reconcile = async ({ tracker: currentTracker }) => ({
+    ...reconciliation({
+      taskRefs: { 15: taskRef },
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState: "NONE" }],
+    }),
+    closeWriterReclaimProof,
   });
 
   try {
     const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
     const interrupted = await coordinator.run({ specId: "15" });
-    const resumed = await coordinator.run({ specId: "15" });
+    const closeOwner = store.readCloseWriterLock(identity.target);
+    assert.equal(closeOwner.runId, identity.runId);
+    closeWriterReclaimProof = {
+      previousCoordinatorInstanceId: closeOwner.coordinatorInstanceId,
+      previousGeneration: closeOwner.generation,
+      coordinatorState: "INACTIVE",
+      reconciled: true,
+      evidence: ["The prior coordinator stopped after the accepted close request."],
+      abandonedOperationIds: [],
+    };
+    const recoveredStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-recovered" });
+    const recovered = createCoordinator({
+      store: recoveredStore,
+      tracker,
+      tasks,
+      reconcile,
+      now,
+      sleep: async () => {},
+    });
+    const resumed = await recovered.run({ specId: "15" });
 
     assert.equal(interrupted.run.state, "RUNNING");
     assert.equal(resumed.run.state, "SUCCEEDED");
     assert.equal(messageCalls, 1);
     assert.equal(waitCalls, 2);
+    assert.equal(recoveredStore.readCloseWriterLock(identity.target), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1167,6 +1192,255 @@ test("grant renewal diagnoses max_parallel drift without replacing authority", a
     assert.equal(status.run.maxParallel, 3);
     assert.equal(status.diagnoses.at(-1).reasonCode, "grant_identity_conflict");
     assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit entry rejects a reconciled identity for another Spec before Grant mutation", async () => {
+  const { root, store } = createStoreFixture();
+  const wrongIdentity = { ...identity, runId: "run-12-wrong", specId: "12", approvedScopeHash: "sha256:spec-12" };
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden after explicit Spec mismatch`);
+    }]),
+  );
+  const reconcile = async () => reconciliation({
+    runIdentity: wrongIdentity,
+    nodes: [{
+      issueId: "12",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T19:00:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "spec_selection_conflict");
+    assert.deepEqual(store.readEvents(wrongIdentity.runId), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Grant identity drift becomes a structured authority stop", async () => {
+  const { root, store } = createStoreFixture();
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden after Grant identity drift`);
+    }]),
+  );
+  const reconcile = async () => ({
+    ...reconciliation({
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      }],
+    }),
+    grant: {
+      runIdentity: { ...identity, approvedScopeHash: "sha256:drifted" },
+      maxParallel: 3,
+    },
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T19:30:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "grant_identity_conflict");
+    assert.match(status.diagnoses.at(-1).evidence[0], /approvedScopeHash/u);
+    assert.deepEqual(store.readEvents(identity.runId), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unrecognized environment failure does not suppress an independent ready branch", async () => {
+  const { root, store } = createStoreFixture();
+  const failedTaskRef = { threadId: "thread-13", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T20:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "13", attempt: 1, taskRef: failedTaskRef });
+  seed.release();
+  const createdIssues = [];
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create({ issueId }) {
+      createdIssues.push(issueId);
+      return { threadId: `thread-${issueId}`, hostId: "local" };
+    },
+    async read() { throw new Error("no task read is needed"); },
+    async message() { throw new Error("no task message is needed"); },
+    async wait() { throw new Error("diagnosed wave returns after scheduling independent work"); },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async ({ journal }) => reconciliation({
+    runIdentity: multiIdentity,
+    taskRefs: Object.fromEntries(
+      journal.filter(({ type }) => type === "dispatch.recorded").map(({ issueId, taskRef }) => [issueId, taskRef]),
+    ),
+    nodes: [
+      {
+        issueId: "13",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "ENVIRONMENT_FAILURE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+        failure: { fingerprint: "windows:unrecognized" },
+      },
+      {
+        issueId: "14",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: journal.some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14")
+          ? "EXECUTING"
+          : "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      },
+    ],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "12" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "environment_unresolved");
+    assert.deepEqual(createdIssues, ["14"]);
+    assert.equal(
+      store.readEvents(multiIdentity.runId).some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14"),
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("restart plus immediate tracker outage preserves a selector-known Run", async () => {
+  const { root, store } = createStoreFixture();
+  let clockMinute = 0;
+  const now = () => `2026-08-30T21:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({
+    type: "dispatch.recorded",
+    at: now(),
+    issueId: "15",
+    attempt: 1,
+    taskRef: { threadId: "thread-15", hostId: "local" },
+  });
+  seed.release();
+  const selector = { async listNonTerminalRuns() { return [{ runIdentity: identity, issueIds: ["15"] }]; } };
+  const tracker = { async read() { throw new Error("tracker offline at restart"); } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden during Tracker outage`);
+    }]),
+  );
+  const reconcile = async () => { throw new Error("outage precedes reconciliation"); };
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, selector, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.run.runId, identity.runId);
+    assert.deepEqual(status.nodes.map(({ issueId }) => issueId), ["15"]);
+    assert.deepEqual(status.diagnoses[0].affectedNodes, ["15"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit re-entry reclaims an exactly proven stale engine writer", async () => {
+  const { root, gitCommonDir, store } = createStoreFixture();
+  const oldWriter = store.acquireWriter(identity.runId);
+  oldWriter.append({
+    type: "grant.recorded",
+    at: "2026-08-30T22:00:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  const owner = store.readWriterLock(identity.runId);
+  const writerReclaimProof = {
+    previousCoordinatorInstanceId: owner.coordinatorInstanceId,
+    previousGeneration: owner.generation,
+    coordinatorState: "INACTIVE",
+    reconciled: true,
+    evidence: ["The prior coordinator process is gone and no operation remains active."],
+    abandonedOperationIds: [],
+  };
+  const recoveredStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "engine-recovered" });
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is unnecessary for a terminal recovered Run`);
+    }]),
+  );
+  const reconcile = async () => ({
+    ...reconciliation({
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "CLOSED",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "ABSENT",
+      }],
+    }),
+    writerReclaimProof,
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store: recoveredStore,
+      tracker,
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T22:01:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "SUCCEEDED");
+    assert.throws(() => oldWriter.release());
+    assert.equal(recoveredStore.readWriterLock(identity.runId), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
