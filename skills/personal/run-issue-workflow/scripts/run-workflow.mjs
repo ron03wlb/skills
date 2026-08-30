@@ -22,12 +22,12 @@ export function createWorkflowRuntime({
   cleanup,
   now,
   sleep,
-  startBridge = startRunPanelBridge,
 }) {
-  for (const method of ["readEvents", "readStatus", "previewCleanup"]) requireMethod(store, method);
+  for (const method of ["readEvents", "readStatus", "previewCleanup", "applyCleanup"]) {
+    requireMethod(store, method);
+  }
   requireMethod(browser, "open");
   requireMethod(cleanup, "listRuns");
-  if (typeof startBridge !== "function") throw new TypeError("Workflow runtime requires startBridge()");
 
   let active = false;
   return {
@@ -37,13 +37,24 @@ export function createWorkflowRuntime({
       let panelState = { opened: false, closed: false, origin: null };
       const panel = {
         async open({ readStatus, appendEvent, rebuildStatus }) {
-          const submitControl = createRunPanelControl({
+          const waiters = [];
+          const applyControl = createRunPanelControl({
             readStatus,
             appendEvent,
             rebuildStatus,
             now,
           });
-          const bridge = await startBridge({ readStatus, submitControl });
+          const submitControl = async (command) => {
+            const result = await applyControl(command);
+            if (result.changed) {
+              for (const waiter of waiters.splice(0)) {
+                if (result.revision > waiter.afterRevision) waiter.resolve();
+                else waiters.push(waiter);
+              }
+            }
+            return result;
+          };
+          const bridge = await startRunPanelBridge({ readStatus, submitControl });
           panelState = { opened: true, closed: false, origin: bridge.origin };
           try {
             await browser.open(bridge.panelUrl);
@@ -53,6 +64,11 @@ export function createWorkflowRuntime({
             throw error;
           }
           return {
+            async waitForControl(afterRevision) {
+              const current = await readStatus();
+              if (current.run.controlRevision > afterRevision) return;
+              await new Promise((resolve) => waiters.push({ afterRevision, resolve }));
+            },
             async close() {
               await bridge.close();
               panelState = { ...panelState, closed: true };
@@ -73,14 +89,19 @@ export function createWorkflowRuntime({
         sleep,
       });
       try {
+        const runs = await cleanup.listRuns({ request });
+        const cleanupAt = now();
+        const cleanupPreview = store.previewCleanup({ now: cleanupAt, runs });
+        const cleanupResult = request.cleanupPreview === true
+          ? null
+          : store.applyCleanup({ now: cleanupAt, runs });
         const status = await coordinator.run(request);
         const journal = status.run.runId ? store.readEvents(status.run.runId) : [];
-        const runs = await cleanup.listRuns({ status, journal });
-        const cleanupPreview = store.previewCleanup({ now: now(), runs });
         return {
           status,
           journal,
           cleanupPreview,
+          cleanupResult,
           panel: { ...panelState },
         };
       } finally {

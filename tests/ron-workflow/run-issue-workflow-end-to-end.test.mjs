@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -16,7 +16,7 @@ const createStoreFixture = () => {
     encoding: "utf8",
   }).trim();
   const gitCommonDir = resolve(root, common);
-  return { root, store: createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-e2e" }) };
+  return { root, gitCommonDir, store: createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-e2e" }) };
 };
 
 const identity = {
@@ -36,6 +36,33 @@ const multiIdentity = {
   classification: "MULTI",
   decompositionIdentity: "decomposition:12:05",
 };
+
+const singleRunCurrent = ({
+  journal = [],
+  model,
+  targetState = "CLEAN",
+  contradictions = [],
+}) => ({
+  runIdentity: identity,
+  grant: { runIdentity: identity, maxParallel: 3 },
+  taskRefs: Object.fromEntries(journal
+    .filter(({ type }) => type === "dispatch.recorded")
+    .map(({ issueId, taskRef }) => [issueId, taskRef])),
+  facts: {
+    schema: "dag-run-facts:v1",
+    run: {
+      ...identity,
+      reconciled: true,
+      trackerAvailable: true,
+      targetState,
+      closeWriterRunId: null,
+      closeWriterState: "ABSENT",
+      parentTrackerState: "OPEN",
+    },
+    nodes: [{ issueId: "17", blockers: [], ...model }],
+    contradictions,
+  },
+});
 
 test("end-to-end Single-Issue runtime opens the panel and retains terminal inspection", async () => {
   const { root, store } = createStoreFixture();
@@ -92,27 +119,7 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
       return { coordinatorActive: true, taskSettled: true };
     },
   };
-  const reconcile = async ({ journal }) => ({
-    runIdentity: identity,
-    grant: { runIdentity: identity, maxParallel: 3 },
-    taskRefs: Object.fromEntries(journal
-      .filter(({ type }) => type === "dispatch.recorded")
-      .map(({ issueId, taskRef: ref }) => [issueId, ref])),
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...identity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "OPEN",
-      },
-      nodes: [{ issueId: "17", blockers: [], ...model }],
-      contradictions: [],
-    },
-  });
+  const reconcile = async ({ journal }) => singleRunCurrent({ journal, model });
   const browser = {
     async open(panelUrl) {
       calls.browser += 1;
@@ -127,18 +134,7 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
       }).then((statusResponse) => statusResponse.json());
     },
   };
-  const cleanup = {
-    async listRuns({ status }) {
-      return [{
-        runId: status.run.runId,
-        specId: status.run.specId,
-        state: status.run.state,
-        terminalAt: "2026-08-30T08:01:00.000Z",
-        engineLock: "RELEASED",
-        activeTasks: "ABSENT",
-      }];
-    },
-  };
+  const cleanup = { async listRuns() { return []; } };
 
   try {
     const runtime = createWorkflowRuntime({
@@ -167,7 +163,8 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
     assert.equal(result.panel.origin, openedOrigin);
     assert.equal(result.journal.filter(({ type }) => type === "dispatch.recorded").length, 1);
     assert.equal(result.cleanupPreview.schema, "dag-run-cleanup-preview:v1");
-    assert.deepEqual(result.cleanupPreview.skipped, [{ runId: identity.runId, reason: "within_30_days" }]);
+    assert.deepEqual(result.cleanupPreview.skipped, []);
+    assert.deepEqual(result.cleanupResult.removed, []);
     await assert.rejects(fetch(`${openedOrigin}/api/status`));
     assert.equal(store.readStatus(identity.runId).run.state, "SUCCEEDED");
   } finally {
@@ -179,6 +176,8 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
   const { root, store } = createStoreFixture();
   let panelOpenCount = 0;
   let priorOrigin;
+  let resumeFlow;
+  let targetState = "CLEAN";
   let second = 0;
   const now = () => `2026-08-30T09:00:${String(second++).padStart(2, "0")}.000Z`;
   const tracker = { async read() { return { issueId: "17", state: "OPEN" }; } };
@@ -189,32 +188,17 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
     async message() { throw new Error("control settlement must not message lanes"); },
     async wait() { throw new Error("control settlement has no active lane"); },
   };
-  const reconcile = async () => ({
-    runIdentity: identity,
-    grant: { runIdentity: identity, maxParallel: 3 },
-    taskRefs: {},
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...identity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "OPEN",
-      },
-      nodes: [{
-        issueId: "17",
-        blockers: [],
-        trackerState: "OPEN",
-        taskState: "NONE",
-        completionState: "NONE",
-        candidateReachable: false,
-        worktreeState: "ABSENT",
-      }],
-      contradictions: [],
-    },
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  const reconcile = async ({ journal }) => singleRunCurrent({
+    journal,
+    model,
+    targetState,
   });
   const browser = {
     async open(panelUrl) {
@@ -233,30 +217,27 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
       if (panelOpenCount === 1) {
         const paused = await submit("PAUSE");
         assert.equal(paused.status.run.state, "PAUSING");
+        resumeFlow = (async () => {
+          while (true) {
+            const current = await fetch(`${url.origin}/api/status`, { headers }).then((response) => response.json());
+            if (current.run.state === "PAUSED") break;
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+          targetState = "DIRTY";
+          const beforeRefresh = store.readEvents(identity.runId).length;
+          const refreshed = await fetch(`${url.origin}/api/status`, { headers });
+          assert.equal(refreshed.status, 200);
+          assert.equal(store.readEvents(identity.runId).length, beforeRefresh);
+          const resumed = await submit("RESUME");
+          assert.equal(resumed.status.run.state, "RUNNING");
+        })();
         return;
       }
-      const resumed = await submit("RESUME");
-      assert.equal(resumed.status.run.state, "RUNNING");
-      const beforeRefresh = store.readEvents(identity.runId).length;
-      const refreshed = await fetch(`${url.origin}/api/status`, { headers });
-      assert.equal(refreshed.status, 200);
-      assert.equal(store.readEvents(identity.runId).length, beforeRefresh);
       const stopped = await submit("STOP");
       assert.equal(stopped.status.run.state, "STOPPING");
     },
   };
-  const cleanup = {
-    async listRuns({ status }) {
-      return [{
-        runId: identity.runId,
-        specId: identity.specId,
-        state: status.run.state,
-        terminalAt: status.run.state === "STOPPED" ? "2026-08-30T09:01:00.000Z" : null,
-        engineLock: "RELEASED",
-        activeTasks: "ABSENT",
-      }];
-    },
-  };
+  const cleanup = { async listRuns() { return []; } };
 
   try {
     const runtime = createWorkflowRuntime({
@@ -269,9 +250,11 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
       now,
       sleep: async () => {},
     });
-    const paused = await runtime.run({ specId: "17" });
-    assert.equal(paused.status.run.state, "PAUSED");
-    assert.equal(paused.panel.closed, true);
+    const resumed = await runtime.run({ specId: "17" });
+    await resumeFlow;
+    assert.equal(resumed.status.run.state, "BLOCKED");
+    assert.equal(resumed.status.run.controlCommand, "RESUME");
+    assert.equal(resumed.panel.closed, true);
     await assert.rejects(fetch(`${priorOrigin}/api/status`));
 
     const stopped = await runtime.run({ specId: "17" });
@@ -287,10 +270,8 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
     ]);
     assert.equal(stopped.journal.filter(({ type }) => type === "pause.transitioned").length, 1);
     assert.equal(stopped.journal.filter(({ type }) => type === "stop.transitioned").length, 1);
-    assert.deepEqual(stopped.cleanupPreview.skipped, [{
-      runId: identity.runId,
-      reason: "within_30_days",
-    }]);
+    assert.deepEqual(stopped.cleanupPreview.skipped, []);
+    assert.deepEqual(stopped.cleanupResult.removed, []);
     await assert.rejects(fetch(`${priorOrigin}/api/status`));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -419,18 +400,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
       }).then((response) => response.json());
     },
   };
-  const cleanup = {
-    async listRuns({ status }) {
-      return [{
-        runId: multiIdentity.runId,
-        specId: multiIdentity.specId,
-        state: status.run.state,
-        terminalAt: "2026-08-30T10:01:00.000Z",
-        engineLock: "RELEASED",
-        activeTasks: "ABSENT",
-      }];
-    },
-  };
+  const cleanup = { async listRuns() { return []; } };
 
   try {
     const runtime = createWorkflowRuntime({
@@ -515,40 +485,9 @@ test("end-to-end no-argument recovery adopts interrupted manual and partial-clos
       return { coordinatorActive: true, taskSettled: true };
     },
   };
-  const reconcile = async ({ journal }) => ({
-    runIdentity: identity,
-    grant: { runIdentity: identity, maxParallel: 3 },
-    taskRefs: Object.fromEntries(journal
-      .filter(({ type }) => type === "dispatch.recorded")
-      .map(({ issueId, taskRef: ref }) => [issueId, ref])),
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...identity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "OPEN",
-      },
-      nodes: [{ issueId: "17", blockers: [], ...model }],
-      contradictions: [],
-    },
-  });
+  const reconcile = async ({ journal }) => singleRunCurrent({ journal, model });
   const browser = { async open() { panelOpens += 1; } };
-  const cleanup = {
-    async listRuns({ status }) {
-      return [{
-        runId: identity.runId,
-        specId: identity.specId,
-        state: status.run.state,
-        terminalAt: status.run.state === "SUCCEEDED" ? "2026-08-30T11:01:00.000Z" : null,
-        engineLock: "RELEASED",
-        activeTasks: status.run.state === "SUCCEEDED" ? "ABSENT" : "PRESENT",
-      }];
-    },
-  };
+  const cleanup = { async listRuns() { return []; } };
 
   try {
     const runtime = createWorkflowRuntime({
@@ -608,9 +547,8 @@ test("end-to-end tracker exhaustion returns a stable diagnosis without opening a
     wait: forbidden,
   };
   const cleanup = {
-    async listRuns({ status, journal }) {
-      assert.equal(status.run.runId, null);
-      assert.deepEqual(journal, []);
+    async listRuns({ request }) {
+      assert.equal(request.specId, "17");
       return [];
     },
   };
@@ -641,6 +579,126 @@ test("end-to-end tracker exhaustion returns a stable diagnosis without opening a
       eligible: [],
       skipped: [],
     });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end panel open loss returns a stable diagnosis and retained inspection", async () => {
+  const { root, store } = createStoreFixture();
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  const forbidden = async () => { throw new Error("panel loss permits no task action"); };
+  const tasks = {
+    findIssueLane: forbidden,
+    create: forbidden,
+    read: forbidden,
+    message: forbidden,
+    wait: forbidden,
+  };
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
+      tasks,
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser: { async open() { throw new Error("panel host unavailable"); } },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-08-30T12:30:00.000Z",
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: "17" });
+    const diagnosis = result.status.diagnoses.at(-1);
+
+    assert.equal(result.status.run.state, "BLOCKED");
+    assert.equal(diagnosis.reasonCode, "panel_unavailable");
+    assert.match(diagnosis.evidence.join(" "), /panel host unavailable/u);
+    assert.deepEqual(diagnosis.affectedNodes, ["17"]);
+    assert.equal(diagnosis.nextOwner, "human");
+    assert.deepEqual(diagnosis.resumePredicates, ["panel_can_open"]);
+    assert.equal(result.panel.opened, true);
+    assert.equal(result.panel.closed, true);
+    assert.ok(result.panel.origin.startsWith("http://127.0.0.1:"));
+    assert.equal(store.readWriterLock(identity.runId), null);
+    assert.equal(result.journal.filter(({ type }) => type === "dispatch.recorded").length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end explicit invocation applies retention unless cleanup preview is requested", async () => {
+  const { root, gitCommonDir, store } = createStoreFixture();
+  const evaluatedAt = "2026-08-30T14:00:00.000Z";
+  const terminalRuns = Array.from({ length: 11 }, (_, index) => ({
+    runId: `terminal-${String(index).padStart(2, "0")}`,
+    specId: String(100 + index),
+    state: "SUCCEEDED",
+    terminalAt: new Date(Date.parse(evaluatedAt) - (40 + index) * 86_400_000).toISOString(),
+    engineLock: "RELEASED",
+    activeTasks: "ABSENT",
+  }));
+  const oldestRunDir = join(gitCommonDir, "matt-workflow-control", "runs", "terminal-10");
+  for (const { runId } of terminalRuns) store.acquireWriter(runId).release();
+  let panels = 0;
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  const forbidden = async () => { throw new Error("retention fixture permits no task action"); };
+  const tasks = {
+    findIssueLane: forbidden,
+    create: forbidden,
+    read: forbidden,
+    message: forbidden,
+    wait: forbidden,
+  };
+  const browser = {
+    async open(panelUrl) {
+      panels += 1;
+      if (panels > 1) return;
+      const url = new URL(panelUrl);
+      const response = await fetch(`${url.origin}/api/control/stop`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${url.searchParams.get("token")}` },
+      });
+      assert.equal(response.status, 200);
+    },
+  };
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
+      tasks,
+      reconcile: async ({ journal }) => singleRunCurrent({
+        journal,
+        model,
+        targetState: "DIRTY",
+      }),
+      browser,
+      cleanup: { async listRuns() { return terminalRuns; } },
+      now: () => evaluatedAt,
+      sleep: async () => {},
+    });
+
+    const previewed = await runtime.run({ specId: "17", cleanupPreview: true });
+    assert.deepEqual(previewed.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);
+    assert.equal(previewed.cleanupResult, null);
+    assert.equal(existsSync(oldestRunDir), true);
+
+    const applied = await runtime.run({ specId: "17" });
+    assert.deepEqual(applied.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);
+    assert.deepEqual(applied.cleanupResult.removed, ["terminal-10"]);
+    assert.equal(existsSync(oldestRunDir), false);
+    assert.deepEqual(store.readCleanupRecords().map(({ runId }) => runId), ["terminal-10"]);
+    assert.equal(applied.status.run.state, "STOPPED");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -678,32 +736,18 @@ test("end-to-end target and contract stops remain structured after panel shutdow
           throw new Error(`${scenario.name} permits no task ${name}`);
         }]),
       );
-      const reconcile = async () => ({
-        runIdentity: identity,
-        grant: { runIdentity: identity, maxParallel: 3 },
-        taskRefs: {},
-        facts: {
-          schema: "dag-run-facts:v1",
-          run: {
-            ...identity,
-            reconciled: true,
-            trackerAvailable: true,
-            targetState: scenario.targetState,
-            closeWriterRunId: null,
-            closeWriterState: "ABSENT",
-            parentTrackerState: "OPEN",
-          },
-          nodes: [{
-            issueId: "17",
-            blockers: [],
-            trackerState: "OPEN",
-            taskState: "NONE",
-            completionState: "NONE",
-            candidateReachable: false,
-            worktreeState: "ABSENT",
-          }],
-          contradictions: scenario.contradictions,
-        },
+      const model = {
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      };
+      const reconcile = async ({ journal }) => singleRunCurrent({
+        journal,
+        model,
+        targetState: scenario.targetState,
+        contradictions: scenario.contradictions,
       });
       try {
         const runtime = createWorkflowRuntime({
@@ -712,18 +756,7 @@ test("end-to-end target and contract stops remain structured after panel shutdow
           tasks,
           reconcile,
           browser: { async open() { panels += 1; } },
-          cleanup: {
-            async listRuns() {
-              return [{
-                runId: identity.runId,
-                specId: identity.specId,
-                state: "BLOCKED",
-                terminalAt: null,
-                engineLock: "RELEASED",
-                activeTasks: "ABSENT",
-              }];
-            },
-          },
+          cleanup: { async listRuns() { return []; } },
           now: () => "2026-08-30T13:00:00.000Z",
           sleep: async () => {},
         });

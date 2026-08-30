@@ -12,18 +12,20 @@ A Single-Issue Spec runs as one node. A Multi-Issue Spec uses only the exact rea
 
 Invoke `/run-issue-workflow <Spec-ID>` once. Successful reconciliation creates or renews the exact Run Grant, opens the loopback panel, and starts work immediately. There is no second Start control.
 
+Before Run reconciliation, explicit invocation previews and applies the bounded terminal-Run retention sweep. Use `cleanupPreview: true` to inspect the same eligible set without deletion.
+
 The runtime adapters must provide current Tracker, Git/worktree/completion-note, Codex task, shared leaf, browser, and cleanup evidence. They normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
 
 ## Read the panel
 
 The panel shows the current Run identity and state, published DAG edges, ready and active frontiers, task attempts, close evidence, diagnoses, and legal controls. It is a projection, not authority.
 
-- **Pause** stops new actions after active work and the close writer settle.
-- **Resume** revises a paused or blocked Run and lets reconciliation decide what is now legal.
+- **Pause** stops new actions after active work and the close writer settle; the same bridge stays open while the Run is paused.
+- **Resume** in that same panel revises a paused Run and lets reconciliation decide what is now legal.
 - **Stop** cooperatively revokes further work after active operations settle; it does not kill tasks or delete state.
 - **Refresh** reads the newest projection and appends no journal event.
 
-Closing the browser panel has no effect. The bridge closes automatically when the active coordinator returns. Reopen the workflow explicitly to resume; do not treat a stale browser snapshot as evidence.
+Closing the browser panel has no effect. The bridge closes automatically when the active coordinator returns at a terminal or diagnosed stop. Reopen the workflow explicitly after return; do not treat a stale browser snapshot as evidence.
 
 ## Diagnose before intervening
 
@@ -44,9 +46,10 @@ The composed runtime returns:
 - the final versioned status projection;
 - the validated append-only journal;
 - a read-only cleanup preview;
+- the applied cleanup result, or `null` for preview-only invocation;
 - sanitized panel lifecycle metadata without the control credential.
 
-The same status and journal remain under the repository's common Git directory after the bridge stops. Cleanup remains a separate explicit operation.
+The same status and journal remain under the repository's common Git directory after the bridge stops. Cleanup audit records remain inspectable independently of the panel.
 
 Renderable examples:
 

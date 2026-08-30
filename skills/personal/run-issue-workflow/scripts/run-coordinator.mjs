@@ -237,6 +237,16 @@ const environmentUnresolved = (status, action) => diagnosedStop(status, {
   resumePredicates: ["environment_changed_or_human_resolution"],
 });
 
+const panelUnavailable = (status, error) => diagnosedStop(status, {
+  reasonCode: "panel_unavailable",
+  evidence: [`The Run panel is unavailable: ${isText(error?.message) ? error.message : "unknown panel error"}.`],
+  noAutomaticTransition: "The required Run panel must open before workflow actions continue.",
+  affectedNodes: status.nodes
+    .filter(({ state }) => state !== "SUCCEEDED")
+    .map(({ issueId }) => issueId),
+  resumePredicates: ["panel_can_open"],
+});
+
 const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
   const mismatch = identityMismatch(runIdentity, current.runIdentity)
     ?? identityMismatch(runIdentity, current.grant?.runIdentity);
@@ -579,15 +589,21 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
         latestFacts = facts;
         return writer.rebuildStatus(facts);
       };
-      const openPanel = async () => {
-        if (!panel || panelHandle) return;
-        panelHandle = await panel.open({
-          runIdentity,
-          readStatus: () => store.readStatus(runIdentity.runId),
-          appendEvent: (event) => writer.append(event),
-          rebuildStatus: () => writer.rebuildStatus(latestFacts),
-        });
-        requireMethod(panelHandle, "close");
+      const openPanel = async (status) => {
+        if (!panel || panelHandle) return null;
+        try {
+          const opened = await panel.open({
+            runIdentity,
+            readStatus: () => store.readStatus(runIdentity.runId),
+            appendEvent: (event) => writer.append(event),
+            rebuildStatus: () => writer.rebuildStatus(latestFacts),
+          });
+          requireMethod(opened, "close");
+          panelHandle = opened;
+          return null;
+        } catch (error) {
+          return panelUnavailable(status, error);
+        }
       };
       try {
         while (true) {
@@ -657,13 +673,22 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             });
             grantRecorded = true;
             lastStatus = rebuildStatus(current.facts);
-            await openPanel();
+            const panelStopped = await openPanel(lastStatus);
+            if (panelStopped) return panelStopped;
             continue;
           }
 
           lastStatus = rebuildStatus(current.facts);
           if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state)) return lastStatus;
           if (lastStatus.legalActions.length === 0) {
+            if (lastStatus.run.state === "PAUSED" && typeof panelHandle?.waitForControl === "function") {
+              try {
+                await panelHandle.waitForControl(lastStatus.run.controlRevision);
+              } catch (error) {
+                return panelUnavailable(lastStatus, error);
+              }
+              continue;
+            }
             const activeTaskRefs = lastStatus.frontier.active.map((issueId) => current.taskRefs?.[issueId]);
             if (activeTaskRefs.length === 0) return lastStatus;
             if (activeTaskRefs.some((taskRef) => !isTaskRef(taskRef))) {
