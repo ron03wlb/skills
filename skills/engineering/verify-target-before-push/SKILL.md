@@ -48,7 +48,7 @@ Issue contributions are many-to-many: overlapping contribution ranges are valid 
 
 ## Recover eligible uncovered contributions
 
-Recovery is considered only when the frozen selected-range coverage check finds uncovered material commits. First discover any exact matching `direct_target_contribution:v1` records and reuse them as the fourth selected-range coverage source without invoking `attest-target-contribution` or writing a duplicate.
+Recovery is considered only when the frozen selected-range coverage check finds uncovered material commits. First discover any exact matching `direct_target_contribution:v1` records and reuse them as the fourth selected-range coverage source without invoking `/attest-target-contribution` or writing a duplicate.
 
 Every remaining uncovered commit must contain only explicit human-directed, non-product workflow or governance maintenance outside an Executable Issue by design and have one unambiguous owning Tracker Spec or Issue. Active skill behavior, runtime or source, tests, configuration, dependencies, migrations, security, data, public APIs, any mixed commit, partial-path attestation, or owner ambiguity is ineligible. A non-coverage failure — including review, test, cleanliness, ref, tracker, normal execution, or closeout failure — performs no tracker mutation and follows ordinary failure ownership.
 
@@ -56,7 +56,7 @@ When and only when every uncovered commit is eligible, prepare and present the e
 
 Immediately before mutation, re-read the owner and refs and revalidate owner, target, commit, whole diff, eligibility, and ref identity. Any owner, target, commit, diff, eligibility, or ref drift before mutation stops without writing or silently broadening the confirmation.
 
-After confirmation, invoke the model-invoked `attest-target-contribution` helper with the exact confirmed packet without requiring a separate manual slash command. Require every reused or appended record to receive exact read-back. A malformed, duplicate, conflicting, mismatched, unavailable, or partially written record stops; never edit tracker history, continue with a subset, or manufacture replacement authority.
+After confirmation, invoke the model-invoked `/attest-target-contribution` skill with the exact confirmed packet without requiring a separate manual slash command. Require every reused or appended record to receive exact read-back. A malformed, duplicate, conflicting, mismatched, unavailable, or partially written record stops; never edit tracker history, continue with a subset, or manufacture replacement authority.
 
 After exact record read-back, discard the failed gate completely and automatically start a fresh `verify-target-before-push` from Entry. Re-freeze all refs and identities, rebuild members and direct contributions, and revalidate every record against its exact tracker location, owner scope, target, full SHAs, Git ancestry, current diff, and strict eligibility. Never resume from the earlier coverage point or carry forward its review, verification, cleanliness, or ref-stability evidence.
 

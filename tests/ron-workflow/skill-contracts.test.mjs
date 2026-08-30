@@ -431,6 +431,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   assert.match(verify, /present.*exact owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
   assert.match(verify, /No write.*until.*human confirms.*exact draft once/isu);
   assert.match(verify, /invoke.*attest-target-contribution.*without.*manual slash command/isu);
+  assert.match(verify, /invoke.*`\/attest-target-contribution` skill/isu);
   assert.match(verify, /owner.*target.*commit.*diff.*eligibility.*ref drift.*before mutation.*stops without writing/isu);
   assert.match(verify, /malformed.*duplicate.*conflicting.*mismatched.*unavailable.*partially written.*stops/isu);
   assert.match(verify, /exact record read-back.*discard.*failed gate.*automatically.*fresh.*Entry/isu);
@@ -449,6 +450,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   assert.match(verifyDocs, /helper.*never pushes/iu);
   assert.match(verifyDocs, /only.*fresh.*local-ahead.*push_ready/isu);
   assert.match(matt, /coverage failure.*eligible direct target contribution.*complete.*draft.*human confirmation.*attest-target-contribution.*fresh.*Entry/isu);
+  assert.match(matt, /invokes `\/attest-target-contribution`/iu);
   assert.match(matt, /no separate manual.*attestation command/iu);
   assert.match(mattDocs, /coverage failure.*eligible.*complete.*draft.*confirmation.*fresh.*Entry/isu);
   assert.match(read("CONTEXT.md"), /Direct target contribution recovery.*confirmation-gated.*fresh target verification.*Entry/isu);
