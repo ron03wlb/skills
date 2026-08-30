@@ -416,6 +416,50 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
 });
 
 
+test("target coverage recovery is confirmation-gated and restarts aggregate verification", () => {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(verify, /frozen selected-range coverage check.*uncovered material commits.*only.*recovery/isu);
+  assert.match(verify, /active skill behavior.*runtime or source.*tests.*configuration.*dependencies.*migrations.*security.*data.*public APIs.*mixed commit.*partial-path.*owner ambiguity.*ineligible/isu);
+  assert.match(verify, /non-coverage.*review.*test.*cleanliness.*ref.*tracker.*execution.*closeout.*no tracker mutation/isu);
+  assert.match(verify, /exact matching.*direct_target_contribution:v1.*reuse.*without invoking.*attest-target-contribution/isu);
+  assert.match(verify, /present.*exact owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
+  assert.match(verify, /No write.*until.*human confirms.*exact draft once/isu);
+  assert.match(verify, /invoke.*attest-target-contribution.*without.*manual slash command/isu);
+  assert.match(verify, /owner.*target.*commit.*diff.*eligibility.*ref drift.*before mutation.*stops without writing/isu);
+  assert.match(verify, /malformed.*duplicate.*conflicting.*mismatched.*unavailable.*partially written.*stops/isu);
+  assert.match(verify, /exact record read-back.*discard.*failed gate.*automatically.*fresh.*Entry/isu);
+  assert.match(verify, /re-freeze.*refs.*identities.*rebuild.*members.*direct contributions/isu);
+  assert.match(verify, /validate.*exact tracker location.*owner scope.*target.*full SHAs.*Git ancestry.*current diff.*strict eligibility/isu);
+  assert.match(verify, /fourth selected-range coverage source/iu);
+  assert.match(verify, /owning Tracker Specs or Issues.*aggregate Spec review/isu);
+  assert.match(verify, /both evidence modes.*Standards.*focused.*full-suite.*cleanliness.*ref-stability.*result[- ]separation/isu);
+  assert.match(verify, /only.*completely passing.*local-ahead.*fresh gate.*`push_ready`/isu);
+  assert.match(verify, /neither.*helper.*recovery.*push/isu);
+  assert.match(verify, /never.*generic attestation framework/isu);
+
+  assert.match(verifyMetadata, /eligible.*coverage recovery.*exact human confirmation.*fresh.*Entry/isu);
+  assert.match(verifyDocs, /uncovered.*eligible.*complete.*draft.*one exact human confirmation.*helper.*fresh.*Entry/isu);
+  assert.match(verifyDocs, /active.*source.*tests.*configuration.*mixed.*ineligible/isu);
+  assert.match(verifyDocs, /helper.*never pushes/iu);
+  assert.match(verifyDocs, /only.*fresh.*local-ahead.*push_ready/isu);
+  assert.match(matt, /coverage failure.*eligible direct target contribution.*complete.*draft.*human confirmation.*attest-target-contribution.*fresh.*Entry/isu);
+  assert.match(matt, /no separate manual.*attestation command/iu);
+  assert.match(mattDocs, /coverage failure.*eligible.*complete.*draft.*confirmation.*fresh.*Entry/isu);
+  assert.match(read("CONTEXT.md"), /Direct target contribution recovery.*confirmation-gated.*fresh target verification.*Entry/isu);
+  assert.match(read("docs/adr/0041-preserve-direct-target-contributions-through-explicit-evidence.md"), /confirmation.*helper.*fresh verification from Entry/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /attest-target-contribution.*authority evidence.*eligible direct target contribution/iu);
+    assert.match(read(path), /verify-target-before-push.*local-ahead.*already-pushed.*recovery/iu);
+  }
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
@@ -570,7 +614,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     const modelStart = readme.indexOf(modelHeading, userStart);
     const userInvoked = readme.slice(userStart, modelStart);
     const modelInvoked = readme.slice(modelStart + modelHeading.length);
-    for (const name of ["execute-issue", "close-issue"]) {
+    for (const name of ["execute-issue", "close-issue", "attest-target-contribution"]) {
       assert.doesNotMatch(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as user-invoked`);
       assert.match(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as model-invoked`);
     }

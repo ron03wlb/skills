@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Verify Target Before Push
 
-Verify one frozen target range after Issue closeout. This skill has two evidence modes, **local-ahead** and **already-pushed**. Both run the same aggregate review and verification gate; only local-ahead may emit push readiness. This skill never repairs product code, closes or reopens Issues, changes other tracker state, pushes, remote-merges, or deploys.
+Verify one frozen target range after Issue closeout. This skill has two evidence modes, **local-ahead** and **already-pushed**. Both run the same aggregate review and verification gate; only local-ahead may emit push readiness. Its only tracker-write recovery is the exact human-confirmed Direct target contribution path below. This skill never repairs product code, closes or reopens Issues, changes other tracker state, pushes, remote-merges, or deploys.
 
 ## Freeze exact `B` and `V`
 
@@ -19,7 +19,7 @@ Capture the mode, target identity, `B`, and `V` once. Create a clean verificatio
 
 ## Derive the Target verification set
 
-Query open and closed Issues whose ordered history contains an Execution completion note. Read each history once without pre-filtering by Issue target. Select the latest valid `implementation_complete` note; a later state supersedes it only when read-back evidence invalidates that candidate's implementation, Standards or Spec review, or verification. Target movement, close conflict, partial close progress, and an aggregate-gate failure do not supersede completion.
+Query open and closed Issues whose ordered history contains an Execution completion note or `direct_target_contribution:v1` record. Read each history once without pre-filtering by Issue target. Select the latest valid `implementation_complete` note; a later state supersedes it only when read-back evidence invalidates that candidate's implementation, Standards or Spec review, or verification. Target movement, close conflict, partial close progress, and an aggregate-gate failure do not supersede completion.
 
 Execution completion notes are the sole Issue-to-commit mapping authority. Derive membership only from their exact candidates and Git ancestry:
 
@@ -39,13 +39,30 @@ Enumerate every material commit in `B..V`. Explain each one through at least one
 
 - a member's Execution baseline-to-candidate contribution;
 - a referenced Planning Seal;
-- necessary merge topology connecting otherwise covered histories.
+- necessary merge topology connecting otherwise covered histories; or
+- a valid Direct target contribution record.
+
+For every `direct_target_contribution:v1` record, validate its exact tracker location, owner scope, target, ordered full SHAs, Git ancestry, current whole-commit diff, fixed classification, human attestation, target-range-only statement, and strict eligibility. The owning Tracker Specs or Issues join the aggregate Spec review. A malformed, duplicate, conflicting, mismatched, unavailable, partially written, unreachable, ineligible, or ambiguously owned record stops without substitution.
 
 Issue contributions are many-to-many: overlapping contribution ranges are valid and require no unique owner. A commit with no valid explanation stops before aggregate review. Never infer ownership from commit or merge messages, and never accept an unexplained material commit.
 
+## Recover eligible uncovered contributions
+
+Recovery is considered only when the frozen selected-range coverage check finds uncovered material commits. First discover any exact matching `direct_target_contribution:v1` records and reuse them as the fourth selected-range coverage source without invoking `attest-target-contribution` or writing a duplicate.
+
+Every remaining uncovered commit must contain only explicit human-directed, non-product workflow or governance maintenance outside an Executable Issue by design and have one unambiguous owning Tracker Spec or Issue. Active skill behavior, runtime or source, tests, configuration, dependencies, migrations, security, data, public APIs, any mixed commit, partial-path attestation, or owner ambiguity is ineligible. A non-coverage failure — including review, test, cleanliness, ref, tracker, normal execution, or closeout failure — performs no tracker mutation and follows ordinary failure ownership.
+
+When and only when every uncovered commit is eligible, prepare and present the exact owner, target, fixed classification, ordered full commit SHAs, per-commit purposes, and complete tracker comment draft for every owner-target group. No write occurs until the human confirms that exact draft once. Confirmation authorizes only those exact records; it does not waive this gate or authorize review, readiness, or push.
+
+Immediately before mutation, re-read the owner and refs and revalidate owner, target, commit, whole diff, eligibility, and ref identity. Any owner, target, commit, diff, eligibility, or ref drift before mutation stops without writing or silently broadening the confirmation.
+
+After confirmation, invoke the model-invoked `attest-target-contribution` helper with the exact confirmed packet without requiring a separate manual slash command. Require every reused or appended record to receive exact read-back. A malformed, duplicate, conflicting, mismatched, unavailable, or partially written record stops; never edit tracker history, continue with a subset, or manufacture replacement authority.
+
+After exact record read-back, discard the failed gate completely and automatically start a fresh `verify-target-before-push` from Entry. Re-freeze all refs and identities, rebuild members and direct contributions, and revalidate every record against its exact tracker location, owner scope, target, full SHAs, Git ancestry, current diff, and strict eligibility. Never resume from the earlier coverage point or carry forward its review, verification, cleanliness, or ref-stability evidence.
+
 ## Run one aggregate gate
 
-Invoke Matt `code-review` on committed diff `B...V`. Run the Standards axis against the aggregate diff and the Spec axis against every member Issue plus every parent or linked Spec. Both axes must be clean.
+Invoke Matt `code-review` on committed diff `B...V`. Run the Standards axis against the aggregate diff and the Spec axis against every member Issue, every parent or linked Spec, and every owning Tracker Spec or Issue for accepted Direct target contributions. Both axes must be clean.
 
 Collect the focused verification commands recorded by member completion notes with their exact Issue and candidate origins, then deduplicate exact commands. Every command remains applicable at exact `V` unless it has valid **Successor verification evidence**. That evidence is allowed only for a path-specific command when one later member candidate descends from every earlier candidate that recorded the command, the later Issue Acceptance Criteria explicitly retire every repository path required by the command, its completion evidence records those paths absent and identifies passing current-behavior commands, every identified current-behavior command remains applicable and is included in the focused set, and every retired path remains absent at `V`.
 
@@ -53,16 +70,18 @@ Missing or ambiguous path extraction, partial retirement or ownership, inferred 
 
 Record each accepted disposition with the exact superseded command, earlier Issue and candidate identities, retired paths, successor Issue and candidate, Acceptance Criteria, absence proof, and current-behavior commands and results. Run every remaining deduplicated focused command in the clean verification worktree at exact `V`, then run the repository-required full suite exactly once at exact `V`. Require every executed command to pass and the verification worktree to remain clean.
 
-This is a gate, not a repair loop. Any identity, coverage, review, verification, target, or cleanliness failure withholds a result and reports exact evidence without changing product code or tracker state. It never automatically invokes `execute-issue`, `close-issue`, or another verification run.
+This is a gate, not a repair loop. Both evidence modes retain all Standards, focused, full-suite, cleanliness, ref-stability, and result-separation requirements. Any identity, coverage, review, verification, target, or cleanliness failure withholds a result and reports exact evidence without changing product code or tracker state. Outside the exact confirmed recovery above, it never automatically invokes `execute-issue`, `close-issue`, or another verification run.
 
 ## Return the mode-specific result
 
 Immediately re-read all selected refs and require the frozen `B` and `V` to be unchanged. Re-prove every member candidate reachable and every member Issue closed.
 
-- **Local-ahead:** write one local Git note under `refs/notes/matt-push-ready` on exact `V`. The human-readable `push_ready:v1` record binds mode, target, `B`, `V`, member Issue and candidate identities, coverage evidence, both clean review axes, exact executed commands and results, every superseded command and its exact successor proof, and clean verification worktree. Read it back once and require every field to match. Reuse an exact matching note on retry; never overwrite mismatched evidence. Target movement invalidates this aggregate evidence and requires this skill again, never `execute-issue`.
+- **Local-ahead:** only a completely passing local-ahead fresh gate may write one local Git note under `refs/notes/matt-push-ready` on exact `V`. The human-readable `push_ready:v1` record binds mode, target, `B`, `V`, member Issue and candidate identities, Direct target contribution records, coverage evidence, both clean review axes, exact executed commands and results, every superseded command and its exact successor proof, and clean verification worktree. Read it back once and require every field to match. Reuse an exact matching note on retry; never overwrite mismatched evidence. Target movement invalidates this aggregate evidence and requires this skill again, never `execute-issue`.
 - **Already-pushed:** return one read-only **Range verification result** binding the explicit merge request, pull request, or base/head source, exact `B`, `V`, members, coverage, reviews, exact executed commands and results, and every superseded command with its exact successor proof. Never write `push_ready`, a Git note, or retroactive push authorization for this mode.
 
 Remove only the clean temporary verification worktree after result read-back or construction. Push remains a separate explicit action and must require a current matching `push_ready:v1` note on the exact local target `HEAD`.
+
+Neither the attestation helper nor recovery pushes. Never add a generic attestation framework, SHA allowlist, partial-path exception, or verifier-owned authority source.
 
 ## Failure ownership
 
