@@ -1,7 +1,6 @@
 ---
 name: execute-issue
-description: Implement and verify one tracker Issue in its recorded-target worktree while preserving a valid completion across target movement.
-disable-model-invocation: true
+description: Implement and verify one dependency-ready tracker Issue in its recorded-target worktree. Use when a human invokes the Issue directly or a valid DAG Run Grant authorizes its coordinator lane.
 ---
 
 # Execute Issue
@@ -11,6 +10,10 @@ Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicate
 ## Entry
 
 Read the exact Issue, parent or linked Spec, comments, repository instructions, Acceptance Criteria, Implementation Plan, blockers, target, exclusions, and ordered execution history. Consume the published Single-Issue or child classification without reclassifying it. Unresolved blockers or material ambiguity stops before writing.
+
+Entry authority is either direct human invocation or a valid **DAG Run Grant**. A coordinator holding that Grant may invoke this exact dependency-ready Issue without separate per-Issue human approval. `execute-issue` never creates or renews a DAG Run Grant.
+
+For coordinator entry, require one read-back DAG Run Grant that binds the exact linked Spec, Issue target branch, published Single-Issue or Multi-Issue classification, and approved scope. A Single-Issue coordinator target must be the exact bound Spec. A Multi-Issue Grant must also bind the exact read-back **Decomposition publication record** whose mapping contains this Issue as an exact mapping member and whose published blockers make it dependency-ready. A Single-Issue outsider or Multi-Issue Issue absent from that bound mapping stops before worktree creation or any mutation. A missing, stale, or mismatched Grant stops before worktree creation or any mutation. The Grant adds no authority to execute a Manual prerequisite, change scope, repair ambiguity, integrate, close, push, or deploy.
 
 If the latest valid `implementation_complete` note still binds this Issue, its Issue target branch, worktree, topic branch, baseline, and unchanged clean reviewed candidate, report that completion and stop unless the human explicitly requested the conflict-resolution rerun below. Target movement alone does not supersede `implementation_complete`, restart execution, or write `implementation_blocked`. A later blocked state supersedes completion only when its read-back evidence invalidates that candidate's own implementation, Standards or Spec review, or verification; a close conflict, partial close, or aggregate-gate failure is not execution evidence.
 
@@ -71,4 +74,4 @@ Write one compact tracker completion note containing:
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.
 
-Read the note back once and stop. Later movement of the Issue target branch does not change this state. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; the human separately invokes `/close-issue`.
+Read the note back once and stop. Later movement of the Issue target branch does not change this state. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; the human or a coordinator holding the same valid DAG Run Grant separately invokes `/close-issue`.

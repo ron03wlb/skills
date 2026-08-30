@@ -324,6 +324,8 @@ test("to-tickets publishes one recoverable decomposition record and the exact re
   assert.match(tickets, /blocked or closed children.*neither `ready-for-agent`.*nor.*`\/execute-issue <Issue-ID>`/isu);
   assert.match(tickets, /remove a stale ready label from every open blocked or closed child/iu);
   assert.match(tickets, /read.*record back.*before.*ready-for-agent.*execution command/isu);
+  assert.match(tickets, /runtime-neutral handoff.*manual.*authorized.*DAG.*coordinator/isu);
+  assert.match(tickets, /never schedules.*tasks.*Codex.*Orca.*titles.*inferred blockers.*global queue/isu);
 });
 
 test("re-entrant to-tickets behavior stays synchronized across promoted surfaces", () => {
@@ -390,6 +392,15 @@ test("manual prerequisite attestation is one-step and sufficient", () => {
 
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
+  assert.doesNotMatch(execute, /^disable-model-invocation:\s*true$/mu);
+  assert.doesNotMatch(executeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(execute, /direct human invocation.*valid.*DAG Run Grant.*without.*per-Issue.*approval/isu);
+  assert.match(execute, /coordinator.*read-back.*DAG Run Grant.*exact.*linked Spec.*Issue target branch.*classification.*scope.*Decomposition publication record/isu);
+  assert.match(execute, /Single-Issue.*coordinator target.*exact bound Spec.*outsider.*stops? before.*worktree.*mutation/isu);
+  assert.match(execute, /missing.*stale.*mismatch.*Grant.*stops? before.*worktree.*mutation/isu);
+  assert.match(read("docs/engineering/execute-issue.md"), /Single-Issue.*exact bound Spec.*Multi-Issue.*exact mapping member/isu);
+  assert.match(execute, /never creates.*DAG Run Grant/iu);
   assert.match(execute, /dedicated Git worktree/iu);
   assert.match(execute, /linked Spec/iu);
   assert.match(execute, /code-review/u);
@@ -405,12 +416,21 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
+  assert.match(execute, /Execution never[^.\n]+; the human or (?:a )?coordinator holding.*valid.*DAG Run Grant separately invokes `\/close-issue`/iu);
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
 
   const close = read("skills/engineering/close-issue/SKILL.md");
+  const closeMetadata = read("skills/engineering/close-issue/agents/openai.yaml");
+  assert.doesNotMatch(close, /^disable-model-invocation:\s*true$/mu);
+  assert.doesNotMatch(closeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(close, /direct human invocation.*valid.*DAG Run Grant.*without.*per-Issue.*approval/isu);
+  assert.match(close, /never creates.*DAG Run Grant/iu);
+  assert.match(close, /coordinator.*Single-Issue.*target.*bound Spec.*Multi-Issue.*Executable Issue.*exact Issue.*mapping.*parent-only.*target.*bound Spec/isu);
+  assert.match(close, /absent from.*mapping.*stop before mutation/isu);
+  assert.match(read("docs/engineering/close-issue.md"), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
-  assert.match(close, /one `close-issue` writer per Issue target branch/iu);
+  assert.match(close, /one `close-issue` writer per Issue target branch.*human.*authorized coordinator/isu);
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
   assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
@@ -490,7 +510,20 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     assert.match(read(path), /verify-target-before-push.*local-ahead.*already-pushed.*completion-note/iu);
   }
 
-  for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
+  for (const name of ["execute-issue", "close-issue"]) {
+    const skill = read(`skills/engineering/${name}/SKILL.md`);
+    const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
+    const page = read(`docs/engineering/${name}.md`);
+    assert.doesNotMatch(skill, /^disable-model-invocation:\s*true$/mu);
+    assert.doesNotMatch(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+    assert.match(skill, /^description:.*Use when.*DAG Run Grant/mu);
+    assert.match(page, /authorized coordinator.*valid DAG Run Grant/isu);
+    assert.doesNotMatch(skill, /Canonical Wiki|\/wiki|wiki_|setup-ron|ron-workflow\.md|workflow-[a-z-]+:v\d|lifecycle authorization|payload hash/iu);
+    assert.doesNotMatch(skill, /GitHub Issue|GitHub comment/u);
+  }
+
+  {
+    const name = "verify-target-before-push";
     const skill = read(`skills/engineering/${name}/SKILL.md`);
     const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
     const page = read(`docs/engineering/${name}.md`);
@@ -511,7 +544,11 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     const modelStart = readme.indexOf(modelHeading, userStart);
     const userInvoked = readme.slice(userStart, modelStart);
     const modelInvoked = readme.slice(modelStart + modelHeading.length);
-    for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
+    for (const name of ["execute-issue", "close-issue"]) {
+      assert.doesNotMatch(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as user-invoked`);
+      assert.match(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as model-invoked`);
+    }
+    for (const name of ["verify-target-before-push"]) {
       assert.match(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as user-invoked`);
       assert.doesNotMatch(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as model-invoked`);
     }
@@ -1147,6 +1184,8 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
   assert.match(matt, /serializes close writers per target/iu);
+  assert.match(matt, /manual leaf route.*authorized coordinator route.*DAG Run Grant/isu);
+  assert.match(matt, /coordinator.*does not create.*broaden.*leaf.*authority/isu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(matt, /Before push.*verify-target-before-push.*local-ahead.*completion notes.*already-pushed.*explicit.*range.*aggregate review.*verification once/isu);
   assert.match(matt, /to-spec.*sole authority.*Single-Issue.*Multi-Issue/isu);
@@ -1154,6 +1193,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
 
   const mattDocs = read("docs/engineering/ask-matt.md");
   assert.match(mattDocs, /one writer per recorded target.*three idempotent close actions/isu);
+  assert.match(mattDocs, /manual leaf route.*authorized coordinator.*DAG Run Grant/isu);
   assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(mattDocs, /verify-target-before-push.*local-ahead.*completion-note.*already-pushed.*explicit.*range.*aggregate/isu);
 
@@ -1164,9 +1204,14 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   }
 
   const context = read("CONTEXT.md");
-  // Necessary discovery: Planning Seal f7c8a85 already changed this canonical operation from "integration" to "close-issue merge".
-  assert.match(context, /Manual integration serialization.*one `close-issue` merge into the same .*Issue target branch.*other target branches.*concurrently/isu);
+  assert.match(context, /Target integration serialization.*one `close-issue` writer.*same .*Issue target branch.*human.*authorized .*DAG Run.*other targets.*concurrently/isu);
   assert.doesNotMatch(context, /checks once|parallel target writers/iu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.doesNotMatch(read(path), /run-issue-workflow/iu, `${path} must not promote the personal coordinator`);
+  }
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.equal(plugin.skills.some((path) => /run-issue-workflow/iu.test(path)), false, "plugin must not package the personal coordinator");
 
   for (const name of [
     "ask-matt",

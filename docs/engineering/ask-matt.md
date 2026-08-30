@@ -36,6 +36,8 @@ A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
 Each completed Issue is locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). Independent Issue worktrees may execute concurrently; one writer per recorded target performs the three idempotent close actions, and advancing that target does not invalidate other completions. The same command closes a Multi-Issue parent only after every exact child is closed and reachable. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) uses local-ahead completion-note reachability; already-pushed work requires an explicit merge request, pull request, or exact range. Both modes run the aggregate gate once. It does not push.
 
+The manual leaf route remains available command by command. A separately installed authorized coordinator may instead use one valid **DAG Run Grant** to invoke the same `execute-issue` and `close-issue` leaves without per-Issue approval. Each leaf revalidates that authority and keeps every existing worktree, review, merge, tracker, prerequisite, push, deploy, and scope boundary; the Codex-only coordinator is not promoted or packaged here.
+
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 
 The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs.

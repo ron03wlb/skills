@@ -1,7 +1,6 @@
 ---
 name: close-issue
-description: Close one executed Issue or completed Multi-Issue Spec against its recorded local target.
-disable-model-invocation: true
+description: Close one completed Issue or Multi-Issue Spec against its recorded local target. Use when a human invokes closeout directly or a valid DAG Run Grant authorizes the next close action.
 ---
 
 # Close Issue
@@ -10,7 +9,11 @@ Close one Issue by ID. Dispatch by the authoritative Issue shape: an Executable 
 
 ## Entry
 
-Read the Issue, parent or linked Spec, ordered execution history, blockers, recorded Issue target branch, and local Git worktree registrations. Resolve exact identities from tracker and Git evidence; never infer the target from the current checkout or substitute a different branch. One human runs only one `close-issue` writer per Issue target branch at a time. Other executions and closes to other targets may continue concurrently; no queue, daemon, or lock service is added.
+Read the Issue, parent or linked Spec, ordered execution history, blockers, recorded Issue target branch, and local Git worktree registrations. Resolve exact identities from tracker and Git evidence; never infer the target from the current checkout or substitute a different branch. Only one `close-issue` writer may run per Issue target branch at a time.
+
+Entry authority is either direct human invocation or a valid **DAG Run Grant**. A coordinator holding that Grant may invoke closeout without separate per-Issue human approval. `close-issue` never creates or renews a DAG Run Grant. For coordinator entry, require the read-back Grant to bind the exact Spec, recorded Issue target branch, published classification and approved scope, plus the exact **Decomposition publication record** for a Multi-Issue Run. A Single-Issue executable target must be the exact bound Spec. A Multi-Issue Executable Issue must be an exact Issue in that record's key-to-Issue mapping; a parent-only target must be the exact bound Spec itself. An Executable Issue absent from the bound mapping stops before mutation. Missing, stale, or mismatched Grant evidence stops before mutation; the Grant never adds push, deploy, prerequisite-execution, scope-expansion, or ambiguity-repair authority.
+
+One `close-issue` writer per Issue target branch applies equally to a direct human and an authorized coordinator. Other executions and close writers for other targets may continue concurrently; no queue, daemon, or lock service is added.
 
 For an Executable Issue, select the latest valid `implementation_complete` note and require its exact Issue, linked Spec, Issue target branch/worktree, topic branch/worktree, execution baseline, reviewed candidate `C`, Planning Seal, clean Standards and Spec, passing final verification, and clean Issue worktree evidence. A later state supersedes it only when read-back evidence invalidates `C` itself. Target movement, a close conflict, partial close progress, or aggregate-gate failure does not supersede completion and never sends the Issue back to `execute-issue`.
 
