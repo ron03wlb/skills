@@ -612,6 +612,7 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
     async closeParent(input) {
       parentCloses.push(input);
       trackerState.parentTrackerState = "CLOSED";
+      return { settled: true };
     },
   };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
@@ -1342,6 +1343,9 @@ test("an unrecognized environment failure does not suppress an independent ready
     assert.equal(status.run.state, "BLOCKED");
     assert.equal(status.diagnoses.at(-1).reasonCode, "environment_unresolved");
     assert.deepEqual(createdIssues, ["14"]);
+    assert.equal(status.nodes.find(({ issueId }) => issueId === "13").state, "BLOCKED");
+    assert.equal(status.nodes.find(({ issueId }) => issueId === "14").state, "EXECUTING");
+    assert.deepEqual(status.frontier.active, ["14"]);
     assert.equal(
       store.readEvents(multiIdentity.runId).some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14"),
       true,
@@ -1441,6 +1445,75 @@ test("explicit re-entry reclaims an exactly proven stale engine writer", async (
     assert.equal(status.run.state, "SUCCEEDED");
     assert.throws(() => oldWriter.release());
     assert.equal(recoveredStore.readWriterLock(identity.runId), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("parent close re-entry reclaims the same target writer from exact stale proof", async () => {
+  const { root, gitCommonDir, store } = createStoreFixture();
+  let clockMinute = 0;
+  const now = () => `2026-08-30T23:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
+  seed.release();
+  const abandoned = store.acquireCloseWriter({ target: multiIdentity.target, runId: multiIdentity.runId });
+  const owner = store.readCloseWriterLock(multiIdentity.target);
+  const closeWriterReclaimProof = {
+    previousCoordinatorInstanceId: owner.coordinatorInstanceId,
+    previousGeneration: owner.generation,
+    coordinatorState: "INACTIVE",
+    reconciled: true,
+    evidence: ["The prior parent-close coordinator is inactive."],
+    abandonedOperationIds: [],
+  };
+  const recoveredStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "parent-close-recovered" });
+  let parentTrackerState = "OPEN";
+  const tracker = { async read() { return { parentTrackerState }; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is unnecessary after every child succeeded`);
+    }]),
+  );
+  const leaf = {
+    async closeParent({ issueId }) {
+      assert.equal(issueId, "12");
+      parentTrackerState = "CLOSED";
+      return { settled: true };
+    },
+  };
+  const reconcile = async ({ tracker: currentTracker }) => ({
+    ...reconciliation({
+      runIdentity: multiIdentity,
+      run: { parentTrackerState: currentTracker.parentTrackerState },
+      nodes: ["13", "14", "15"].map((issueId) => ({
+        issueId,
+        blockers: [],
+        trackerState: "CLOSED",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "ABSENT",
+      })),
+    }),
+    closeWriterReclaimProof,
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store: recoveredStore,
+      tracker,
+      tasks,
+      reconcile,
+      leaf,
+      now,
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "12" });
+
+    assert.equal(status.run.state, "SUCCEEDED");
+    assert.throws(() => abandoned.release());
+    assert.equal(recoveredStore.readCloseWriterLock(multiIdentity.target), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

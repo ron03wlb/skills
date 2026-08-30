@@ -121,6 +121,10 @@ const diagnosedStop = (status, {
     nodes: status.nodes.map((node) => (
       affectedNodes.includes(node.issueId) ? { ...node, state: "BLOCKED" } : node
     )),
+    frontier: Object.fromEntries(Object.entries(status.frontier).map(([name, issueIds]) => [
+      name,
+      issueIds.filter((issueId) => !affectedNodes.includes(issueId)),
+    ])),
     legalActions: [],
     legalControls: ["RESUME", "STOP", "REFRESH"],
     diagnoses: [...status.diagnoses, {
@@ -310,23 +314,25 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
     return null;
   };
 
-  const closeIssue = async ({ action, current }) => {
-    const taskRef = current.taskRefs?.[action.issueId];
-    if (!isTaskRef(taskRef)) throw new Error("CLOSE_TASK_REFERENCE_MISSING");
-    let closeWriter;
+  const acquireTargetCloseWriter = (current) => {
     if (current.closeWriterReclaimProof) {
       requireMethod(store, "reclaimCloseWriter");
-      closeWriter = store.reclaimCloseWriter({
+      return store.reclaimCloseWriter({
         target: current.runIdentity.target,
         runId: current.runIdentity.runId,
         staleProof: current.closeWriterReclaimProof,
       });
-    } else {
-      closeWriter = store.acquireCloseWriter({
-        target: current.runIdentity.target,
-        runId: current.runIdentity.runId,
-      });
     }
+    return store.acquireCloseWriter({
+      target: current.runIdentity.target,
+      runId: current.runIdentity.runId,
+    });
+  };
+
+  const closeIssue = async ({ action, current }) => {
+    const taskRef = current.taskRefs?.[action.issueId];
+    if (!isTaskRef(taskRef)) throw new Error("CLOSE_TASK_REFERENCE_MISSING");
+    const closeWriter = acquireTargetCloseWriter(current);
     let settled = false;
     try {
       const task = await tasks.read(taskRef);
@@ -375,14 +381,14 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
 
   const closeParent = async ({ action, current }) => {
     requireMethod(leaf, "closeParent");
-    const closeWriter = store.acquireCloseWriter({
-      target: current.runIdentity.target,
-      runId: current.runIdentity.runId,
-    });
+    const closeWriter = acquireTargetCloseWriter(current);
+    let settled = false;
     try {
-      await leaf.closeParent({ issueId: action.issueId, runIdentity: current.runIdentity });
+      const result = await leaf.closeParent({ issueId: action.issueId, runIdentity: current.runIdentity });
+      settled = result?.settled === true;
+      return settled;
     } finally {
-      closeWriter.release();
+      if (settled) closeWriter.release();
     }
   };
 
@@ -528,7 +534,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             continue;
           }
 
-          let deferredStop = null;
+          let deferredEnvironmentStop = null;
           for (const action of lastStatus.legalActions) {
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
@@ -536,14 +542,15 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) {
-                deferredStop ??= environmentUnresolved(lastStatus, action);
+                deferredEnvironmentStop ??= action;
                 continue;
               }
             } else if (action.type === "close_issue") {
               const active = await closeIssue({ action, current });
               if (!active) return lastStatus;
             } else if (action.type === "close_parent") {
-              await closeParent({ action, current });
+              const settled = await closeParent({ action, current });
+              if (!settled) return lastStatus;
             } else if (action.type === "reconcile_run") {
               // The next loop reacquires tracker and task-owned evidence before rebuilding status.
             } else if (["settle_pause", "settle_stop"].includes(action.type)) {
@@ -556,7 +563,20 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
           }
-          if (deferredStop) return deferredStop;
+          if (deferredEnvironmentStop) {
+            const trackerResult = await readTracker(selectedRequest);
+            if (!trackerResult.available) {
+              return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
+            }
+            const refreshed = await reconcile({
+              request: selectedRequest,
+              tracker: trackerResult.snapshot,
+              journal: store.readEvents(runIdentity.runId),
+              tasks,
+            });
+            const refreshedStatus = writer.rebuildStatus(refreshed.facts);
+            return environmentUnresolved(refreshedStatus, deferredEnvironmentStop);
+          }
         }
       } finally {
         if (writer) writer.release();
