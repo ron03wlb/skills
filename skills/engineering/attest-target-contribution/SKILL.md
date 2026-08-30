@@ -1,11 +1,11 @@
 ---
 name: attest-target-contribution
-description: Append or reuse exact direct-target contribution authority evidence. Use when verify-target-before-push hands off a human-confirmed eligible coverage-recovery packet.
+description: Append or reuse exact direct-target contribution authority evidence. Use when /verify-target-before-push hands off a human-confirmed eligible coverage-recovery packet.
 ---
 
 # Attest Target Contribution
 
-Append or reuse the narrow tracker authority record for exact eligible Direct target contributions. This helper runs only from an active `verify-target-before-push` recovery after one exact human confirmation. It never decides push readiness or replaces Issue execution, closeout, review, or verification.
+Append or reuse the narrow tracker authority record for exact eligible Direct target contributions. This helper runs only from an active `/verify-target-before-push` recovery after one exact human confirmation. It never decides push readiness or replaces Issue execution, closeout, review, or verification.
 
 ## Require the confirmed recovery packet
 

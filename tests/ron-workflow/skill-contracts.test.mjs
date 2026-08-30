@@ -399,7 +399,11 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
   assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
   assert.doesNotMatch(metadata, /^policy:/mu);
   assert.match(skill, /^description:.*Use when/mu);
+  assert.match(skill, /^description:.*Use when \/verify-target-before-push/mu);
+  assert.match(skill, /active `\/verify-target-before-push` recovery/iu);
+  assert.match(metadata, /handed off by \/verify-target-before-push/iu);
   assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(docs, /## Prerequisites.*configured Issue tracker.*active.*verify-target-before-push.*exact packet.*complete draft.*human.*confirmed/isu);
   assert.match(skill, /exact confirmed recovery packet.*owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
   assert.match(skill, /before mutation.*owner.*target.*commit.*diff.*eligibility.*ref drift.*stops without writing/isu);
   assert.match(skill, /explicit human-directed.*non-product workflow or governance maintenance.*outside an Executable Issue by design/isu);
@@ -435,6 +439,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   assert.match(verify, /owner.*target.*commit.*diff.*eligibility.*ref drift.*before mutation.*stops without writing/isu);
   assert.match(verify, /malformed.*duplicate.*conflicting.*mismatched.*unavailable.*partially written.*stops/isu);
   assert.match(verify, /exact record read-back.*discard.*failed gate.*automatically.*fresh.*Entry/isu);
+  assert.match(verify, /start a fresh `\/verify-target-before-push` from Entry/iu);
   assert.match(verify, /re-freeze.*refs.*identities.*rebuild.*members.*direct contributions/isu);
   assert.match(verify, /validate.*exact tracker location.*owner scope.*target.*full SHAs.*Git ancestry.*current diff.*strict eligibility/isu);
   assert.match(verify, /fourth selected-range coverage source/iu);

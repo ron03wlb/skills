@@ -58,7 +58,7 @@ Immediately before mutation, re-read the owner and refs and revalidate owner, ta
 
 After confirmation, invoke the model-invoked `/attest-target-contribution` skill with the exact confirmed packet without requiring a separate manual slash command. Require every reused or appended record to receive exact read-back. A malformed, duplicate, conflicting, mismatched, unavailable, or partially written record stops; never edit tracker history, continue with a subset, or manufacture replacement authority.
 
-After exact record read-back, discard the failed gate completely and automatically start a fresh `verify-target-before-push` from Entry. Re-freeze all refs and identities, rebuild members and direct contributions, and revalidate every record against its exact tracker location, owner scope, target, full SHAs, Git ancestry, current diff, and strict eligibility. Never resume from the earlier coverage point or carry forward its review, verification, cleanliness, or ref-stability evidence.
+After exact record read-back, discard the failed gate completely and automatically start a fresh `/verify-target-before-push` from Entry. Re-freeze all refs and identities, rebuild members and direct contributions, and revalidate every record against its exact tracker location, owner scope, target, full SHAs, Git ancestry, current diff, and strict eligibility. Never resume from the earlier coverage point or carry forward its review, verification, cleanliness, or ref-stability evidence.
 
 ## Run one aggregate gate
 

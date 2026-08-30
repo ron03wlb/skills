@@ -22,6 +22,10 @@ Type `/attest-target-contribution`, or the agent reaches for it automatically wh
 
 A standalone invocation without that active, confirmed recovery packet stops without writing.
 
+## Prerequisites
+
+The repository needs a configured Issue tracker, and an active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) recovery must provide the exact packet whose complete draft the human already confirmed. This helper writes only the matching tracker comment.
+
 ## One bounded attestation
 
 The leading idea is **attestation**, not verification. Only explicit human-directed, non-product workflow or governance maintenance outside an Executable Issue by design is eligible. Active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, mixed commits, partial paths, and ambiguous ownership stay on the normal Issue route.
