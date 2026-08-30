@@ -24,7 +24,9 @@ const eventFields = new Map([
   ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel"])],
   ["control.revised", new Set(["type", "at", "revision", "command"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
-  ["retry.recorded", new Set(["type", "at", "issueId", "attempt", "reason"])],
+  ["retry.recorded", new Set([
+    "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
+  ])],
   ["remediation.recorded", new Set(["type", "at", "issueId", "fingerprint", "cycle", "adapter"])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
@@ -34,6 +36,16 @@ const isRecord = (value) => value !== null && typeof value === "object" && !Arra
 
 const requireText = (value, label) => {
   if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} is required`);
+};
+
+const isoInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+
+export const requireIsoInstant = (value, label) => {
+  if (typeof value !== "string" || !isoInstantPattern.test(value)
+    || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) {
+    throw new TypeError(`${label} must be a canonical ISO instant`);
+  }
+  return Date.parse(value);
 };
 
 const requirePositiveInteger = (value, label, maximum = Number.MAX_SAFE_INTEGER) => {
@@ -47,6 +59,14 @@ const assertExactFields = (value, allowed, label) => {
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
 };
+
+const validateTaskRef = (taskRef, label) => {
+  assertExactFields(taskRef, new Set(["threadId", "hostId"]), label);
+  requireText(taskRef.threadId, `${label}.threadId`);
+  requireText(taskRef.hostId, `${label}.hostId`);
+};
+
+const sameTaskRef = (left, right) => left.threadId === right.threadId && left.hostId === right.hostId;
 
 export const normalizeEventDraft = (eventDraft) => (
   isRecord(eventDraft) && eventDraft.type === "grant.recorded" && eventDraft.maxParallel === undefined
@@ -62,9 +82,7 @@ export function validateEventDraft(event) {
   const allowedFields = eventFields.get(event.type);
   if (!allowedFields) throw new TypeError(`Unsupported event type: ${String(event.type)}`);
   assertExactFields(event, allowedFields, `${event.type} event`);
-  if (typeof event.at !== "string" || Number.isNaN(Date.parse(event.at))) {
-    throw new TypeError("Journal events require an ISO timestamp");
-  }
+  requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
     case "grant.recorded":
       assertExactFields(event.runIdentity, new Set(immutableRunIdentityKeys), "grant runIdentity");
@@ -86,16 +104,34 @@ export function validateEventDraft(event) {
       if (!controlCommands.has(event.command)) throw new TypeError("Unsupported control command");
       break;
     case "dispatch.recorded":
-      assertExactFields(event.taskRef, new Set(["threadId", "hostId"]), "dispatch taskRef");
       requireText(event.issueId, "dispatch issueId");
       requirePositiveInteger(event.attempt, "dispatch attempt", 3);
-      requireText(event.taskRef.threadId, "dispatch taskRef.threadId");
-      requireText(event.taskRef.hostId, "dispatch taskRef.hostId");
+      validateTaskRef(event.taskRef, "dispatch taskRef");
       break;
     case "retry.recorded":
       requireText(event.issueId, "retry issueId");
       requirePositiveInteger(event.attempt, "retry attempt", 3);
       requireText(event.reason, "retry reason");
+      validateTaskRef(event.priorTaskRef, "retry priorTaskRef");
+      if (event.replacement !== null) {
+        assertExactFields(
+          event.replacement,
+          new Set(["supersedesAttempt", "nextTaskRef", "inactiveEvidence"]),
+          "retry replacement",
+        );
+        if (event.replacement.supersedesAttempt !== event.attempt) {
+          throw new TypeError("Replacement supersedesAttempt must match retry attempt");
+        }
+        validateTaskRef(event.replacement.nextTaskRef, "retry replacement nextTaskRef");
+        if (sameTaskRef(event.priorTaskRef, event.replacement.nextTaskRef)) {
+          throw new TypeError("Replacement nextTaskRef must identify a different task");
+        }
+        if (!Array.isArray(event.replacement.inactiveEvidence)
+          || event.replacement.inactiveEvidence.length === 0
+          || !event.replacement.inactiveEvidence.every((item) => typeof item === "string" && item.length > 0)) {
+          throw new TypeError("Replacement requires exact prior-task inactive evidence");
+        }
+      }
       break;
     case "remediation.recorded":
       requireText(event.issueId, "remediation issueId");
@@ -141,21 +177,37 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     }
   }
   if (event.type === "dispatch.recorded") {
-    const previousAttempt = events
+    const previousDispatch = events
       .filter(({ type, issueId }) => type === "dispatch.recorded" && issueId === event.issueId)
-      .reduce((maximum, item) => Math.max(maximum, item.attempt), 0);
+      .sort((left, right) => right.attempt - left.attempt)[0];
+    const previousAttempt = previousDispatch?.attempt ?? 0;
     if (event.attempt !== previousAttempt + 1) {
       throw new TypeError(`Expected next dispatch attempt ${previousAttempt + 1}`);
     }
+    if (previousDispatch) {
+      const retry = events.findLast((item) => (
+        item.type === "retry.recorded"
+        && item.issueId === event.issueId
+        && item.attempt === previousAttempt
+      ));
+      if (!retry) throw new TypeError("A later dispatch attempt requires one matching retry fact");
+      const authorizedTaskRef = retry.replacement?.nextTaskRef ?? previousDispatch.taskRef;
+      if (!sameTaskRef(event.taskRef, authorizedTaskRef)) {
+        throw new TypeError("Dispatch taskRef is not authorized by the matching retry fact");
+      }
+    }
   }
   if (event.type === "retry.recorded") {
-    const dispatched = events.some((item) => (
+    const dispatched = events.find((item) => (
       item.type === "dispatch.recorded" && item.issueId === event.issueId && item.attempt === event.attempt
     ));
     const duplicate = events.some((item) => (
       item.type === "retry.recorded" && item.issueId === event.issueId && item.attempt === event.attempt
     ));
     if (!dispatched || duplicate) throw new TypeError("Retry facts require one matching dispatch attempt");
+    if (!sameTaskRef(event.priorTaskRef, dispatched.taskRef)) {
+      throw new TypeError("Retry priorTaskRef must match the dispatched attempt");
+    }
   }
   if (event.type === "remediation.recorded") {
     const duplicate = events.some((item) => (

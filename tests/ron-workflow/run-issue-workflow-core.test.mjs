@@ -70,6 +70,18 @@ const dispatchEvent = (issueId, attempt = 1, sequence = 2) => ({
   taskRef: { threadId: `thread-${issueId}`, hostId: "local" },
 });
 
+const retryEvent = (issueId, attempt, sequence) => ({
+  schema: "dag-run-event:v1",
+  sequence,
+  type: "retry.recorded",
+  at: `2026-08-30T00:0${sequence}:00.000Z`,
+  issueId,
+  attempt,
+  reason: "transient_terminal_failure",
+  priorTaskRef: { threadId: `thread-${issueId}`, hostId: "local" },
+  replacement: null,
+});
+
 const facts = (nodes) => ({
   schema: "dag-run-facts:v1",
   run: {
@@ -434,7 +446,14 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
 
   const exhausted = reduceRun({
     ...facts([{ ...node("13"), taskState: "TRANSIENT_FAILURE" }]),
-    journal: [grant, dispatchEvent("13", 1, 2), dispatchEvent("13", 2, 3), dispatchEvent("13", 3, 4)],
+    journal: [
+      grant,
+      dispatchEvent("13", 1, 2),
+      retryEvent("13", 1, 3),
+      dispatchEvent("13", 2, 4),
+      retryEvent("13", 2, 5),
+      dispatchEvent("13", 3, 6),
+    ],
   });
   assert.equal(exhausted.nodes[0].state, "FAILED");
   assert.equal(exhausted.run.state, "BLOCKED");
@@ -720,8 +739,78 @@ test("the single writer appends ordered control events and atomically rebuilds d
     }), /storage Run/u);
     mismatchedWriter.release();
 
+    const retryWriter = store.acquireWriter("retry-run");
+    retryWriter.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      runIdentity: { ...grant.runIdentity, runId: "retry-run" },
+    });
+    retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:01:00.000Z",
+      issueId: "13",
+      attempt: 1,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    });
+    assert.throws(() => retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:02:00.000Z",
+      issueId: "13",
+      attempt: 2,
+      taskRef: { threadId: "replacement-13", hostId: "local" },
+    }), /matching retry fact/u);
+    retryWriter.append({
+      type: "retry.recorded",
+      at: "2026-08-30T00:02:00.000Z",
+      issueId: "13",
+      attempt: 1,
+      reason: "transient_terminal_failure",
+      priorTaskRef: { threadId: "thread-13", hostId: "local" },
+      replacement: null,
+    });
+    retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:03:00.000Z",
+      issueId: "13",
+      attempt: 2,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    });
+    retryWriter.append({
+      type: "retry.recorded",
+      at: "2026-08-30T00:04:00.000Z",
+      issueId: "13",
+      attempt: 2,
+      reason: "proven_inactive_task",
+      priorTaskRef: { threadId: "thread-13", hostId: "local" },
+      replacement: {
+        supersedesAttempt: 2,
+        nextTaskRef: { threadId: "replacement-13", hostId: "local" },
+        inactiveEvidence: ["Codex task read-back reports the prior task cannot continue."],
+      },
+    });
+    assert.throws(() => retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:05:00.000Z",
+      issueId: "13",
+      attempt: 3,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    }), /not authorized/u);
+    retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:05:00.000Z",
+      issueId: "13",
+      attempt: 3,
+      taskRef: { threadId: "replacement-13", hostId: "local" },
+    });
+    retryWriter.release();
+
     const writer = store.acquireWriter("run-12");
     assert.throws(() => store.acquireWriter("run-12"), /RUN_WRITER_LOCKED/u);
+    assert.throws(() => writer.append({
+      type: "grant.recorded",
+      at: "0",
+      runIdentity: grant.runIdentity,
+    }), /canonical ISO instant/u);
 
     const storedGrant = writer.append({
       type: "grant.recorded",
@@ -1023,19 +1112,85 @@ test("cleanup newest-ten floor ignores absent directories", () => {
   }
 });
 
+test("cleanup recovers an exact stale lease and resumes append-before-delete idempotently", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-cleanup-reclaim-");
+  const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "cleanup-new" });
+  const now = "2026-08-30T00:00:00.000Z";
+  const runs = Array.from({ length: 11 }, (_, index) => ({
+    runId: `recover-${String(index).padStart(2, "0")}`,
+    specId: String(700 + index),
+    state: "SUCCEEDED",
+    terminalAt: new Date(Date.parse(now) - (40 + index) * 86_400_000).toISOString(),
+    engineLock: "RELEASED",
+    activeTasks: "ABSENT",
+  }));
+  const controlRoot = join(gitCommonDir, "matt-workflow-control");
+  const runsRoot = join(controlRoot, "runs");
+  const cleanupLock = join(controlRoot, "cleanup.lock");
+  try {
+    for (const { runId } of runs) mkdirSync(join(runsRoot, runId), { recursive: true });
+    writeFileSync(join(controlRoot, "cleanup.jsonl"), `${JSON.stringify({
+      schema: "dag-run-cleanup:v1",
+      sequence: 1,
+      runId: "recover-10",
+      specId: "710",
+      terminalState: "SUCCEEDED",
+      deletionTime: now,
+      retentionReason: "older_than_30_days_and_outside_newest_10",
+    })}\n`, "utf8");
+    mkdirSync(cleanupLock);
+    writeFileSync(join(cleanupLock, "owner.json"), `${JSON.stringify({
+      schema: "dag-run-lock-owner:v1",
+      kind: "cleanup",
+      runId: "cleanup",
+      coordinatorInstanceId: "cleanup-old",
+      generation: "cleanup-generation-old",
+    })}\n`, "utf8");
+    assert.equal(store.readCleanupLock().generation, "cleanup-generation-old");
+    assert.throws(() => store.applyCleanup({ now, runs }), /CLEANUP_WRITER_LOCKED/u);
+    assert.throws(() => store.previewCleanup({ now: "0", runs }), /ISO time/u);
+    assert.throws(() => store.previewCleanup({
+      now,
+      runs: runs.map((run, index) => (index === 0 ? { ...run, terminalAt: "0" } : run)),
+    }), /canonical ISO instant/u);
+    const applied = store.applyCleanup({
+      now,
+      runs,
+      cleanupStaleProof: {
+        previousCoordinatorInstanceId: "cleanup-old",
+        previousGeneration: "cleanup-generation-old",
+        coordinatorState: "INACTIVE",
+        reconciled: true,
+        evidence: ["Coordinator read-back proves cleanup-old is inactive."],
+        abandonedOperationIds: [],
+      },
+    });
+    assert.deepEqual(applied.removed, ["recover-10"]);
+    assert.equal(existsSync(join(runsRoot, "recover-10")), false);
+    assert.equal(store.readCleanupRecords().length, 1);
+    assert.equal(existsSync(cleanupLock), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("explicit stale-owner proof can reclaim same-Run engine and close locks", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-lock-reclaim-");
   const oldStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-old" });
   const newStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-new" });
-  const staleProof = {
-    previousCoordinatorInstanceId: "coordinator-old",
+  const staleProofFor = (owner, abandonedOperationIds = []) => ({
+    previousCoordinatorInstanceId: owner.coordinatorInstanceId,
+    previousGeneration: owner.generation,
     coordinatorState: "INACTIVE",
     reconciled: true,
     evidence: ["Codex task read-back proves the previous coordinator is inactive."],
-  };
+    abandonedOperationIds,
+  });
   try {
     const oldWriter = oldStore.acquireWriter("reclaim-run");
-    assert.equal(oldStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-old");
+    const oldOwner = oldStore.readWriterLock("reclaim-run");
+    const staleProof = staleProofFor(oldOwner);
+    assert.equal(oldOwner.coordinatorInstanceId, "coordinator-old");
     assert.throws(() => newStore.acquireWriter("reclaim-run"), /RUN_WRITER_LOCKED/u);
     assert.throws(() => newStore.reclaimWriter({
       runId: "reclaim-run",
@@ -1056,12 +1211,24 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
       coordinatorInstanceId: "coordinator-gate-old",
       generation: "gate-generation-old",
     })}\n`, "utf8");
+    assert.equal(newStore.readWriterReclaimLock("reclaim-run").generation, "gate-generation-old");
+    assert.throws(() => newStore.reclaimWriter({
+      runId: "reclaim-run",
+      staleProof,
+      gateStaleProof: staleProofFor({
+        coordinatorInstanceId: "coordinator-gate-old",
+        generation: "wrong-gate-generation",
+      }),
+    }), /GATE_STALE_PROOF_MISMATCH/u);
+    assert.equal(newStore.readWriterReclaimLock("reclaim-run").generation, "gate-generation-old");
     const adoptedWriter = newStore.reclaimWriter({
       runId: "reclaim-run",
       staleProof,
       gateStaleProof: {
-        ...staleProof,
-        previousCoordinatorInstanceId: "coordinator-gate-old",
+        ...staleProofFor({
+          coordinatorInstanceId: "coordinator-gate-old",
+          generation: "gate-generation-old",
+        }),
       },
     });
     assert.equal(newStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-new");
@@ -1075,8 +1242,35 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
     assert.equal(newStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-new");
     adoptedWriter.release();
 
+    const laterOldWriter = oldStore.acquireWriter("reclaim-run");
+    assert.throws(() => newStore.reclaimWriter({ runId: "reclaim-run", staleProof }), /STALE_PROOF_MISMATCH/u);
+    laterOldWriter.release();
+
+    const operationWriter = oldStore.acquireWriter("operation-run");
+    const operationOwner = oldStore.readWriterLock("operation-run");
+    const operationId = `engine-operation.${operationOwner.generation}.abandoned.lock`;
+    mkdirSync(join(
+      gitCommonDir,
+      "matt-workflow-control",
+      "runs",
+      "operation-run",
+      operationId,
+    ));
+    assert.deepEqual(oldStore.readWriterLock("operation-run").activeOperationIds, [operationId]);
+    assert.throws(() => newStore.reclaimWriter({
+      runId: "operation-run",
+      staleProof: staleProofFor(operationOwner),
+    }), /OPERATION_ACTIVE_OR_UNPROVEN/u);
+    const recoveredOperationWriter = newStore.reclaimWriter({
+      runId: "operation-run",
+      staleProof: staleProofFor(operationOwner, [operationId]),
+    });
+    assert.throws(() => operationWriter.release(), /LOCK_LEASE_FENCED/u);
+    recoveredOperationWriter.release();
+
     const oldCloseWriter = oldStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" });
     const oldCloseOwner = oldStore.readCloseWriterLock("features/ron");
+    const closeStaleProof = staleProofFor(oldCloseOwner);
     assert.equal(oldCloseOwner.coordinatorInstanceId, "coordinator-old");
     assert.throws(
       () => newStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" }),
@@ -1085,7 +1279,7 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
     const adoptedCloseWriter = newStore.reclaimCloseWriter({
       target: "features/ron",
       runId: "reclaim-run",
-      staleProof,
+      staleProof: closeStaleProof,
     });
     assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
     assert.throws(() => oldCloseWriter.assertCurrent(), /LOCK_LEASE_FENCED/u);
