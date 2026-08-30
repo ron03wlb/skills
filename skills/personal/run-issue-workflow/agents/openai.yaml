@@ -4,4 +4,3 @@ interface:
   default_prompt: "Use $run-issue-workflow to reconcile and run this exact Tracker Spec through Codex-native Issue lanes."
 policy:
   allow_implicit_invocation: false
-

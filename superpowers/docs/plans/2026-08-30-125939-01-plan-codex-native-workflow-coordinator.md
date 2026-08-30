@@ -25,4 +25,3 @@
 
 - Work: Commit coherent slices, run required syntax/focused/full checks, compare the exact baseline-to-candidate diff with Issue #15 AC-1 through AC-7 and exclusions, then run independent Standards and Spec review. Repair only confirmed in-scope findings for at most ten waves and rerun both axes after each repair.
 - Verify: `node --test tests/ron-workflow/*.test.mjs` and `git diff --check b27b88e005cf7581720ff8e9a59767d4c786d3a5..HEAD`
-

@@ -74,4 +74,3 @@ The only recognized automatic environment adapter in v1 is the Windows Gradle ca
 Stop at `SUCCEEDED`, `STOPPED`, or any state with no legal action. Every blocked, failed, or paused result reports the stable reason code, exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates.
 
 This personal coordinator uses only Codex task capabilities exposed by the current host and repository-owned runtime scripts. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow. Shared leaf repair happens in a separately authorized Issue and a later explicit re-entry reconciles the result.
-
