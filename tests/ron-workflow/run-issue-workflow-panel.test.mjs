@@ -5,12 +5,16 @@ import {
   createRunPanelControl,
   startRunPanelBridge,
 } from "../../skills/personal/run-issue-workflow/scripts/run-panel-bridge.mjs";
-import { renderRunPanel } from "../../skills/personal/run-issue-workflow/scripts/run-panel.mjs";
+import {
+  renderRunPanel,
+  statusDigest,
+} from "../../skills/personal/run-issue-workflow/scripts/run-panel.mjs";
 
 const status = ({
   state = "RUNNING",
   controlRevision = 0,
   controlCommand = null,
+  nodes = [],
 } = {}) => ({
   schema: "dag-run-status:v1",
   run: {
@@ -20,7 +24,7 @@ const status = ({
     controlRevision,
     controlCommand,
   },
-  nodes: [],
+  nodes,
   frontier: { ready: [], active: [], closeable: [] },
   legalActions: [],
   legalControls: ["PAUSE", "STOP", "REFRESH"],
@@ -71,11 +75,46 @@ test("panel controls append one revisioned event and make duplicates read-only",
   assert.equal(appended.length, 1);
 });
 
+test("panel controls serialize concurrent duplicates and reject out-of-state commands", async () => {
+  let current = status();
+  const appended = [];
+  const submit = createRunPanelControl({
+    readStatus: () => current,
+    appendEvent: async (event) => appended.push(event),
+    rebuildStatus: () => {
+      current = status({ state: "PAUSING", controlRevision: 1, controlCommand: "PAUSE" });
+      return current;
+    },
+    now: () => "2026-08-30T01:00:00.000Z",
+  });
+
+  const results = await Promise.all([submit("PAUSE"), submit("PAUSE")]);
+  assert.deepEqual(results.map(({ changed, revision }) => ({ changed, revision })), [
+    { changed: true, revision: 1 },
+    { changed: false, revision: 1 },
+  ]);
+  assert.equal(appended.length, 1);
+
+  current = status({ state: "SUCCEEDED", controlRevision: 1, controlCommand: "PAUSE" });
+  assert.deepEqual(await submit("STOP"), {
+    accepted: false,
+    changed: false,
+    revision: 1,
+    reason: "illegal_control",
+    status: current,
+  });
+  assert.equal(appended.length, 1);
+});
+
 test("bridge is loopback-only, token-authenticated, and exposes a fixed route allowlist", async (t) => {
-  const snapshot = status();
+  let snapshot = status();
+  let statusReads = 0;
   const submitted = [];
   const bridge = await startRunPanelBridge({
-    readStatus: () => snapshot,
+    readStatus: () => {
+      statusReads += 1;
+      return snapshot;
+    },
     submitControl: async (command) => {
       submitted.push(command);
       return { accepted: true, changed: true, revision: 1, status: snapshot };
@@ -104,6 +143,24 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
   const current = await fetch(`${bridge.origin}/api/status`, { headers: authenticated });
   assert.equal(current.status, 200);
   assert.deepEqual(await current.json(), snapshot);
+  const originalEtag = current.headers.get("etag");
+  assert.equal(originalEtag, `"${statusDigest(snapshot)}"`);
+  assert.equal(submitted.length, 0);
+
+  const unchanged = await fetch(`${bridge.origin}/api/status`, {
+    headers: { ...authenticated, "if-none-match": originalEtag },
+  });
+  assert.equal(unchanged.status, 304);
+  assert.equal(submitted.length, 0);
+
+  snapshot = status({ nodes: [{ issueId: "16", blockers: [], state: "EXECUTING" }] });
+  const progressed = await fetch(`${bridge.origin}/api/status`, {
+    headers: { ...authenticated, "if-none-match": originalEtag },
+  });
+  assert.equal(progressed.status, 200);
+  assert.notEqual(progressed.headers.get("etag"), originalEtag);
+  assert.equal(snapshot.run.controlRevision, 0);
+  assert.equal(submitted.length, 0);
 
   const pause = await fetch(`${bridge.origin}/api/control/pause`, {
     method: "POST",
@@ -113,12 +170,25 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
   assert.equal((await pause.json()).revision, 1);
   assert.deepEqual(submitted, ["PAUSE"]);
 
+  for (const [route, command] of [["resume", "RESUME"], ["stop", "STOP"]]) {
+    const response = await fetch(`${bridge.origin}/api/control/${route}`, {
+      method: "POST",
+      headers: authenticated,
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).revision, 1);
+    assert.equal(submitted.at(-1), command);
+  }
+
+  const wrongMethod = await fetch(`${bridge.origin}/api/control/pause`, { headers: authenticated });
+  assert.equal(wrongMethod.status, 404);
+
   const start = await fetch(`${bridge.origin}/api/control/start`, {
     method: "POST",
     headers: authenticated,
   });
   assert.equal(start.status, 404);
-  assert.deepEqual(submitted, ["PAUSE"]);
+  assert.deepEqual(submitted, ["PAUSE", "RESUME", "STOP"]);
 
   const body = await fetch(`${bridge.origin}/api/control/stop`, {
     method: "POST",
@@ -126,7 +196,8 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
     body: "{}",
   });
   assert.equal(body.status, 413);
-  assert.deepEqual(submitted, ["PAUSE"]);
+  assert.deepEqual(submitted, ["PAUSE", "RESUME", "STOP"]);
+  assert.ok(statusReads >= 4);
 });
 
 test("bridge shutdown changes no Run state", async () => {
@@ -151,7 +222,7 @@ test("bridge shutdown changes no Run state", async () => {
 });
 
 test("renderer projects the complete Run, DAG, task, close, and diagnosis snapshot", () => {
-  const html = renderRunPanel({
+  const snapshot = {
     schema: "dag-run-status:v1",
     run: {
       runId: "run-<16>",
@@ -190,7 +261,7 @@ test("renderer projects the complete Run, DAG, task, close, and diagnosis snapsh
       reasonCode: "stopped_by_user",
       limitationClass: "instance-blocker",
       evidence: ["Grant revoked; no process was killed <exact>."],
-      attemptedRecovery: ["workers allowed to settle"],
+      attemptedRecovery: ["workers allowed to settle", { adapter: "gradle-loopback-safe", cycle: 1 }],
       retryCount: 2,
       noAutomaticTransition: "Await explicit recovery.",
       affectedNodes: ["16"],
@@ -198,7 +269,8 @@ test("renderer projects the complete Run, DAG, task, close, and diagnosis snapsh
       nextOwner: "human",
       resumePredicates: ["new Grant is valid"],
     }],
-  });
+  };
+  const html = renderRunPanel(snapshot);
 
   assert.match(html, /run-&lt;16&gt;/u);
   assert.match(html, /STOPPING/u);
@@ -214,6 +286,7 @@ test("renderer projects the complete Run, DAG, task, close, and diagnosis snapsh
   assert.match(html, /Blocked.*#16/su);
   assert.match(html, /Closeable.*#15/su);
   assert.match(html, /Grant revoked; no process was killed &lt;exact&gt;\./u);
+  assert.match(html, /\{&quot;adapter&quot;:&quot;gradle-loopback-safe&quot;,&quot;cycle&quot;:1\}/u);
   assert.match(html, /Affected.*#16/su);
   assert.match(html, /Unaffected.*#17/su);
   assert.match(html, /Next owner.*human/su);
@@ -222,4 +295,12 @@ test("renderer projects the complete Run, DAG, task, close, and diagnosis snapsh
   assert.doesNotMatch(html, /data-control="PAUSE"/u);
   assert.match(html, /Bridge unreachable — displayed snapshot is stale\./u);
   assert.doesNotMatch(html, /<script>Grant revoked/u);
+  assert.match(html, new RegExp(`data-status-digest="${statusDigest(snapshot)}"`, "u"));
+});
+
+test("renderer accepts representative lifecycle snapshots", () => {
+  for (const stateName of ["RUNNING", "PAUSED", "BLOCKED", "STOPPED", "SUCCEEDED"]) {
+    const html = renderRunPanel(status({ state: stateName }));
+    assert.match(html, new RegExp(`<span class="state">${stateName}</span>`, "u"));
+  }
 });

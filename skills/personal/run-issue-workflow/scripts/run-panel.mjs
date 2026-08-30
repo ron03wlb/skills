@@ -1,8 +1,23 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import { CONTROL_COMMANDS, STATUS_SCHEMA } from "./run-core.mjs";
 
 const template = readFileSync(new URL("./run-panel.html", import.meta.url), "utf8");
+
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right, "en"))
+      .map(([key, child]) => [key, canonicalize(child)]));
+  }
+  return value;
+};
+
+const stableJson = (value) => JSON.stringify(canonicalize(value));
+
+export const statusDigest = (status) => createHash("sha256").update(stableJson(status)).digest("hex");
 
 const escapeHtml = (value) => String(value ?? "—")
   .replaceAll("&", "&amp;")
@@ -18,7 +33,7 @@ const issueList = (values) => values.length === 0
   : values.map((value) => `<code>#${escapeHtml(value)}</code>`).join(", ");
 const textList = (values) => values.length === 0
   ? '<li class="muted">None</li>'
-  : values.map((value) => `<li>${escapeHtml(value)}</li>`).join("");
+  : values.map((value) => `<li>${escapeHtml(value && typeof value === "object" ? stableJson(value) : value)}</li>`).join("");
 
 const renderTaskRef = (ref) => {
   if (!ref || typeof ref !== "object" || Array.isArray(ref)) return '<span class="muted">None</span>';
@@ -83,6 +98,6 @@ export function renderRunPanel(status) {
   </main>`;
 
   return template
-    .replace("<!--RUN_PANEL_REVISION-->", escapeHtml(run.controlRevision))
+    .replace("<!--RUN_PANEL_DIGEST-->", statusDigest(status))
     .replace("<!--RUN_PANEL_CONTENT-->", content);
 }

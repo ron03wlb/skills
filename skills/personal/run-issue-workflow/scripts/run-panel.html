@@ -24,7 +24,7 @@
     code { overflow-wrap: anywhere; }
   </style>
 </head>
-<body data-control-revision="<!--RUN_PANEL_REVISION-->">
+<body data-status-digest="<!--RUN_PANEL_DIGEST-->">
   <!--RUN_PANEL_CONTENT-->
   <script>
     (() => {
@@ -69,14 +69,16 @@
           return;
         }
         try {
-          const response = await fetch("/api/status", { headers });
-          if (!response.ok) throw new Error(String(response.status));
-          const snapshot = await response.json();
-          const renderedRevision = Number(document.body.dataset.controlRevision);
-          if (snapshot.run.controlRevision > renderedRevision) {
-            stale("A newer Run revision is available — Refresh to display it.");
-          } else {
+          const renderedEtag = `"${document.body.dataset.statusDigest}"`;
+          const response = await fetch("/api/status", {
+            headers: { ...headers, "if-none-match": renderedEtag },
+          });
+          if (response.status === 304) {
             current();
+          } else if (response.ok && response.headers.get("etag") !== renderedEtag) {
+            stale("A newer Run snapshot is available — Refresh to display it.");
+          } else {
+            throw new Error(String(response.status));
           }
         } catch {
           stale();

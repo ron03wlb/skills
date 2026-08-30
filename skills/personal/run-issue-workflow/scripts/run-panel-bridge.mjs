@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import { planControl, STATUS_SCHEMA } from "./run-core.mjs";
-import { renderRunPanel } from "./run-panel.mjs";
+import { renderRunPanel, statusDigest } from "./run-panel.mjs";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const controlRoutes = new Map([
@@ -35,19 +35,29 @@ const bearerToken = (request) => {
   return authorization.slice("Bearer ".length);
 };
 
-const send = (response, statusCode, contentType, body) => {
+const send = (response, statusCode, contentType, body, headers = {}) => {
   response.writeHead(statusCode, {
     "cache-control": "no-store",
     "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "content-type": contentType,
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
+    ...headers,
   });
   response.end(body);
 };
 
 const sendJson = (response, statusCode, value) => {
   send(response, statusCode, "application/json; charset=utf-8", `${JSON.stringify(value)}\n`);
+};
+
+const sendStatus = (request, response, status) => {
+  const etag = `"${statusDigest(status)}"`;
+  if (request.headers["if-none-match"] === etag) {
+    send(response, 304, "application/json; charset=utf-8", "", { etag });
+  } else {
+    send(response, 200, "application/json; charset=utf-8", `${JSON.stringify(status)}\n`, { etag });
+  }
 };
 
 const requestBodyIsEmpty = (request) => new Promise((resolve) => {
@@ -135,7 +145,7 @@ export async function startRunPanelBridge({ readStatus, submitControl, renderPan
         return;
       }
       if (request.method === "GET" && url.pathname === "/api/status") {
-        sendJson(response, 200, requireStatus(await readStatus()));
+        sendStatus(request, response, requireStatus(await readStatus()));
         return;
       }
       if (request.method === "POST" && controlRoutes.has(url.pathname)) {
