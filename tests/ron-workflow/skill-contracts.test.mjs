@@ -1231,6 +1231,49 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   }
 });
 
+test("Codex-native workflow coordinator is explicit personal only", () => {
+  const skillPath = "skills/personal/run-issue-workflow/SKILL.md";
+  const metadataPath = "skills/personal/run-issue-workflow/agents/openai.yaml";
+  assert.equal(existsSync(skillPath), true);
+  assert.equal(existsSync(metadataPath), true);
+
+  const skill = read(skillPath);
+  const metadata = read(metadataPath);
+  assert.match(skill, /^disable-model-invocation:\s*true$/mu);
+  assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\)/u);
+  assert.match(skill, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
+  assert.match(skill, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
+  assert.match(skill, /DAG Run Grant.*`max_parallel`.*default three/isu);
+  assert.match(skill, /saved project.*`local` environment/isu);
+  assert.match(skill, /Every executable Issue maps to one sidebar-visible child Codex task/iu);
+  assert.match(skill, /Never create a duplicate live lane/iu);
+  assert.match(skill, /`execute-issue` owns its dedicated Issue worktree/iu);
+  assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
+  assert.match(skill, /node success.*release dependants/iu);
+  assert.match(skill, /All-child node success triggers.*parent-only close/iu);
+  assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
+  assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
+  assert.match(skill, /5, 15, and 30 second.*tracker.*probe.*retry budget/isu);
+  assert.match(skill, /`Selector\.open\(\)`.*Unable to establish loopback connection.*`gradle-loopback-safe`.*one.*process-local.*cycle/isu);
+  assert.match(skill, /On every entry.*reacquire/isu);
+  for (const evidence of [
+    /tracker evidence/iu,
+    /registered worktree evidence from Git/iu,
+    /`implementation_complete`/u,
+    /Codex task lifecycle/iu,
+    /append-only run journal/iu,
+  ]) assert.match(skill, evidence);
+  assert.match(skill, /Re-entry.*without duplicate/isu);
+  assert.doesNotMatch(skill, /Orca|Codex App Server|push the target|deploy the target|edit shared skills/iu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.doesNotMatch(read(path), /run-issue-workflow/iu);
+  }
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.equal(plugin.skills.some((path) => /run-issue-workflow/iu.test(path)), false);
+});
+
 test("changed delivery documentation remains structurally valid", () => {
   for (const path of [
     "README.md",
