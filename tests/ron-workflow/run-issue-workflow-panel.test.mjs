@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import {
@@ -302,5 +303,17 @@ test("renderer accepts representative lifecycle snapshots", () => {
   for (const stateName of ["RUNNING", "PAUSED", "BLOCKED", "STOPPED", "SUCCEEDED"]) {
     const html = renderRunPanel(status({ state: stateName }));
     assert.match(html, new RegExp(`<span class="state">${stateName}</span>`, "u"));
+  }
+});
+
+test("documented terminal and diagnosed status examples stay renderable and token-free", () => {
+  for (const [name, state] of [["status-succeeded", "SUCCEEDED"], ["status-diagnosed", "BLOCKED"]]) {
+    const path = new URL(`../../skills/personal/run-issue-workflow/examples/${name}.json`, import.meta.url);
+    const source = readFileSync(path, "utf8");
+    const example = JSON.parse(source);
+    assert.equal(example.schema, "dag-run-status:v1");
+    assert.equal(example.run.state, state);
+    assert.doesNotMatch(source, /token/iu);
+    assert.match(renderRunPanel(example), new RegExp(`<span class="state">${state}</span>`, "u"));
   }
 });

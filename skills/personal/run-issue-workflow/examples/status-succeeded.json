@@ -1,0 +1,41 @@
+{
+  "schema": "dag-run-status:v1",
+  "run": {
+    "runId": "run-17-single",
+    "specId": "17",
+    "approvedScopeHash": "sha256:issue-17",
+    "target": "features/ron",
+    "classification": "SINGLE",
+    "decompositionIdentity": null,
+    "closeWriterRunId": null,
+    "closeWriterState": "ABSENT",
+    "state": "SUCCEEDED",
+    "maxParallel": 3,
+    "controlRevision": 0,
+    "controlCommand": null
+  },
+  "nodes": [
+    {
+      "issueId": "17",
+      "blockers": [],
+      "state": "SUCCEEDED",
+      "task": {
+        "ref": { "threadId": "thread-17", "hostId": "local" },
+        "state": "NONE",
+        "attempt": 1,
+        "retryCount": 0,
+        "remediationCount": 0
+      },
+      "close": {
+        "completionState": "COMPLETE",
+        "candidateReachable": true,
+        "worktreeState": "ABSENT",
+        "trackerState": "CLOSED"
+      }
+    }
+  ],
+  "frontier": { "ready": [], "active": [], "closeable": [] },
+  "legalActions": [],
+  "legalControls": ["REFRESH"],
+  "diagnoses": []
+}

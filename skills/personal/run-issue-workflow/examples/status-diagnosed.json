@@ -1,0 +1,54 @@
+{
+  "schema": "dag-run-status:v1",
+  "run": {
+    "runId": "run-12-multi",
+    "specId": "12",
+    "approvedScopeHash": "sha256:spec-12",
+    "target": "features/ron",
+    "classification": "MULTI",
+    "decompositionIdentity": "decomposition:12:05",
+    "closeWriterRunId": null,
+    "closeWriterState": "ABSENT",
+    "state": "BLOCKED",
+    "maxParallel": 2,
+    "controlRevision": 0,
+    "controlCommand": null
+  },
+  "nodes": [
+    {
+      "issueId": "17",
+      "blockers": ["13"],
+      "state": "BLOCKED",
+      "task": {
+        "ref": null,
+        "state": "NONE",
+        "attempt": 0,
+        "retryCount": 0,
+        "remediationCount": 0
+      },
+      "close": {
+        "completionState": "NONE",
+        "candidateReachable": false,
+        "worktreeState": "ABSENT",
+        "trackerState": "OPEN"
+      }
+    }
+  ],
+  "frontier": { "ready": [], "active": [], "closeable": [] },
+  "legalActions": [],
+  "legalControls": ["RESUME", "STOP", "REFRESH"],
+  "diagnoses": [
+    {
+      "reasonCode": "merge_conflict",
+      "limitationClass": "unresolved-evidence",
+      "evidence": ["Target integration reported a merge conflict."],
+      "attemptedRecovery": [],
+      "retryCount": 0,
+      "noAutomaticTransition": "Contradictory authoritative evidence has no safe precedence.",
+      "affectedNodes": ["17"],
+      "unaffectedNodes": [],
+      "nextOwner": "human",
+      "resumePredicates": ["resolve_contradiction:merge_conflict"]
+    }
+  ]
+}

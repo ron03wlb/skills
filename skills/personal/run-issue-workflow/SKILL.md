@@ -18,6 +18,14 @@ Bind one immutable Run identity containing the exact Spec, Issue target branch, 
 
 After successful reconciliation, create or renew one read-back DAG Run Grant for that identity. Record `max_parallel`, default three, in the append-only run journal. A renewal may not change identity or `max_parallel`; a paused Run requires a revisioned setting change before Resume. The Grant authorizes only this Run's `execute-issue` and `close-issue` calls. It does not authorize scope expansion, external-prerequisite execution, push, deployment, or ambiguous-state repair.
 
+## Run the composed lifecycle
+
+`run-workflow.mjs` is the single composition interface for the active Run. Supply the owning-source Tracker, Git/worktree/completion-note, Codex task, browser, shared leaf, and cleanup-evidence adapters; keep normalization in `reconcile` and every scheduling decision in the reducer and coordinator. After the first valid reconciled status projection, the runtime opens the authenticated loopback panel and immediately continues execution without a second Start.
+
+The panel reads only the disposable status projection. Pause, Resume, and Stop append revisioned controls through the same active engine writer used by the coordinator; Refresh is read-only. A closed browser panel changes no Run state. When the active coordinator returns, the bridge closes before the writer is released, while the returned final status, journal, and cleanup preview remain inspectable. Never persist or return the bridge control token.
+
+Use [OPERATOR.md](./OPERATOR.md) for invocation, intervention, recovery, and inspection guidance. The `examples/` directory contains renderable terminal and diagnosed status snapshots; neither example is workflow authority.
+
 ## Reconcile live evidence
 
 On every entry and after every material task or leaf transition, reacquire:

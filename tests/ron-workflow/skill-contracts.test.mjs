@@ -1234,14 +1234,20 @@ test("router exposes the Issue worktree flow and independent controls", () => {
 test("Codex-native workflow coordinator is explicit personal only", () => {
   const skillPath = "skills/personal/run-issue-workflow/SKILL.md";
   const metadataPath = "skills/personal/run-issue-workflow/agents/openai.yaml";
+  const runtimePath = "skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
+  const operatorPath = "skills/personal/run-issue-workflow/OPERATOR.md";
   assert.equal(existsSync(skillPath), true);
   assert.equal(existsSync(metadataPath), true);
+  assert.equal(existsSync(runtimePath), true);
+  assert.equal(existsSync(operatorPath), true);
 
   const skill = read(skillPath);
   const metadata = read(metadataPath);
+  const operator = read(operatorPath);
   assert.match(skill, /^disable-model-invocation:\s*true$/mu);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
-  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\)/u);
+  assert.match(metadata, /automatic.*panel.*Pause.*Resume.*Stop/isu);
+  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*automatic.*panel/isu);
   assert.match(skill, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skill, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
   assert.match(skill, /DAG Run Grant.*`max_parallel`.*default three/isu);
@@ -1272,6 +1278,16 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
     /append-only run journal/iu,
   ]) assert.match(skill, evidence);
   assert.match(skill, /Re-entry.*without duplicate/isu);
+  assert.match(skill, /`run-workflow\.mjs`.*single composition.*first valid.*status projection.*opens.*panel.*without a second Start/isu);
+  assert.match(skill, /Pause.*Resume.*Stop.*same active engine writer.*Refresh.*read-only/isu);
+  assert.match(skill, /bridge.*closes.*status.*journal.*cleanup preview.*inspectable/isu);
+  assert.match(operator, /GRILL.*Spec.*`\/to-tickets`.*`\/run-issue-workflow <main Issue>`/isu);
+  assert.match(operator, /Single-Issue.*Multi-Issue.*no-argument.*unique non-terminal Run/isu);
+  assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
+  assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
+  for (const name of ["status-succeeded", "status-diagnosed"]) {
+    assert.equal(existsSync(`skills/personal/run-issue-workflow/examples/${name}.json`), true);
+  }
   assert.doesNotMatch(skill, /Orca|Codex App Server|push the target|deploy the target|edit shared skills/iu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
@@ -1279,6 +1295,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   }
   const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
   assert.equal(plugin.skills.some((path) => /run-issue-workflow/iu.test(path)), false);
+  const packageManifest = JSON.parse(read("package.json"));
+  assert.deepEqual(packageManifest.dependencies ?? {}, {});
 });
 
 test("changed delivery documentation remains structurally valid", () => {

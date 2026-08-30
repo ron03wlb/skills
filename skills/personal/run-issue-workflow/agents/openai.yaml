@@ -1,6 +1,6 @@
 interface:
   display_name: "Run Issue Workflow"
-  short_description: "Deliver one Tracker Spec through Codex Issue lanes"
-  default_prompt: "Use $run-issue-workflow to reconcile and run this exact Tracker Spec through Codex-native Issue lanes."
+  short_description: "Deliver one Tracker Spec with an automatic control panel"
+  default_prompt: "Use $run-issue-workflow to reconcile and run this exact Tracker Spec through Codex-native Issue lanes, opening the automatic panel with Pause, Resume, and Stop controls."
 policy:
   allow_implicit_invocation: false
