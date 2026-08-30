@@ -208,6 +208,35 @@ const environmentUnresolved = (status, action) => diagnosedStop(status, {
   resumePredicates: ["environment_changed_or_human_resolution"],
 });
 
+const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
+  const mismatch = identityMismatch(runIdentity, current.runIdentity)
+    ?? identityMismatch(runIdentity, current.grant?.runIdentity);
+  if (mismatch) {
+    return diagnosedStop(status, {
+      reasonCode: "grant_identity_conflict",
+      limitationClass: "contract-blocker",
+      evidence: [`Run identity changed at ${mismatch} during reconciliation.`],
+      noAutomaticTransition: "A live Run cannot change its bound authority.",
+      affectedNodes: status.nodes.map(({ issueId }) => issueId),
+      resumePredicates: ["grant_and_reconciled_run_identity_match"],
+    });
+  }
+  const grantMaxParallel = current.grant?.maxParallel ?? DEFAULT_MAX_PARALLEL;
+  if (recordedGrant && recordedGrant.maxParallel !== grantMaxParallel) {
+    return diagnosedStop(status, {
+      reasonCode: "grant_identity_conflict",
+      limitationClass: "contract-blocker",
+      evidence: [
+        `Run ${runIdentity.runId} Grant max_parallel is ${recordedGrant.maxParallel}; reconciliation proposed ${grantMaxParallel}.`,
+      ],
+      noAutomaticTransition: "Grant renewal cannot change max_parallel without a valid revisioned setting.",
+      affectedNodes: status.nodes.map(({ issueId }) => issueId),
+      resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
+    });
+  }
+  return null;
+};
+
 export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, now, sleep }) {
   for (const method of ["readEvents", "acquireWriter", "acquireCloseWriter"]) requireMethod(store, method);
   requireMethod(tracker, "read");
@@ -280,7 +309,16 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
           inactiveEvidence: [...task.inactiveEvidence],
         };
       } else {
-        throw new Error("RETRY_TASK_LIVENESS_UNPROVEN");
+        return diagnosedStop(status, {
+          reasonCode: "insufficient_evidence",
+          limitationClass: "unresolved-evidence",
+          evidence: [
+            `Task ${priorDispatch.taskRef.threadId}@${priorDispatch.taskRef.hostId} liveness state ${task?.state ?? "missing"} does not prove resumable or exactly inactive.`,
+          ],
+          noAutomaticTransition: "Retry cannot resume or replace a task without exact liveness evidence.",
+          affectedNodes: [action.issueId],
+          resumePredicates: ["exact_task_liveness_evidence_is_available"],
+        });
       }
       writer.append({
         type: "retry.recorded",
@@ -500,18 +538,10 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               writer = store.acquireWriter(runIdentity.runId);
             }
           } else {
-            const mismatch = identityMismatch(runIdentity, current.runIdentity)
-              ?? identityMismatch(runIdentity, current.grant?.runIdentity);
-            if (mismatch) {
-              return diagnosedStop(lastStatus, {
-                reasonCode: "grant_identity_conflict",
-                limitationClass: "contract-blocker",
-                evidence: [`Run identity changed at ${mismatch} during reconciliation.`],
-                noAutomaticTransition: "A live Run cannot change its bound authority.",
-                affectedNodes: lastStatus.nodes.map(({ issueId }) => issueId),
-                resumePredicates: ["grant_and_reconciled_run_identity_match"],
-              });
-            }
+            const recordedGrant = store.readEvents(runIdentity.runId)
+              .findLast(({ type }) => type === "grant.recorded");
+            const stopped = authorityDrift({ status: lastStatus, runIdentity, current, recordedGrant });
+            if (stopped) return stopped;
           }
           if (!grantRecorded) {
             const previousGrant = store.readEvents(runIdentity.runId)
@@ -596,6 +626,15 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               tasks,
             });
             const refreshedStatus = writer.rebuildStatus(refreshed.facts);
+            const recordedGrant = store.readEvents(runIdentity.runId)
+              .findLast(({ type }) => type === "grant.recorded");
+            const authorityStopped = authorityDrift({
+              status: refreshedStatus,
+              runIdentity,
+              current: refreshed,
+              recordedGrant,
+            });
+            if (authorityStopped) return authorityStopped;
             const stillPresent = refreshedStatus.legalActions.some((action) => (
               action.type === "remediate_environment"
               && action.issueId === deferredEnvironmentStop.issueId

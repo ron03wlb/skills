@@ -232,6 +232,54 @@ test("a transient failure retries the same reachable Issue lane", async () => {
   }
 });
 
+test("retry liveness ambiguity fails closed with structured evidence", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T01:${String(clockMinute++).padStart(2, "0")}:30.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
+  seed.release();
+
+  const tasks = {
+    async findIssueLane() { throw new Error("ambiguous liveness forbids replacement lookup"); },
+    async create() { throw new Error("ambiguous liveness forbids replacement creation"); },
+    async read(actual) {
+      assert.deepEqual(actual, taskRef);
+      return { state: "UNKNOWN", inactiveEvidence: [] };
+    },
+    async message() { throw new Error("ambiguous liveness forbids retry messaging"); },
+    async wait() { throw new Error("a structured stop must not wait"); },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "TRANSIENT_FAILURE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "insufficient_evidence");
+    assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
+    assert.match(status.diagnoses.at(-1).evidence[0], /liveness.*UNKNOWN/iu);
+    assert.equal(store.readEvents(identity.runId).some(({ type }) => type === "retry.recorded"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a replacement lane requires exact prior-task inactive evidence", async () => {
   const { root, store } = createStoreFixture();
   const priorTaskRef = { threadId: "thread-15-old", hostId: "local" };
@@ -1415,6 +1463,70 @@ test("environment diagnosis is discarded when refreshed evidence removes the fai
     assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "environment_unresolved"), false);
     assert.deepEqual(createdIssues, ["14"]);
     assert.deepEqual(status.frontier.active, ["13", "14"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("environment refresh revalidates Run and Grant authority before diagnosis", async () => {
+  const { root, store } = createStoreFixture();
+  const failedTaskRef = { threadId: "thread-13", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T20:${String(clockMinute++).padStart(2, "0")}:40.000Z`;
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "13", attempt: 1, taskRef: failedTaskRef });
+  seed.release();
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create({ issueId }) { return { threadId: `thread-${issueId}`, hostId: "local" }; },
+    async read() { throw new Error("no retry or close is legal"); },
+    async message() { throw new Error("no retry or close is legal"); },
+    async wait() { throw new Error("authority drift must stop before waiting"); },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async ({ journal }) => {
+    const issue14Dispatched = journal.some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14");
+    const current = reconciliation({
+      runIdentity: multiIdentity,
+      taskRefs: Object.fromEntries(
+        journal.filter(({ type }) => type === "dispatch.recorded").map(({ issueId, taskRef }) => [issueId, taskRef]),
+      ),
+      nodes: [
+        {
+          issueId: "13",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: "ENVIRONMENT_FAILURE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: "PRESENT",
+          failure: { fingerprint: "windows:unrecognized" },
+        },
+        {
+          issueId: "14",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: issue14Dispatched ? "EXECUTING" : "NONE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: issue14Dispatched ? "PRESENT" : "ABSENT",
+        },
+      ],
+    });
+    return issue14Dispatched
+      ? { ...current, grant: { ...current.grant, runIdentity: { ...multiIdentity, approvedScopeHash: "sha256:drifted" } } }
+      : current;
+  };
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "12" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "grant_identity_conflict");
+    assert.match(status.diagnoses.at(-1).evidence[0], /approvedScopeHash/u);
+    assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "environment_unresolved"), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
