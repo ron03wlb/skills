@@ -190,25 +190,27 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     || existsSync(gateTakeoverStalePath(lockPath));
 
   const releaseOwnedDirectory = (lockPath, owner) => {
-    if (!existsSync(lockPath)) return;
-    const current = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+    const stalePath = `${lockPath}.stale-claim`;
+    const ownedPath = existsSync(lockPath) ? lockPath : existsSync(stalePath) ? stalePath : null;
+    if (ownedPath === null) return;
+    const current = readLockOwner(join(ownedPath, "owner.json"), owner.kind);
     if (current.runId !== owner.runId || current.coordinatorInstanceId !== owner.coordinatorInstanceId
       || current.generation !== owner.generation || current.target !== owner.target) {
       throw new Error("RECLAIM_GATE_LEASE_FENCED");
     }
-    const releaseClaim = `${lockPath}.release-${owner.generation}`;
-    renameSync(lockPath, releaseClaim);
+    const releaseClaim = `${ownedPath}.release-${owner.generation}`;
+    renameSync(ownedPath, releaseClaim);
     const claimed = readLockOwner(join(releaseClaim, "owner.json"), owner.kind);
     if (claimed.runId !== owner.runId || claimed.coordinatorInstanceId !== owner.coordinatorInstanceId
       || claimed.generation !== owner.generation || claimed.target !== owner.target) {
-      if (!existsSync(lockPath)) {
-        renameSync(releaseClaim, lockPath);
-        syncParent(lockPath);
+      if (!existsSync(ownedPath)) {
+        renameSync(releaseClaim, ownedPath);
+        syncParent(ownedPath);
       }
       throw new Error("RECLAIM_GATE_LEASE_FENCED");
     }
     rmSync(releaseClaim, { recursive: true, force: false });
-    syncParent(lockPath);
+    syncParent(ownedPath);
   };
 
   const acquireTakeoverClaim = ({ lockPath, owner, staleProof }) => {
@@ -253,7 +255,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
           throw new Error("RECLAIM_GATE_TAKEOVER_STALE_PROOF_MISMATCH");
         }
       } catch (error) {
-        if (movedToStale && !existsSync(takeoverPath)) {
+        if (movedToStale && existsSync(stalePath) && !existsSync(takeoverPath)) {
           renameSync(stalePath, takeoverPath);
           syncParent(takeoverPath);
         }
