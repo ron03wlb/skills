@@ -83,6 +83,7 @@ const facts = (nodes) => ({
     trackerAvailable: true,
     targetState: "CLEAN",
     closeWriterRunId: null,
+    closeWriterState: "ABSENT",
     parentTrackerState: "OPEN",
   },
   nodes,
@@ -151,6 +152,7 @@ test("node lifecycle follows task, completion, Git, worktree, and tracker eviden
       trackerAvailable: true,
       targetState: "CLEAN",
       closeWriterRunId: null,
+      closeWriterState: "ABSENT",
       parentTrackerState: "NOT_APPLICABLE",
     },
     nodes: [{ ...node("12"), ...nodeFacts }],
@@ -257,6 +259,25 @@ test("missing authority and malformed DAG facts fail closed", () => {
     [{ ...facts([node("13")]), nodes: [null] }, "invalid_fact_schema"],
     [{ ...facts([node("13")]), contradictions: [{}] }, "invalid_fact_schema"],
     [{
+      ...facts([{ ...node("13"), taskState: "ENVIRONMENT_FAILURE", failure: { fingerprint: Symbol("bad") } }]),
+      journal: [grant, dispatchEvent("13")],
+    }, "invalid_fact_schema"],
+    [{
+      ...facts([node("13")]),
+      journal: [grant, { ...dispatchEvent("13"), attempt: "bad" }],
+    }, "invalid_fact_schema"],
+    [{
+      ...facts([node("13")]),
+      journal: [grant, {
+        schema: "dag-run-event:v1",
+        sequence: 2,
+        type: "control.revised",
+        at: "2026-08-30T00:01:00.000Z",
+        revision: 1,
+        command: "START",
+      }],
+    }, "invalid_fact_schema"],
+    [{
       ...facts([{ ...node("13"), taskState: "ENVIRONMENT_FAILURE" }]),
       journal: [grant, dispatchEvent("13")],
     }, "insufficient_evidence"],
@@ -285,6 +306,27 @@ test("missing authority and malformed DAG facts fail closed", () => {
     run: { ...facts([]).run, decompositionIdentity: "decomposition:changed" },
   });
   assert.equal(changedDecomposition.diagnoses[0].reasonCode, "grant_identity_conflict");
+
+  const unsafeIdentity = facts([node("13")]);
+  unsafeIdentity.run.runId = 1n;
+  const sanitized = reduceRun(unsafeIdentity);
+  assert.equal(sanitized.run.state, "BLOCKED");
+  assert.doesNotThrow(() => JSON.stringify(sanitized));
+
+  const invalidSingle = reduceRun({
+    ...facts([node("12"), node("13")]),
+    run: {
+      ...facts([]).run,
+      classification: "SINGLE",
+      decompositionIdentity: null,
+    },
+    journal: [grantFor()],
+  });
+  assert.equal(invalidSingle.diagnoses[0].reasonCode, "invalid_fact_schema");
+
+  const missingReconciliation = facts([node("13")]);
+  delete missingReconciliation.run.reconciled;
+  assert.equal(reduceRun(missingReconciliation).diagnoses[0].reasonCode, "invalid_fact_schema");
 });
 
 test("impossible owning-source combinations are reducer contradictions", () => {
@@ -367,6 +409,20 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.equal(retrying.nodes[0].state, "RETRYING");
   assert.deepEqual(retrying.legalActions, [{ type: "dispatch_issue", issueId: "13", attempt: 2 }]);
 
+  const prematureCompletion = reduceRun({
+    ...facts([{
+      ...node("13"),
+      taskState: "EXECUTING",
+      completionState: "COMPLETE",
+      worktreeState: "PRESENT",
+    }]),
+    journal: [grant, dispatchEvent("13")],
+  });
+  assert.equal(prematureCompletion.run.state, "BLOCKED");
+  assert.deepEqual(prematureCompletion.frontier.active, ["13"]);
+  assert.deepEqual(prematureCompletion.frontier.closeable, []);
+  assert.equal(prematureCompletion.diagnoses[0].reasonCode, "evidence_contradiction");
+
   const exhausted = reduceRun({
     ...facts([{ ...node("13"), taskState: "TRANSIENT_FAILURE" }]),
     journal: [grant, dispatchEvent("13", 1, 2), dispatchEvent("13", 2, 3), dispatchEvent("13", 3, 4)],
@@ -429,18 +485,25 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
 
   const targetCloseConflict = reduceRun({
     ...facts([{ ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" }]),
-    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+    run: { ...facts([]).run, closeWriterRunId: "another-run", closeWriterState: "ACTIVE" },
   });
   assert.equal(targetCloseConflict.run.state, "BLOCKED");
   assert.equal(targetCloseConflict.diagnoses[0].reasonCode, "close_writer_conflict");
   assert.deepEqual(targetCloseConflict.legalActions, []);
+
+  const uncertainOwnClose = reduceRun({
+    ...facts([{ ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" }]),
+    run: { ...facts([]).run, closeWriterRunId: "run-12", closeWriterState: "UNKNOWN" },
+  });
+  assert.equal(uncertainOwnClose.run.state, "BLOCKED");
+  assert.equal(uncertainOwnClose.diagnoses[0].reasonCode, "close_writer_conflict");
 
   const serializedCloseWithIndependentExecution = reduceRun({
     ...facts([
       { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
       node("14"),
     ]),
-    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+    run: { ...facts([]).run, closeWriterRunId: "another-run", closeWriterState: "ACTIVE" },
   });
   assert.equal(serializedCloseWithIndependentExecution.run.state, "RUNNING");
   assert.deepEqual(serializedCloseWithIndependentExecution.legalActions, [
@@ -449,7 +512,7 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
 
   const unrelatedExecution = reduceRun({
     ...facts([node("13")]),
-    run: { ...facts([]).run, closeWriterRunId: "another-run" },
+    run: { ...facts([]).run, closeWriterRunId: "another-run", closeWriterState: "ACTIVE" },
   });
   assert.equal(unrelatedExecution.run.state, "RUNNING");
   assert.deepEqual(unrelatedExecution.legalActions, [{ type: "dispatch_issue", issueId: "13", attempt: 1 }]);
@@ -630,6 +693,24 @@ test("the single writer appends ordered control events and atomically rebuilds d
   const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-store-");
   const store = createRunStore({ gitCommonDir });
   try {
+    const badOrderWriter = store.acquireWriter("bad-order");
+    assert.throws(() => badOrderWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      issueId: "13",
+      attempt: 1,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    }), /first Run event/u);
+    badOrderWriter.release();
+
+    const mismatchedWriter = store.acquireWriter("mismatched-run");
+    assert.throws(() => mismatchedWriter.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      runIdentity: grant.runIdentity,
+    }), /storage Run/u);
+    mismatchedWriter.release();
+
     const writer = store.acquireWriter("run-12");
     assert.throws(() => store.acquireWriter("run-12"), /RUN_WRITER_LOCKED/u);
 
@@ -864,6 +945,79 @@ test("cleanup rejects duplicate Run evidence before destructive retention", () =
     assert.throws(() => store.applyCleanup({ now, runs }), /duplicate runId/u);
     assert.equal(existsSync(join(gitCommonDir, "matt-workflow-control", "runs", runId)), true);
     assert.deepEqual(store.readCleanupRecords(), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("cleanup newest-ten floor ignores absent directories", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-cleanup-absent-");
+  const store = createRunStore({ gitCommonDir });
+  const now = "2026-08-30T00:00:00.000Z";
+  const daysAgo = (days) => new Date(Date.parse(now) - days * 86_400_000).toISOString();
+  const existing = Array.from({ length: 11 }, (_, index) => ({
+    runId: `existing-${String(index).padStart(2, "0")}`,
+    specId: String(500 + index),
+    state: "SUCCEEDED",
+    terminalAt: daysAgo(40 + index),
+    engineLock: "RELEASED",
+    activeTasks: "ABSENT",
+  }));
+  const absent = Array.from({ length: 10 }, (_, index) => ({
+    runId: `absent-${String(index).padStart(2, "0")}`,
+    specId: String(600 + index),
+    state: "SUCCEEDED",
+    terminalAt: daysAgo(index + 1),
+    engineLock: "RELEASED",
+    activeTasks: "ABSENT",
+  }));
+  try {
+    for (const { runId } of existing) store.acquireWriter(runId).release();
+    const preview = store.previewCleanup({ now, runs: [...absent, ...existing] });
+    assert.deepEqual(preview.eligible.map(({ runId }) => runId), ["existing-10"]);
+    assert.equal(preview.skipped.filter(({ reason }) => reason === "newest_10_terminal_runs").length, 10);
+    assert.equal(preview.skipped.filter(({ reason }) => reason === "run_directory_absent").length, 10);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit stale-owner proof can reclaim same-Run engine and close locks", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-lock-reclaim-");
+  const oldStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-old" });
+  const newStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-new" });
+  const staleProof = {
+    previousCoordinatorInstanceId: "coordinator-old",
+    coordinatorState: "INACTIVE",
+    reconciled: true,
+    evidence: ["Codex task read-back proves the previous coordinator is inactive."],
+  };
+  try {
+    oldStore.acquireWriter("reclaim-run");
+    assert.equal(oldStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-old");
+    assert.throws(() => newStore.acquireWriter("reclaim-run"), /RUN_WRITER_LOCKED/u);
+    assert.throws(() => newStore.reclaimWriter({
+      runId: "reclaim-run",
+      staleProof: { ...staleProof, previousCoordinatorInstanceId: "wrong-owner" },
+    }), /STALE_PROOF_MISMATCH/u);
+    const adoptedWriter = newStore.reclaimWriter({ runId: "reclaim-run", staleProof });
+    assert.equal(newStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-new");
+    adoptedWriter.release();
+
+    oldStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" });
+    const oldCloseOwner = oldStore.readCloseWriterLock("features/ron");
+    assert.equal(oldCloseOwner.coordinatorInstanceId, "coordinator-old");
+    assert.throws(
+      () => newStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" }),
+      /TARGET_CLOSE_WRITER_LOCKED/u,
+    );
+    const adoptedCloseWriter = newStore.reclaimCloseWriter({
+      target: "features/ron",
+      runId: "reclaim-run",
+      staleProof,
+    });
+    assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
+    adoptedCloseWriter.release();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

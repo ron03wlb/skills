@@ -1,0 +1,191 @@
+export const EVENT_SCHEMA = "dag-run-event:v1";
+export const DEFAULT_MAX_PARALLEL = 3;
+export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
+export const RUN_EVENT_TYPES = Object.freeze([
+  "grant.recorded",
+  "control.revised",
+  "dispatch.recorded",
+  "retry.recorded",
+  "remediation.recorded",
+  "pause.transitioned",
+  "stop.transitioned",
+]);
+
+const controlCommands = new Set(CONTROL_COMMANDS);
+const immutableRunIdentityKeys = Object.freeze([
+  "runId",
+  "specId",
+  "approvedScopeHash",
+  "target",
+  "classification",
+  "decompositionIdentity",
+]);
+const eventFields = new Map([
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel"])],
+  ["control.revised", new Set(["type", "at", "revision", "command"])],
+  ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
+  ["retry.recorded", new Set(["type", "at", "issueId", "attempt", "reason"])],
+  ["remediation.recorded", new Set(["type", "at", "issueId", "fingerprint", "cycle", "adapter"])],
+  ["pause.transitioned", new Set(["type", "at", "revision"])],
+  ["stop.transitioned", new Set(["type", "at", "revision"])],
+]);
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+const requireText = (value, label) => {
+  if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} is required`);
+};
+
+const requirePositiveInteger = (value, label, maximum = Number.MAX_SAFE_INTEGER) => {
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    throw new TypeError(`${label} must be an integer from 1 through ${maximum}`);
+  }
+};
+
+const assertExactFields = (value, allowed, label) => {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
+};
+
+export const normalizeEventDraft = (eventDraft) => (
+  isRecord(eventDraft) && eventDraft.type === "grant.recorded" && eventDraft.maxParallel === undefined
+    ? { ...eventDraft, maxParallel: DEFAULT_MAX_PARALLEL }
+    : eventDraft
+);
+
+export function validateEventDraft(event) {
+  if (!isRecord(event)) throw new TypeError("Journal event must be an object");
+  if (Object.hasOwn(event, "schema") || Object.hasOwn(event, "sequence")) {
+    throw new TypeError("Journal schema and sequence are store-owned");
+  }
+  const allowedFields = eventFields.get(event.type);
+  if (!allowedFields) throw new TypeError(`Unsupported event type: ${String(event.type)}`);
+  assertExactFields(event, allowedFields, `${event.type} event`);
+  if (typeof event.at !== "string" || Number.isNaN(Date.parse(event.at))) {
+    throw new TypeError("Journal events require an ISO timestamp");
+  }
+  switch (event.type) {
+    case "grant.recorded":
+      assertExactFields(event.runIdentity, new Set(immutableRunIdentityKeys), "grant runIdentity");
+      for (const key of ["runId", "specId", "approvedScopeHash", "target", "classification"]) {
+        requireText(event.runIdentity[key], `grant runIdentity.${key}`);
+      }
+      if (!["SINGLE", "MULTI"].includes(event.runIdentity.classification)) {
+        throw new TypeError("grant runIdentity.classification must be SINGLE or MULTI");
+      }
+      if (event.runIdentity.classification === "MULTI") {
+        requireText(event.runIdentity.decompositionIdentity, "grant runIdentity.decompositionIdentity");
+      } else if (event.runIdentity.decompositionIdentity !== null) {
+        throw new TypeError("A SINGLE Run must bind decompositionIdentity as null");
+      }
+      if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
+      break;
+    case "control.revised":
+      requirePositiveInteger(event.revision, "control revision");
+      if (!controlCommands.has(event.command)) throw new TypeError("Unsupported control command");
+      break;
+    case "dispatch.recorded":
+      assertExactFields(event.taskRef, new Set(["threadId", "hostId"]), "dispatch taskRef");
+      requireText(event.issueId, "dispatch issueId");
+      requirePositiveInteger(event.attempt, "dispatch attempt", 3);
+      requireText(event.taskRef.threadId, "dispatch taskRef.threadId");
+      requireText(event.taskRef.hostId, "dispatch taskRef.hostId");
+      break;
+    case "retry.recorded":
+      requireText(event.issueId, "retry issueId");
+      requirePositiveInteger(event.attempt, "retry attempt", 3);
+      requireText(event.reason, "retry reason");
+      break;
+    case "remediation.recorded":
+      requireText(event.issueId, "remediation issueId");
+      requireText(event.fingerprint, "remediation fingerprint");
+      requirePositiveInteger(event.cycle, "remediation cycle", 1);
+      requireText(event.adapter, "remediation adapter");
+      break;
+    case "pause.transitioned":
+    case "stop.transitioned":
+      requirePositiveInteger(event.revision, "transition revision");
+      break;
+    default:
+      throw new TypeError(`Unsupported event type: ${String(event.type)}`);
+  }
+}
+
+export function validateEventSemantics(events, event, { storageRunId } = {}) {
+  if (events.length === 0 && event.type !== "grant.recorded") {
+    throw new TypeError("The first Run event must be grant.recorded");
+  }
+  if (event.type === "grant.recorded") {
+    if (storageRunId !== undefined && event.runIdentity.runId !== storageRunId) {
+      throw new TypeError("The Grant runId must match its storage Run");
+    }
+    const previous = events.findLast(({ type }) => type === "grant.recorded");
+    if (previous) {
+      if (immutableRunIdentityKeys.some((key) => previous.runIdentity[key] !== event.runIdentity[key])) {
+        throw new TypeError("A renewed grant must preserve the Run identity");
+      }
+      if ((previous.maxParallel ?? DEFAULT_MAX_PARALLEL) !== (event.maxParallel ?? DEFAULT_MAX_PARALLEL)) {
+        throw new TypeError("A renewed grant must preserve maxParallel until a revisioned setting exists");
+      }
+    }
+  }
+  if (event.type === "control.revised") {
+    const previousControl = events.findLast(({ type }) => type === "control.revised");
+    const previousRevision = previousControl?.revision ?? 0;
+    if (event.revision !== previousRevision + 1) {
+      throw new TypeError(`Expected next control revision ${previousRevision + 1}`);
+    }
+    if (previousControl?.command === event.command) {
+      throw new TypeError(`Repeated ${event.command} control is idempotent and must not create a revision`);
+    }
+  }
+  if (event.type === "dispatch.recorded") {
+    const previousAttempt = events
+      .filter(({ type, issueId }) => type === "dispatch.recorded" && issueId === event.issueId)
+      .reduce((maximum, item) => Math.max(maximum, item.attempt), 0);
+    if (event.attempt !== previousAttempt + 1) {
+      throw new TypeError(`Expected next dispatch attempt ${previousAttempt + 1}`);
+    }
+  }
+  if (event.type === "retry.recorded") {
+    const dispatched = events.some((item) => (
+      item.type === "dispatch.recorded" && item.issueId === event.issueId && item.attempt === event.attempt
+    ));
+    const duplicate = events.some((item) => (
+      item.type === "retry.recorded" && item.issueId === event.issueId && item.attempt === event.attempt
+    ));
+    if (!dispatched || duplicate) throw new TypeError("Retry facts require one matching dispatch attempt");
+  }
+  if (event.type === "remediation.recorded") {
+    const duplicate = events.some((item) => (
+      item.type === "remediation.recorded"
+      && item.issueId === event.issueId
+      && item.fingerprint === event.fingerprint
+    ));
+    if (duplicate) throw new TypeError("Only one remediation cycle is allowed per exact fingerprint");
+  }
+  if (["pause.transitioned", "stop.transitioned"].includes(event.type)) {
+    const expectedCommand = event.type === "pause.transitioned" ? "PAUSE" : "STOP";
+    const latestControl = events.findLast(({ type }) => type === "control.revised");
+    const duplicate = events.some((item) => item.type === event.type && item.revision === event.revision);
+    if (duplicate || latestControl?.command !== expectedCommand || latestControl.revision !== event.revision) {
+      throw new TypeError(`Transition requires one matching ${expectedCommand} control revision`);
+    }
+  }
+}
+
+export function validateJournal(events, options = {}) {
+  if (!Array.isArray(events)) throw new TypeError("Run journal must be an array");
+  const validated = [];
+  for (const [index, event] of events.entries()) {
+    if (!isRecord(event) || event.schema !== EVENT_SCHEMA || event.sequence !== index + 1) {
+      throw new TypeError(`Invalid journal event at sequence ${index + 1}`);
+    }
+    const { schema: _schema, sequence: _sequence, ...draft } = event;
+    validateEventDraft(draft);
+    validateEventSemantics(validated, draft, options);
+    validated.push(event);
+  }
+  return events;
+}

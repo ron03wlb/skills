@@ -1,3 +1,5 @@
+import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
+
 export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
 export const RUN_STATES = Object.freeze([
@@ -22,7 +24,7 @@ export const NODE_STATES = Object.freeze([
   "BLOCKED",
   "FAILED",
 ]);
-export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
+export { CONTROL_COMMANDS };
 export const REASON_CODES = Object.freeze({
   invalidFactSchema: "invalid_fact_schema",
   emptyDag: "empty_dag",
@@ -54,6 +56,9 @@ const isRecord = (value) => value !== null && typeof value === "object" && !Arra
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
   if (node.completionState === "BLOCKED") return "BLOCKED";
+  if (node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+    return "BLOCKED";
+  }
   if (node.completionState === "COMPLETE") {
     if (node.trackerState === "CLOSED" && node.candidateReachable && node.worktreeState === "ABSENT") {
       return "SUCCEEDED";
@@ -94,16 +99,20 @@ const diagnosis = ({
 });
 
 const publicRun = (run, state, maxParallel = 3) => ({
-  runId: isRecord(run) ? run.runId ?? null : null,
-  specId: isRecord(run) ? run.specId ?? null : null,
-  approvedScopeHash: isRecord(run) ? run.approvedScopeHash ?? null : null,
-  target: isRecord(run) ? run.target ?? null : null,
-  classification: isRecord(run) ? run.classification ?? null : null,
-  decompositionIdentity: isRecord(run) ? run.decompositionIdentity ?? null : null,
+  runId: isRecord(run) && isText(run.runId) ? run.runId : null,
+  specId: isRecord(run) && isText(run.specId) ? run.specId : null,
+  approvedScopeHash: isRecord(run) && isText(run.approvedScopeHash) ? run.approvedScopeHash : null,
+  target: isRecord(run) && isText(run.target) ? run.target : null,
+  classification: isRecord(run) && isText(run.classification) ? run.classification : null,
+  decompositionIdentity: isRecord(run) && isText(run.decompositionIdentity) ? run.decompositionIdentity : null,
+  closeWriterRunId: isRecord(run) && isText(run.closeWriterRunId) ? run.closeWriterRunId : null,
+  closeWriterState: isRecord(run) && ["ABSENT", "ACTIVE", "UNKNOWN"].includes(run.closeWriterState)
+    ? run.closeWriterState
+    : "UNKNOWN",
   state,
   maxParallel,
-  controlRevision: isRecord(run) ? run.controlRevision ?? 0 : 0,
-  controlCommand: isRecord(run) ? run.controlCommand ?? null : null,
+  controlRevision: isRecord(run) && Number.isSafeInteger(run.controlRevision) ? run.controlRevision : 0,
+  controlCommand: isRecord(run) && CONTROL_COMMANDS.includes(run.controlCommand) ? run.controlCommand : null,
 });
 
 const blockedResult = (input, reasonCode, evidence, affectedNodes = []) => {
@@ -164,7 +173,12 @@ export function reduceRun(input) {
     return blockedResult(input, REASON_CODES.emptyDag, ["A DAG Run requires at least one executable Issue."]);
   }
   if (!input.nodes.every((node) => isRecord(node) && isText(node.issueId) && Array.isArray(node.blockers)
-      && node.blockers.every(isText))
+      && node.blockers.every(isText)
+      && (node.failure === undefined || (isRecord(node.failure)
+        && (node.failure.kind === undefined || isText(node.failure.kind))
+        && (node.failure.fingerprint === undefined || isText(node.failure.fingerprint))
+        && (node.failure.evidence === undefined || (Array.isArray(node.failure.evidence)
+          && node.failure.evidence.every(isText))))))
     || !input.contradictions.every((contradiction) => isRecord(contradiction)
       && isText(contradiction.code) && Array.isArray(contradiction.evidence)
       && contradiction.evidence.every(isText) && Array.isArray(contradiction.affectedNodes)
@@ -175,8 +189,23 @@ export function reduceRun(input) {
     || !isText(input.run.target) || !["SINGLE", "MULTI"].includes(input.run.classification)
     || (input.run.classification === "MULTI" && !isText(input.run.decompositionIdentity))
     || (input.run.classification === "SINGLE" && input.run.decompositionIdentity !== null)
-    || (input.run.closeWriterRunId !== null && !isText(input.run.closeWriterRunId))) {
+    || typeof input.run.reconciled !== "boolean"
+    || !["ABSENT", "ACTIVE", "UNKNOWN"].includes(input.run.closeWriterState)
+    || (input.run.closeWriterState === "ABSENT" && input.run.closeWriterRunId !== null)
+    || (input.run.closeWriterState !== "ABSENT" && !isText(input.run.closeWriterRunId))) {
     return blockedResult(input, REASON_CODES.invalidFactSchema, ["Run identity and node facts are malformed."]);
+  }
+  if (input.run.classification === "SINGLE"
+    && (input.nodes.length !== 1 || input.nodes[0].issueId !== input.run.specId)) {
+    return blockedResult(input, REASON_CODES.invalidFactSchema, ["A SINGLE Run must contain only its Spec Issue node."]);
+  }
+  try {
+    validateJournal(input.journal, { storageRunId: input.run.runId });
+  } catch (error) {
+    const reasonCode = /maxParallel/u.test(error.message)
+      ? REASON_CODES.grantInvalid
+      : REASON_CODES.invalidFactSchema;
+    return blockedResult(input, reasonCode, [`Invalid Run journal: ${error.message}`]);
   }
   const grant = input.journal.findLast(({ type }) => type === "grant.recorded");
   if (!grant) {
@@ -352,6 +381,14 @@ export function reduceRun(input) {
         affectedNodes: [node.issueId],
       }];
     }
+    if (node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+      return [{
+        code: "completion_while_task_active",
+        reasonCode: REASON_CODES.evidenceContradiction,
+        evidence: [`Issue ${node.issueId} has completion evidence while its Codex task is still active.`],
+        affectedNodes: [node.issueId],
+      }];
+    }
     if (node.trackerState === "CLOSED" && (
       node.completionState !== "COMPLETE" || !node.candidateReachable || node.worktreeState !== "ABSENT"
     )) {
@@ -411,8 +448,8 @@ export function reduceRun(input) {
     }));
   const ready = nodes.filter(({ state }) => state === "READY").map(({ issueId }) => issueId);
   const retrying = nodes.filter(({ state }) => state === "RETRYING").map(({ issueId }) => issueId);
-  const active = nodes
-    .filter(({ state }) => ["DISPATCHED", "EXECUTING"].includes(state))
+  const active = normalizedNodes
+    .filter(({ taskState }) => ["DISPATCHED", "EXECUTING"].includes(taskState))
     .map(({ issueId }) => issueId);
   const closeable = nodes
     .filter(({ state }) => ["IMPLEMENTATION_COMPLETE", "CLOSING"].includes(state))
@@ -423,10 +460,12 @@ export function reduceRun(input) {
   );
   const slots = Math.max(0, maxParallel - active.length);
   const normalActions = [];
-  const targetCloseWriterConflict = input.run.closeWriterRunId !== null
+  const targetCloseWriterConflict = input.run.closeWriterState !== "ABSENT"
     && input.run.closeWriterRunId !== input.run.runId;
-  const targetCloseWriterOwned = input.run.closeWriterRunId === input.run.runId;
-  const targetCloseWriterAvailable = input.run.closeWriterRunId === null;
+  const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN";
+  const targetCloseWriterOwned = input.run.closeWriterState === "ACTIVE"
+    && input.run.closeWriterRunId === input.run.runId;
+  const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
   if (targetCloseWriterAvailable && closeable.length > 0) {
     normalActions.push({ type: "close_issue", issueId: closeable[0] });
   }
@@ -456,11 +495,14 @@ export function reduceRun(input) {
   if (needsParentClose && targetCloseWriterAvailable) {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
   }
-  const closeWriterDiagnoses = targetCloseWriterConflict && (closeable.length > 0 || needsParentClose)
+  const closeWriterDiagnoses = (targetCloseWriterConflict || targetCloseWriterUncertain)
+    && (closeable.length > 0 || needsParentClose)
     ? [diagnosis({
       reasonCode: REASON_CODES.closeWriterConflict,
       limitationClass: "unresolved-evidence",
-      evidence: [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
+      evidence: targetCloseWriterUncertain
+        ? [`Close-writer liveness for Run ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`]
+        : [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
       noAutomaticTransition: "Only one close writer may act on one target.",
       affectedNodes: closeable,
       allNodes: allNodeIds,
