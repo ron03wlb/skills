@@ -191,6 +191,15 @@ const issueLaneAmbiguous = (status, issueId, laneCount) => diagnosedStop(status,
   resumePredicates: ["one_exact_issue_lane_is_proven"],
 });
 
+const issueLaneMissing = (status, issueId) => diagnosedStop(status, {
+  reasonCode: "issue_lane_missing",
+  limitationClass: "unresolved-evidence",
+  evidence: [`Issue ${issueId} has valid completion evidence but no adoptable Codex task lane.`],
+  noAutomaticTransition: "Closeout cannot create or guess a task lane after manual completion.",
+  affectedNodes: [issueId],
+  resumePredicates: ["one_exact_issue_lane_is_proven"],
+});
+
 const environmentUnresolved = (status, action) => diagnosedStop(status, {
   reasonCode: "environment_unresolved",
   evidence: [`Environment fingerprint ${action.fingerprint} has no approved automatic remediation.`],
@@ -329,9 +338,20 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
     });
   };
 
-  const closeIssue = async ({ action, current }) => {
-    const taskRef = current.taskRefs?.[action.issueId];
-    if (!isTaskRef(taskRef)) throw new Error("CLOSE_TASK_REFERENCE_MISSING");
+  const closeIssue = async ({ action, current, status }) => {
+    let taskRef = current.taskRefs?.[action.issueId];
+    if (!isTaskRef(taskRef)) {
+      const existing = await tasks.findIssueLane({
+        issueId: action.issueId,
+        runIdentity: current.runIdentity,
+        purpose: "close",
+      });
+      if (!Array.isArray(existing) || existing.length > 1) {
+        return { stopped: issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0) };
+      }
+      taskRef = existing[0];
+      if (!isTaskRef(taskRef)) return { stopped: issueLaneMissing(status, action.issueId) };
+    }
     const closeWriter = acquireTargetCloseWriter(current);
     let settled = false;
     try {
@@ -347,7 +367,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
       }
       const waited = await tasks.wait([taskRef]);
       settled = waited?.taskSettled === true;
-      return settled && waited?.coordinatorActive !== false;
+      return { active: settled && waited?.coordinatorActive !== false };
     } finally {
       if (settled) closeWriter.release();
     }
@@ -546,8 +566,9 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
                 continue;
               }
             } else if (action.type === "close_issue") {
-              const active = await closeIssue({ action, current });
-              if (!active) return lastStatus;
+              const outcome = await closeIssue({ action, current, status: lastStatus });
+              if (outcome.stopped) return outcome.stopped;
+              if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {
               const settled = await closeParent({ action, current });
               if (!settled) return lastStatus;
@@ -575,6 +596,15 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               tasks,
             });
             const refreshedStatus = writer.rebuildStatus(refreshed.facts);
+            const stillPresent = refreshedStatus.legalActions.some((action) => (
+              action.type === "remediate_environment"
+              && action.issueId === deferredEnvironmentStop.issueId
+              && action.fingerprint === deferredEnvironmentStop.fingerprint
+            ));
+            if (!stillPresent) {
+              lastStatus = refreshedStatus;
+              continue;
+            }
             return environmentUnresolved(refreshedStatus, deferredEnvironmentStop);
           }
         }

@@ -1355,6 +1355,124 @@ test("an unrecognized environment failure does not suppress an independent ready
   }
 });
 
+test("environment diagnosis is discarded when refreshed evidence removes the failure", async () => {
+  const { root, store } = createStoreFixture();
+  const failedTaskRef = { threadId: "thread-13", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T20:${String(clockMinute++).padStart(2, "0")}:30.000Z`;
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "13", attempt: 1, taskRef: failedTaskRef });
+  seed.release();
+  const createdIssues = [];
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create({ issueId }) {
+      createdIssues.push(issueId);
+      return { threadId: `thread-${issueId}`, hostId: "local" };
+    },
+    async read() { throw new Error("no retry or close is legal"); },
+    async message() { throw new Error("no retry or close is legal"); },
+    async wait() { return { coordinatorActive: false }; },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async ({ journal }) => {
+    const issue14Dispatched = journal.some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14");
+    return reconciliation({
+      runIdentity: multiIdentity,
+      taskRefs: Object.fromEntries(
+        journal.filter(({ type }) => type === "dispatch.recorded").map(({ issueId, taskRef }) => [issueId, taskRef]),
+      ),
+      nodes: [
+        {
+          issueId: "13",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: issue14Dispatched ? "EXECUTING" : "ENVIRONMENT_FAILURE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: "PRESENT",
+          ...(issue14Dispatched ? {} : { failure: { fingerprint: "windows:unrecognized" } }),
+        },
+        {
+          issueId: "14",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: issue14Dispatched ? "EXECUTING" : "NONE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: issue14Dispatched ? "PRESENT" : "ABSENT",
+        },
+      ],
+    });
+  };
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "12" });
+
+    assert.equal(status.run.state, "RUNNING");
+    assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "environment_unresolved"), false);
+    assert.deepEqual(createdIssues, ["14"]);
+    assert.deepEqual(status.frontier.active, ["13", "14"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("manual implementation completion adopts one existing lane for serialized close", async () => {
+  const { root, store } = createStoreFixture();
+  const adoptedTaskRef = { threadId: "thread-15-manual", hostId: "local" };
+  const trackerState = {
+    trackerState: "OPEN",
+    completionState: "COMPLETE",
+    candidateReachable: true,
+    worktreeState: "PRESENT",
+  };
+  let clockMinute = 0;
+  let laneReads = 0;
+  let messages = 0;
+  const now = () => `2026-08-30T20:${String(clockMinute++).padStart(2, "0")}:45.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.release();
+  const tasks = {
+    async findIssueLane({ issueId }) {
+      laneReads += 1;
+      assert.equal(issueId, "15");
+      return [adoptedTaskRef];
+    },
+    async create() { throw new Error("manual completion must not create a duplicate lane"); },
+    async read(actual) { assert.deepEqual(actual, adoptedTaskRef); return { state: "ACTIVE" }; },
+    async message(actual, message) {
+      assert.deepEqual(actual, adoptedTaskRef);
+      assert.match(message, /close-issue/iu);
+      messages += 1;
+    },
+    async wait() {
+      trackerState.trackerState = "CLOSED";
+      trackerState.worktreeState = "ABSENT";
+      return { coordinatorActive: true, taskSettled: true };
+    },
+  };
+  const tracker = { async read() { return { ...trackerState }; } };
+  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
+    nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState: "NONE" }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "SUCCEEDED");
+    assert.equal(laneReads, 1);
+    assert.equal(messages, 1);
+    assert.equal(store.readEvents(identity.runId).some(({ type }) => type === "dispatch.recorded"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("restart plus immediate tracker outage preserves a selector-known Run", async () => {
   const { root, store } = createStoreFixture();
   let clockMinute = 0;

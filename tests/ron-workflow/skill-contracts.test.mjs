@@ -1262,6 +1262,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /On every entry.*reacquire/isu);
   assert.match(skill, /stale engine writer.*exact reconciled `INACTIVE` owner evidence.*active operation.*fenced and stop/isu);
   assert.match(skill, /accepted `close-issue` follow-up.*task history.*already in flight.*never send the same close request again/isu);
+  assert.match(skill, /manual `implementation_complete`.*no journaled task reference.*adopt one uniquely matching.*Zero or multiple.*structured diagnosis.*never creates or guesses/isu);
   assert.match(skill, /coordinator loss retains durable close-writer ownership.*stale-owner evidence.*release still waits for task settlement/isu);
   for (const evidence of [
     /tracker evidence/iu,

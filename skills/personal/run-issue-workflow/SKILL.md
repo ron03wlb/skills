@@ -30,11 +30,13 @@ On every entry and after every material task or leaf transition, reacquire:
 
 Normalize those owning-source facts for `run-core.mjs`; use `run-store.mjs` to rebuild the disposable status projection. Only `reduceRun` legal actions authorize progress. Never let a task summary, cached tracker response, panel state, or coordinator memory override current evidence. Any contradiction fails closed with the reducer's structured diagnosis.
 
-Re-entry adopts valid manual node success, a settled task with valid completion evidence, an existing clean candidate, partial close progress, and unchanged completed nodes. It then continues from the current legal action without duplicate Codex tasks, duplicate `execute-issue`, duplicate close actions, or replay from the first node. Coordinator loss is fail-closed: no new dispatch or close occurs until a later explicit invocation reacquires every live source.
+Re-entry adopts valid manual completion or node success, a settled task with valid completion evidence, an existing clean candidate, partial close progress, and unchanged completed nodes. It then continues from the current legal action without duplicate Codex tasks, duplicate `execute-issue`, duplicate close actions, or replay from the first node. Coordinator loss is fail-closed: no new dispatch or close occurs until a later explicit invocation reacquires every live source.
 
 Reclaim a stale engine writer only from exact reconciled `INACTIVE` owner evidence with no unaccounted active operation. Otherwise leave the writer fenced and stop.
 
 Treat an exact accepted `close-issue` follow-up proven by the Issue lane's task history as already in flight. Wait on that lane and reacquire tracker, Git, and worktree evidence; never send the same close request again from coordinator memory alone.
+
+If valid manual `implementation_complete` evidence has no journaled task reference, adopt one uniquely matching existing Issue lane for serialized closeout. Zero or multiple matches stop with a structured diagnosis; closeout never creates or guesses a duplicate lane.
 
 ## Bind one Codex Issue lane
 
