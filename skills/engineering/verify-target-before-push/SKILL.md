@@ -1,6 +1,6 @@
 ---
 name: verify-target-before-push
-description: Verify one exact local-ahead or already-pushed target range from completion-note contributions without pushing.
+description: Verify one exact local-ahead or already-pushed target range, with confirmation-gated direct-contribution recovery, without pushing.
 disable-model-invocation: true
 ---
 

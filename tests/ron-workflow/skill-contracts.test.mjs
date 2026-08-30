@@ -423,6 +423,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   const mattDocs = read("docs/engineering/ask-matt.md");
 
+  assert.match(verify, /^description:.*confirmation-gated.*recovery.*without pushing/mu);
   assert.match(verify, /frozen selected-range coverage check.*uncovered material commits.*only.*recovery/isu);
   assert.match(verify, /active skill behavior.*runtime or source.*tests.*configuration.*dependencies.*migrations.*security.*data.*public APIs.*mixed commit.*partial-path.*owner ambiguity.*ineligible/isu);
   assert.match(verify, /non-coverage.*review.*test.*cleanliness.*ref.*tracker.*execution.*closeout.*no tracker mutation/isu);
