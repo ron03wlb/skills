@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import { planControl, STATUS_SCHEMA } from "./run-core.mjs";
+import { renderRunPanel } from "./run-panel.mjs";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const controlRoutes = new Map([
@@ -37,6 +38,7 @@ const bearerToken = (request) => {
 const send = (response, statusCode, contentType, body) => {
   response.writeHead(statusCode, {
     "cache-control": "no-store",
+    "content-security-policy": "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "content-type": contentType,
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
@@ -107,7 +109,7 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
   };
 }
 
-export async function startRunPanelBridge({ readStatus, submitControl, renderPanel, port = 0 }) {
+export async function startRunPanelBridge({ readStatus, submitControl, renderPanel = renderRunPanel, port = 0 }) {
   requireFunction(readStatus, "readStatus");
   requireFunction(submitControl, "submitControl");
   requireFunction(renderPanel, "renderPanel");

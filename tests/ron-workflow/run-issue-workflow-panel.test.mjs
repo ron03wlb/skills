@@ -5,6 +5,7 @@ import {
   createRunPanelControl,
   startRunPanelBridge,
 } from "../../skills/personal/run-issue-workflow/scripts/run-panel-bridge.mjs";
+import { renderRunPanel } from "../../skills/personal/run-issue-workflow/scripts/run-panel.mjs";
 
 const status = ({
   state = "RUNNING",
@@ -147,4 +148,78 @@ test("bridge shutdown changes no Run state", async () => {
   await bridge.close();
   assert.equal(reads, 0);
   assert.equal(controls, 0);
+});
+
+test("renderer projects the complete Run, DAG, task, close, and diagnosis snapshot", () => {
+  const html = renderRunPanel({
+    schema: "dag-run-status:v1",
+    run: {
+      runId: "run-<16>",
+      specId: "12",
+      approvedScopeHash: "scope-abc",
+      target: "features/ron",
+      classification: "Multi-Issue",
+      decompositionIdentity: "12/04",
+      state: "STOPPING",
+      maxParallel: 3,
+      controlRevision: 4,
+      controlCommand: "STOP",
+    },
+    nodes: [{
+      issueId: "16",
+      blockers: ["13"],
+      state: "BLOCKED",
+      task: {
+        ref: { threadId: "thread-16", hostId: "local" },
+        state: "EXECUTING",
+        attempt: 2,
+        retryCount: 1,
+        remediationCount: 1,
+      },
+      close: {
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "PRESENT",
+        trackerState: "OPEN",
+      },
+    }],
+    frontier: { ready: ["17"], active: ["16"], closeable: ["15"] },
+    legalActions: [],
+    legalControls: ["STOP", "REFRESH"],
+    diagnoses: [{
+      reasonCode: "stopped_by_user",
+      limitationClass: "instance-blocker",
+      evidence: ["Grant revoked; no process was killed <exact>."],
+      attemptedRecovery: ["workers allowed to settle"],
+      retryCount: 2,
+      noAutomaticTransition: "Await explicit recovery.",
+      affectedNodes: ["16"],
+      unaffectedNodes: ["17"],
+      nextOwner: "human",
+      resumePredicates: ["new Grant is valid"],
+    }],
+  });
+
+  assert.match(html, /run-&lt;16&gt;/u);
+  assert.match(html, /STOPPING/u);
+  assert.match(html, /12\/04/u);
+  assert.match(html, /#13.*→.*#16/su);
+  assert.match(html, /thread-16/u);
+  assert.match(html, /Attempts<\/dt><dd>2<\/dd>/u);
+  assert.match(html, /Retries<\/dt><dd>1<\/dd>/u);
+  assert.match(html, /Remediations<\/dt><dd>1<\/dd>/u);
+  assert.match(html, /Candidate reachable<\/dt><dd>Yes<\/dd>/u);
+  assert.match(html, /Ready.*#17/su);
+  assert.match(html, /Running.*#16/su);
+  assert.match(html, /Blocked.*#16/su);
+  assert.match(html, /Closeable.*#15/su);
+  assert.match(html, /Grant revoked; no process was killed &lt;exact&gt;\./u);
+  assert.match(html, /Affected.*#16/su);
+  assert.match(html, /Unaffected.*#17/su);
+  assert.match(html, /Next owner.*human/su);
+  assert.match(html, /Resume predicates.*new Grant is valid/su);
+  assert.match(html, /data-control="STOP"/u);
+  assert.doesNotMatch(html, /data-control="PAUSE"/u);
+  assert.match(html, /Bridge unreachable — displayed snapshot is stale\./u);
+  assert.doesNotMatch(html, /<script>Grant revoked/u);
 });

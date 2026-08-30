@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DAG Run control panel</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: Canvas; color: CanvasText; }
+    main { max-width: 72rem; margin: 0 auto; padding: 1.5rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h2 { margin-top: 2rem; }
+    .muted { color: GrayText; }
+    .banner { border: 1px solid ButtonBorder; border-radius: .4rem; padding: .65rem; }
+    .banner.stale { border-color: #b45309; background: #fffbeb; color: #78350f; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 1rem; }
+    .card { border: 1px solid ButtonBorder; border-radius: .5rem; padding: 1rem; overflow-wrap: anywhere; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .75rem; margin: .5rem 0; }
+    dt { font-weight: 650; }
+    dd { margin: 0; }
+    ul { margin: .4rem 0; padding-left: 1.25rem; }
+    button { margin: .25rem .35rem .25rem 0; padding: .5rem .75rem; }
+    .state { font-weight: 700; letter-spacing: .03em; }
+    code { overflow-wrap: anywhere; }
+  </style>
+</head>
+<body data-control-revision="<!--RUN_PANEL_REVISION-->">
+  <!--RUN_PANEL_CONTENT-->
+  <script>
+    (() => {
+      const banner = document.querySelector("#bridge-status");
+      const token = new URL(window.location.href).searchParams.get("token");
+      const headers = token ? { authorization: `Bearer ${token}` } : {};
+      const endpoints = {
+        PAUSE: "/api/control/pause",
+        RESUME: "/api/control/resume",
+        STOP: "/api/control/stop",
+      };
+      const stale = (message = "Bridge unreachable — displayed snapshot is stale.") => {
+        banner.textContent = message;
+        banner.classList.add("stale");
+      };
+      const current = () => {
+        banner.textContent = "Bridge reachable — snapshot is current.";
+        banner.classList.remove("stale");
+      };
+
+      document.querySelector("[data-refresh]").addEventListener("click", () => window.location.reload());
+      document.querySelectorAll("[data-control]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          button.disabled = true;
+          try {
+            const response = await fetch(endpoints[button.dataset.control], {
+              method: "POST",
+              headers,
+            });
+            if (!response.ok) throw new Error(`control rejected (${response.status})`);
+            window.location.reload();
+          } catch (error) {
+            stale(`Control unavailable — ${error.message}. Displayed snapshot is stale.`);
+            button.disabled = false;
+          }
+        });
+      });
+
+      const checkBridge = async () => {
+        if (!token) {
+          stale("Authorization token missing — displayed snapshot is stale.");
+          return;
+        }
+        try {
+          const response = await fetch("/api/status", { headers });
+          if (!response.ok) throw new Error(String(response.status));
+          const snapshot = await response.json();
+          const renderedRevision = Number(document.body.dataset.controlRevision);
+          if (snapshot.run.controlRevision > renderedRevision) {
+            stale("A newer Run revision is available — Refresh to display it.");
+          } else {
+            current();
+          }
+        } catch {
+          stale();
+        }
+      };
+      window.setInterval(checkBridge, 5000);
+    })();
+  </script>
+</body>
+</html>
