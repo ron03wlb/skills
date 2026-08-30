@@ -37,12 +37,13 @@ export function createWorkflowRuntime({
       let panelState = { opened: false, closed: false, origin: null };
       let cleanupPreview = null;
       let cleanupResult = null;
-      const inspectCleanup = async (selectedRequest, apply) => {
+      const inspectCleanup = async (selectedRequest, current, apply) => {
         const runs = await cleanup.listRuns({ request: selectedRequest });
         const cleanupAt = now();
-        cleanupPreview = store.previewCleanup({ now: cleanupAt, runs });
+        const protectedRunIds = current?.runIdentity?.runId ? [current.runIdentity.runId] : [];
+        cleanupPreview = store.previewCleanup({ now: cleanupAt, runs, protectedRunIds });
         cleanupResult = apply && selectedRequest.cleanupPreview !== true
-          ? store.applyCleanup({ now: cleanupAt, runs })
+          ? store.applyCleanup({ now: cleanupAt, runs, protectedRunIds })
           : null;
       };
       const panel = {
@@ -95,13 +96,13 @@ export function createWorkflowRuntime({
         leaf,
         environment,
         panel,
-        onSelected: (selectedRequest) => inspectCleanup(selectedRequest, true),
+        onSelected: ({ request: selectedRequest, current }) => inspectCleanup(selectedRequest, current, true),
         now,
         sleep,
       });
       try {
         const status = await coordinator.run(request);
-        if (cleanupPreview === null) await inspectCleanup(request, false);
+        if (cleanupPreview === null) await inspectCleanup(request, null, false);
         const journal = status.run.runId ? store.readEvents(status.run.runId) : [];
         return {
           status,

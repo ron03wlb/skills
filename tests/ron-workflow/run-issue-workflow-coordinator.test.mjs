@@ -1353,6 +1353,7 @@ test("grant renewal diagnoses max_parallel drift without replacing authority", a
 test("explicit entry rejects a reconciled identity for another Spec before Grant mutation", async () => {
   const { root, store } = createStoreFixture();
   const wrongIdentity = { ...identity, runId: "run-12-wrong", specId: "12", approvedScopeHash: "sha256:spec-12" };
+  let selectedHooks = 0;
   const tracker = { async read() { return {}; } };
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
@@ -1378,6 +1379,7 @@ test("explicit entry rejects a reconciled identity for another Spec before Grant
       tracker,
       tasks,
       reconcile,
+      onSelected: async () => { selectedHooks += 1; },
       now: () => "2026-08-30T19:00:00.000Z",
       sleep: async () => {},
     });
@@ -1385,6 +1387,7 @@ test("explicit entry rejects a reconciled identity for another Spec before Grant
 
     assert.equal(status.run.state, "BLOCKED");
     assert.equal(status.diagnoses.at(-1).reasonCode, "spec_selection_conflict");
+    assert.equal(selectedHooks, 0);
     assert.deepEqual(store.readEvents(wrongIdentity.runId), []);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -12,7 +12,7 @@ A Single-Issue Spec runs as one node. A Multi-Issue Spec uses only the exact rea
 
 Invoke `/run-issue-workflow <Spec-ID>` once. Successful reconciliation creates or renews the exact Run Grant, opens the loopback panel, and starts work immediately. There is no second Start control.
 
-After one exact Run is selected and before reconciliation, invocation previews and applies the bounded terminal-Run retention sweep. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
+After one exact Run is selected and its identity is reconciled, invocation previews and applies the bounded terminal-Run retention sweep before writer acquisition. The selected Run is protected even if cleanup evidence contradicts reconciliation. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
 
 The runtime adapters must provide current Tracker, Git/worktree/completion-note, Codex task, shared leaf, browser, and cleanup evidence. They normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
 

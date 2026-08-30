@@ -715,8 +715,17 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
     engineLock: "RELEASED",
     activeTasks: "ABSENT",
   }));
+  const selectedRunContradiction = {
+    runId: identity.runId,
+    specId: identity.specId,
+    state: "SUCCEEDED",
+    terminalAt: new Date(Date.parse(evaluatedAt) - 90 * 86_400_000).toISOString(),
+    engineLock: "RELEASED",
+    activeTasks: "ABSENT",
+  };
+  const retentionRuns = [...terminalRuns, selectedRunContradiction];
   const oldestRunDir = join(gitCommonDir, "matt-workflow-control", "runs", "terminal-10");
-  for (const { runId } of terminalRuns) store.acquireWriter(runId).release();
+  for (const { runId } of retentionRuns) store.acquireWriter(runId).release();
   let panels = 0;
   const model = {
     trackerState: "OPEN",
@@ -759,14 +768,14 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
         targetState: "DIRTY",
       }),
       browser,
-      cleanup: { async listRuns() { return terminalRuns; } },
+      cleanup: { async listRuns() { return retentionRuns; } },
       now: () => evaluatedAt,
       sleep: async () => {},
     });
 
     const unselected = await runtime.run({});
     assert.equal(unselected.status.diagnoses[0].reasonCode, "run_selection_required");
-    assert.deepEqual(unselected.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);
+    assert.deepEqual(unselected.cleanupPreview.eligible.map(({ runId }) => runId), [identity.runId, "terminal-10"]);
     assert.equal(unselected.cleanupResult, null);
     assert.equal(existsSync(oldestRunDir), true);
 
@@ -777,6 +786,10 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
 
     const applied = await runtime.run({ specId: "17" });
     assert.deepEqual(applied.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);
+    assert.deepEqual(applied.cleanupPreview.skipped.find(({ runId }) => runId === identity.runId), {
+      runId: identity.runId,
+      reason: "selected_run",
+    });
     assert.deepEqual(applied.cleanupResult.removed, ["terminal-10"]);
     assert.equal(existsSync(oldestRunDir), false);
     assert.deepEqual(store.readCleanupRecords().map(({ runId }) => runId), ["terminal-10"]);

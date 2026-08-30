@@ -998,6 +998,11 @@ test("the single writer appends ordered control events and atomically rebuilds d
       run: { ...currentFacts.run, controlToken: "must-not-persist" },
     }), /token/u);
     assert.equal(readFileSync(statusPath, "utf8"), beforeRejectedWrite);
+    assert.throws(() => writer.publishStatus({
+      ...status,
+      run: { ...status.run, runId: "run-13" },
+    }), /writer Run run-12/u);
+    assert.equal(readFileSync(statusPath, "utf8"), beforeRejectedWrite);
 
     writeFileSync(statusPath, "{corrupt", "utf8");
     assert.equal(writer.rebuildStatus(currentFacts).run.state, "RUNNING");

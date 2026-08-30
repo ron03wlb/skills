@@ -505,7 +505,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       });
   };
 
-  const previewCleanup = ({ now, runs }) => {
+  const previewCleanup = ({ now, runs, protectedRunIds = [] }) => {
     let evaluatedAt;
     try {
       evaluatedAt = requireIsoInstant(now, "Cleanup preview time");
@@ -515,6 +515,13 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     if (!Array.isArray(runs)) {
       throw new TypeError("Cleanup preview requires an ISO time and normalized Run evidence");
     }
+    if (!Array.isArray(protectedRunIds)) {
+      throw new TypeError("Cleanup preview protected Run IDs must be an array");
+    }
+    const protectedRuns = new Set(protectedRunIds.map((runId) => {
+      assertSafeRunId(runId);
+      return runId;
+    }));
     const seenRunIds = new Set();
     for (const run of runs) {
       if (!isRecord(run)) throw new TypeError("Cleanup evidence entries must be objects");
@@ -551,7 +558,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       const paths = pathsFor(run.runId);
       const { runDir, lock } = paths;
       let reason;
-      if (!existsSync(runDir)) reason = "run_directory_absent";
+      if (protectedRuns.has(run.runId)) reason = "selected_run";
+      else if (!existsSync(runDir)) reason = "run_directory_absent";
       else if (!["SUCCEEDED", "STOPPED"].includes(run.state)) reason = "non_terminal";
       else if (!Number.isFinite(Date.parse(run.terminalAt))) reason = "terminal_state_uncertain";
       else if (run.engineLock !== "RELEASED" || existsSync(lock) || gateStateExists(paths.reclaimLock)
@@ -575,7 +583,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return { schema: CLEANUP_PREVIEW_SCHEMA, evaluatedAt: now, eligible, skipped };
   };
 
-  const applyCleanup = ({ now, runs, cleanupStaleProof, cleanupClaimStaleProof }) => {
+  const applyCleanup = ({ now, runs, protectedRunIds = [], cleanupStaleProof, cleanupClaimStaleProof }) => {
     mkdirSync(controlRoot, { recursive: true });
     let releaseCleanup;
     try {
@@ -601,7 +609,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const skippedDuringApply = [];
     let preview;
     try {
-      preview = previewCleanup({ now, runs });
+      preview = previewCleanup({ now, runs, protectedRunIds });
       const records = readCleanupRecords();
       let sequence = records.length;
       for (const eligible of preview.eligible) {
@@ -653,6 +661,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const persistStatus = (projection) => {
       assertNoToken(projection);
       if (projection?.schema !== STATUS_SCHEMA) throw new TypeError("Invalid status projection schema");
+      if (projection?.run?.runId !== runId) {
+        throw new TypeError(`Status projection runId must match writer Run ${runId}`);
+      }
       const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
       try {
         const descriptor = openSync(temporary, "wx");

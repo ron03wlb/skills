@@ -594,7 +594,6 @@ export function createCoordinator({
           };
         }
       }
-      if (onSelected) await onSelected(selectedRequest);
       let runIdentity;
       let writer;
       let grantRecorded = false;
@@ -659,6 +658,7 @@ export function createCoordinator({
                 resumePredicates: ["grant_and_selected_run_identity_match"],
               });
             }
+            if (onSelected) await onSelected({ request: selectedRequest, current });
             const acquired = acquireRunWriter(current);
             if (acquired.stopped) return acquired.stopped;
             writer = acquired.writer;
