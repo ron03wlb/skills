@@ -1,0 +1,4 @@
+interface:
+  display_name: "Attest Target Contribution"
+  short_description: "Record eligible direct target authority"
+  default_prompt: "Use $attest-target-contribution only for the exact human-confirmed recovery packet handed off by verify-target-before-push; append or reuse the minimal tracker record and read it back without granting push readiness."

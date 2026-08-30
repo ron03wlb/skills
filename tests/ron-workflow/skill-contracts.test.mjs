@@ -390,6 +390,32 @@ test("manual prerequisite attestation is one-step and sufficient", () => {
 });
 
 
+test("direct target contribution attestation is exact, minimal, and model-invoked", () => {
+  const name = "attest-target-contribution";
+  const skill = read(`skills/engineering/${name}/SKILL.md`);
+  const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
+  const docs = read(`docs/engineering/${name}.md`);
+
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(skill, /^description:.*Use when/mu);
+  assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(skill, /exact confirmed recovery packet.*owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
+  assert.match(skill, /before mutation.*owner.*target.*commit.*diff.*eligibility.*ref drift.*stops without writing/isu);
+  assert.match(skill, /explicit human-directed.*non-product workflow or governance maintenance.*outside an Executable Issue by design/isu);
+  assert.match(skill, /active skill behavior.*runtime or source.*tests.*configuration.*dependencies.*migrations.*security.*data.*public APIs.*mixed commit.*partial-path.*ineligible/isu);
+  assert.match(skill, /same owner, target, and classification.*one `direct_target_contribution:v1`/isu);
+  assert.match(skill, /reuse.*exact matching record.*without.*duplicate/isu);
+  assert.match(skill, /malformed.*duplicate.*conflicting.*mismatched.*unavailable.*partially written.*stops/isu);
+  assert.match(skill, /direct_target_contribution:v1\s+owner: <Tracker Spec or Issue ID>\s+target: <Issue target branch>\s+classification: non-product-workflow-governance-maintenance\s+contributions:\s+- commit: <full SHA>\s+purpose: <human-confirmed purpose>\s+attested_by: human\s+statement: authorized for target-range coverage only/isu);
+  assert.match(skill, /record contains only.*owner.*target.*classification.*contributions.*commit.*purpose.*attested_by.*statement/isu);
+  assert.match(skill, /Tracker.*author.*timestamp.*tracker-owned/isu);
+  assert.match(skill, /`B`.*`V`.*paths.*diff hashes.*review.*test results.*push readiness.*absent/isu);
+  assert.match(skill, /append.*exact read-back/isu);
+  assert.match(skill, /never.*Issue state.*labels.*Git.*product.*push.*remote-merge.*deploy/isu);
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");

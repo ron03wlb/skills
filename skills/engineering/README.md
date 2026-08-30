@@ -26,6 +26,7 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 
 - **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue while preserving completion across recorded-target movement.
 - **[close-issue](./close-issue/SKILL.md)** — Resume three idempotent actions against one human- or DAG-authorized recorded target, or close a verified Multi-Issue parent.
+- **[attest-target-contribution](./attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery.
 - **[prototype](./prototype/SKILL.md)** — Build a throwaway prototype to answer a design question: a runnable terminal app for state/logic, or several toggleable UI variations.
 - **[diagnosing-bugs](./diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
 - **[research](./research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.
