@@ -7,8 +7,6 @@ Skills I use daily for code work.
 Reachable only when you type them (Claude Code: `disable-model-invocation: true`; Codex: `policy.allow_implicit_invocation: false` in `agents/openai.yaml`).
 
 - **[pre-execute-issue](./pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
-- **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one Issue while preserving completion across recorded-target movement.
-- **[close-issue](./close-issue/SKILL.md)** — Resume three idempotent actions against an Issue's recorded target, or close a verified Multi-Issue parent.
 - **[verify-target-before-push](./verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range without pushing.
 - **[ask-matt](./ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
@@ -26,6 +24,8 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 
 Model- or user-reachable (rich trigger phrasing so the model can reach for them).
 
+- **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue while preserving completion across recorded-target movement.
+- **[close-issue](./close-issue/SKILL.md)** — Resume three idempotent actions against one human- or DAG-authorized recorded target, or close a verified Multi-Issue parent.
 - **[prototype](./prototype/SKILL.md)** — Build a throwaway prototype to answer a design question: a runnable terminal app for state/logic, or several toggleable UI variations.
 - **[diagnosing-bugs](./diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
 - **[research](./research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.

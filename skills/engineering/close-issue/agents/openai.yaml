@@ -1,7 +1,4 @@
 interface:
   display_name: "Close Issue"
-  short_description: "Resume an idempotent three-action close"
-  default_prompt: "Use $close-issue to merge one unchanged completed candidate into its recorded target, remove its exact clean worktree, and close the Issue, or close a verified Multi-Issue parent."
-
-policy:
-  allow_implicit_invocation: false
+  short_description: "Close one human- or DAG-authorized Issue"
+  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant, then resume the exact idempotent merge, worktree removal, and tracker closure path without widening authority."

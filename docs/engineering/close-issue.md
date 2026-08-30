@@ -12,15 +12,15 @@ npx skills update close-issue
 
 ## What it does
 
-`close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue.
+`close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. A direct human request or one valid read-back DAG Run Grant may authorize entry without separate per-Issue approval; the skill never creates the Grant or widens what closeout may do.
 
-The defining constraint is idempotent close progress. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
+The defining constraint is idempotent close progress. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
 
 ## When to reach for it
 
-You invoke this by typing `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete` — the agent won't reach for it on its own.
+Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete`, or an authorized coordinator reaches for it when its valid DAG Run Grant binds that exact Issue or completed parent. Without either authority, the agent stops before mutation.
 
-Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue, while keeping one writer at a time for each target branch. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
+Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue, while keeping one writer at a time for each target branch whether the writer is a human or authorized coordinator. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 
 ## Three observable actions
 

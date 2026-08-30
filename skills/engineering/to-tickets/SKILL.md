@@ -78,6 +78,8 @@ A failure before or during record publication is recoverable partial publication
 
 Compute readiness only after record read-back. An open child whose every owned and External blocker is closed belongs to the dependency-ready frontier. Apply `ready-for-agent` only to those children, and output `/execute-issue <Issue-ID>` only for the dependency-ready frontier; remove a stale ready label from every open blocked or closed child. Blocked or closed children receive neither `ready-for-agent` nor an `/execute-issue <Issue-ID>` command. Read every resulting child ready state back once.
 
+The read-back Decomposition publication record and dependency-ready frontier are one runtime-neutral handoff. A human may consume the emitted commands manually, or an authorized DAG coordinator may consume the same record and frontier under its own valid DAG Run Grant. `/to-tickets` never schedules or creates tasks and never depends on Codex, Orca, titles, inferred blockers, or global queue state.
+
 <child-contract>
 
 ## Parent

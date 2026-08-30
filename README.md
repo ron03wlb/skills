@@ -177,8 +177,6 @@ Skills I use daily for code work.
 **User-invoked**
 
 - **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
-- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one Issue while preserving completion across recorded-target movement.
-- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Resume three idempotent actions against an Issue's recorded target, or close a verified Multi-Issue parent.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range without pushing.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
@@ -194,6 +192,8 @@ Skills I use daily for code work.
 
 **Model-invoked**
 
+- **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue while preserving completion across recorded-target movement.
+- **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Resume three idempotent actions against one human- or DAG-authorized recorded target, or close a verified Multi-Issue parent.
 - **[prototype](./skills/engineering/prototype/SKILL.md)** — Build a throwaway prototype to answer a design question — a runnable terminal app for state/logic questions, or several radically different UI variations toggleable from one route.
 - **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
 - **[research](./skills/engineering/research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.

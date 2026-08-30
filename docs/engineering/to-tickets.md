@@ -34,6 +34,8 @@ Decomposition keys make retries stable: exact tracker evidence is reused, while 
 
 A complete, read-back Issue decomposition gains one Decomposition publication record and an exact dependency-ready frontier. A wide mechanical refactor that cannot stay green as vertical slices uses expand-contract instead.
 
+That record and frontier are a runtime-neutral handoff. A human may follow the emitted commands, or a separately authorized coordinator may consume the same evidence under its own DAG Run Grant; `to-tickets` never schedules tasks or depends on Codex, Orca, titles, inferred blockers, or global queue state.
+
 Exact in-Spec planning refinements may create one successor Planning Seal. Changes to behavior, acceptance, target, or exclusions return to `to-spec`; child publication never silently expands or edits the parent.
 
 ## It's working if
@@ -44,4 +46,4 @@ Exact in-Spec planning refinements may create one successor Planning Seal. Chang
 
 ## Where it fits
 
-`to-tickets` follows [to-spec](https://aihero.dev/skills-to-spec) and hands each ready child to [execute-issue](https://aihero.dev/skills-execute-issue), followed by [close-issue](https://aihero.dev/skills-close-issue). See [ask-matt](https://aihero.dev/skills-ask-matt) for the whole flow.
+`to-tickets` follows [to-spec](https://aihero.dev/skills-to-spec) and hands each ready child to [execute-issue](https://aihero.dev/skills-execute-issue), for either manual or authorized coordinator delivery, followed by [close-issue](https://aihero.dev/skills-close-issue). See [ask-matt](https://aihero.dev/skills-ask-matt) for the whole flow.

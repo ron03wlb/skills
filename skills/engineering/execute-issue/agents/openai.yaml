@@ -1,7 +1,4 @@
 interface:
   display_name: "Execute Issue"
-  short_description: "Keep Issue completion valid as target moves"
-  default_prompt: "Use $execute-issue to implement and verify one tracker Issue in its recorded-target worktree, preserving a valid completion while concurrent closes advance that target."
-
-policy:
-  allow_implicit_invocation: false
+  short_description: "Execute one human- or DAG-authorized Issue"
+  default_prompt: "Use $execute-issue only for a direct human request or an exact Issue authorized by a valid read-back DAG Run Grant; preserve its dedicated-worktree, review, completion-note, and no-close boundaries."
