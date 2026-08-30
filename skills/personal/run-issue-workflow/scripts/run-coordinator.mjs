@@ -266,7 +266,7 @@ const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
   return null;
 };
 
-export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, now, sleep }) {
+export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, panel, now, sleep }) {
   for (const method of [
     "readEvents",
     "acquireWriter",
@@ -276,6 +276,10 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
   ]) requireMethod(store, method);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
+  if (panel) {
+    requireMethod(panel, "open");
+    requireMethod(store, "readStatus");
+  }
   if (typeof reconcile !== "function") throw new TypeError("Coordinator requires reconcile()");
   if (typeof now !== "function") throw new TypeError("Coordinator requires now()");
   if (typeof sleep !== "function") throw new TypeError("Coordinator requires sleep()");
@@ -569,6 +573,22 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
       let writer;
       let grantRecorded = false;
       let lastStatus = null;
+      let latestFacts = null;
+      let panelHandle = null;
+      const rebuildStatus = (facts) => {
+        latestFacts = facts;
+        return writer.rebuildStatus(facts);
+      };
+      const openPanel = async () => {
+        if (!panel || panelHandle) return;
+        panelHandle = await panel.open({
+          runIdentity,
+          readStatus: () => store.readStatus(runIdentity.runId),
+          appendEvent: (event) => writer.append(event),
+          rebuildStatus: () => writer.rebuildStatus(latestFacts),
+        });
+        requireMethod(panelHandle, "close");
+      };
       try {
         while (true) {
           const trackerResult = await readTracker(selectedRequest);
@@ -617,7 +637,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               .findLast(({ type }) => type === "grant.recorded");
             const grantMaxParallel = current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL;
             if (previousGrant && previousGrant.maxParallel !== grantMaxParallel) {
-              lastStatus = writer.rebuildStatus(current.facts);
+              lastStatus = rebuildStatus(current.facts);
               return diagnosedStop(lastStatus, {
                 reasonCode: "grant_identity_conflict",
                 limitationClass: "contract-blocker",
@@ -636,11 +656,12 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               maxParallel: grantMaxParallel,
             });
             grantRecorded = true;
-            lastStatus = writer.rebuildStatus(current.facts);
+            lastStatus = rebuildStatus(current.facts);
+            await openPanel();
             continue;
           }
 
-          lastStatus = writer.rebuildStatus(current.facts);
+          lastStatus = rebuildStatus(current.facts);
           if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state)) return lastStatus;
           if (lastStatus.legalActions.length === 0) {
             const activeTaskRefs = lastStatus.frontier.active.map((issueId) => current.taskRefs?.[issueId]);
@@ -695,7 +716,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               journal: store.readEvents(runIdentity.runId),
               tasks,
             });
-            const refreshedStatus = writer.rebuildStatus(refreshed.facts);
+            const refreshedStatus = rebuildStatus(refreshed.facts);
             const recordedGrant = store.readEvents(runIdentity.runId)
               .findLast(({ type }) => type === "grant.recorded");
             const authorityStopped = authorityDrift({
@@ -718,7 +739,11 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
           }
         }
       } finally {
-        if (writer) writer.release();
+        try {
+          if (panelHandle) await panelHandle.close();
+        } finally {
+          if (writer) writer.release();
+        }
       }
     },
   };
