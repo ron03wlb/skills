@@ -62,6 +62,18 @@ _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
 _Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping
 
+**Direct target contribution**:
+An exact material target-branch commit or commit set containing only explicit human-directed, non-product workflow or governance maintenance that is outside an **Executable Issue** by design and not explained by an **Issue contribution**, referenced **Planning Seal**, or necessary merge topology. A matching **Direct target contribution record** may admit it to a **Target verification set**, but active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, and every mixed commit are ineligible.
+_Avoid_: Product implementation, partial-path attestation, SHA allowlist, retroactive completion note
+
+**Direct target contribution record**:
+The append-only read-back `direct_target_contribution:v1` tracker comment on the exact **Tracker Spec** or **Issue** that owns a **Direct target contribution**. It binds explicit human authority, scope, target, and commit identity without claiming review, verification, or push readiness; Git owns ancestry and the aggregate gate proves quality.
+_Avoid_: Local Git note, repository manifest, verifier-created exception, historical test claim
+
+**Direct target contribution recovery**:
+The confirmation-gated recovery triggered only when a frozen `verify-target-before-push` coverage check reports exact uncovered material commits and every proposed commit satisfies **Direct target contribution** eligibility. The active workflow prepares the owner, scope, target, commit identities, and record draft; after one exact human confirmation, a separate model-invoked attestation helper writes and reads back the **Direct target contribution record**, then automatically starts a fresh target verification from Entry.
+_Avoid_: Silent or proactive attestation, manual slash-command requirement, non-coverage failure recovery, in-place gate continuation
+
 **Target integration serialization**:
 The target-scoped rule that permits only one `close-issue` writer for the same **Issue target branch** at a time, whether started directly by a human or by an authorized **DAG Run**. Issue executions and writers for other targets may proceed concurrently; advancing the target does not invalidate successful execution state.
 _Avoid_: Global execution lock, concurrent writers for the same target branch
@@ -207,7 +219,7 @@ The directly observable ordered progress of one idempotent `close-issue`: the re
 _Avoid_: Issue integration receipt, closeout journal, retry checkpoint
 
 **Target verification set**:
-The aggregate Issue set frozen by `verify-target-before-push` from one exact baseline `B`, target `V`, and Issue **Execution completion notes**. The default source is the target's local unpushed range from its unique upstream tip to local `HEAD`; already-pushed work requires an explicit merge request, pull request, or exact base/head comparison. A candidate reachable from `V` but not `B` is a member and must belong to a closed Issue; an open unreachable candidate remains concurrent work outside the set, while a closed unreachable candidate is contradictory delivery evidence that blocks verification. Every material range commit must be covered by a member **Issue contribution**, its referenced Planning Seal, or necessary merge topology.
+The aggregate delivery set frozen by `verify-target-before-push` from one exact baseline `B`, target `V`, Issue **Execution completion notes**, and **Direct target contribution records**. The default source is the target's local unpushed range from its unique upstream tip to local `HEAD`; already-pushed work requires an explicit merge request, pull request, or exact base/head comparison. A candidate reachable from `V` but not `B` is a member and must belong to a closed Issue; an open unreachable candidate remains concurrent work outside the set, while a closed unreachable candidate is contradictory delivery evidence that blocks verification. Every material range commit must be covered by a member **Issue contribution**, a matching **Direct target contribution**, its referenced Planning Seal, or necessary merge topology.
 _Avoid_: Closeout receipt union, explicit Issue manifest, merge-message discovery
 
 **Successor verification evidence**:
@@ -517,7 +529,10 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Closing the final child never closes its parent implicitly, and parent closure never claims aggregate `push_ready`
 - `/verify-target-before-push` keeps one public name: by default it freezes the non-empty local unpushed range from the target's unique upstream tip to local `HEAD`, while already-pushed work requires an explicit merge request, pull request, or exact base/head comparison and never uses a guessed baseline
 - `/verify-target-before-push` derives one **Target verification set** from completion notes plus candidate reachability; a reachable member still open or a closed candidate no longer reachable stops before review, while open unreachable work remains outside the selected range
-- Every material commit in a **Target verification set** must be explained by a member **Issue contribution**, referenced Planning Seal, or necessary merge topology; an uncovered commit stops without guessing from commit messages
+- Every material commit in a **Target verification set** must be explained by a member **Issue contribution**, matching **Direct target contribution**, referenced Planning Seal, or necessary merge topology; an uncovered commit stops without guessing from commit messages
+- **Direct target contribution recovery** is available only after frozen-range coverage failure when every proposed uncovered commit is eligible; matching existing records are reused, while review, test, cleanliness, ref, tracker, normal execution, and closeout states never trigger attestation
+- Recovery requires one exact human confirmation before its separate model-invoked helper writes authority evidence, then automatically starts a fresh `/verify-target-before-push`; the failed gate neither writes the record nor continues from its stopping point
+- A **Direct target contribution** is eligible only for explicit human-directed, non-product workflow or governance maintenance outside an **Executable Issue** by design; active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, and mixed commits return to normal Issue delivery without partial-path attestation
 - **Successor verification evidence** may replace only an earlier path-specific focused command that is inapplicable at exact `V`; every referenced path requires explicit later-member retirement, absence proof, passing current-behavior evidence, and descendant ancestry, while partial, inferred, renamed, or non-path-specific cases stop
 - `/verify-target-before-push` performs aggregate Standards, every member Spec, deduplicated focused verification, and the repository full suite once on exact target `V`; local-ahead mode writes a current **Push-ready receipt**, while explicit already-pushed mode returns only a **Range verification result**
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**
