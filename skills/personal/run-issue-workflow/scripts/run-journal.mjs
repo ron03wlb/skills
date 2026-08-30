@@ -179,8 +179,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
   }
   if (event.type === "dispatch.recorded") {
     const aliasedDispatch = events.find((item) => (
-      item.type === "dispatch.recorded"
-      && taskRefKey(item.taskRef) === taskRefKey(event.taskRef)
+      ((item.type === "dispatch.recorded" && taskRefKey(item.taskRef) === taskRefKey(event.taskRef))
+        || (item.type === "retry.recorded" && item.replacement
+          && taskRefKey(item.replacement.nextTaskRef) === taskRefKey(event.taskRef)))
       && item.issueId !== event.issueId
     ));
     if (aliasedDispatch) {

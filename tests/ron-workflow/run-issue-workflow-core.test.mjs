@@ -795,6 +795,13 @@ test("the single writer appends ordered control events and atomically rebuilds d
       attempt: 3,
       taskRef: { threadId: "thread-13", hostId: "local" },
     }), /not authorized/u);
+    assert.throws(() => retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:05:00.000Z",
+      issueId: "14",
+      attempt: 1,
+      taskRef: { threadId: "replacement-13", hostId: "local" },
+    }), /cannot serve both Issue/u);
     retryWriter.append({
       type: "dispatch.recorded",
       at: "2026-08-30T00:05:00.000Z",
