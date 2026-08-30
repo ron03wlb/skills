@@ -531,6 +531,9 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
     assert.doesNotMatch(skill, /^description:\s*Use when\b/mu);
     assert.match(page, /agent won't reach for it on its own/iu);
+    assert.doesNotMatch(page, /agent reaches for it automatically/iu);
+    assert.doesNotMatch(skill, /Canonical Wiki|\/wiki|wiki_|setup-ron|ron-workflow\.md|workflow-[a-z-]+:v\d|lifecycle authorization|payload hash/iu);
+    assert.doesNotMatch(skill, /GitHub Issue|GitHub comment/u);
   }
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
