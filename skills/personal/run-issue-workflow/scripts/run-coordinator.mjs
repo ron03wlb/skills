@@ -1,4 +1,5 @@
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
+const DEFAULT_MAX_PARALLEL = 3;
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
   "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
 const RUN_IDENTITY_KEYS = Object.freeze([
@@ -44,6 +45,27 @@ const initialTrackerUnavailable = (request, attempts) => ({
     unaffectedNodes: [],
     nextOwner: "human",
     resumePredicates: ["tracker_read_succeeds"],
+  }],
+});
+
+const runSelectionRequired = (candidateCount) => ({
+  schema: "dag-run-status:v1",
+  run: { runId: null, specId: null, state: "BLOCKED" },
+  nodes: [],
+  frontier: { ready: [], active: [], closeable: [] },
+  legalActions: [],
+  legalControls: ["REFRESH"],
+  diagnoses: [{
+    reasonCode: "run_selection_required",
+    limitationClass: "unresolved-evidence",
+    evidence: [`Found ${candidateCount} non-terminal Runs; exactly one is required.`],
+    attemptedRecovery: [],
+    retryCount: 0,
+    noAutomaticTransition: "No-argument entry cannot guess a new or ambiguous Run.",
+    affectedNodes: [],
+    unaffectedNodes: [],
+    nextOwner: "human",
+    resumePredicates: ["one_exact_non_terminal_run_or_explicit_spec_id"],
   }],
 });
 
@@ -114,7 +136,7 @@ const environmentUnresolved = (status, action) => diagnosedStop(status, {
   resumePredicates: ["environment_changed_or_human_resolution"],
 });
 
-export function createCoordinator({ store, tracker, tasks, reconcile, leaf, environment, now, sleep }) {
+export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, now, sleep }) {
   for (const method of ["readEvents", "acquireWriter", "acquireCloseWriter"]) requireMethod(store, method);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
@@ -153,10 +175,16 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
       let nextTaskRef = priorDispatch.taskRef;
       let replacement = null;
       if (task?.state === "RESUMABLE") {
-        await tasks.message(
-          priorDispatch.taskRef,
-          `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
-        );
+        const accepted = task.retryRequest?.state === "ACCEPTED"
+          && task.retryRequest.runId === current.runIdentity.runId
+          && task.retryRequest.issueId === action.issueId
+          && task.retryRequest.attempt === action.attempt;
+        if (!accepted) {
+          await tasks.message(
+            priorDispatch.taskRef,
+            `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
+          );
+        }
       } else if (task?.state === "INACTIVE" && Array.isArray(task.inactiveEvidence)
         && task.inactiveEvidence.length > 0 && task.inactiveEvidence.every(isText)) {
         const existing = await tasks.findIssueLane({
@@ -289,23 +317,39 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
 
   return {
     async run(request = {}) {
+      let selectedRequest = request;
+      if (!isText(request.specId)) {
+        requireMethod(selector, "listNonTerminalRuns");
+        const candidates = await selector.listNonTerminalRuns({ store, tasks });
+        if (!Array.isArray(candidates) || candidates.length !== 1) {
+          return runSelectionRequired(Array.isArray(candidates) ? candidates.length : 0);
+        }
+        const selectedRun = candidates[0];
+        if (!RUN_IDENTITY_KEYS.every((key) => key === "decompositionIdentity"
+          ? selectedRun?.[key] === null || isText(selectedRun?.[key])
+          : isText(selectedRun?.[key]))) {
+          return runSelectionRequired(candidates.length);
+        }
+        selectedRequest = { ...request, specId: selectedRun.specId, runIdentity: selectedRun };
+      }
       let runIdentity;
       let writer;
       let grantRecorded = false;
       let lastStatus = null;
       try {
         while (true) {
-          const trackerResult = await readTracker(request);
-          if (!trackerResult.available) return trackerUnavailable(request, trackerResult.attempts, lastStatus);
+          const trackerResult = await readTracker(selectedRequest);
+          if (!trackerResult.available) return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
           const journal = runIdentity ? store.readEvents(runIdentity.runId) : [];
           const current = await reconcile({
-            request,
+            request: selectedRequest,
             tracker: trackerResult.snapshot,
             journal,
             tasks,
           });
           if (!runIdentity) {
             runIdentity = current.runIdentity;
+            if (selectedRequest.runIdentity) assertSameIdentity(selectedRequest.runIdentity, runIdentity);
             assertSameIdentity(runIdentity, current.grant?.runIdentity);
             writer = store.acquireWriter(runIdentity.runId);
           } else {
@@ -313,11 +357,27 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
             assertSameIdentity(runIdentity, current.grant?.runIdentity);
           }
           if (!grantRecorded) {
+            const previousGrant = store.readEvents(runIdentity.runId)
+              .findLast(({ type }) => type === "grant.recorded");
+            const grantMaxParallel = current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL;
+            if (previousGrant && previousGrant.maxParallel !== grantMaxParallel) {
+              lastStatus = writer.rebuildStatus(current.facts);
+              return diagnosedStop(lastStatus, {
+                reasonCode: "grant_identity_conflict",
+                limitationClass: "contract-blocker",
+                evidence: [
+                  `Run ${runIdentity.runId} Grant max_parallel is ${previousGrant.maxParallel}; reconciliation proposed ${grantMaxParallel}.`,
+                ],
+                noAutomaticTransition: "Grant renewal cannot change max_parallel without a valid revisioned setting.",
+                affectedNodes: lastStatus.nodes.map(({ issueId }) => issueId),
+                resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
+              });
+            }
             writer.append({
               type: "grant.recorded",
               at: now(),
               runIdentity,
-              maxParallel: current.grant.maxParallel,
+              maxParallel: grantMaxParallel,
             });
             grantRecorded = true;
             lastStatus = writer.rebuildStatus(current.facts);

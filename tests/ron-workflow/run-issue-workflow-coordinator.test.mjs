@@ -997,3 +997,177 @@ test("tracker exhaustion during an existing Run preserves identity and affected 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("no-argument entry takes no action for zero or multiple non-terminal Runs", async () => {
+  for (const candidates of [[], [identity, multiIdentity]]) {
+    const { root, store } = createStoreFixture();
+    let trackerReads = 0;
+    const selector = { async listNonTerminalRuns() { return candidates; } };
+    const tracker = { async read() { trackerReads += 1; throw new Error("selection must precede Tracker reads"); } };
+    const tasks = Object.fromEntries(
+      ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+        throw new Error(`${name} is forbidden without one selected Run`);
+      }]),
+    );
+    const reconcile = async () => { throw new Error("reconciliation is forbidden without one selected Run"); };
+
+    try {
+      const coordinator = createCoordinator({
+        store,
+        tracker,
+        tasks,
+        selector,
+        reconcile,
+        now: () => "2026-08-30T15:00:00.000Z",
+        sleep: async () => {},
+      });
+      const status = await coordinator.run({});
+
+      assert.equal(status.run.state, "BLOCKED");
+      assert.equal(status.diagnoses[0].reasonCode, "run_selection_required");
+      assert.equal(status.diagnoses[0].evidence[0], `Found ${candidates.length} non-terminal Runs; exactly one is required.`);
+      assert.equal(trackerReads, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("no-argument entry resumes one exact non-terminal Run", async () => {
+  const { root, store } = createStoreFixture();
+  const selector = { async listNonTerminalRuns() { return [identity]; } };
+  const tracker = { async read(request) { assert.deepEqual(request.runIdentity, identity); return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is unnecessary for a successful resumed Run`);
+    }]),
+  );
+  const reconcile = async ({ request }) => {
+    assert.equal(request.specId, "15");
+    assert.deepEqual(request.runIdentity, identity);
+    return reconciliation({
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "CLOSED",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "ABSENT",
+      }],
+    });
+  };
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker,
+      tasks,
+      selector,
+      reconcile,
+      now: () => "2026-08-30T16:00:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({});
+
+    assert.equal(status.run.state, "SUCCEEDED");
+    assert.equal(status.run.runId, identity.runId);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("re-entry observes an accepted retry request before journaling the next attempt", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  let retryRequest = null;
+  let messageCalls = 0;
+  let clockMinute = 0;
+  const now = () => `2026-08-30T17:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
+  seed.release();
+  const tasks = {
+    async findIssueLane() { throw new Error("resumable task forbids replacement"); },
+    async create() { throw new Error("resumable task forbids replacement"); },
+    async read() { return { state: "RESUMABLE", inactiveEvidence: [], retryRequest }; },
+    async message() {
+      messageCalls += 1;
+      retryRequest = { runId: identity.runId, issueId: "15", attempt: 2, state: "ACCEPTED" };
+      throw new Error("coordinator lost after the retry prompt was accepted");
+    },
+    async wait() { return { coordinatorActive: false }; },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async ({ journal }) => {
+    const dispatches = journal.filter(({ type }) => type === "dispatch.recorded");
+    return reconciliation({
+      taskRefs: { 15: dispatches.at(-1)?.taskRef ?? taskRef },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: dispatches.length === 1 ? "TRANSIENT_FAILURE" : "EXECUTING",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+      }],
+    });
+  };
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    await assert.rejects(coordinator.run({ specId: "15" }), /coordinator lost/u);
+    const resumed = await coordinator.run({ specId: "15" });
+    const dispatches = store.readEvents(identity.runId).filter(({ type }) => type === "dispatch.recorded");
+
+    assert.equal(resumed.run.state, "RUNNING");
+    assert.equal(messageCalls, 1);
+    assert.deepEqual(dispatches.map(({ attempt, taskRef: ref }) => ({ attempt, taskRef: ref })), [
+      { attempt: 1, taskRef },
+      { attempt: 2, taskRef },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("grant renewal diagnoses max_parallel drift without replacing authority", async () => {
+  const { root, store } = createStoreFixture();
+  let clockMinute = 0;
+  const now = () => `2026-08-30T18:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.release();
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden after Grant drift`);
+    }]),
+  );
+  const reconcile = async () => reconciliation({
+    maxParallel: 4,
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.run.maxParallel, 3);
+    assert.equal(status.diagnoses.at(-1).reasonCode, "grant_identity_conflict");
+    assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

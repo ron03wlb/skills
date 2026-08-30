@@ -1254,6 +1254,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
   assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
   assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
+  assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);
   assert.match(skill, /5, 15, and 30 second.*tracker.*probe.*retry budget/isu);
   assert.match(skill, /`Selector\.open\(\)`.*Unable to establish loopback connection.*`gradle-loopback-safe`.*one.*process-local.*cycle/isu);
   assert.match(skill, /On every entry.*reacquire/isu);
