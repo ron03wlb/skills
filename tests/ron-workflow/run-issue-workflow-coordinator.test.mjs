@@ -1020,6 +1020,110 @@ test("re-entry observes an accepted close request instead of sending a duplicate
   }
 });
 
+test("a competing target close writer returns a structured stop before lane messaging", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T13:${String(clockMinute++).padStart(2, "0")}:30.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
+  seed.release();
+  const competing = store.acquireCloseWriter({ target: identity.target, runId: "run-competing" });
+  let taskCalls = 0;
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      taskCalls += 1;
+      throw new Error(`${name} is forbidden while another Run owns the target close writer`);
+    }]),
+  );
+  const tracker = { async read() { return {}; } };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: true,
+      worktreeState: "PRESENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "close_writer_conflict");
+    assert.match(status.diagnoses.at(-1).evidence.join(" "), /run-competing/u);
+    assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
+    assert.equal(taskCalls, 0);
+    assert.equal(store.readCloseWriterLock(identity.target).runId, "run-competing");
+  } finally {
+    competing.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a lost close-writer reclaim race returns the same structured stop", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  let clockMinute = 0;
+  const now = () => `2026-08-30T13:${String(clockMinute++).padStart(2, "0")}:45.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
+  seed.release();
+  const racingStore = {
+    ...store,
+    reclaimCloseWriter() { throw new Error("TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH"); },
+    readCloseWriterLock() {
+      return { runId: "run-race-winner", coordinatorInstanceId: "winner", generation: "new-generation" };
+    },
+  };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden after the reclaim race is lost`);
+    }]),
+  );
+  const tracker = { async read() { return {}; } };
+  const reconcile = async () => ({
+    ...reconciliation({
+      taskRefs: { 15: taskRef },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "PRESENT",
+      }],
+    }),
+    closeWriterReclaimProof: {
+      previousCoordinatorInstanceId: "loser",
+      previousGeneration: "old-generation",
+      coordinatorState: "INACTIVE",
+      reconciled: true,
+      evidence: ["The previous close writer appeared stale before the race."],
+      abandonedOperationIds: [],
+    },
+  });
+
+  try {
+    const coordinator = createCoordinator({ store: racingStore, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "close_writer_conflict");
+    assert.match(status.diagnoses.at(-1).evidence.join(" "), /run-race-winner/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("tracker exhaustion during an existing Run preserves identity and affected nodes", async () => {
   const { root, store } = createStoreFixture();
   let trackerReads = 0;
@@ -1676,6 +1780,59 @@ test("explicit re-entry reclaims an exactly proven stale engine writer", async (
     assert.throws(() => oldWriter.release());
     assert.equal(recoveredStore.readWriterLock(identity.runId), null);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("active engine writer contention remains fenced and returns a structured stop", async () => {
+  const { root, gitCommonDir, store } = createStoreFixture();
+  const activeWriter = store.acquireWriter(identity.runId);
+  activeWriter.append({
+    type: "grant.recorded",
+    at: "2026-08-30T22:30:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  const owner = store.readWriterLock(identity.runId);
+  const contenderStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "engine-contender" });
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden while the engine writer remains active`);
+    }]),
+  );
+  const reconcile = async () => reconciliation({
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store: contenderStore,
+      tracker,
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T22:31:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "engine_writer_conflict");
+    assert.match(status.diagnoses.at(-1).evidence.join(" "), new RegExp(owner.coordinatorInstanceId, "u"));
+    assert.deepEqual(status.diagnoses.at(-1).resumePredicates, [
+      "prior_engine_writer_is_inactive_with_exact_reclaim_proof",
+    ]);
+    assert.equal(contenderStore.readWriterLock(identity.runId).generation, owner.generation);
+  } finally {
+    activeWriter.release();
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -11,6 +11,29 @@ const RUN_IDENTITY_KEYS = Object.freeze([
   "classification",
   "decompositionIdentity",
 ]);
+const RECLAIM_CONTENTION = Object.freeze([
+  "RECLAIM_GATE_LOCKED",
+  "RECLAIM_GATE_STALE_PROOF_MISMATCH",
+  "RECLAIM_GATE_TAKEOVER_LOCKED",
+  "RECLAIM_GATE_TAKEOVER_STALE_PROOF_MISMATCH",
+  "RECLAIM_GATE_LEASE_FENCED",
+  "LOCK_LEASE_FENCED",
+]);
+const ENGINE_WRITER_CONTENTION = new Set([
+  ...RECLAIM_CONTENTION,
+  "CLEANUP_IN_PROGRESS",
+  "RUN_WRITER_LOCKED",
+  "RUN_WRITER_RECLAIM_IN_PROGRESS",
+  "RUN_WRITER_STALE_PROOF_MISMATCH",
+  "RUN_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
+]);
+const CLOSE_WRITER_CONTENTION = new Set([
+  ...RECLAIM_CONTENTION,
+  "TARGET_CLOSE_WRITER_LOCKED",
+  "TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS",
+  "TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH",
+  "TARGET_CLOSE_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
+]);
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTaskRef = (value) => value && isText(value.threadId) && isText(value.hostId);
@@ -69,7 +92,13 @@ const runSelectionRequired = (candidateCount) => ({
   }],
 });
 
-const preflightConflict = (current, { reasonCode, evidence, resumePredicates }) => {
+const preflightConflict = (current, {
+  reasonCode,
+  limitationClass = "contract-blocker",
+  evidence,
+  noAutomaticTransition = "Selection and reconciled Run authority must match exactly.",
+  resumePredicates,
+}) => {
   const runIdentity = current?.runIdentity ?? {};
   const allNodes = Array.isArray(current?.facts?.nodes)
     ? current.facts.nodes.map(({ issueId }) => issueId).filter(isText)
@@ -91,11 +120,11 @@ const preflightConflict = (current, { reasonCode, evidence, resumePredicates }) 
     legalControls: ["REFRESH"],
     diagnoses: [{
       reasonCode,
-      limitationClass: "contract-blocker",
+      limitationClass,
       evidence,
       attemptedRecovery: [],
       retryCount: 0,
-      noAutomaticTransition: "Selection and reconciled Run authority must match exactly.",
+      noAutomaticTransition,
       affectedNodes: allNodes,
       unaffectedNodes: [],
       nextOwner: "human",
@@ -238,7 +267,13 @@ const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
 };
 
 export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, now, sleep }) {
-  for (const method of ["readEvents", "acquireWriter", "acquireCloseWriter"]) requireMethod(store, method);
+  for (const method of [
+    "readEvents",
+    "acquireWriter",
+    "readWriterLock",
+    "acquireCloseWriter",
+    "readCloseWriterLock",
+  ]) requireMethod(store, method);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
   if (typeof reconcile !== "function") throw new TypeError("Coordinator requires reconcile()");
@@ -260,6 +295,29 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
         }
       }
       return { available: false, snapshot: null, attempts };
+    }
+  };
+
+  const acquireRunWriter = (current) => {
+    try {
+      if (current.writerReclaimProof) {
+        requireMethod(store, "reclaimWriter");
+        return { writer: store.reclaimWriter({
+          runId: current.runIdentity.runId,
+          staleProof: current.writerReclaimProof,
+        }) };
+      }
+      return { writer: store.acquireWriter(current.runIdentity.runId) };
+    } catch (error) {
+      if (!ENGINE_WRITER_CONTENTION.has(error?.message)) throw error;
+      const owner = store.readWriterLock(current.runIdentity.runId);
+      return { stopped: preflightConflict(current, {
+        reasonCode: "engine_writer_conflict",
+        limitationClass: "unresolved-evidence",
+        evidence: [`${error.message}; observed engine writer owner ${JSON.stringify(owner)}.`],
+        noAutomaticTransition: "A live or unproven engine writer remains fenced.",
+        resumePredicates: ["prior_engine_writer_is_inactive_with_exact_reclaim_proof"],
+      }) };
     }
   };
 
@@ -361,19 +419,32 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
     return null;
   };
 
-  const acquireTargetCloseWriter = (current) => {
-    if (current.closeWriterReclaimProof) {
-      requireMethod(store, "reclaimCloseWriter");
-      return store.reclaimCloseWriter({
+  const acquireTargetCloseWriter = (current, status) => {
+    try {
+      if (current.closeWriterReclaimProof) {
+        requireMethod(store, "reclaimCloseWriter");
+        return { writer: store.reclaimCloseWriter({
+          target: current.runIdentity.target,
+          runId: current.runIdentity.runId,
+          staleProof: current.closeWriterReclaimProof,
+        }) };
+      }
+      return { writer: store.acquireCloseWriter({
         target: current.runIdentity.target,
         runId: current.runIdentity.runId,
-        staleProof: current.closeWriterReclaimProof,
-      });
+      }) };
+    } catch (error) {
+      if (!CLOSE_WRITER_CONTENTION.has(error?.message)) throw error;
+      const owner = store.readCloseWriterLock(current.runIdentity.target);
+      return { stopped: diagnosedStop(status, {
+        reasonCode: "close_writer_conflict",
+        limitationClass: "unresolved-evidence",
+        evidence: [`${error.message}; observed target close-writer owner ${JSON.stringify(owner)}.`],
+        noAutomaticTransition: "Target closeout cannot race or replace an active or unproven writer.",
+        affectedNodes: status.nodes.map(({ issueId }) => issueId),
+        resumePredicates: ["target_close_writer_is_absent_or_exactly_reclaimable"],
+      }) };
     }
-    return store.acquireCloseWriter({
-      target: current.runIdentity.target,
-      runId: current.runIdentity.runId,
-    });
   };
 
   const closeIssue = async ({ action, current, status }) => {
@@ -390,7 +461,9 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
       taskRef = existing[0];
       if (!isTaskRef(taskRef)) return { stopped: issueLaneMissing(status, action.issueId) };
     }
-    const closeWriter = acquireTargetCloseWriter(current);
+    const acquired = acquireTargetCloseWriter(current, status);
+    if (acquired.stopped) return { stopped: acquired.stopped };
+    const closeWriter = acquired.writer;
     let settled = false;
     try {
       const task = await tasks.read(taskRef);
@@ -437,14 +510,16 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
     return true;
   };
 
-  const closeParent = async ({ action, current }) => {
+  const closeParent = async ({ action, current, status }) => {
     requireMethod(leaf, "closeParent");
-    const closeWriter = acquireTargetCloseWriter(current);
+    const acquired = acquireTargetCloseWriter(current, status);
+    if (acquired.stopped) return { stopped: acquired.stopped };
+    const closeWriter = acquired.writer;
     let settled = false;
     try {
       const result = await leaf.closeParent({ issueId: action.issueId, runIdentity: current.runIdentity });
       settled = result?.settled === true;
-      return settled;
+      return { settled };
     } finally {
       if (settled) closeWriter.release();
     }
@@ -528,15 +603,9 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
                 resumePredicates: ["grant_and_selected_run_identity_match"],
               });
             }
-            if (current.writerReclaimProof) {
-              requireMethod(store, "reclaimWriter");
-              writer = store.reclaimWriter({
-                runId: runIdentity.runId,
-                staleProof: current.writerReclaimProof,
-              });
-            } else {
-              writer = store.acquireWriter(runIdentity.runId);
-            }
+            const acquired = acquireRunWriter(current);
+            if (acquired.stopped) return acquired.stopped;
+            writer = acquired.writer;
           } else {
             const recordedGrant = store.readEvents(runIdentity.runId)
               .findLast(({ type }) => type === "grant.recorded");
@@ -600,8 +669,9 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
               if (outcome.stopped) return outcome.stopped;
               if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {
-              const settled = await closeParent({ action, current });
-              if (!settled) return lastStatus;
+              const outcome = await closeParent({ action, current, status: lastStatus });
+              if (outcome.stopped) return outcome.stopped;
+              if (!outcome.settled) return lastStatus;
             } else if (action.type === "reconcile_run") {
               // The next loop reacquires tracker and task-owned evidence before rebuilding status.
             } else if (["settle_pause", "settle_stop"].includes(action.type)) {
