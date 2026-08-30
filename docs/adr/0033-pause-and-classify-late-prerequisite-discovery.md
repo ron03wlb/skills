@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 ---
 
 # Pause and classify late prerequisite discovery

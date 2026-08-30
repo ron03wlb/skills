@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 ---
 
 # Share one Issue worktree across prerequisite preparation and execution

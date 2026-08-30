@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0039
 ---
 
 # Require one read-only target check for READY
