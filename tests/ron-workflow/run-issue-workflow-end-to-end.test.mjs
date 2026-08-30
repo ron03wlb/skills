@@ -28,6 +28,15 @@ const identity = {
   decompositionIdentity: null,
 };
 
+const multiIdentity = {
+  runId: "run-12-multi",
+  specId: "12",
+  approvedScopeHash: "sha256:spec-12",
+  target: "features/ron",
+  classification: "MULTI",
+  decompositionIdentity: "decomposition:12:05",
+};
+
 test("end-to-end Single-Issue runtime opens the panel and retains terminal inspection", async () => {
   const { root, store } = createStoreFixture();
   const model = {
@@ -285,5 +294,452 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
     await assert.rejects(fetch(`${priorOrigin}/api/status`));
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end Multi-Issue runtime releases blockers and closes the parent last", async () => {
+  const { root, store } = createStoreFixture();
+  const nodes = new Map([
+    ["13", {
+      issueId: "13", blockers: [], trackerState: "OPEN", taskState: "NONE",
+      completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT",
+    }],
+    ["14", {
+      issueId: "14", blockers: [], trackerState: "OPEN", taskState: "NONE",
+      completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT",
+    }],
+    ["17", {
+      issueId: "17", blockers: ["13"], trackerState: "OPEN", taskState: "NONE",
+      completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT",
+    }],
+  ]);
+  let parentTrackerState = "OPEN";
+  let second = 0;
+  let largestWaitBatch = 0;
+  const now = () => `2026-08-30T10:00:${String(second++).padStart(2, "0")}.000Z`;
+  const created = [];
+  const closeOrder = [];
+  const closeAccepted = new Set();
+  const taskRefs = new Map();
+  const issueByThread = new Map();
+  const tracker = {
+    async read() {
+      return { parentTrackerState, nodes: [...nodes.values()].map((node) => ({ ...node })) };
+    },
+  };
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create({ issueId }) {
+      if (issueId === "17") {
+        const blocker = nodes.get("13");
+        assert.equal(blocker.trackerState, "CLOSED");
+        assert.equal(blocker.candidateReachable, true);
+        assert.equal(blocker.worktreeState, "ABSENT");
+      }
+      const ref = { threadId: `thread-${issueId}`, hostId: "local" };
+      created.push(issueId);
+      taskRefs.set(issueId, ref);
+      issueByThread.set(ref.threadId, issueId);
+      nodes.get(issueId).taskState = "DISPATCHED";
+      return ref;
+    },
+    async read(ref) {
+      const issueId = issueByThread.get(ref.threadId);
+      return {
+        state: "SETTLED",
+        closeRequest: closeAccepted.has(issueId)
+          ? { state: "ACCEPTED", runId: multiIdentity.runId, issueId }
+          : null,
+      };
+    },
+    async message(ref, prompt) {
+      const issueId = issueByThread.get(ref.threadId);
+      assert.match(prompt, new RegExp(`\\$close-issue.*${issueId}`, "u"));
+      assert.equal(store.readCloseWriter(multiIdentity.target), multiIdentity.runId);
+      closeAccepted.add(issueId);
+    },
+    async wait(refs) {
+      largestWaitBatch = Math.max(largestWaitBatch, refs.length);
+      const issueIds = refs.map(({ threadId }) => issueByThread.get(threadId));
+      for (const issueId of issueIds) {
+        const node = nodes.get(issueId);
+        if (closeAccepted.has(issueId)) {
+          node.trackerState = "CLOSED";
+          node.worktreeState = "ABSENT";
+          closeOrder.push(issueId);
+        } else {
+          node.taskState = "NONE";
+          node.completionState = "COMPLETE";
+          node.candidateReachable = true;
+          node.worktreeState = "PRESENT";
+        }
+      }
+      return { coordinatorActive: true, taskSettled: true };
+    },
+  };
+  const reconcile = async ({ journal }) => ({
+    runIdentity: multiIdentity,
+    grant: { runIdentity: multiIdentity, maxParallel: 2 },
+    taskRefs: Object.fromEntries(journal
+      .filter(({ type }) => type === "dispatch.recorded")
+      .map(({ issueId, taskRef }) => [issueId, taskRef])),
+    facts: {
+      schema: "dag-run-facts:v1",
+      run: {
+        ...multiIdentity,
+        reconciled: true,
+        trackerAvailable: true,
+        targetState: "CLEAN",
+        closeWriterRunId: null,
+        closeWriterState: "ABSENT",
+        parentTrackerState,
+      },
+      nodes: [...nodes.values()].map((node) => ({ ...node, blockers: [...node.blockers] })),
+      contradictions: [],
+    },
+  });
+  const leaf = {
+    async closeParent({ issueId }) {
+      assert.equal(issueId, "12");
+      assert.equal(store.readCloseWriter(multiIdentity.target), multiIdentity.runId);
+      assert.equal([...nodes.values()].every((node) => (
+        node.trackerState === "CLOSED" && node.candidateReachable && node.worktreeState === "ABSENT"
+      )), true);
+      closeOrder.push("parent:12");
+      parentTrackerState = "CLOSED";
+      return { settled: true };
+    },
+  };
+  let initialPanelStatus;
+  const browser = {
+    async open(panelUrl) {
+      const url = new URL(panelUrl);
+      initialPanelStatus = await fetch(`${url.origin}/api/status`, {
+        headers: { authorization: `Bearer ${url.searchParams.get("token")}` },
+      }).then((response) => response.json());
+    },
+  };
+  const cleanup = {
+    async listRuns({ status }) {
+      return [{
+        runId: multiIdentity.runId,
+        specId: multiIdentity.specId,
+        state: status.run.state,
+        terminalAt: "2026-08-30T10:01:00.000Z",
+        engineLock: "RELEASED",
+        activeTasks: "ABSENT",
+      }];
+    },
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      leaf,
+      browser,
+      cleanup,
+      now,
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: "12" });
+
+    assert.equal(result.status.run.state, "SUCCEEDED", JSON.stringify(result.status));
+    assert.equal(result.status.run.maxParallel, 2);
+    assert.deepEqual(initialPanelStatus.frontier.ready, ["13", "14"]);
+    assert.deepEqual(created, ["13", "14", "17"]);
+    assert.equal(largestWaitBatch, 2);
+    assert.deepEqual(closeOrder, ["13", "14", "17", "parent:12"]);
+    assert.equal(parentTrackerState, "CLOSED");
+    assert.deepEqual(result.journal
+      .filter(({ type }) => type === "dispatch.recorded")
+      .map(({ issueId }) => issueId), ["13", "14", "17"]);
+    assert.equal(store.readCloseWriter(multiIdentity.target), null);
+    assert.equal(result.panel.closed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end no-argument recovery adopts interrupted manual and partial-close evidence", async () => {
+  const { root, store } = createStoreFixture();
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+    closeAccepted: false,
+  };
+  const taskRef = { threadId: "thread-17-recovery", hostId: "local" };
+  let created = 0;
+  let closeMessages = 0;
+  let panelOpens = 0;
+  let interrupted = false;
+  let second = 0;
+  const now = () => `2026-08-30T11:00:${String(second++).padStart(2, "0")}.000Z`;
+  const tracker = { async read() { return { issueId: "17", state: model.trackerState }; } };
+  const selector = {
+    async listNonTerminalRuns() {
+      return [{ runIdentity: identity, issueIds: ["17"], maxParallel: 3 }];
+    },
+  };
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create() {
+      created += 1;
+      model.taskState = "DISPATCHED";
+      return taskRef;
+    },
+    async read() {
+      return {
+        state: "SETTLED",
+        closeRequest: model.closeAccepted
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          : null,
+      };
+    },
+    async message() {
+      closeMessages += 1;
+      throw new Error("accepted partial close must not be sent again");
+    },
+    async wait() {
+      if (!interrupted) {
+        interrupted = true;
+        return { coordinatorActive: false, taskSettled: false };
+      }
+      model.trackerState = "CLOSED";
+      model.worktreeState = "ABSENT";
+      return { coordinatorActive: true, taskSettled: true };
+    },
+  };
+  const reconcile = async ({ journal }) => ({
+    runIdentity: identity,
+    grant: { runIdentity: identity, maxParallel: 3 },
+    taskRefs: Object.fromEntries(journal
+      .filter(({ type }) => type === "dispatch.recorded")
+      .map(({ issueId, taskRef: ref }) => [issueId, ref])),
+    facts: {
+      schema: "dag-run-facts:v1",
+      run: {
+        ...identity,
+        reconciled: true,
+        trackerAvailable: true,
+        targetState: "CLEAN",
+        closeWriterRunId: null,
+        closeWriterState: "ABSENT",
+        parentTrackerState: "OPEN",
+      },
+      nodes: [{ issueId: "17", blockers: [], ...model }],
+      contradictions: [],
+    },
+  });
+  const browser = { async open() { panelOpens += 1; } };
+  const cleanup = {
+    async listRuns({ status }) {
+      return [{
+        runId: identity.runId,
+        specId: identity.specId,
+        state: status.run.state,
+        terminalAt: status.run.state === "SUCCEEDED" ? "2026-08-30T11:01:00.000Z" : null,
+        engineLock: "RELEASED",
+        activeTasks: status.run.state === "SUCCEEDED" ? "ABSENT" : "PRESENT",
+      }];
+    },
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker,
+      tasks,
+      selector,
+      reconcile,
+      browser,
+      cleanup,
+      now,
+      sleep: async () => {},
+    });
+    const first = await runtime.run({ specId: "17" });
+    assert.equal(first.status.run.state, "RUNNING");
+    assert.equal(first.panel.closed, true);
+    assert.equal(created, 1);
+
+    model.taskState = "NONE";
+    model.completionState = "COMPLETE";
+    model.candidateReachable = true;
+    model.worktreeState = "PRESENT";
+    model.closeAccepted = true;
+
+    const resumed = await runtime.run({});
+    assert.equal(resumed.status.run.state, "SUCCEEDED", JSON.stringify(resumed.status));
+    assert.equal(created, 1);
+    assert.equal(closeMessages, 0);
+    assert.equal(panelOpens, 2);
+    assert.equal(resumed.journal.filter(({ type }) => type === "dispatch.recorded").length, 1);
+    assert.equal(resumed.journal.filter(({ type }) => type === "grant.recorded").length, 2);
+    assert.equal(model.trackerState, "CLOSED");
+    assert.equal(model.worktreeState, "ABSENT");
+    assert.equal(store.readWriterLock(identity.runId), null);
+    assert.equal(store.readCloseWriter(identity.target), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end tracker exhaustion returns a stable diagnosis without opening a panel", async () => {
+  const { root, store } = createStoreFixture();
+  const probes = [];
+  let trackerReads = 0;
+  const tracker = {
+    async read() {
+      trackerReads += 1;
+      throw new Error("tracker offline");
+    },
+  };
+  const forbidden = async () => { throw new Error("tracker outage permits no task action"); };
+  const tasks = {
+    findIssueLane: forbidden,
+    create: forbidden,
+    read: forbidden,
+    message: forbidden,
+    wait: forbidden,
+  };
+  const cleanup = {
+    async listRuns({ status, journal }) {
+      assert.equal(status.run.runId, null);
+      assert.deepEqual(journal, []);
+      return [];
+    },
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker,
+      tasks,
+      reconcile: async () => { throw new Error("tracker outage permits no reconciliation"); },
+      browser: { async open() { throw new Error("tracker outage permits no panel"); } },
+      cleanup,
+      now: () => "2026-08-30T12:00:00.000Z",
+      sleep: async (delayMs) => probes.push(delayMs),
+    });
+    const result = await runtime.run({ specId: "17" });
+
+    assert.equal(trackerReads, 4);
+    assert.deepEqual(probes, [5_000, 15_000, 30_000]);
+    assert.equal(result.status.run.state, "BLOCKED");
+    assert.equal(result.status.diagnoses[0].reasonCode, "tracker_unavailable");
+    assert.deepEqual(result.status.diagnoses[0].attemptedRecovery, probes.map((delayMs) => ({ delayMs })));
+    assert.deepEqual(result.status.diagnoses[0].resumePredicates, ["tracker_read_succeeds"]);
+    assert.deepEqual(result.panel, { opened: false, closed: false, origin: null });
+    assert.deepEqual(result.cleanupPreview, {
+      schema: "dag-run-cleanup-preview:v1",
+      evaluatedAt: "2026-08-30T12:00:00.000Z",
+      eligible: [],
+      skipped: [],
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end target and contract stops remain structured after panel shutdown", async (t) => {
+  const scenarios = [
+    {
+      name: "dirty target",
+      targetState: "DIRTY",
+      contradictions: [],
+      reasonCode: "target_dirty",
+      resumePredicate: "target_is_clean",
+    },
+    {
+      name: "merge conflict",
+      targetState: "CLEAN",
+      contradictions: [{
+        code: "merge_conflict",
+        reasonCode: "merge_conflict",
+        evidence: ["Target integration reported a merge conflict."],
+        affectedNodes: ["17"],
+      }],
+      reasonCode: "merge_conflict",
+      resumePredicate: "resolve_contradiction:merge_conflict",
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    await t.test(scenario.name, async () => {
+      const { root, store } = createStoreFixture();
+      let panels = 0;
+      const tasks = Object.fromEntries(
+        ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+          throw new Error(`${scenario.name} permits no task ${name}`);
+        }]),
+      );
+      const reconcile = async () => ({
+        runIdentity: identity,
+        grant: { runIdentity: identity, maxParallel: 3 },
+        taskRefs: {},
+        facts: {
+          schema: "dag-run-facts:v1",
+          run: {
+            ...identity,
+            reconciled: true,
+            trackerAvailable: true,
+            targetState: scenario.targetState,
+            closeWriterRunId: null,
+            closeWriterState: "ABSENT",
+            parentTrackerState: "OPEN",
+          },
+          nodes: [{
+            issueId: "17",
+            blockers: [],
+            trackerState: "OPEN",
+            taskState: "NONE",
+            completionState: "NONE",
+            candidateReachable: false,
+            worktreeState: "ABSENT",
+          }],
+          contradictions: scenario.contradictions,
+        },
+      });
+      try {
+        const runtime = createWorkflowRuntime({
+          store,
+          tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
+          tasks,
+          reconcile,
+          browser: { async open() { panels += 1; } },
+          cleanup: {
+            async listRuns() {
+              return [{
+                runId: identity.runId,
+                specId: identity.specId,
+                state: "BLOCKED",
+                terminalAt: null,
+                engineLock: "RELEASED",
+                activeTasks: "ABSENT",
+              }];
+            },
+          },
+          now: () => "2026-08-30T13:00:00.000Z",
+          sleep: async () => {},
+        });
+        const result = await runtime.run({ specId: "17" });
+        const diagnosis = result.status.diagnoses.find(({ reasonCode }) => reasonCode === scenario.reasonCode);
+        assert.equal(result.status.run.state, "BLOCKED");
+        assert.equal(panels, 1);
+        assert.equal(result.panel.closed, true);
+        assert.deepEqual(diagnosis.affectedNodes, ["17"]);
+        assert.deepEqual(diagnosis.unaffectedNodes, []);
+        assert.equal(diagnosis.nextOwner, "human");
+        assert.ok(diagnosis.evidence.length > 0);
+        assert.deepEqual(diagnosis.resumePredicates, [scenario.resumePredicate]);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   }
 });
