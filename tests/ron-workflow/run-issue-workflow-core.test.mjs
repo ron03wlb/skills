@@ -284,6 +284,7 @@ test("missing authority and malformed DAG facts fail closed", () => {
     [facts([node("13", ["missing"])]), "unknown_blocker"],
     [facts([node("13", ["14"]), node("14", ["13"])]), "dependency_cycle"],
     [{ ...facts([node("13"), node("13")]) }, "duplicate_node"],
+    [{ ...facts([node("13")]), journal: [grant, dispatchEvent("999")] }, "journal_scope_conflict"],
   ];
 
   for (const [input, reasonCode] of cases) {
@@ -362,6 +363,14 @@ test("impossible owning-source combinations are reducer contradictions", () => {
   const dispatchedWithoutReference = reduceRun(facts([{ ...node("13"), taskState: "DISPATCHED" }]));
   assert.equal(dispatchedWithoutReference.run.state, "BLOCKED");
   assert.equal(dispatchedWithoutReference.diagnoses[0].reasonCode, "insufficient_evidence");
+
+  const dispatchWithoutTaskEvidence = reduceRun({
+    ...facts([node("13")]),
+    journal: [grant, dispatchEvent("13")],
+  });
+  assert.equal(dispatchWithoutTaskEvidence.run.state, "BLOCKED");
+  assert.equal(dispatchWithoutTaskEvidence.diagnoses[0].reasonCode, "insufficient_evidence");
+  assert.deepEqual(dispatchWithoutTaskEvidence.legalActions, []);
 
   const parentClosedEarly = reduceRun({
     ...facts([node("13")]),
@@ -864,12 +873,20 @@ test("cleanup retains recent and newest terminal Runs and deletes only after an 
     { runId: "locked-old", specId: "201", state: "SUCCEEDED", terminalAt: daysAgo(100), engineLock: "RELEASED", activeTasks: "ABSENT" },
     { runId: "tasks-old", specId: "202", state: "STOPPED", terminalAt: daysAgo(100), engineLock: "RELEASED", activeTasks: "PRESENT" },
     { runId: "uncertain-old", specId: "203", state: "SUCCEEDED", terminalAt: daysAgo(100), engineLock: "UNKNOWN", activeTasks: "UNKNOWN" },
+    { runId: "reclaiming-old", specId: "204", state: "SUCCEEDED", terminalAt: daysAgo(100), engineLock: "RELEASED", activeTasks: "ABSENT" },
   ];
   try {
     for (const { runId } of [...terminalRuns, ...guardedRuns]) {
       const writer = store.acquireWriter(runId);
       if (runId !== "locked-old") writer.release();
     }
+    mkdirSync(join(
+      gitCommonDir,
+      "matt-workflow-control",
+      "runs",
+      "reclaiming-old",
+      "engine-reclaim.lock",
+    ));
 
     const preview = store.previewCleanup({ now, runs: [...terminalRuns, ...guardedRuns] });
     assert.deepEqual(preview.eligible.map(({ runId }) => runId), ["terminal-10", "terminal-11", "terminal-12"]);
@@ -879,6 +896,7 @@ test("cleanup retains recent and newest terminal Runs and deletes only after an 
     assert.equal(preview.skipped.find(({ runId }) => runId === "locked-old").reason, "engine_active_or_uncertain");
     assert.equal(preview.skipped.find(({ runId }) => runId === "tasks-old").reason, "tasks_active_or_uncertain");
     assert.equal(preview.skipped.find(({ runId }) => runId === "uncertain-old").reason, "engine_active_or_uncertain");
+    assert.equal(preview.skipped.find(({ runId }) => runId === "reclaiming-old").reason, "engine_active_or_uncertain");
 
     const applied = store.applyCleanup({ now, runs: [...terminalRuns, ...guardedRuns] });
     assert.deepEqual(applied.removed, ["terminal-10", "terminal-11", "terminal-12"]);
@@ -950,6 +968,29 @@ test("cleanup rejects duplicate Run evidence before destructive retention", () =
   }
 });
 
+test("cleanup requires complete Spec audit identity before destructive retention", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-cleanup-spec-");
+  const store = createRunStore({ gitCommonDir });
+  const runId = "missing-spec-run";
+  const now = "2026-08-30T00:00:00.000Z";
+  try {
+    store.acquireWriter(runId).release();
+    const incomplete = [{
+      runId,
+      state: "SUCCEEDED",
+      terminalAt: "2026-06-01T00:00:00.000Z",
+      engineLock: "RELEASED",
+      activeTasks: "ABSENT",
+    }];
+    assert.throws(() => store.previewCleanup({ now, runs: incomplete }), /specId/u);
+    assert.throws(() => store.applyCleanup({ now, runs: incomplete }), /specId/u);
+    assert.equal(existsSync(join(gitCommonDir, "matt-workflow-control", "runs", runId)), true);
+    assert.deepEqual(store.readCleanupRecords(), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("cleanup newest-ten floor ignores absent directories", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-cleanup-absent-");
   const store = createRunStore({ gitCommonDir });
@@ -993,18 +1034,48 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
     evidence: ["Codex task read-back proves the previous coordinator is inactive."],
   };
   try {
-    oldStore.acquireWriter("reclaim-run");
+    const oldWriter = oldStore.acquireWriter("reclaim-run");
     assert.equal(oldStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-old");
     assert.throws(() => newStore.acquireWriter("reclaim-run"), /RUN_WRITER_LOCKED/u);
     assert.throws(() => newStore.reclaimWriter({
       runId: "reclaim-run",
       staleProof: { ...staleProof, previousCoordinatorInstanceId: "wrong-owner" },
     }), /STALE_PROOF_MISMATCH/u);
-    const adoptedWriter = newStore.reclaimWriter({ runId: "reclaim-run", staleProof });
+    const strandedGate = join(
+      gitCommonDir,
+      "matt-workflow-control",
+      "runs",
+      "reclaim-run",
+      "engine-reclaim.lock",
+    );
+    mkdirSync(strandedGate);
+    writeFileSync(join(strandedGate, "owner.json"), `${JSON.stringify({
+      schema: "dag-run-lock-owner:v1",
+      kind: "engine-reclaim",
+      runId: "reclaim-run",
+      coordinatorInstanceId: "coordinator-gate-old",
+      generation: "gate-generation-old",
+    })}\n`, "utf8");
+    const adoptedWriter = newStore.reclaimWriter({
+      runId: "reclaim-run",
+      staleProof,
+      gateStaleProof: {
+        ...staleProof,
+        previousCoordinatorInstanceId: "coordinator-gate-old",
+      },
+    });
+    assert.equal(newStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-new");
+    assert.throws(() => oldWriter.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      runIdentity: { ...grant.runIdentity, runId: "reclaim-run" },
+      maxParallel: 3,
+    }), /LOCK_LEASE_FENCED/u);
+    assert.throws(() => oldWriter.release(), /LOCK_LEASE_FENCED/u);
     assert.equal(newStore.readWriterLock("reclaim-run").coordinatorInstanceId, "coordinator-new");
     adoptedWriter.release();
 
-    oldStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" });
+    const oldCloseWriter = oldStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" });
     const oldCloseOwner = oldStore.readCloseWriterLock("features/ron");
     assert.equal(oldCloseOwner.coordinatorInstanceId, "coordinator-old");
     assert.throws(
@@ -1016,6 +1087,9 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
       runId: "reclaim-run",
       staleProof,
     });
+    assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
+    assert.throws(() => oldCloseWriter.assertCurrent(), /LOCK_LEASE_FENCED/u);
+    assert.throws(() => oldCloseWriter.release(), /LOCK_LEASE_FENCED/u);
     assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
     adoptedCloseWriter.release();
   } finally {

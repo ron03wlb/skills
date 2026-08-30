@@ -34,6 +34,7 @@ export const REASON_CODES = Object.freeze({
   duplicateNode: "duplicate_node",
   unknownBlocker: "unknown_blocker",
   dependencyCycle: "dependency_cycle",
+  journalScopeConflict: "journal_scope_conflict",
   evidenceContradiction: "evidence_contradiction",
   insufficientEvidence: "insufficient_evidence",
   failedDependency: "failed_dependency",
@@ -239,6 +240,17 @@ export function reduceRun(input) {
   if (dependencyCycle) {
     return blockedResult(input, REASON_CODES.dependencyCycle, [`Issue ${dependencyCycle} participates in a blocker cycle.`], [dependencyCycle]);
   }
+  const outOfScopeJournalEvent = input.journal.find((event) => (
+    ["dispatch.recorded", "retry.recorded", "remediation.recorded"].includes(event.type)
+      && !seen.has(event.issueId)
+  ));
+  if (outOfScopeJournalEvent) {
+    return blockedResult(
+      input,
+      REASON_CODES.journalScopeConflict,
+      [`Journal event ${outOfScopeJournalEvent.type} references out-of-scope Issue ${outOfScopeJournalEvent.issueId}.`],
+    );
+  }
   const normalizedNodes = [...input.nodes]
     .sort((left, right) => compareIds(left.issueId, right.issueId))
     .map((node) => ({ ...node, blockers: [...node.blockers].sort(compareIds) }));
@@ -421,6 +433,15 @@ export function reduceRun(input) {
         code: "task_without_dispatch_reference",
         reasonCode: REASON_CODES.insufficientEvidence,
         evidence: [`Issue ${node.issueId} task evidence has no journaled dispatch reference.`],
+        affectedNodes: [node.issueId],
+      }];
+    }
+    if (node.taskState === "NONE" && node.completionState === "NONE"
+      && dispatchAttemptsByIssue.get(node.issueId) > 0) {
+      return [{
+        code: "dispatch_without_task_evidence",
+        reasonCode: REASON_CODES.insufficientEvidence,
+        evidence: [`Issue ${node.issueId} has a journaled dispatch but no authoritative task evidence.`],
         affectedNodes: [node.issueId],
       }];
     }

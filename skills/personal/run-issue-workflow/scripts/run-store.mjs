@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   rmdirSync,
@@ -35,6 +36,23 @@ const staleProofFields = new Set([
   "coordinatorState",
   "reconciled",
   "evidence",
+]);
+const cleanupEvidenceFields = new Set([
+  "runId",
+  "specId",
+  "state",
+  "terminalAt",
+  "engineLock",
+  "activeTasks",
+]);
+const cleanupRecordFields = new Set([
+  "schema",
+  "sequence",
+  "runId",
+  "specId",
+  "terminalState",
+  "deletionTime",
+  "retentionReason",
 ]);
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -116,18 +134,62 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     }
   };
 
+  const replaceLockOwner = (ownerPath, owner) => {
+    const temporary = `${ownerPath}.tmp-${process.pid}-${randomUUID()}`;
+    try {
+      writeLockOwner(temporary, owner);
+      renameSync(temporary, ownerPath);
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+  };
+
   const readLockOwner = (ownerPath, kind) => {
     const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
-    const allowed = new Set(["schema", "kind", "runId", "coordinatorInstanceId"]);
-    if (kind === "close") allowed.add("target");
+    const allowed = new Set(["schema", "kind", "runId", "coordinatorInstanceId", "generation"]);
+    if (kind.startsWith("close")) allowed.add("target");
     assertExactFields(owner, allowed, `${kind} lock owner`);
     if (owner.schema !== LOCK_OWNER_SCHEMA || owner.kind !== kind) {
       throw new TypeError(`Invalid ${kind} lock owner schema`);
     }
     assertSafeRunId(owner.runId);
     requireText(owner.coordinatorInstanceId, `${kind} lock coordinatorInstanceId`);
-    if (kind === "close") requireText(owner.target, "close lock target");
+    requireText(owner.generation, `${kind} lock generation`);
+    if (kind.startsWith("close")) requireText(owner.target, "close lock target");
     return owner;
+  };
+
+  const acquireRecoverableGate = ({ lockPath, owner, staleProof }) => {
+    if (existsSync(lockPath)) {
+      if (!staleProof) throw new Error("RECLAIM_GATE_LOCKED");
+      validateStaleProof(staleProof);
+      const previous = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+      if (previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId) {
+        throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
+      }
+      rmSync(lockPath, { recursive: true, force: false });
+    }
+    const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
+    mkdirSync(candidate, { recursive: false });
+    try {
+      writeLockOwner(join(candidate, "owner.json"), owner);
+      renameSync(candidate, lockPath);
+    } catch (error) {
+      rmSync(candidate, { recursive: true, force: true });
+      if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+        throw new Error("RECLAIM_GATE_LOCKED");
+      }
+      throw error;
+    }
+    return () => {
+      if (!existsSync(lockPath)) return;
+      const current = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+      if (current.runId !== owner.runId || current.coordinatorInstanceId !== owner.coordinatorInstanceId
+        || current.generation !== owner.generation || current.target !== owner.target) {
+        throw new Error("RECLAIM_GATE_LEASE_FENCED");
+      }
+      rmSync(lockPath, { recursive: true, force: false });
+    };
   };
 
   const pathsFor = (runId) => {
@@ -140,6 +202,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       lock: join(runDir, "engine.lock"),
       lockOwner: join(runDir, "engine.lock", "owner.json"),
       reclaimLock: join(runDir, "engine-reclaim.lock"),
+      operationRoot: runDir,
+      operationPrefix: "engine-operation",
     };
   };
 
@@ -151,7 +215,43 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       lock,
       owner: join(lock, "owner.json"),
       reclaimLock: join(closeWritersRoot, `${targetKey}.reclaim.lock`),
+      operationRoot: closeWritersRoot,
+      operationPrefix: `${targetKey}.operation`,
     };
+  };
+
+  const operationLocks = (paths, generation) => {
+    if (!existsSync(paths.operationRoot)) return [];
+    const prefix = `${paths.operationPrefix}.${generation}.`;
+    return readdirSync(paths.operationRoot)
+      .filter((name) => name.startsWith(prefix) && name.endsWith(".lock"))
+      .map((name) => join(paths.operationRoot, name));
+  };
+
+  const hasOperationLocks = (paths) => existsSync(paths.operationRoot)
+    && readdirSync(paths.operationRoot).some((name) => (
+      name.startsWith(`${paths.operationPrefix}.`) && name.endsWith(".lock")
+    ));
+
+  const withLease = ({ paths, kind, runId, target, generation }, operation) => {
+    if (existsSync(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
+    const marker = join(
+      paths.operationRoot,
+      `${paths.operationPrefix}.${generation}.${randomUUID()}.lock`,
+    );
+    mkdirSync(marker);
+    try {
+      if (existsSync(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
+      const owner = readLockOwner(kind === "engine" ? paths.lockOwner : paths.owner, kind);
+      if (owner.runId !== runId || owner.generation !== generation
+        || owner.coordinatorInstanceId !== coordinatorInstanceId
+        || (kind === "close" && owner.target !== target)) {
+        throw new Error("LOCK_LEASE_FENCED");
+      }
+      return operation();
+    } finally {
+      rmSync(marker, { recursive: true, force: true });
+    }
   };
 
   const readEvents = (runId) => {
@@ -183,9 +283,17 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       .filter(Boolean)
       .map((line, index) => {
         const record = JSON.parse(line);
+        assertExactFields(record, cleanupRecordFields, `cleanup record ${index + 1}`);
         if (record.schema !== CLEANUP_SCHEMA || record.sequence !== index + 1) {
           throw new Error(`Invalid cleanup record at sequence ${index + 1}`);
         }
+        assertSafeRunId(record.runId);
+        requireText(record.specId, `cleanup record ${index + 1} specId`);
+        if (!["SUCCEEDED", "STOPPED"].includes(record.terminalState)
+          || typeof record.deletionTime !== "string" || Number.isNaN(Date.parse(record.deletionTime))) {
+          throw new Error(`Invalid cleanup record evidence at sequence ${index + 1}`);
+        }
+        requireText(record.retentionReason, `cleanup record ${index + 1} retentionReason`);
         return record;
       });
   };
@@ -198,7 +306,17 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const seenRunIds = new Set();
     for (const run of runs) {
       if (!isRecord(run)) throw new TypeError("Cleanup evidence entries must be objects");
+      assertExactFields(run, cleanupEvidenceFields, "cleanup evidence entry");
       assertSafeRunId(run.runId);
+      requireText(run.specId, "cleanup evidence specId");
+      requireText(run.state, "cleanup evidence state");
+      if (run.terminalAt !== null && typeof run.terminalAt !== "string") {
+        throw new TypeError("cleanup evidence terminalAt must be a timestamp or null");
+      }
+      if (!["RELEASED", "HELD", "UNKNOWN"].includes(run.engineLock)
+        || !["ABSENT", "PRESENT", "UNKNOWN"].includes(run.activeTasks)) {
+        throw new TypeError("cleanup evidence activity state is invalid");
+      }
       if (seenRunIds.has(run.runId)) {
         throw new TypeError(`Cleanup evidence contains duplicate runId ${run.runId}`);
       }
@@ -217,12 +335,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
     for (const run of knownRuns) {
       assertSafeRunId(run.runId);
-      const { runDir, lock } = pathsFor(run.runId);
+      const paths = pathsFor(run.runId);
+      const { runDir, lock } = paths;
       let reason;
       if (!existsSync(runDir)) reason = "run_directory_absent";
       else if (!["SUCCEEDED", "STOPPED"].includes(run.state)) reason = "non_terminal";
       else if (!Number.isFinite(Date.parse(run.terminalAt))) reason = "terminal_state_uncertain";
-      else if (run.engineLock !== "RELEASED" || existsSync(lock)) reason = "engine_active_or_uncertain";
+      else if (run.engineLock !== "RELEASED" || existsSync(lock) || existsSync(paths.reclaimLock)
+        || hasOperationLocks(paths)) reason = "engine_active_or_uncertain";
       else if (run.activeTasks !== "ABSENT") reason = "tasks_active_or_uncertain";
       else if (evaluatedAt - Date.parse(run.terminalAt) <= 30 * 86_400_000) reason = "within_30_days";
       else if (newestTen.has(run.runId)) reason = "newest_10_terminal_runs";
@@ -275,7 +395,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return { schema: "dag-run-cleanup-result:v1", evaluatedAt: now, removed, skipped: preview.skipped };
   };
 
-  const writerHandle = (runId, paths) => {
+  const writerHandle = (runId, paths, generation) => {
     let active = true;
     const requireActive = () => {
       if (!active) throw new Error("RUN_WRITER_RELEASED");
@@ -284,46 +404,52 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return {
       append(eventDraft) {
         requireActive();
-        assertNoToken(eventDraft);
-        const normalizedDraft = normalizeEventDraft(eventDraft);
-        validateEventDraft(normalizedDraft);
-        const events = readEvents(runId);
-        validateEventSemantics(events, normalizedDraft, { storageRunId: runId });
-        const event = {
-          ...normalizedDraft,
-          schema: EVENT_SCHEMA,
-          sequence: events.length + 1,
-        };
-        durableAppend(paths.events, `${JSON.stringify(event)}\n`);
-        return event;
+        return withLease({ paths, kind: "engine", runId, generation }, () => {
+          assertNoToken(eventDraft);
+          const normalizedDraft = normalizeEventDraft(eventDraft);
+          validateEventDraft(normalizedDraft);
+          const events = readEvents(runId);
+          validateEventSemantics(events, normalizedDraft, { storageRunId: runId });
+          const event = {
+            ...normalizedDraft,
+            schema: EVENT_SCHEMA,
+            sequence: events.length + 1,
+          };
+          durableAppend(paths.events, `${JSON.stringify(event)}\n`);
+          return event;
+        });
       },
 
       rebuildStatus(currentFacts) {
         requireActive();
-        assertNoToken(currentFacts);
-        const projection = reduceRun({ ...currentFacts, journal: readEvents(runId) });
-        assertNoToken(projection);
-        const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
-        try {
-          const descriptor = openSync(temporary, "wx");
+        return withLease({ paths, kind: "engine", runId, generation }, () => {
+          assertNoToken(currentFacts);
+          const projection = reduceRun({ ...currentFacts, journal: readEvents(runId) });
+          assertNoToken(projection);
+          const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
           try {
-            writeAll(descriptor, `${JSON.stringify(projection, null, 2)}\n`);
-            fsyncSync(descriptor);
+            const descriptor = openSync(temporary, "wx");
+            try {
+              writeAll(descriptor, `${JSON.stringify(projection, null, 2)}\n`);
+              fsyncSync(descriptor);
+            } finally {
+              closeSync(descriptor);
+            }
+            renameSync(temporary, paths.status);
           } finally {
-            closeSync(descriptor);
+            if (existsSync(temporary)) unlinkSync(temporary);
           }
-          renameSync(temporary, paths.status);
-        } finally {
-          if (existsSync(temporary)) unlinkSync(temporary);
-        }
-        return projection;
+          return projection;
+        });
       },
 
       release() {
         requireActive();
-        unlinkSync(paths.lockOwner);
-        rmdirSync(paths.lock);
-        active = false;
+        return withLease({ paths, kind: "engine", runId, generation }, () => {
+          unlinkSync(paths.lockOwner);
+          rmdirSync(paths.lock);
+          active = false;
+        });
       },
     };
   };
@@ -338,12 +464,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       if (error?.code === "EEXIST") throw new Error("RUN_WRITER_LOCKED");
       throw error;
     }
+    const generation = randomUUID();
     try {
       writeLockOwner(paths.lockOwner, {
         schema: LOCK_OWNER_SCHEMA,
         kind: "engine",
         runId,
         coordinatorInstanceId,
+        generation,
       });
     } catch (error) {
       rmSync(paths.lock, { recursive: true, force: true });
@@ -353,12 +481,13 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       rmSync(paths.lock, { recursive: true, force: true });
       throw new Error(existsSync(cleanupLock) ? "CLEANUP_IN_PROGRESS" : "RUN_WRITER_RECLAIM_IN_PROGRESS");
     }
+    return generation;
   };
 
   const acquireWriter = (runId) => {
     const paths = pathsFor(runId);
-    installWriterLock(runId, paths);
-    return writerHandle(runId, paths);
+    const generation = installWriterLock(runId, paths);
+    return writerHandle(runId, paths, generation);
   };
 
   const readWriterLock = (runId) => {
@@ -373,34 +502,46 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     }
   };
 
-  const reclaimWriter = ({ runId, staleProof }) => {
+  const reclaimWriter = ({ runId, staleProof, gateStaleProof }) => {
     const paths = pathsFor(runId);
     validateStaleProof(staleProof);
+    if (existsSync(cleanupLock)) throw new Error("CLEANUP_IN_PROGRESS");
     mkdirSync(paths.runDir, { recursive: true });
+    const gateGeneration = randomUUID();
+    const releaseGate = acquireRecoverableGate({
+      lockPath: paths.reclaimLock,
+      staleProof: gateStaleProof,
+      owner: {
+        schema: LOCK_OWNER_SCHEMA,
+        kind: "engine-reclaim",
+        runId,
+        coordinatorInstanceId,
+        generation: gateGeneration,
+      },
+    });
+    let generation;
     try {
-      mkdirSync(paths.reclaimLock);
-    } catch (error) {
-      if (error?.code === "EEXIST") throw new Error("RUN_WRITER_RECLAIM_IN_PROGRESS");
-      throw error;
-    }
-    try {
+      if (existsSync(cleanupLock)) throw new Error("CLEANUP_IN_PROGRESS");
       const previous = readLockOwner(paths.lockOwner, "engine");
       if (previous.runId !== runId
         || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId) {
         throw new Error("RUN_WRITER_STALE_PROOF_MISMATCH");
       }
-      rmSync(paths.lock, { recursive: true, force: false });
-      mkdirSync(paths.lock);
-      writeLockOwner(paths.lockOwner, {
+      for (const marker of operationLocks(paths, previous.generation)) {
+        rmSync(marker, { recursive: true, force: true });
+      }
+      generation = randomUUID();
+      replaceLockOwner(paths.lockOwner, {
         schema: LOCK_OWNER_SCHEMA,
         kind: "engine",
         runId,
         coordinatorInstanceId,
+        generation,
       });
     } finally {
-      rmdirSync(paths.reclaimLock);
+      releaseGate();
     }
-    return writerHandle(runId, paths);
+    return writerHandle(runId, paths, generation);
   };
 
   const acquireCloseWriter = ({ target, runId }) => {
@@ -414,6 +555,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       if (error?.code === "EEXIST") throw new Error("TARGET_CLOSE_WRITER_LOCKED");
       throw error;
     }
+    const generation = randomUUID();
     try {
       writeLockOwner(paths.owner, {
         schema: LOCK_OWNER_SCHEMA,
@@ -421,6 +563,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
         target,
         runId,
         coordinatorInstanceId,
+        generation,
       });
     } catch (error) {
       rmSync(paths.lock, { recursive: true, force: true });
@@ -430,19 +573,25 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       rmSync(paths.lock, { recursive: true, force: true });
       throw new Error("TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS");
     }
-    return closeWriterHandle(target, runId, paths);
+    return closeWriterHandle(target, runId, paths, generation);
   };
 
-  const closeWriterHandle = (target, runId, paths) => {
+  const closeWriterHandle = (target, runId, paths, generation) => {
     let active = true;
     return {
       target,
       runId,
+      assertCurrent() {
+        if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
+        return withLease({ paths, kind: "close", target, runId, generation }, () => true);
+      },
       release() {
         if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
-        unlinkSync(paths.owner);
-        rmdirSync(paths.lock);
-        active = false;
+        return withLease({ paths, kind: "close", target, runId, generation }, () => {
+          unlinkSync(paths.owner);
+          rmdirSync(paths.lock);
+          active = false;
+        });
       },
     };
   };
@@ -465,36 +614,47 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return owner.runId ?? "UNKNOWN";
   };
 
-  const reclaimCloseWriter = ({ target, runId, staleProof }) => {
+  const reclaimCloseWriter = ({ target, runId, staleProof, gateStaleProof }) => {
     assertSafeRunId(runId);
     validateStaleProof(staleProof);
     const paths = closePathsFor(target);
     mkdirSync(closeWritersRoot, { recursive: true });
-    try {
-      mkdirSync(paths.reclaimLock);
-    } catch (error) {
-      if (error?.code === "EEXIST") throw new Error("TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS");
-      throw error;
-    }
+    const gateGeneration = randomUUID();
+    const releaseGate = acquireRecoverableGate({
+      lockPath: paths.reclaimLock,
+      staleProof: gateStaleProof,
+      owner: {
+        schema: LOCK_OWNER_SCHEMA,
+        kind: "close-reclaim",
+        target,
+        runId,
+        coordinatorInstanceId,
+        generation: gateGeneration,
+      },
+    });
+    let generation;
     try {
       const previous = readLockOwner(paths.owner, "close");
       if (previous.target !== target || previous.runId !== runId
         || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId) {
         throw new Error("TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH");
       }
-      rmSync(paths.lock, { recursive: true, force: false });
-      mkdirSync(paths.lock);
-      writeLockOwner(paths.owner, {
+      for (const marker of operationLocks(paths, previous.generation)) {
+        rmSync(marker, { recursive: true, force: true });
+      }
+      generation = randomUUID();
+      replaceLockOwner(paths.owner, {
         schema: LOCK_OWNER_SCHEMA,
         kind: "close",
         target,
         runId,
         coordinatorInstanceId,
+        generation,
       });
     } finally {
-      rmdirSync(paths.reclaimLock);
+      releaseGate();
     }
-    return closeWriterHandle(target, runId, paths);
+    return closeWriterHandle(target, runId, paths, generation);
   };
 
   return {
