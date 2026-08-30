@@ -183,70 +183,141 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return owner;
   };
 
-  const acquireRecoverableGate = ({ lockPath, owner, staleProof }) => {
-    if (existsSync(lockPath)) {
-      if (!staleProof) throw new Error("RECLAIM_GATE_LOCKED");
-      validateStaleProof(staleProof);
-      const previous = readLockOwner(join(lockPath, "owner.json"), owner.kind);
-      if (previous.runId !== owner.runId || previous.target !== owner.target
-        || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
-        || previous.generation !== staleProof.previousGeneration
-        || staleProof.abandonedOperationIds.length !== 0) {
-        throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
-      }
-      // The canonical directory never disappears during takeover; only its fsynced owner generation changes.
-      replaceLockOwner(join(lockPath, "owner.json"), owner);
-      const claimed = readLockOwner(join(lockPath, "owner.json"), owner.kind);
-      if (claimed.runId !== owner.runId || claimed.target !== owner.target
-        || claimed.coordinatorInstanceId !== owner.coordinatorInstanceId
-        || claimed.generation !== owner.generation) throw new Error("RECLAIM_GATE_LOCKED");
-    } else {
-      const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
-      mkdirSync(candidate, { recursive: false });
-      try {
-        writeLockOwner(join(candidate, "owner.json"), owner);
-        renameSync(candidate, lockPath);
+  const gateTakeoverPath = (lockPath) => `${lockPath}.takeover.lock`;
+  const gateTakeoverStalePath = (lockPath) => `${gateTakeoverPath(lockPath)}.stale-claim`;
+  const gateStateExists = (lockPath) => existsSync(lockPath)
+    || existsSync(gateTakeoverPath(lockPath))
+    || existsSync(gateTakeoverStalePath(lockPath));
+
+  const releaseOwnedDirectory = (lockPath, owner) => {
+    if (!existsSync(lockPath)) return;
+    const current = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+    if (current.runId !== owner.runId || current.coordinatorInstanceId !== owner.coordinatorInstanceId
+      || current.generation !== owner.generation || current.target !== owner.target) {
+      throw new Error("RECLAIM_GATE_LEASE_FENCED");
+    }
+    const releaseClaim = `${lockPath}.release-${owner.generation}`;
+    renameSync(lockPath, releaseClaim);
+    const claimed = readLockOwner(join(releaseClaim, "owner.json"), owner.kind);
+    if (claimed.runId !== owner.runId || claimed.coordinatorInstanceId !== owner.coordinatorInstanceId
+      || claimed.generation !== owner.generation || claimed.target !== owner.target) {
+      if (!existsSync(lockPath)) {
+        renameSync(releaseClaim, lockPath);
         syncParent(lockPath);
+      }
+      throw new Error("RECLAIM_GATE_LEASE_FENCED");
+    }
+    rmSync(releaseClaim, { recursive: true, force: false });
+    syncParent(lockPath);
+  };
+
+  const acquireTakeoverClaim = ({ lockPath, owner, staleProof }) => {
+    const takeoverPath = gateTakeoverPath(lockPath);
+    const stalePath = gateTakeoverStalePath(lockPath);
+    let movedToStale = false;
+    if (existsSync(takeoverPath) && existsSync(stalePath)) {
+      if (!staleProof) throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
+      validateStaleProof(staleProof);
+      const current = readLockOwner(join(takeoverPath, "owner.json"), owner.kind);
+      if (current.runId !== owner.runId || current.target !== owner.target
+        || current.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
+        || current.generation !== staleProof.previousGeneration
+        || staleProof.abandonedOperationIds.length !== 0) {
+        throw new Error("RECLAIM_GATE_TAKEOVER_STALE_PROOF_MISMATCH");
+      }
+      rmSync(stalePath, { recursive: true, force: false });
+      syncParent(stalePath);
+    }
+    if (existsSync(takeoverPath)) {
+      if (!staleProof) throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
+      try {
+        renameSync(takeoverPath, stalePath);
+        movedToStale = true;
+        syncParent(takeoverPath);
       } catch (error) {
-        rmSync(candidate, { recursive: true, force: true });
-        if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
-          throw new Error("RECLAIM_GATE_LOCKED");
+        if (["EEXIST", "ENOTEMPTY", "ENOENT", "EPERM"].includes(error?.code)) {
+          throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
         }
         throw error;
       }
     }
-    return () => {
-      if (!existsSync(lockPath)) return;
-      let current;
+    if (existsSync(stalePath)) {
+      if (!staleProof) throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
       try {
-        current = readLockOwner(join(lockPath, "owner.json"), owner.kind);
-      } catch (error) {
-        if (error?.code === "ENOENT") return;
-        throw error;
-      }
-      if (current.runId !== owner.runId || current.coordinatorInstanceId !== owner.coordinatorInstanceId
-        || current.generation !== owner.generation || current.target !== owner.target) {
-        throw new Error("RECLAIM_GATE_LEASE_FENCED");
-      }
-      const releaseClaim = `${lockPath}.release-${owner.generation}`;
-      try {
-        renameSync(lockPath, releaseClaim);
-      } catch (error) {
-        if (error?.code === "ENOENT") return;
-        throw error;
-      }
-      const claimed = readLockOwner(join(releaseClaim, "owner.json"), owner.kind);
-      if (claimed.runId !== owner.runId || claimed.coordinatorInstanceId !== owner.coordinatorInstanceId
-        || claimed.generation !== owner.generation || claimed.target !== owner.target) {
-        if (!existsSync(lockPath)) {
-          renameSync(releaseClaim, lockPath);
-          syncParent(lockPath);
+        validateStaleProof(staleProof);
+        const previous = readLockOwner(join(stalePath, "owner.json"), owner.kind);
+        if (previous.runId !== owner.runId || previous.target !== owner.target
+          || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
+          || previous.generation !== staleProof.previousGeneration
+          || staleProof.abandonedOperationIds.length !== 0) {
+          throw new Error("RECLAIM_GATE_TAKEOVER_STALE_PROOF_MISMATCH");
         }
-        throw new Error("RECLAIM_GATE_LEASE_FENCED");
+      } catch (error) {
+        if (movedToStale && !existsSync(takeoverPath)) {
+          renameSync(stalePath, takeoverPath);
+          syncParent(takeoverPath);
+        }
+        throw error;
       }
-      rmSync(releaseClaim, { recursive: true, force: false });
-      syncParent(lockPath);
+    }
+    const candidate = `${takeoverPath}.candidate-${process.pid}-${randomUUID()}`;
+    mkdirSync(candidate, { recursive: false });
+    try {
+      writeLockOwner(join(candidate, "owner.json"), owner);
+      renameSync(candidate, takeoverPath);
+      syncParent(takeoverPath);
+    } catch (error) {
+      rmSync(candidate, { recursive: true, force: true });
+      if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+        throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
+      }
+      throw error;
+    }
+    if (existsSync(stalePath)) {
+      rmSync(stalePath, { recursive: true, force: false });
+      syncParent(stalePath);
+    }
+    return () => releaseOwnedDirectory(takeoverPath, owner);
+  };
+
+  const acquireRecoverableGate = ({ lockPath, owner, staleProof, claimStaleProof }) => {
+    const claimOwner = {
+      ...owner,
+      kind: `${owner.kind}-takeover`,
+      generation: randomUUID(),
     };
+    const releaseTakeover = acquireTakeoverClaim({
+      lockPath,
+      owner: claimOwner,
+      staleProof: claimStaleProof,
+    });
+    try {
+      if (existsSync(lockPath)) {
+        if (!staleProof) throw new Error("RECLAIM_GATE_LOCKED");
+        validateStaleProof(staleProof);
+        const previous = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+        if (previous.runId !== owner.runId || previous.target !== owner.target
+          || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
+          || previous.generation !== staleProof.previousGeneration
+          || staleProof.abandonedOperationIds.length !== 0) {
+          throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
+        }
+        replaceLockOwner(join(lockPath, "owner.json"), owner);
+      } else {
+        const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
+        mkdirSync(candidate, { recursive: false });
+        try {
+          writeLockOwner(join(candidate, "owner.json"), owner);
+          renameSync(candidate, lockPath);
+          syncParent(lockPath);
+        } finally {
+          if (existsSync(candidate)) rmSync(candidate, { recursive: true, force: true });
+        }
+      }
+    } finally {
+      releaseTakeover();
+    }
+    return () => releaseOwnedDirectory(lockPath, owner);
   };
 
   const pathsFor = (runId) => {
@@ -359,7 +430,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     ));
 
   const withLease = ({ paths, kind, runId, target, generation }, operation) => {
-    if (existsSync(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
+    if (gateStateExists(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
     const marker = join(
       paths.operationRoot,
       `${paths.operationPrefix}.${generation}.${randomUUID()}.lock`,
@@ -367,7 +438,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     mkdirSync(marker);
     syncDirectory(paths.operationRoot);
     try {
-      if (existsSync(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
+      if (gateStateExists(paths.reclaimLock)) throw new Error("LOCK_LEASE_FENCED");
       const owner = readLockOwner(kind === "engine" ? paths.lockOwner : paths.owner, kind);
       if (owner.runId !== runId || owner.generation !== generation
         || owner.coordinatorInstanceId !== coordinatorInstanceId
@@ -481,7 +552,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       if (!existsSync(runDir)) reason = "run_directory_absent";
       else if (!["SUCCEEDED", "STOPPED"].includes(run.state)) reason = "non_terminal";
       else if (!Number.isFinite(Date.parse(run.terminalAt))) reason = "terminal_state_uncertain";
-      else if (run.engineLock !== "RELEASED" || existsSync(lock) || existsSync(paths.reclaimLock)
+      else if (run.engineLock !== "RELEASED" || existsSync(lock) || gateStateExists(paths.reclaimLock)
         || hasOperationLocks(paths)) reason = "engine_active_or_uncertain";
       else if (run.activeTasks !== "ABSENT") reason = "tasks_active_or_uncertain";
       else if (evaluatedAt - Date.parse(run.terminalAt) <= 30 * 86_400_000) reason = "within_30_days";
@@ -502,13 +573,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return { schema: CLEANUP_PREVIEW_SCHEMA, evaluatedAt: now, eligible, skipped };
   };
 
-  const applyCleanup = ({ now, runs, cleanupStaleProof }) => {
+  const applyCleanup = ({ now, runs, cleanupStaleProof, cleanupClaimStaleProof }) => {
     mkdirSync(controlRoot, { recursive: true });
     let releaseCleanup;
     try {
       releaseCleanup = acquireRecoverableGate({
         lockPath: cleanupLock,
         staleProof: cleanupStaleProof,
+        claimStaleProof: cleanupClaimStaleProof,
         owner: {
           schema: LOCK_OWNER_SCHEMA,
           kind: "cleanup",
@@ -518,7 +590,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
         },
       });
     } catch (error) {
-      if (error?.message === "RECLAIM_GATE_LOCKED") throw new Error("CLEANUP_WRITER_LOCKED");
+      if (["RECLAIM_GATE_LOCKED", "RECLAIM_GATE_TAKEOVER_LOCKED"].includes(error?.message)) {
+        throw new Error("CLEANUP_WRITER_LOCKED");
+      }
       throw error;
     }
     const removed = [];
@@ -530,7 +604,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       let sequence = records.length;
       for (const eligible of preview.eligible) {
         const paths = pathsFor(eligible.runId);
-        if (existsSync(paths.lock) || existsSync(paths.reclaimLock) || hasOperationLocks(paths)) {
+        if (existsSync(paths.lock) || gateStateExists(paths.reclaimLock) || hasOperationLocks(paths)) {
           skippedDuringApply.push({ runId: eligible.runId, reason: "engine_active_or_uncertain" });
           continue;
         }
@@ -640,12 +714,12 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
         generation,
       },
       lockedError: "RUN_WRITER_LOCKED",
-      preflight: () => (existsSync(cleanupLock)
+      preflight: () => (gateStateExists(cleanupLock)
         ? "CLEANUP_IN_PROGRESS"
-        : existsSync(paths.reclaimLock) ? "RUN_WRITER_RECLAIM_IN_PROGRESS" : null),
-      postflight: () => (existsSync(cleanupLock)
+        : gateStateExists(paths.reclaimLock) ? "RUN_WRITER_RECLAIM_IN_PROGRESS" : null),
+      postflight: () => (gateStateExists(cleanupLock)
         ? "CLEANUP_IN_PROGRESS"
-        : existsSync(paths.reclaimLock) ? "RUN_WRITER_RECLAIM_IN_PROGRESS" : null),
+        : gateStateExists(paths.reclaimLock) ? "RUN_WRITER_RECLAIM_IN_PROGRESS" : null),
     });
   };
 
@@ -662,6 +736,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     runId,
     staleProof,
     gateStaleProof,
+    gateClaimStaleProof,
     guard,
     staleMismatchError,
     operationError,
@@ -674,6 +749,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const releaseGate = acquireRecoverableGate({
       lockPath: paths.reclaimLock,
       staleProof: gateStaleProof,
+      claimStaleProof: gateClaimStaleProof,
       owner: {
         schema: LOCK_OWNER_SCHEMA,
         kind: `${kind}-reclaim`,
@@ -725,7 +801,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     }
   };
 
-  const reclaimWriter = ({ runId, staleProof, gateStaleProof }) => {
+  const reclaimWriter = ({ runId, staleProof, gateStaleProof, gateClaimStaleProof }) => {
     const paths = pathsFor(runId);
     const generation = reclaimLease({
       paths,
@@ -733,7 +809,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       runId,
       staleProof,
       gateStaleProof,
-      guard: () => (existsSync(cleanupLock) ? "CLEANUP_IN_PROGRESS" : null),
+      gateClaimStaleProof,
+      guard: () => (gateStateExists(cleanupLock) ? "CLEANUP_IN_PROGRESS" : null),
       staleMismatchError: "RUN_WRITER_STALE_PROOF_MISMATCH",
       operationError: "RUN_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
     });
@@ -755,9 +832,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
         generation,
       },
       lockedError: "TARGET_CLOSE_WRITER_LOCKED",
-      preflight: () => (existsSync(paths.reclaimLock)
+      preflight: () => (gateStateExists(paths.reclaimLock)
         ? "TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS" : null),
-      postflight: () => (existsSync(paths.reclaimLock)
+      postflight: () => (gateStateExists(paths.reclaimLock)
         ? "TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS" : null),
     });
     return closeWriterHandle(target, runId, paths, generation);
@@ -804,7 +881,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   };
 
   const readGate = (lockPath, kind, fallback) => {
-    if (!existsSync(lockPath)) return null;
+    if (!existsSync(lockPath)) {
+      return gateStateExists(lockPath)
+        ? { schema: LOCK_OWNER_SCHEMA, kind, ...fallback, state: "TAKEOVER_ACTIVE" }
+        : null;
+    }
+    if (existsSync(gateTakeoverPath(lockPath)) || existsSync(gateTakeoverStalePath(lockPath))) {
+      return { schema: LOCK_OWNER_SCHEMA, kind, ...fallback, state: "TAKEOVER_ACTIVE" };
+    }
     try {
       return readLockOwner(join(lockPath, "owner.json"), kind);
     } catch {
@@ -824,7 +908,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const readCleanupLock = () => readGate(cleanupLock, "cleanup", { runId: "cleanup" });
 
-  const reclaimCloseWriter = ({ target, runId, staleProof, gateStaleProof }) => {
+  const reclaimCloseWriter = ({ target, runId, staleProof, gateStaleProof, gateClaimStaleProof }) => {
     assertSafeRunId(runId);
     const paths = closePathsFor(target);
     const generation = reclaimLease({
@@ -834,6 +918,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       runId,
       staleProof,
       gateStaleProof,
+      gateClaimStaleProof,
       staleMismatchError: "TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH",
       operationError: "TARGET_CLOSE_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
     });

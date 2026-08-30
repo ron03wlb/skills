@@ -1159,6 +1159,8 @@ test("cleanup recovers an exact stale lease and resumes append-before-delete ide
   const controlRoot = join(gitCommonDir, "matt-workflow-control");
   const runsRoot = join(controlRoot, "runs");
   const cleanupLock = join(controlRoot, "cleanup.lock");
+  const cleanupTakeover = `${cleanupLock}.takeover.lock`;
+  const cleanupTakeoverStale = `${cleanupTakeover}.stale-claim`;
   try {
     for (const { runId } of runs) mkdirSync(join(runsRoot, runId), { recursive: true });
     writeFileSync(join(controlRoot, "cleanup.jsonl"), `${JSON.stringify({
@@ -1178,7 +1180,23 @@ test("cleanup recovers an exact stale lease and resumes append-before-delete ide
       coordinatorInstanceId: "cleanup-old",
       generation: "cleanup-generation-old",
     })}\n`, "utf8");
-    assert.equal(store.readCleanupLock().generation, "cleanup-generation-old");
+    mkdirSync(cleanupTakeover);
+    writeFileSync(join(cleanupTakeover, "owner.json"), `${JSON.stringify({
+      schema: "dag-run-lock-owner:v1",
+      kind: "cleanup-takeover",
+      runId: "cleanup",
+      coordinatorInstanceId: "cleanup-takeover-old",
+      generation: "cleanup-takeover-generation-old",
+    })}\n`, "utf8");
+    mkdirSync(cleanupTakeoverStale);
+    writeFileSync(join(cleanupTakeoverStale, "owner.json"), `${JSON.stringify({
+      schema: "dag-run-lock-owner:v1",
+      kind: "cleanup-takeover",
+      runId: "cleanup",
+      coordinatorInstanceId: "cleanup-takeover-archive",
+      generation: "cleanup-takeover-generation-archive",
+    })}\n`, "utf8");
+    assert.equal(store.readCleanupLock().state, "TAKEOVER_ACTIVE");
     assert.throws(() => store.applyCleanup({ now, runs }), /CLEANUP_WRITER_LOCKED/u);
     assert.throws(() => store.previewCleanup({ now: "0", runs }), /ISO time/u);
     assert.throws(() => store.previewCleanup({
@@ -1194,6 +1212,14 @@ test("cleanup recovers an exact stale lease and resumes append-before-delete ide
         coordinatorState: "INACTIVE",
         reconciled: true,
         evidence: ["Coordinator read-back proves cleanup-old is inactive."],
+        abandonedOperationIds: [],
+      },
+      cleanupClaimStaleProof: {
+        previousCoordinatorInstanceId: "cleanup-takeover-old",
+        previousGeneration: "cleanup-takeover-generation-old",
+        coordinatorState: "INACTIVE",
+        reconciled: true,
+        evidence: ["Coordinator read-back proves the takeover owner is inactive."],
         abandonedOperationIds: [],
       },
     });
