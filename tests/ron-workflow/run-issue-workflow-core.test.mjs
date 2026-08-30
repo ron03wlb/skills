@@ -1197,6 +1197,10 @@ test("cleanup recovers an exact stale lease and resumes append-before-delete ide
       generation: "cleanup-takeover-generation-archive",
     })}\n`, "utf8");
     assert.equal(store.readCleanupLock().state, "TAKEOVER_ACTIVE");
+    assert.equal(
+      store.readCleanupLock().claimOwner.generation,
+      "cleanup-takeover-generation-old",
+    );
     assert.throws(() => store.applyCleanup({ now, runs }), /CLEANUP_WRITER_LOCKED/u);
     assert.throws(() => store.previewCleanup({ now: "0", runs }), /ISO time/u);
     assert.throws(() => store.previewCleanup({

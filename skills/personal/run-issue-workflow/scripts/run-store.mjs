@@ -881,14 +881,26 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   };
 
   const readGate = (lockPath, kind, fallback) => {
-    if (!existsSync(lockPath)) {
-      return gateStateExists(lockPath)
-        ? { schema: LOCK_OWNER_SCHEMA, kind, ...fallback, state: "TAKEOVER_ACTIVE" }
-        : null;
+    const takeoverPath = gateTakeoverPath(lockPath);
+    const stalePath = gateTakeoverStalePath(lockPath);
+    if (existsSync(takeoverPath) || existsSync(stalePath)) {
+      try {
+        return {
+          schema: LOCK_OWNER_SCHEMA,
+          kind,
+          ...fallback,
+          state: "TAKEOVER_ACTIVE",
+          gateOwner: existsSync(lockPath) ? readLockOwner(join(lockPath, "owner.json"), kind) : null,
+          claimOwner: readLockOwner(
+            join(existsSync(takeoverPath) ? takeoverPath : stalePath, "owner.json"),
+            `${kind}-takeover`,
+          ),
+        };
+      } catch {
+        return { schema: LOCK_OWNER_SCHEMA, kind, ...fallback, state: "UNKNOWN" };
+      }
     }
-    if (existsSync(gateTakeoverPath(lockPath)) || existsSync(gateTakeoverStalePath(lockPath))) {
-      return { schema: LOCK_OWNER_SCHEMA, kind, ...fallback, state: "TAKEOVER_ACTIVE" };
-    }
+    if (!existsSync(lockPath)) return null;
     try {
       return readLockOwner(join(lockPath, "owner.json"), kind);
     } catch {
