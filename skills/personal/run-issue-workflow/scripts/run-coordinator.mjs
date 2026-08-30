@@ -22,7 +22,7 @@ const assertSameIdentity = (expected, actual) => {
   if (mismatch) throw new Error(`RUN_IDENTITY_DRIFT:${mismatch}`);
 };
 
-const trackerUnavailable = (request, attempts) => ({
+const initialTrackerUnavailable = (request, attempts) => ({
   schema: "dag-run-status:v1",
   run: {
     runId: null,
@@ -47,30 +47,72 @@ const trackerUnavailable = (request, attempts) => ({
   }],
 });
 
-const environmentUnresolved = (status, action) => {
+const diagnosedStop = (status, {
+  reasonCode,
+  limitationClass = "instance-blocker",
+  evidence,
+  attemptedRecovery = [],
+  retryCount = 0,
+  noAutomaticTransition,
+  affectedNodes,
+  resumePredicates,
+}) => {
   const allNodes = status.nodes.map(({ issueId }) => issueId);
   return {
     ...status,
     run: { ...status.run, state: "BLOCKED" },
     nodes: status.nodes.map((node) => (
-      node.issueId === action.issueId ? { ...node, state: "BLOCKED" } : node
+      affectedNodes.includes(node.issueId) ? { ...node, state: "BLOCKED" } : node
     )),
     legalActions: [],
     legalControls: ["RESUME", "STOP", "REFRESH"],
     diagnoses: [...status.diagnoses, {
-      reasonCode: "environment_unresolved",
-      limitationClass: "instance-blocker",
-      evidence: [`Environment fingerprint ${action.fingerprint} has no approved automatic remediation.`],
-      attemptedRecovery: [],
-      retryCount: 0,
-      noAutomaticTransition: "Only the exact Windows Gradle loopback fingerprint is eligible for automatic remediation.",
-      affectedNodes: [action.issueId],
-      unaffectedNodes: allNodes.filter((issueId) => issueId !== action.issueId),
+      reasonCode,
+      limitationClass,
+      evidence,
+      attemptedRecovery,
+      retryCount,
+      noAutomaticTransition,
+      affectedNodes,
+      unaffectedNodes: allNodes.filter((issueId) => !affectedNodes.includes(issueId)),
       nextOwner: "human",
-      resumePredicates: ["environment_changed_or_human_resolution"],
+      resumePredicates,
     }],
   };
 };
+
+const trackerUnavailable = (request, attempts, status) => {
+  if (!status) return initialTrackerUnavailable(request, attempts);
+  const affectedNodes = status.nodes
+    .filter(({ state }) => state !== "SUCCEEDED")
+    .map(({ issueId }) => issueId);
+  return diagnosedStop(status, {
+    reasonCode: "tracker_unavailable",
+    limitationClass: "unresolved-evidence",
+    evidence: [`Tracker reads failed after ${attempts.join(", ")} millisecond probes.`],
+    attemptedRecovery: attempts.map((delayMs) => ({ delayMs })),
+    noAutomaticTransition: "Cached tracker evidence cannot authorize workflow action.",
+    affectedNodes,
+    resumePredicates: ["tracker_read_succeeds"],
+  });
+};
+
+const issueLaneAmbiguous = (status, issueId, laneCount) => diagnosedStop(status, {
+  reasonCode: "issue_lane_ambiguous",
+  limitationClass: "unresolved-evidence",
+  evidence: [`Issue ${issueId} matched ${laneCount} Codex task lanes; exactly one or zero is required.`],
+  noAutomaticTransition: "Ambiguous task identity cannot authorize dispatch, retry, or closeout.",
+  affectedNodes: status.nodes.map(({ issueId: nodeIssueId }) => nodeIssueId),
+  resumePredicates: ["one_exact_issue_lane_is_proven"],
+});
+
+const environmentUnresolved = (status, action) => diagnosedStop(status, {
+  reasonCode: "environment_unresolved",
+  evidence: [`Environment fingerprint ${action.fingerprint} has no approved automatic remediation.`],
+  noAutomaticTransition: "Only the exact Windows Gradle loopback fingerprint is eligible for automatic remediation.",
+  affectedNodes: [action.issueId],
+  resumePredicates: ["environment_changed_or_human_resolution"],
+});
 
 export function createCoordinator({ store, tracker, tasks, reconcile, leaf, environment, now, sleep }) {
   for (const method of ["readEvents", "acquireWriter", "acquireCloseWriter"]) requireMethod(store, method);
@@ -98,7 +140,7 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
     }
   };
 
-  const dispatchIssue = async ({ action, current, writer }) => {
+  const dispatchIssue = async ({ action, current, status, writer }) => {
     if (action.attempt > 1) {
       const journal = store.readEvents(current.runIdentity.runId);
       const priorDispatch = journal.findLast((event) => (
@@ -122,7 +164,9 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
           runIdentity: current.runIdentity,
           supersededTaskRef: priorDispatch.taskRef,
         });
-        if (!Array.isArray(existing) || existing.length > 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+        if (!Array.isArray(existing) || existing.length > 1) {
+          return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
+        }
         nextTaskRef = existing[0] ?? await tasks.create({
           issueId: action.issueId,
           runIdentity: current.runIdentity,
@@ -154,13 +198,15 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
         attempt: action.attempt,
         taskRef: nextTaskRef,
       });
-      return;
+      return null;
     }
     const existing = await tasks.findIssueLane({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
     });
-    if (!Array.isArray(existing) || existing.length > 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+    if (!Array.isArray(existing) || existing.length > 1) {
+      return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
+    }
     const taskRef = existing[0] ?? await tasks.create({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
@@ -174,6 +220,7 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
       attempt: action.attempt,
       taskRef,
     });
+    return null;
   };
 
   const closeIssue = async ({ action, current }) => {
@@ -184,10 +231,16 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
       runId: current.runIdentity.runId,
     });
     try {
-      await tasks.message(
-        taskRef,
-        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
-      );
+      const task = await tasks.read(taskRef);
+      const accepted = task?.closeRequest?.state === "ACCEPTED"
+        && task.closeRequest.runId === current.runIdentity.runId
+        && task.closeRequest.issueId === action.issueId;
+      if (!accepted) {
+        await tasks.message(
+          taskRef,
+          `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
+        );
+      }
       const waited = await tasks.wait([taskRef]);
       return waited?.coordinatorActive !== false;
     } finally {
@@ -243,7 +296,7 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
       try {
         while (true) {
           const trackerResult = await readTracker(request);
-          if (!trackerResult.available) return trackerUnavailable(request, trackerResult.attempts);
+          if (!trackerResult.available) return trackerUnavailable(request, trackerResult.attempts, lastStatus);
           const journal = runIdentity ? store.readEvents(runIdentity.runId) : [];
           const current = await reconcile({
             request,
@@ -267,6 +320,7 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
               maxParallel: current.grant.maxParallel,
             });
             grantRecorded = true;
+            lastStatus = writer.rebuildStatus(current.facts);
             continue;
           }
 
@@ -285,7 +339,8 @@ export function createCoordinator({ store, tracker, tasks, reconcile, leaf, envi
 
           for (const action of lastStatus.legalActions) {
             if (action.type === "dispatch_issue") {
-              await dispatchIssue({ action, current, writer });
+              const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
+              if (stopped) return stopped;
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) return environmentUnresolved(lastStatus, action);

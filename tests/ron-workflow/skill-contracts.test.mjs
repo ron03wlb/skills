@@ -1257,6 +1257,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /5, 15, and 30 second.*tracker.*probe.*retry budget/isu);
   assert.match(skill, /`Selector\.open\(\)`.*Unable to establish loopback connection.*`gradle-loopback-safe`.*one.*process-local.*cycle/isu);
   assert.match(skill, /On every entry.*reacquire/isu);
+  assert.match(skill, /accepted `close-issue` follow-up.*task history.*already in flight.*never send the same close request again/isu);
   for (const evidence of [
     /tracker evidence/iu,
     /registered worktree evidence from Git/iu,

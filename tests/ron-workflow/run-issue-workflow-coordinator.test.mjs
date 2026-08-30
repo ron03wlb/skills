@@ -39,6 +39,34 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:01-05",
 };
 
+const reconciliation = ({
+  runIdentity = identity,
+  maxParallel = 3,
+  taskRefs = {},
+  run = {},
+  nodes,
+  contradictions = [],
+}) => ({
+  runIdentity,
+  grant: { runIdentity, maxParallel },
+  taskRefs,
+  facts: {
+    schema: "dag-run-facts:v1",
+    run: {
+      ...runIdentity,
+      reconciled: true,
+      trackerAvailable: true,
+      targetState: "CLEAN",
+      closeWriterRunId: null,
+      closeWriterState: "ABSENT",
+      parentTrackerState: "OPEN",
+      ...run,
+    },
+    nodes,
+    contradictions,
+  },
+});
+
 test("a Single-Issue Run creates one lane and closes only after implementation completion", async () => {
   const { root, store } = createStoreFixture();
   const trackerState = {
@@ -97,30 +125,11 @@ test("a Single-Issue Run creates one lane and closes only after implementation c
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
     const taskRef = dispatch?.taskRef ?? null;
     const taskState = taskRef && taskStates.get(taskRef.threadId) === "EXECUTING" ? "EXECUTING" : "NONE";
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: taskRef ? { 15: taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.trackerState,
-        },
-        nodes: [{
-          issueId: "15",
-          blockers: [],
-          ...currentTracker,
-          taskState,
-        }],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState }],
+    });
   };
 
   try {
@@ -193,25 +202,11 @@ test("a transient failure retries the same reachable Issue lane", async () => {
   const tracker = { async read() { return { ...trackerState }; } };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: dispatch ? { 15: dispatch.taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.trackerState,
-        },
-        nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
+    });
   };
 
   try {
@@ -267,8 +262,12 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
       return replacementTaskRef;
     },
     async read(actual) {
-      assert.deepEqual(actual, priorTaskRef);
-      return { state: "INACTIVE", inactiveEvidence };
+      if (actual.threadId === priorTaskRef.threadId) {
+        assert.deepEqual(actual, priorTaskRef);
+        return { state: "INACTIVE", inactiveEvidence };
+      }
+      assert.deepEqual(actual, replacementTaskRef);
+      return { state: "ACTIVE", closeRequest: null };
     },
     async message(actual, message) {
       assert.deepEqual(actual, replacementTaskRef);
@@ -291,25 +290,11 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
   const tracker = { async read() { return { ...trackerState }; } };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: dispatch ? { 15: dispatch.taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.trackerState,
-        },
-        nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
+    });
   };
 
   try {
@@ -354,24 +339,9 @@ test("tracker recovery uses 5 and 15 second probes without consuming Issue retry
       throw new Error(`${name} must not run for an already successful node`);
     }]),
   );
-  const reconcile = async ({ tracker: currentTracker }) => ({
-    runIdentity: identity,
-    grant: { runIdentity: identity, maxParallel: 3 },
-    taskRefs: {},
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...identity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "CLOSED",
-      },
-      nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
-      contradictions: [],
-    },
+  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
+    run: { parentTrackerState: "CLOSED" },
+    nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
   });
 
   try {
@@ -479,25 +449,11 @@ test("the exact Windows Gradle loopback fingerprint gets one process-local remed
   };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: dispatch ? { 15: dispatch.taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.trackerState,
-        },
-        nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker }],
+    });
   };
 
   try {
@@ -568,25 +524,11 @@ test("re-entry adopts a settled task and partial close after coordinator loss", 
   const tracker = { async read() { return { ...trackerState }; } };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: dispatch ? { 15: dispatch.taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.trackerState,
-        },
-        nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState }],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.trackerState },
+      nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState }],
+    });
   };
 
   try {
@@ -673,29 +615,16 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
   };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
     const dispatch = journal.findLast((event) => event.type === "dispatch.recorded" && event.issueId === "15");
-    return {
+    return reconciliation({
       runIdentity: multiIdentity,
-      grant: { runIdentity: multiIdentity, maxParallel: 3 },
       taskRefs: dispatch ? { 15: dispatch.taskRef } : {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...multiIdentity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: currentTracker.parentTrackerState,
-        },
-        nodes: [
-          { issueId: "13", blockers: [], ...currentTracker.nodes[13], taskState: "NONE" },
-          { issueId: "14", blockers: [], ...currentTracker.nodes[14], taskState: "NONE" },
-          { issueId: "15", blockers: ["13", "14"], ...currentTracker.nodes[15], taskState },
-        ],
-        contradictions: [],
-      },
-    };
+      run: { parentTrackerState: currentTracker.parentTrackerState },
+      nodes: [
+        { issueId: "13", blockers: [], ...currentTracker.nodes[13], taskState: "NONE" },
+        { issueId: "14", blockers: [], ...currentTracker.nodes[14], taskState: "NONE" },
+        { issueId: "15", blockers: ["13", "14"], ...currentTracker.nodes[15], taskState },
+      ],
+    });
   };
 
   try {
@@ -712,7 +641,6 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
 
 test("default max_parallel adopts one lane and creates only two more of four ready Issues", async () => {
   const { root, store } = createStoreFixture();
-  const taskStates = new Map();
   const adopted = { threadId: "thread-13-existing", hostId: "local" };
   const createdIssues = [];
   let clockMinute = 0;
@@ -724,7 +652,6 @@ test("default max_parallel adopts one lane and creates only two more of four rea
     async create({ issueId }) {
       createdIssues.push(issueId);
       const taskRef = { threadId: `thread-${issueId}`, hostId: "local" };
-      taskStates.set(issueId, "EXECUTING");
       return taskRef;
     },
     async read() { return { state: "RESUMABLE", inactiveEvidence: [] }; },
@@ -732,36 +659,22 @@ test("default max_parallel adopts one lane and creates only two more of four rea
     async wait() { return { coordinatorActive: false }; },
   };
   const tracker = { async read() { return {}; } };
-  const reconcile = async ({ journal }) => ({
+  const reconcile = async ({ journal }) => reconciliation({
     runIdentity: multiIdentity,
-    grant: { runIdentity: multiIdentity, maxParallel: 3 },
     taskRefs: Object.fromEntries(
       journal.filter(({ type }) => type === "dispatch.recorded").map(({ issueId, taskRef }) => [issueId, taskRef]),
     ),
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...multiIdentity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "OPEN",
-      },
-      nodes: ["13", "14", "15", "16"].map((issueId) => ({
-        issueId,
-        blockers: [],
-        trackerState: "OPEN",
-        taskState: journal.some((event) => event.type === "dispatch.recorded" && event.issueId === issueId)
-          ? "EXECUTING"
-          : "NONE",
-        completionState: "NONE",
-        candidateReachable: false,
-        worktreeState: "ABSENT",
-      })),
-      contradictions: [],
-    },
+    nodes: ["13", "14", "15", "16"].map((issueId) => ({
+      issueId,
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: journal.some((event) => event.type === "dispatch.recorded" && event.issueId === issueId)
+        ? "EXECUTING"
+        : "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    })),
   });
 
   try {
@@ -798,33 +711,18 @@ test("an unknown environment fingerprint stops with diagnosis and no automatic r
     async wait() { throw new Error("no wait is legal"); },
   };
   const tracker = { async read() { return {}; } };
-  const reconcile = async () => ({
-    runIdentity: identity,
-    grant: { runIdentity: identity, maxParallel: 3 },
+  const reconcile = async () => reconciliation({
     taskRefs: { 15: taskRef },
-    facts: {
-      schema: "dag-run-facts:v1",
-      run: {
-        ...identity,
-        reconciled: true,
-        trackerAvailable: true,
-        targetState: "CLEAN",
-        closeWriterRunId: null,
-        closeWriterState: "ABSENT",
-        parentTrackerState: "OPEN",
-      },
-      nodes: [{
-        issueId: "15",
-        blockers: [],
-        trackerState: "OPEN",
-        taskState: "ENVIRONMENT_FAILURE",
-        completionState: "NONE",
-        candidateReachable: false,
-        worktreeState: "PRESENT",
-        failure: { fingerprint: "windows:some-other-environment-failure" },
-      }],
-      contradictions: [],
-    },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "ENVIRONMENT_FAILURE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+      failure: { fingerprint: "windows:some-other-environment-failure" },
+    }],
   });
   const environment = {
     async remediate() {
@@ -878,33 +776,19 @@ test("reconcile_run reacquires owning facts before waiting on active work", asyn
   const tracker = { async read() { return {}; } };
   const reconcile = async () => {
     reconcileCalls += 1;
-    return {
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
+    return reconciliation({
       taskRefs: { 15: taskRef },
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: reconcileCalls >= 3,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: "OPEN",
-        },
-        nodes: [{
-          issueId: "15",
-          blockers: [],
-          trackerState: "OPEN",
-          taskState: "EXECUTING",
-          completionState: "NONE",
-          candidateReachable: false,
-          worktreeState: "PRESENT",
-        }],
-        contradictions: [],
-      },
-    };
+      run: { reconciled: reconcileCalls >= 3 },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "EXECUTING",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+      }],
+    });
   };
 
   try {
@@ -938,32 +822,16 @@ for (const [command, action, terminalState] of [
       async wait() { throw new Error("settled control has no active lane"); },
     };
     const tracker = { async read() { return {}; } };
-    const reconcile = async () => ({
-      runIdentity: identity,
-      grant: { runIdentity: identity, maxParallel: 3 },
-      taskRefs: {},
-      facts: {
-        schema: "dag-run-facts:v1",
-        run: {
-          ...identity,
-          reconciled: true,
-          trackerAvailable: true,
-          targetState: "CLEAN",
-          closeWriterRunId: null,
-          closeWriterState: "ABSENT",
-          parentTrackerState: "OPEN",
-        },
-        nodes: [{
-          issueId: "15",
-          blockers: [],
-          trackerState: "OPEN",
-          taskState: "NONE",
-          completionState: "NONE",
-          candidateReachable: false,
-          worktreeState: "ABSENT",
-        }],
-        contradictions: [],
-      },
+    const reconcile = async () => reconciliation({
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      }],
     });
 
     try {
@@ -978,3 +846,154 @@ for (const [command, action, terminalState] of [
     }
   });
 }
+
+test("ambiguous Codex Issue lanes fail closed with a structured diagnosis", async () => {
+  const { root, store } = createStoreFixture();
+  let clockMinute = 0;
+  const now = () => `2026-08-30T12:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const tasks = {
+    async findIssueLane() {
+      return [
+        { threadId: "thread-15-a", hostId: "local" },
+        { threadId: "thread-15-b", hostId: "local" },
+      ];
+    },
+    async create() { throw new Error("ambiguity forbids task creation"); },
+    async read() { throw new Error("no task was selected"); },
+    async message() { throw new Error("no task was selected"); },
+    async wait() { throw new Error("no task was selected"); },
+  };
+  const tracker = { async read() { return {}; } };
+  const reconcile = async () => reconciliation({
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.deepEqual(status.legalActions, []);
+    assert.equal(status.diagnoses.at(-1).reasonCode, "issue_lane_ambiguous");
+    assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
+    assert.deepEqual(status.diagnoses.at(-1).resumePredicates, ["one_exact_issue_lane_is_proven"]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("re-entry observes an accepted close request instead of sending a duplicate", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const trackerState = {
+    trackerState: "OPEN",
+    completionState: "COMPLETE",
+    candidateReachable: false,
+    worktreeState: "PRESENT",
+  };
+  let closeRequest = null;
+  let messageCalls = 0;
+  let waitCalls = 0;
+  let clockMinute = 0;
+  const now = () => `2026-08-30T13:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
+  seed.release();
+  const tasks = {
+    async findIssueLane() { throw new Error("no dispatch is legal"); },
+    async create() { throw new Error("no dispatch is legal"); },
+    async read() { return { state: "ACTIVE", closeRequest }; },
+    async message() {
+      messageCalls += 1;
+      closeRequest = { runId: identity.runId, issueId: "15", state: "ACCEPTED" };
+    },
+    async wait() {
+      waitCalls += 1;
+      if (waitCalls === 1) return { coordinatorActive: false };
+      trackerState.trackerState = "CLOSED";
+      trackerState.candidateReachable = true;
+      trackerState.worktreeState = "ABSENT";
+      return { coordinatorActive: true };
+    },
+  };
+  const tracker = { async read() { return { ...trackerState }; } };
+  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
+    taskRefs: { 15: taskRef },
+    run: { parentTrackerState: currentTracker.trackerState },
+    nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState: "NONE" }],
+  });
+
+  try {
+    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const interrupted = await coordinator.run({ specId: "15" });
+    const resumed = await coordinator.run({ specId: "15" });
+
+    assert.equal(interrupted.run.state, "RUNNING");
+    assert.equal(resumed.run.state, "SUCCEEDED");
+    assert.equal(messageCalls, 1);
+    assert.equal(waitCalls, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("tracker exhaustion during an existing Run preserves identity and affected nodes", async () => {
+  const { root, store } = createStoreFixture();
+  let trackerReads = 0;
+  let clockMinute = 0;
+  const sleeps = [];
+  const now = () => `2026-08-30T14:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+  const tracker = {
+    async read() {
+      trackerReads += 1;
+      if (trackerReads === 1) return {};
+      throw new Error("tracker unavailable");
+    },
+  };
+  const tasks = {
+    async findIssueLane() { throw new Error("outage forbids dispatch"); },
+    async create() { throw new Error("outage forbids dispatch"); },
+    async read() { throw new Error("outage forbids task reads"); },
+    async message() { throw new Error("outage forbids messages"); },
+    async wait() { throw new Error("outage forbids waits"); },
+  };
+  const reconcile = async () => reconciliation({
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      now,
+      sleep: async (delayMs) => sleeps.push(delayMs),
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.run.runId, identity.runId);
+    assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
+    assert.deepEqual(sleeps, [5_000, 15_000, 30_000]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

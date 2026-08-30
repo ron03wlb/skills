@@ -32,6 +32,8 @@ Normalize those owning-source facts for `run-core.mjs`; use `run-store.mjs` to r
 
 Re-entry adopts valid manual node success, a settled task with valid completion evidence, an existing clean candidate, partial close progress, and unchanged completed nodes. It then continues from the current legal action without duplicate Codex tasks, duplicate `execute-issue`, duplicate close actions, or replay from the first node. Coordinator loss is fail-closed: no new dispatch or close occurs until a later explicit invocation reacquires every live source.
 
+Treat an exact accepted `close-issue` follow-up proven by the Issue lane's task history as already in flight. Wait on that lane and reacquire tracker, Git, and worktree evidence; never send the same close request again from coordinator memory alone.
+
 ## Bind one Codex Issue lane
 
 Resolve the repository's one exact saved project before dispatch. Every executable Issue maps to one sidebar-visible child Codex task in that saved project's `local` environment. The child task works from the shared saved project only long enough to invoke `execute-issue`; `execute-issue` owns its dedicated Issue worktree, topic branch, implementation, verification, review, and completion note. Product-file edits never belong in the shared checkout.
