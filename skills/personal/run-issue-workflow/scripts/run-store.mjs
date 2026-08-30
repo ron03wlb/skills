@@ -544,7 +544,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     }
     const knownRuns = [...runs].sort((left, right) => compareRunIds(left.runId, right.runId));
     const terminal = knownRuns
-      .filter((run) => existsSync(pathsFor(run.runId).runDir)
+      .filter((run) => !protectedRuns.has(run.runId)
+        && existsSync(pathsFor(run.runId).runDir)
         && ["SUCCEEDED", "STOPPED"].includes(run.state)
         && Number.isFinite(Date.parse(run.terminalAt)))
       .sort((left, right) => Date.parse(right.terminalAt) - Date.parse(left.terminalAt)

@@ -719,7 +719,7 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
     runId: identity.runId,
     specId: identity.specId,
     state: "SUCCEEDED",
-    terminalAt: new Date(Date.parse(evaluatedAt) - 90 * 86_400_000).toISOString(),
+    terminalAt: new Date(Date.parse(evaluatedAt) - 2 * 86_400_000).toISOString(),
     engineLock: "RELEASED",
     activeTasks: "ABSENT",
   };
@@ -775,7 +775,7 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
 
     const unselected = await runtime.run({});
     assert.equal(unselected.status.diagnoses[0].reasonCode, "run_selection_required");
-    assert.deepEqual(unselected.cleanupPreview.eligible.map(({ runId }) => runId), [identity.runId, "terminal-10"]);
+    assert.deepEqual(unselected.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-09", "terminal-10"]);
     assert.equal(unselected.cleanupResult, null);
     assert.equal(existsSync(oldestRunDir), true);
 
@@ -792,6 +792,9 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
     });
     assert.deepEqual(applied.cleanupResult.removed, ["terminal-10"]);
     assert.equal(existsSync(oldestRunDir), false);
+    for (const { runId } of terminalRuns.slice(0, 10)) {
+      assert.equal(existsSync(join(gitCommonDir, "matt-workflow-control", "runs", runId)), true);
+    }
     assert.deepEqual(store.readCleanupRecords().map(({ runId }) => runId), ["terminal-10"]);
     assert.equal(applied.status.run.state, "STOPPED");
   } finally {
