@@ -802,6 +802,26 @@ test("the single writer appends ordered control events and atomically rebuilds d
       attempt: 3,
       taskRef: { threadId: "replacement-13", hostId: "local" },
     });
+    assert.throws(() => retryWriter.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:06:00.000Z",
+      issueId: "14",
+      attempt: 1,
+      taskRef: { threadId: "replacement-13", hostId: "local" },
+    }), /cannot serve both Issue/u);
+    assert.throws(() => retryWriter.append({
+      type: "retry.recorded",
+      at: "2026-08-30T00:06:00.000Z",
+      issueId: "13",
+      attempt: 3,
+      reason: "proven_inactive_task",
+      priorTaskRef: { threadId: "replacement-13", hostId: "local" },
+      replacement: {
+        supersedesAttempt: 3,
+        nextTaskRef: { threadId: "thread-13", hostId: "local" },
+        inactiveEvidence: ["Codex task read-back reports the replacement cannot continue."],
+      },
+    }), /new to this Run/u);
     retryWriter.release();
 
     const writer = store.acquireWriter("run-12");
@@ -920,6 +940,9 @@ test("the single writer appends ordered control events and atomically rebuilds d
     }), /idempotent/u);
 
     writer.release();
+    const runDirectory = join(gitCommonDir, "matt-workflow-control", "runs", "run-12");
+    assert.equal(existsSync(join(runDirectory, "engine.lock")), false);
+    assert.equal(readdirSync(runDirectory).some((name) => name.startsWith("engine.lock.release-")), false);
 
     const closeWriter = store.acquireCloseWriter({ target: "features/ron", runId: "run-12" });
     assert.equal(store.readCloseWriter("features/ron"), "run-12");
@@ -930,6 +953,8 @@ test("the single writer appends ordered control events and atomically rebuilds d
     store.acquireCloseWriter({ target: "another-target", runId: "another-run" }).release();
     closeWriter.release();
     assert.equal(store.readCloseWriter("features/ron"), null);
+    assert.equal(readdirSync(join(gitCommonDir, "matt-workflow-control", "close-writers"))
+      .some((name) => name.includes(".release-")), false);
     store.acquireCloseWriter({ target: "features/ron", runId: "another-run" }).release();
 
     const controlRoot = join(gitCommonDir, "matt-workflow-control");
@@ -1169,6 +1194,24 @@ test("cleanup recovers an exact stale lease and resumes append-before-delete ide
     assert.equal(existsSync(join(runsRoot, "recover-10")), false);
     assert.equal(store.readCleanupRecords().length, 1);
     assert.equal(existsSync(cleanupLock), false);
+
+    mkdirSync(cleanupLock);
+    writeFileSync(join(cleanupLock, "owner.json"), "{corrupt", "utf8");
+    assert.throws(() => store.applyCleanup({
+      now,
+      runs,
+      cleanupStaleProof: {
+        previousCoordinatorInstanceId: "cleanup-old",
+        previousGeneration: "cleanup-generation-old",
+        coordinatorState: "INACTIVE",
+        reconciled: true,
+        evidence: ["The malformed owner cannot authorize recovery."],
+        abandonedOperationIds: [],
+      },
+    }));
+    assert.equal(existsSync(cleanupLock), true);
+    assert.equal(store.readCleanupLock().state, "UNKNOWN");
+    assert.throws(() => store.applyCleanup({ now, runs }), /CLEANUP_WRITER_LOCKED/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1248,12 +1291,13 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
 
     const operationWriter = oldStore.acquireWriter("operation-run");
     const operationOwner = oldStore.readWriterLock("operation-run");
-    const operationId = `engine-operation.${operationOwner.generation}.abandoned.lock`;
+    const operationId = `operation.${operationOwner.generation}.abandoned.lock`;
     mkdirSync(join(
       gitCommonDir,
       "matt-workflow-control",
       "runs",
       "operation-run",
+      "engine.lock",
       operationId,
     ));
     assert.deepEqual(oldStore.readWriterLock("operation-run").activeOperationIds, [operationId]);

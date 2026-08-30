@@ -67,6 +67,7 @@ const validateTaskRef = (taskRef, label) => {
 };
 
 const sameTaskRef = (left, right) => left.threadId === right.threadId && left.hostId === right.hostId;
+const taskRefKey = ({ hostId, threadId }) => JSON.stringify([hostId, threadId]);
 
 export const normalizeEventDraft = (eventDraft) => (
   isRecord(eventDraft) && eventDraft.type === "grant.recorded" && eventDraft.maxParallel === undefined
@@ -177,6 +178,14 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     }
   }
   if (event.type === "dispatch.recorded") {
+    const aliasedDispatch = events.find((item) => (
+      item.type === "dispatch.recorded"
+      && taskRefKey(item.taskRef) === taskRefKey(event.taskRef)
+      && item.issueId !== event.issueId
+    ));
+    if (aliasedDispatch) {
+      throw new TypeError(`One taskRef cannot serve both Issue ${aliasedDispatch.issueId} and ${event.issueId}`);
+    }
     const previousDispatch = events
       .filter(({ type, issueId }) => type === "dispatch.recorded" && issueId === event.issueId)
       .sort((left, right) => right.attempt - left.attempt)[0];
@@ -207,6 +216,17 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     if (!dispatched || duplicate) throw new TypeError("Retry facts require one matching dispatch attempt");
     if (!sameTaskRef(event.priorTaskRef, dispatched.taskRef)) {
       throw new TypeError("Retry priorTaskRef must match the dispatched attempt");
+    }
+    if (event.replacement) {
+      const nextKey = taskRefKey(event.replacement.nextTaskRef);
+      const alreadyBound = events.some((item) => (
+        (item.type === "dispatch.recorded" && taskRefKey(item.taskRef) === nextKey)
+        || (item.type === "retry.recorded" && item.replacement
+          && taskRefKey(item.replacement.nextTaskRef) === nextKey)
+      ));
+      if (alreadyBound) {
+        throw new TypeError("A replacement nextTaskRef must be new to this Run and cannot revive a superseded task");
+      }
     }
   }
   if (event.type === "remediation.recorded") {

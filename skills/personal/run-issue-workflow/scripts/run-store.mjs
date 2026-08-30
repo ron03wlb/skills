@@ -9,7 +9,6 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  rmdirSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -188,48 +187,33 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     if (existsSync(lockPath)) {
       if (!staleProof) throw new Error("RECLAIM_GATE_LOCKED");
       validateStaleProof(staleProof);
-      const staleClaim = `${lockPath}.stale-claim-${process.pid}-${randomUUID()}`;
-      // Move first, then validate the moved generation so recovery never check-then-deletes a new owner.
+      const previous = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+      if (previous.runId !== owner.runId || previous.target !== owner.target
+        || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
+        || previous.generation !== staleProof.previousGeneration
+        || staleProof.abandonedOperationIds.length !== 0) {
+        throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
+      }
+      // The canonical directory never disappears during takeover; only its fsynced owner generation changes.
+      replaceLockOwner(join(lockPath, "owner.json"), owner);
+      const claimed = readLockOwner(join(lockPath, "owner.json"), owner.kind);
+      if (claimed.runId !== owner.runId || claimed.target !== owner.target
+        || claimed.coordinatorInstanceId !== owner.coordinatorInstanceId
+        || claimed.generation !== owner.generation) throw new Error("RECLAIM_GATE_LOCKED");
+    } else {
+      const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
+      mkdirSync(candidate, { recursive: false });
       try {
-        renameSync(lockPath, staleClaim);
-      } catch (error) {
-        if (error?.code !== "ENOENT") throw error;
-      }
-      if (existsSync(staleClaim)) {
-        const previous = readLockOwner(join(staleClaim, "owner.json"), owner.kind);
-        if (previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
-          || previous.generation !== staleProof.previousGeneration) {
-          if (!existsSync(lockPath)) {
-            renameSync(staleClaim, lockPath);
-            syncParent(lockPath);
-          }
-          throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
-        }
-        if (staleProof.abandonedOperationIds.length !== 0) {
-          if (!existsSync(lockPath)) {
-            renameSync(staleClaim, lockPath);
-            syncParent(lockPath);
-          }
-          throw new Error("RECLAIM_GATE_STALE_PROOF_MISMATCH");
-        }
-        rmSync(staleClaim, { recursive: true, force: false });
+        writeLockOwner(join(candidate, "owner.json"), owner);
+        renameSync(candidate, lockPath);
         syncParent(lockPath);
-      } else if (existsSync(lockPath)) {
-        throw new Error("RECLAIM_GATE_LOCKED");
+      } catch (error) {
+        rmSync(candidate, { recursive: true, force: true });
+        if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
+          throw new Error("RECLAIM_GATE_LOCKED");
+        }
+        throw error;
       }
-    }
-    const candidate = `${lockPath}.candidate-${process.pid}-${randomUUID()}`;
-    mkdirSync(candidate, { recursive: false });
-    try {
-      writeLockOwner(join(candidate, "owner.json"), owner);
-      renameSync(candidate, lockPath);
-      syncParent(lockPath);
-    } catch (error) {
-      rmSync(candidate, { recursive: true, force: true });
-      if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error?.code)) {
-        throw new Error("RECLAIM_GATE_LOCKED");
-      }
-      throw error;
     }
     return () => {
       if (!existsSync(lockPath)) return;
@@ -275,8 +259,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       lock: join(runDir, "engine.lock"),
       lockOwner: join(runDir, "engine.lock", "owner.json"),
       reclaimLock: join(runDir, "engine-reclaim.lock"),
-      operationRoot: runDir,
-      operationPrefix: "engine-operation",
+      operationRoot: join(runDir, "engine.lock"),
+      operationPrefix: "operation",
     };
   };
 
@@ -288,9 +272,27 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       lock,
       owner: join(lock, "owner.json"),
       reclaimLock: join(closeWritersRoot, `${targetKey}.reclaim.lock`),
-      operationRoot: closeWritersRoot,
-      operationPrefix: `${targetKey}.operation`,
+      operationRoot: lock,
+      operationPrefix: "operation",
     };
+  };
+
+  const retireLease = ({ paths, kind, runId, target, generation }) => {
+    const retirement = `${paths.lock}.release-${generation}`;
+    renameSync(paths.lock, retirement);
+    syncParent(paths.lock);
+    const retired = readLockOwner(join(retirement, "owner.json"), kind);
+    if (retired.runId !== runId || retired.target !== target
+      || retired.coordinatorInstanceId !== coordinatorInstanceId
+      || retired.generation !== generation) {
+      if (!existsSync(paths.lock)) {
+        renameSync(retirement, paths.lock);
+        syncParent(paths.lock);
+      }
+      throw new Error("LOCK_LEASE_FENCED");
+    }
+    rmSync(retirement, { recursive: true, force: false });
+    syncParent(paths.lock);
   };
 
   const installLease = ({ paths, owner, lockedError, preflight, postflight }) => {
@@ -315,8 +317,13 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
           || current.generation !== owner.generation || current.target !== owner.target) {
           throw new Error("LOCK_LEASE_FENCED");
         }
-        rmSync(paths.lock, { recursive: true, force: false });
-        syncParent(paths.lock);
+        retireLease({
+          paths,
+          kind: owner.kind,
+          runId: owner.runId,
+          target: owner.target,
+          generation: owner.generation,
+        });
         throw new Error(after);
       }
       return owner.generation;
@@ -370,7 +377,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       return operation();
     } finally {
       rmSync(marker, { recursive: true, force: true });
-      syncDirectory(paths.operationRoot);
+      syncDirectory(existsSync(paths.operationRoot) ? paths.operationRoot : dirname(paths.operationRoot));
     }
   };
 
@@ -614,9 +621,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       release() {
         requireActive();
         return withLease({ paths, kind: "engine", runId, generation }, () => {
-          unlinkSync(paths.lockOwner);
-          rmdirSync(paths.lock);
-          syncDirectory(paths.runDir);
+          retireLease({ paths, kind: "engine", runId, generation });
           active = false;
         });
       },
@@ -770,9 +775,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       release() {
         if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
         return withLease({ paths, kind: "close", target, runId, generation }, () => {
-          unlinkSync(paths.owner);
-          rmdirSync(paths.lock);
-          syncDirectory(closeWritersRoot);
+          retireLease({ paths, kind: "close", target, runId, generation });
           active = false;
         });
       },
