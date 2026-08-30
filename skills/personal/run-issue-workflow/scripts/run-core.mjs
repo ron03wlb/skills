@@ -116,6 +116,25 @@ const publicRun = (run, state, maxParallel = 3) => ({
   controlCommand: isRecord(run) && CONTROL_COMMANDS.includes(run.controlCommand) ? run.controlCommand : null,
 });
 
+const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationCount = 0 }) => ({
+  issueId: node.issueId,
+  blockers: Array.isArray(node.blockers) ? [...node.blockers] : [],
+  state,
+  task: {
+    ref: isRecord(dispatch?.taskRef) ? { ...dispatch.taskRef } : null,
+    state: isText(node.taskState) ? node.taskState : "UNKNOWN",
+    attempt: Number.isInteger(dispatch?.attempt) ? dispatch.attempt : 0,
+    retryCount,
+    remediationCount,
+  },
+  close: {
+    completionState: isText(node.completionState) ? node.completionState : "UNKNOWN",
+    candidateReachable: typeof node.candidateReachable === "boolean" ? node.candidateReachable : null,
+    worktreeState: isText(node.worktreeState) ? node.worktreeState : "UNKNOWN",
+    trackerState: isText(node.trackerState) ? node.trackerState : "UNKNOWN",
+  },
+});
+
 const blockedResult = (input, reasonCode, evidence, affectedNodes = []) => {
   const allNodes = Array.isArray(input?.nodes)
     ? [...new Set(input.nodes.filter(isRecord).map(({ issueId }) => issueId).filter(isText))].sort(compareIds)
@@ -124,7 +143,10 @@ const blockedResult = (input, reasonCode, evidence, affectedNodes = []) => {
   return {
     schema: STATUS_SCHEMA,
     run: publicRun(input?.run, "BLOCKED"),
-    nodes: allNodes.map((issueId) => ({ issueId, blockers: [], state: "BLOCKED" })),
+    nodes: allNodes.map((issueId) => publicNode({
+      node: input.nodes.find((candidate) => candidate?.issueId === issueId),
+      state: "BLOCKED",
+    })),
     frontier: { ready: [], active: [], closeable: [] },
     legalActions: [],
     legalControls: ["STOP", "REFRESH"],
@@ -256,6 +278,9 @@ export function reduceRun(input) {
     .map((node) => ({ ...node, blockers: [...node.blockers].sort(compareIds) }));
   const allNodeIds = normalizedNodes.map(({ issueId }) => issueId);
   const dispatchAttemptsByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
+  const latestDispatchByIssue = new Map();
+  const retryCountByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
+  const remediationCountByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
   const remediationCyclesByIssueAndFingerprint = new Map();
   for (const event of input.journal) {
     if (event.type === "dispatch.recorded" && dispatchAttemptsByIssue.has(event.issueId)) {
@@ -263,6 +288,10 @@ export function reduceRun(input) {
         event.issueId,
         Math.max(dispatchAttemptsByIssue.get(event.issueId), event.attempt ?? 0),
       );
+      latestDispatchByIssue.set(event.issueId, event);
+    }
+    if (event.type === "retry.recorded" && retryCountByIssue.has(event.issueId)) {
+      retryCountByIssue.set(event.issueId, retryCountByIssue.get(event.issueId) + 1);
     }
     if (event.type === "remediation.recorded") {
       const key = `${event.issueId}\0${event.fingerprint}`;
@@ -270,6 +299,9 @@ export function reduceRun(input) {
         key,
         Math.max(remediationCyclesByIssueAndFingerprint.get(key) ?? 0, event.cycle ?? 0),
       );
+      if (remediationCountByIssue.has(event.issueId)) {
+        remediationCountByIssue.set(event.issueId, remediationCountByIssue.get(event.issueId) + 1);
+      }
     }
   }
   const byId = new Map(normalizedNodes.map((node) => [node.issueId, node]));
@@ -310,10 +342,12 @@ export function reduceRun(input) {
     return state;
   };
 
-  const nodes = normalizedNodes.map(({ issueId, blockers }) => ({
-    issueId,
-    blockers,
-    state: deriveState(issueId),
+  const nodes = normalizedNodes.map((node) => publicNode({
+    node,
+    state: deriveState(node.issueId),
+    dispatch: latestDispatchByIssue.get(node.issueId),
+    retryCount: retryCountByIssue.get(node.issueId),
+    remediationCount: remediationCountByIssue.get(node.issueId),
   }));
   failedDependencyDiagnoses.sort((left, right) => compareIds(left.affectedNodes[0], right.affectedNodes[0]));
   const nodeDiagnoses = normalizedNodes.flatMap((node) => {

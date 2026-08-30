@@ -150,6 +150,76 @@ test("the same normalized evidence yields the same ready frontier", () => {
   assert.equal(defaulted.legalActions.length, 3);
 });
 
+test("the status projection carries panel task and close evidence", () => {
+  const journal = [
+    grant,
+    dispatchEvent("13", 1, 2),
+    retryEvent("13", 1, 3),
+    dispatchEvent("13", 2, 4),
+    {
+      schema: "dag-run-event:v1",
+      sequence: 5,
+      type: "remediation.recorded",
+      at: "2026-08-30T00:05:00.000Z",
+      issueId: "13",
+      fingerprint: "windows:loopback",
+      cycle: 1,
+      adapter: "gradle-loopback-safe",
+    },
+  ];
+  const status = reduceRun({
+    ...facts([
+      { ...node("13"), taskState: "EXECUTING", worktreeState: "PRESENT" },
+      {
+        ...node("14"),
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "PRESENT",
+      },
+    ]),
+    journal,
+  });
+
+  assert.deepEqual(status.nodes, [
+    {
+      issueId: "13",
+      blockers: [],
+      state: "EXECUTING",
+      task: {
+        ref: { threadId: "thread-13", hostId: "local" },
+        state: "EXECUTING",
+        attempt: 2,
+        retryCount: 1,
+        remediationCount: 1,
+      },
+      close: {
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+        trackerState: "OPEN",
+      },
+    },
+    {
+      issueId: "14",
+      blockers: [],
+      state: "CLOSING",
+      task: {
+        ref: null,
+        state: "NONE",
+        attempt: 0,
+        retryCount: 0,
+        remediationCount: 0,
+      },
+      close: {
+        completionState: "COMPLETE",
+        candidateReachable: true,
+        worktreeState: "PRESENT",
+        trackerState: "OPEN",
+      },
+    },
+  ]);
+});
+
 test("node lifecycle follows task, completion, Git, worktree, and tracker evidence", () => {
   const singleFacts = (nodeFacts, journal = [grantFor()]) => ({
     schema: "dag-run-facts:v1",
