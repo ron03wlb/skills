@@ -416,6 +416,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
+  assert.match(execute, /Execution never[^.\n]+; the human or (?:a )?coordinator holding.*valid.*DAG Run Grant separately invokes `\/close-issue`/iu);
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
 
   const close = read("skills/engineering/close-issue/SKILL.md");
