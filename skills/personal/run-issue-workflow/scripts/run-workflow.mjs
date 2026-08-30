@@ -35,6 +35,16 @@ export function createWorkflowRuntime({
       if (active) throw new Error("WORKFLOW_RUNTIME_ALREADY_ACTIVE");
       active = true;
       let panelState = { opened: false, closed: false, origin: null };
+      let cleanupPreview = null;
+      let cleanupResult = null;
+      const inspectCleanup = async (selectedRequest, apply) => {
+        const runs = await cleanup.listRuns({ request: selectedRequest });
+        const cleanupAt = now();
+        cleanupPreview = store.previewCleanup({ now: cleanupAt, runs });
+        cleanupResult = apply && selectedRequest.cleanupPreview !== true
+          ? store.applyCleanup({ now: cleanupAt, runs })
+          : null;
+      };
       const panel = {
         async open({ readStatus, appendEvent, rebuildStatus }) {
           const waiters = [];
@@ -85,17 +95,13 @@ export function createWorkflowRuntime({
         leaf,
         environment,
         panel,
+        onSelected: (selectedRequest) => inspectCleanup(selectedRequest, true),
         now,
         sleep,
       });
       try {
-        const runs = await cleanup.listRuns({ request });
-        const cleanupAt = now();
-        const cleanupPreview = store.previewCleanup({ now: cleanupAt, runs });
-        const cleanupResult = request.cleanupPreview === true
-          ? null
-          : store.applyCleanup({ now: cleanupAt, runs });
         const status = await coordinator.run(request);
+        if (cleanupPreview === null) await inspectCleanup(request, false);
         const journal = status.run.runId ? store.readEvents(status.run.runId) : [];
         return {
           status,

@@ -1281,13 +1281,13 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /`run-workflow\.mjs`.*single composition.*first valid.*status projection.*opens.*panel.*without a second Start/isu);
   assert.match(skill, /Pause.*Resume.*Stop.*same active engine writer.*Refresh.*read-only/isu);
   assert.match(skill, /paused coordinator.*same bridge active.*Resume.*Stop.*same panel/isu);
-  assert.match(skill, /explicit invocation.*cleanup preview.*applies.*terminal-Run sweep.*cleanupPreview: true.*without deletion/isu);
+  assert.match(skill, /exact explicit.*unique no-argument selection.*cleanup preview.*applies.*terminal-Run sweep.*Zero or ambiguous.*only.*preview.*no cleanup mutation.*cleanupPreview: true.*without deletion/isu);
   assert.match(skill, /bridge.*closes.*status.*journal.*cleanup preview.*cleanup result.*inspectable/isu);
   assert.match(skill, /panel-open failure.*panel_unavailable/isu);
   assert.match(operator, /GRILL.*Spec.*`\/to-tickets`.*`\/run-issue-workflow <main Issue>`/isu);
   assert.match(operator, /Single-Issue.*Multi-Issue.*no-argument.*unique non-terminal Run/isu);
   assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
-  assert.match(operator, /retention sweep.*cleanupPreview: true.*without deletion/isu);
+  assert.match(operator, /exact Run.*retention sweep.*Zero or ambiguous no-argument.*only previews.*cleanupPreview: true.*without deletion/isu);
   assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
   for (const name of ["status-succeeded", "status-diagnosed"]) {
     assert.equal(existsSync(`skills/personal/run-issue-workflow/examples/${name}.json`), true);

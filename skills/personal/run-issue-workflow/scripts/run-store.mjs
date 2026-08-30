@@ -650,6 +650,25 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const requireActive = () => {
       if (!active) throw new Error("RUN_WRITER_RELEASED");
     };
+    const persistStatus = (projection) => {
+      assertNoToken(projection);
+      if (projection?.schema !== STATUS_SCHEMA) throw new TypeError("Invalid status projection schema");
+      const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
+      try {
+        const descriptor = openSync(temporary, "wx");
+        try {
+          writeAll(descriptor, `${JSON.stringify(projection, null, 2)}\n`);
+          fsyncSync(descriptor);
+        } finally {
+          closeSync(descriptor);
+        }
+        renameSync(temporary, paths.status);
+        syncParent(paths.status);
+      } finally {
+        if (existsSync(temporary)) unlinkSync(temporary);
+      }
+      return projection;
+    };
 
     return {
       append(eventDraft) {
@@ -675,23 +694,16 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
         return withLease({ paths, kind: "engine", runId, generation }, () => {
           assertNoToken(currentFacts);
           const projection = reduceRun({ ...currentFacts, journal: readEvents(runId) });
-          assertNoToken(projection);
-          const temporary = `${paths.status}.tmp-${process.pid}-${randomUUID()}`;
-          try {
-            const descriptor = openSync(temporary, "wx");
-            try {
-              writeAll(descriptor, `${JSON.stringify(projection, null, 2)}\n`);
-              fsyncSync(descriptor);
-            } finally {
-              closeSync(descriptor);
-            }
-            renameSync(temporary, paths.status);
-            syncParent(paths.status);
-          } finally {
-            if (existsSync(temporary)) unlinkSync(temporary);
-          }
-          return projection;
+          return persistStatus(projection);
         });
+      },
+
+      publishStatus(projection) {
+        requireActive();
+        return withLease(
+          { paths, kind: "engine", runId, generation },
+          () => persistStatus(projection),
+        );
       },
 
       release() {

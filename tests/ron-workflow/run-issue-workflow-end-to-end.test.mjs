@@ -278,6 +278,69 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
   }
 });
 
+test("end-to-end paused Run accepts Stop from the same panel", async () => {
+  const { root, store } = createStoreFixture();
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  let stopFlow;
+  let panelOpens = 0;
+  const forbidden = async () => { throw new Error("paused Stop permits no task action"); };
+  const tasks = {
+    findIssueLane: forbidden,
+    create: forbidden,
+    read: forbidden,
+    message: forbidden,
+    wait: forbidden,
+  };
+  const browser = {
+    async open(panelUrl) {
+      panelOpens += 1;
+      const url = new URL(panelUrl);
+      const headers = { authorization: `Bearer ${url.searchParams.get("token")}` };
+      const pause = await fetch(`${url.origin}/api/control/pause`, { method: "POST", headers });
+      assert.equal(pause.status, 200);
+      stopFlow = (async () => {
+        while (true) {
+          const current = await fetch(`${url.origin}/api/status`, { headers }).then((response) => response.json());
+          if (current.run.state === "PAUSED") break;
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+        const stop = await fetch(`${url.origin}/api/control/stop`, { method: "POST", headers });
+        assert.equal(stop.status, 200);
+      })();
+    },
+  };
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
+      tasks,
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser,
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-08-30T09:30:00.000Z",
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: "17" });
+    await stopFlow;
+
+    assert.equal(result.status.run.state, "STOPPED");
+    assert.equal(panelOpens, 1);
+    assert.deepEqual(result.journal
+      .filter(({ type }) => type === "control.revised")
+      .map(({ command }) => command), ["PAUSE", "STOP"]);
+    assert.equal(result.journal.filter(({ type }) => type === "stop.transitioned").length, 1);
+    assert.equal(result.panel.closed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("end-to-end Multi-Issue runtime releases blockers and closes the parent last", async () => {
   const { root, store } = createStoreFixture();
   const nodes = new Map([
@@ -586,6 +649,7 @@ test("end-to-end tracker exhaustion returns a stable diagnosis without opening a
 
 test("end-to-end panel open loss returns a stable diagnosis and retained inspection", async () => {
   const { root, store } = createStoreFixture();
+  let controlCredential;
   const model = {
     trackerState: "OPEN",
     taskState: "NONE",
@@ -607,7 +671,12 @@ test("end-to-end panel open loss returns a stable diagnosis and retained inspect
       tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
       tasks,
       reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
-      browser: { async open() { throw new Error("panel host unavailable"); } },
+      browser: {
+        async open(panelUrl) {
+          controlCredential = new URL(panelUrl).searchParams.get("token");
+          throw new Error(`panel host unavailable at ${panelUrl}`);
+        },
+      },
       cleanup: { async listRuns() { return []; } },
       now: () => "2026-08-30T12:30:00.000Z",
       sleep: async () => {},
@@ -617,13 +686,17 @@ test("end-to-end panel open loss returns a stable diagnosis and retained inspect
 
     assert.equal(result.status.run.state, "BLOCKED");
     assert.equal(diagnosis.reasonCode, "panel_unavailable");
-    assert.match(diagnosis.evidence.join(" "), /panel host unavailable/u);
+    assert.deepEqual(diagnosis.evidence, ["The Run panel failed to open or remain available."]);
     assert.deepEqual(diagnosis.affectedNodes, ["17"]);
     assert.equal(diagnosis.nextOwner, "human");
     assert.deepEqual(diagnosis.resumePredicates, ["panel_can_open"]);
     assert.equal(result.panel.opened, true);
     assert.equal(result.panel.closed, true);
     assert.ok(result.panel.origin.startsWith("http://127.0.0.1:"));
+    assert.equal(JSON.stringify(result).includes(controlCredential), false);
+    assert.deepEqual(store.readStatus(identity.runId), result.status);
+    assert.equal(JSON.stringify(store.readStatus(identity.runId)).includes(controlCredential), false);
+    assert.equal(JSON.stringify(store.readEvents(identity.runId)).includes(controlCredential), false);
     assert.equal(store.readWriterLock(identity.runId), null);
     assert.equal(result.journal.filter(({ type }) => type === "dispatch.recorded").length, 0);
   } finally {
@@ -677,6 +750,9 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
       store,
       tracker: { async read() { return { issueId: "17", state: "OPEN" }; } },
       tasks,
+      selector: {
+        async listNonTerminalRuns() { return []; },
+      },
       reconcile: async ({ journal }) => singleRunCurrent({
         journal,
         model,
@@ -687,6 +763,12 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
       now: () => evaluatedAt,
       sleep: async () => {},
     });
+
+    const unselected = await runtime.run({});
+    assert.equal(unselected.status.diagnoses[0].reasonCode, "run_selection_required");
+    assert.deepEqual(unselected.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);
+    assert.equal(unselected.cleanupResult, null);
+    assert.equal(existsSync(oldestRunDir), true);
 
     const previewed = await runtime.run({ specId: "17", cleanupPreview: true });
     assert.deepEqual(previewed.cleanupPreview.eligible.map(({ runId }) => runId), ["terminal-10"]);

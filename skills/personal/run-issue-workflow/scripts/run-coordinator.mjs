@@ -237,9 +237,9 @@ const environmentUnresolved = (status, action) => diagnosedStop(status, {
   resumePredicates: ["environment_changed_or_human_resolution"],
 });
 
-const panelUnavailable = (status, error) => diagnosedStop(status, {
+const panelUnavailable = (status) => diagnosedStop(status, {
   reasonCode: "panel_unavailable",
-  evidence: [`The Run panel is unavailable: ${isText(error?.message) ? error.message : "unknown panel error"}.`],
+  evidence: ["The Run panel failed to open or remain available."],
   noAutomaticTransition: "The required Run panel must open before workflow actions continue.",
   affectedNodes: status.nodes
     .filter(({ state }) => state !== "SUCCEEDED")
@@ -276,7 +276,19 @@ const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
   return null;
 };
 
-export function createCoordinator({ store, tracker, tasks, selector, reconcile, leaf, environment, panel, now, sleep }) {
+export function createCoordinator({
+  store,
+  tracker,
+  tasks,
+  selector,
+  reconcile,
+  leaf,
+  environment,
+  panel,
+  onSelected,
+  now,
+  sleep,
+}) {
   for (const method of [
     "readEvents",
     "acquireWriter",
@@ -289,6 +301,9 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
   if (panel) {
     requireMethod(panel, "open");
     requireMethod(store, "readStatus");
+  }
+  if (onSelected !== undefined && typeof onSelected !== "function") {
+    throw new TypeError("Coordinator onSelected must be a function");
   }
   if (typeof reconcile !== "function") throw new TypeError("Coordinator requires reconcile()");
   if (typeof now !== "function") throw new TypeError("Coordinator requires now()");
@@ -579,6 +594,7 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
           };
         }
       }
+      if (onSelected) await onSelected(selectedRequest);
       let runIdentity;
       let writer;
       let grantRecorded = false;
@@ -588,6 +604,10 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
       const rebuildStatus = (facts) => {
         latestFacts = facts;
         return writer.rebuildStatus(facts);
+      };
+      const publishPanelStop = (status) => {
+        requireMethod(writer, "publishStatus");
+        return writer.publishStatus(panelUnavailable(status));
       };
       const openPanel = async (status) => {
         if (!panel || panelHandle) return null;
@@ -601,8 +621,8 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
           requireMethod(opened, "close");
           panelHandle = opened;
           return null;
-        } catch (error) {
-          return panelUnavailable(status, error);
+        } catch {
+          return publishPanelStop(status);
         }
       };
       try {
@@ -684,8 +704,8 @@ export function createCoordinator({ store, tracker, tasks, selector, reconcile, 
             if (lastStatus.run.state === "PAUSED" && typeof panelHandle?.waitForControl === "function") {
               try {
                 await panelHandle.waitForControl(lastStatus.run.controlRevision);
-              } catch (error) {
-                return panelUnavailable(lastStatus, error);
+              } catch {
+                return publishPanelStop(lastStatus);
               }
               continue;
             }
