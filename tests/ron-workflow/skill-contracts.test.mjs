@@ -422,6 +422,9 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(closeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(close, /direct human invocation.*valid.*DAG Run Grant.*without.*per-Issue.*approval/isu);
   assert.match(close, /never creates.*DAG Run Grant/iu);
+  assert.match(close, /coordinator.*Single-Issue.*target.*bound Spec.*Multi-Issue.*Executable Issue.*exact Issue.*mapping.*parent-only.*target.*bound Spec/isu);
+  assert.match(close, /absent from.*mapping.*stop before mutation/isu);
+  assert.match(read("docs/engineering/close-issue.md"), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
   assert.match(close, /one `close-issue` writer per Issue target branch.*human.*authorized coordinator/isu);

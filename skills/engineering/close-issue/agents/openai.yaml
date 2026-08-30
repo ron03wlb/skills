@@ -1,4 +1,4 @@
 interface:
   display_name: "Close Issue"
   short_description: "Close one human- or DAG-authorized Issue"
-  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant, then resume the exact idempotent merge, worktree removal, and tracker closure path without widening authority."
+  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant bound to the exact Issue or parent, then resume the idempotent merge, worktree removal, and tracker closure path without widening authority."
