@@ -397,7 +397,9 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(executeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(execute, /direct human invocation.*valid.*DAG Run Grant.*without.*per-Issue.*approval/isu);
   assert.match(execute, /coordinator.*read-back.*DAG Run Grant.*exact.*linked Spec.*Issue target branch.*classification.*scope.*Decomposition publication record/isu);
+  assert.match(execute, /Single-Issue.*coordinator target.*exact bound Spec.*outsider.*stops? before.*worktree.*mutation/isu);
   assert.match(execute, /missing.*stale.*mismatch.*Grant.*stops? before.*worktree.*mutation/isu);
+  assert.match(read("docs/engineering/execute-issue.md"), /Single-Issue.*exact bound Spec.*Multi-Issue.*exact mapping member/isu);
   assert.match(execute, /never creates.*DAG Run Grant/iu);
   assert.match(execute, /dedicated Git worktree/iu);
   assert.match(execute, /linked Spec/iu);
