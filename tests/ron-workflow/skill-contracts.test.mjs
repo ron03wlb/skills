@@ -420,6 +420,47 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
 });
 
 
+test("record-closed-issue-reconciliation is exact, immutable, and model-invoked", () => {
+  const name = "record-closed-issue-reconciliation";
+  const skill = read(`skills/engineering/${name}/SKILL.md`);
+  const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
+  const docs = read(`docs/engineering/${name}.md`);
+
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(skill, /^description:.*Use when \/verify-target-before-push/mu);
+  assert.match(skill, /active `\/verify-target-before-push` recovery.*exact human-confirmed packet/isu);
+  assert.match(metadata, /handed off by \/verify-target-before-push.*exact human confirmation/isu);
+  assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(docs, /## Prerequisites.*configured Issue tracker.*active.*verify-target-before-push.*complete.*draft.*human.*confirmed/isu);
+
+  assert.match(skill, /confirmed packet.*affected Issue.*completion-note identity.*Issue target branch.*execution baseline.*candidate.*diagnostic fingerprint.*remedy Issue.*completion-note identity.*candidate.*complete tracker comment draft/isu);
+  assert.match(skill, /affected Issue.*closed.*sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable from.*target.*not.*baseline.*worktree.*absent/isu);
+  assert.match(skill, /diagnostic fingerprint.*command.*exit code.*failure count.*ordered failure identities.*source locators.*assertion or error identities/isu);
+  assert.match(skill, /clean temporary worktrees.*exact affected baseline.*candidate.*identical.*fingerprint.*no additional candidate failure/isu);
+  assert.match(skill, /exactly one closed remedy Issue.*explicitly own.*complete correction.*valid passing completion.*candidate.*reachable.*same.*target/isu);
+  assert.match(skill, /before mutation.*affected.*remedy.*completion.*target.*refs.*diagnostics.*drift.*stops without writing/isu);
+
+  assert.match(skill, /reuse one exact matching.*closed_issue_evidence_reconciliation:v1.*without.*duplicate/isu);
+  assert.match(skill, /append.*affected closed Issue.*read.*back once/isu);
+  assert.match(skill, /malformed.*duplicate.*edited.*conflicting.*drifting.*unavailable.*partial.*ambiguous.*stops/isu);
+  assert.match(skill, /closed_issue_evidence_reconciliation:v1\s+affected:\s+issue: <affected Issue ID>\s+completion: <immutable completion-note identity>\s+target: <Issue target branch>\s+baseline: <full execution baseline SHA>\s+candidate: <full affected candidate SHA>\s+diagnostic:\s+command: <exact failed command>\s+exit_code: <non-zero integer>\s+failure_count: 1\s+failures:\s+- identity: <failure identity>\s+source: <source locator>\s+error: <assertion or error identity>\s+remedy:\s+issue: <remedy Issue ID>\s+completion: <immutable completion-note identity>\s+candidate: <full remedy candidate SHA>\s+authorized_by: human\s+statement: authorized for exact-target verification only/isu);
+  assert.match(skill, /record contains only.*affected.*diagnostic.*remedy.*authorized_by.*statement/isu);
+  assert.match(skill, /aggregate.*`B`.*`V`.*current verification results.*push readiness.*full logs.*output hashes.*worktree paths.*absent/isu);
+  assert.match(skill, /never.*edit.*delete.*tracker history.*reopen.*attest-target-contribution.*implementation_complete.*review.*verification.*readiness.*push.*deploy/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /record-closed-issue-reconciliation.*immutable.*closed Issue.*evidence/iu);
+  }
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.equal(plugin.skills.includes("./skills/engineering/record-closed-issue-reconciliation"), true);
+  assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
+  assert.match(docs, /## What it does/u);
+  assert.match(docs, /## When to reach for it/u);
+  assert.match(docs, /## Where it fits/u);
+});
+
+
 test("target coverage recovery is confirmation-gated and restarts aggregate verification", () => {
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");

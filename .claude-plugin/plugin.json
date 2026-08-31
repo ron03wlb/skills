@@ -36,6 +36,7 @@
     "./skills/engineering/execute-issue",
     "./skills/engineering/close-issue",
     "./skills/engineering/attest-target-contribution",
+    "./skills/engineering/record-closed-issue-reconciliation",
     "./skills/engineering/verify-target-before-push",
     "./skills/engineering/prototype",
     "./skills/engineering/research",
