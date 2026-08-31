@@ -484,6 +484,7 @@ test("daily-journal bounds active practice, recall, and Heptabase writes", () =>
   assert.match(skill, /highest-value.*`Your turn`.*repeat or vary.*one concise feedback.*at most one retry/isu);
   assert.match(skill, /Attach `Your turn` directly.*selected item.*other items.*without a practice prompt/isu);
   assert.match(skill, /`skip English today`.*journal.*complete/isu);
+  assert.match(skill, /`skip English today`.*skip only.*`Your turn`.*still present.*lesson.*later reading/isu);
   assert.match(skill, /practice artifact.*not.*score.*streak.*proficiency.*mastery/isu);
   assert.match(skill, /thirty-second recall.*most recent saved.*directly available.*skip.*broad search.*delay/isu);
   assert.match(skill, /Heptabase is the only persistence destination/iu);

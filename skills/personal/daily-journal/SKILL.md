@@ -37,7 +37,7 @@ Teach one learning point per sentence.
 
 ### Active practice
 
-Mark only the highest-value item as `Your turn`. Attach `Your turn` directly beneath that selected item; present the other items without a practice prompt. Ask the user to repeat or vary the selected sentence, give one concise feedback response, and allow at most one retry. If the user says `skip English today`, end the exercise while leaving the journal complete.
+Mark only the highest-value item as `Your turn`. Attach `Your turn` directly beneath that selected item; present the other items without a practice prompt. Ask the user to repeat or vary the selected sentence, give one concise feedback response, and allow at most one retry. If the user says `skip English today`, skip only the `Your turn` exchange; still present the selected lesson items for later reading while leaving the journal complete. Skip the whole lesson only when the user explicitly declines it.
 
 Treat the Micro-Lesson as a daily practice artifact, not a score, streak, proficiency label, or mastery record.
 
