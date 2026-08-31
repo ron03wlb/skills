@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Superpowers × Matt：整合速查表</title>
+    <link rel="stylesheet" href="../assets/lesson.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Reference · Current local versions</div>
+        <h1>Superpowers × Matt：整合速查表</h1>
+        <p class="lede">
+          用責任與 authority 比較，不用 skill 名稱比較。結論是「政策層包住工作流層」，
+          不是把兩條完整流程首尾相接。
+        </p>
+      </header>
+
+      <section>
+        <h2>系統級比較</h2>
+        <div class="wide-table">
+          <table>
+            <thead>
+              <tr>
+                <th>維度</th>
+                <th>Superpowers-derived（本機 13 個）</th>
+                <th>Matt promoted set（本 fork 22 個）</th>
+                <th>整合判斷</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>核心目的</td>
+                <td>以風險成比例的守門、授權、最小變更與證據紀律</td>
+                <td>把 idea、spec、tickets、implementation 與 tracker 串成可組合流程</td>
+                <td><span class="decision">上下層並存</span></td>
+              </tr>
+              <tr>
+                <td>Router</td>
+                <td><code>using-superpowers</code>；每次對話自動分級</td>
+                <td><code>ask-matt</code>；使用者主動詢問或選 slash command</td>
+                <td>前者管政策，後者改造成你的 workflow router</td>
+              </tr>
+              <tr>
+                <td>Invocation</td>
+                <td>描述匹配時由 model 自動載入</td>
+                <td>明分 user-invoked orchestrator 與 model-invoked discipline</td>
+                <td>保留 Matt 的顯式入口設計，底層紀律自動化</td>
+              </tr>
+              <tr>
+                <td>需求釐清</td>
+                <td>只有 material ambiguity 才 <code>brainstorming</code></td>
+                <td>主流程建議每次 change 從 <code>grill-with-docs</code> 開始</td>
+                <td>採 Superpowers trigger；需要時執行 Matt 的深度 grilling</td>
+              </tr>
+              <tr>
+                <td>Domain knowledge</td>
+                <td>無固定 glossary / ADR workflow</td>
+                <td><code>CONTEXT.md</code>、ADR、<code>domain-modeling</code></td>
+                <td>由 Matt 負責；另接 reviewed Wiki 作業務基線</td>
+              </tr>
+              <tr>
+                <td>需求 authority</td>
+                <td>可建立 durable plan，但不定義 spec lifecycle</td>
+                <td><code>to-spec</code> 建立 change contract</td>
+                <td>Matt spec 唯一權威；plan 不得重述需求</td>
+              </tr>
+              <tr>
+                <td>分工與依賴</td>
+                <td>outcome tracking，無 issue graph</td>
+                <td>tracer-bullet tickets、blocking edges、frontier</td>
+                <td>多 session 工作用 Matt <code>to-tickets</code></td>
+              </tr>
+              <tr>
+                <td>大型未知工作</td>
+                <td>無專用 discovery map</td>
+                <td><code>wayfinder</code> 以 decision tickets 清除 fog</td>
+                <td>保留，但只用於一個 session 無法看清路線的工作</td>
+              </tr>
+              <tr>
+                <td>TDD</td>
+                <td>選擇性觸發、授權清楚、允許最強替代驗證</td>
+                <td>pre-agreed seams、public interface、vertical slice、反模式完整</td>
+                <td>合併成一個 TDD skill</td>
+              </tr>
+              <tr>
+                <td>Debugging</td>
+                <td>先 reproduce、可證偽假設、最小 fix；診斷與實作分權</td>
+                <td>tight red-capable loop、minimise、3–5 hypotheses、instrument、post-mortem</td>
+                <td>合併；Matt 提供深度，Superpowers 提供授權與停止條件</td>
+              </tr>
+              <tr>
+                <td>Outgoing review</td>
+                <td>只在 requested 或 material risk 時獨立 review</td>
+                <td>每次 implement 後做 Standards + Spec 雙軸 review</td>
+                <td>採風險觸發；完整 Issue 用 Standards + Spec + Wiki 三軸</td>
+              </tr>
+              <tr>
+                <td>Incoming review</td>
+                <td><code>receiving-code-review</code> 驗證 feedback，不盲從</td>
+                <td>沒有同等獨立流程</td>
+                <td>保留 Superpowers 能力</td>
+              </tr>
+              <tr>
+                <td>Verification</td>
+                <td>claim-to-evidence、later mutation 只使相關證據失效</td>
+                <td>focused checks、full suite、code review</td>
+                <td>Superpowers 是完成宣稱的底層 gate</td>
+              </tr>
+              <tr>
+                <td>Delivery / cleanup</td>
+                <td>commit、push、merge、PR、worktree 各自需要 authority</td>
+                <td><code>implement</code> 結尾直接 commit；無完整 Issue closeout</td>
+                <td>以 <code>finish-issue</code> 統一收尾且分離 proof states</td>
+              </tr>
+              <tr>
+                <td>持久產物</td>
+                <td>必要時 plan / log；不要求 tracker</td>
+                <td>CONTEXT、ADR、spec、tickets、tracker、handoff</td>
+                <td>以 tracker/spec 為主；log 只補 consequential audit</td>
+              </tr>
+              <tr>
+                <td>主要成本</td>
+                <td>規則短，但觸發正確性依賴 model description</td>
+                <td>入口多、setup 重、使用者要記得路由與 tracker 狀態</td>
+                <td>縮減 user-facing 入口，保留底層專業能力</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>責任分配：保留、合併、降級</h2>
+        <div class="grid">
+          <article class="card role-super">
+            <h3>保留 Superpowers owner</h3>
+            <p>
+              <span class="tag">risk classification</span>
+              <span class="tag">authority</span>
+              <span class="tag">claim-to-evidence</span>
+              <span class="tag">worktree safety</span>
+              <span class="tag">incoming review</span>
+              <span class="tag">branch finishing</span>
+            </p>
+          </article>
+          <article class="card role-matt">
+            <h3>保留 Matt owner</h3>
+            <p>
+              <span class="tag">domain language</span>
+              <span class="tag">grilling</span>
+              <span class="tag">spec</span>
+              <span class="tag">tickets</span>
+              <span class="tag">triage</span>
+              <span class="tag">wayfinder</span>
+              <span class="tag">handoff</span>
+              <span class="tag">deep modules</span>
+            </p>
+          </article>
+          <article class="card role-own">
+            <h3>必須合併或改寫</h3>
+            <p>
+              <span class="tag">brainstorm / grill trigger</span>
+              <span class="tag">TDD</span>
+              <span class="tag">debugging</span>
+              <span class="tag">outgoing review</span>
+              <span class="tag">implement</span>
+              <span class="tag">finish-issue</span>
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>你的推薦流程 v0.1</h2>
+        <div class="wide-table">
+          <table>
+            <thead>
+              <tr>
+                <th>階段</th>
+                <th>入口 / discipline</th>
+                <th>產物或通過條件</th>
+                <th>可跳過條件</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>0. Guard</td>
+                <td>自動 action / impact / risk 分級</td>
+                <td>授權、範圍、acceptance、需要的 gates</td>
+                <td>不可跳過；read-only 也要分類，但不增加流程</td>
+              </tr>
+              <tr>
+                <td>1. Preflight</td>
+                <td>讀 AGENTS、Wiki、CONTEXT、ADR、repo state</td>
+                <td>現況、限制、衝突、可安全假設</td>
+                <td>只可縮小讀取範圍</td>
+              </tr>
+              <tr>
+                <td>2. Shape</td>
+                <td><code>grill-with-docs</code>；巨大未知改走 <code>wayfinder</code></td>
+                <td>shared understanding、domain updates、重要決策</td>
+                <td>精確/mechanical 任務</td>
+              </tr>
+              <tr>
+                <td>3. Contract</td>
+                <td><code>to-spec</code></td>
+                <td>唯一 change contract，含 Wiki Context / override</td>
+                <td>單 session、低風險且 acceptance 已明確</td>
+              </tr>
+              <tr>
+                <td>4. Slice</td>
+                <td><code>to-tickets</code></td>
+                <td>vertical slices、blocking edges、approved granularity</td>
+                <td>一個 session 可完成</td>
+              </tr>
+              <tr>
+                <td>5. Execute</td>
+                <td><code>implement</code> + 合併後 TDD discipline</td>
+                <td>最小變更、focused red/green、proportionate checks</td>
+                <td>不可跳過實作驗證；TDD 可依變更型態替代</td>
+              </tr>
+              <tr>
+                <td>6. Review</td>
+                <td>Standards + Spec + Wiki；incoming feedback 另走 receiving review</td>
+                <td>三軸各自 verdict 與 actionable findings</td>
+                <td>mechanical 變更可只做 diff / policy checks</td>
+              </tr>
+              <tr>
+                <td>7. Verify</td>
+                <td>claim-to-evidence gate</td>
+                <td>每個 material claim 都有 fresh evidence</td>
+                <td>普通任務可內嵌於 scoped checks，不需獨立儀式</td>
+              </tr>
+              <tr>
+                <td>8. Finish</td>
+                <td><code>finish-issue</code></td>
+                <td>reconcile → merge → target verify → close → cleanup</td>
+                <td>只在不要求整合/關閉的 WIP 任務跳過</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>Authority 與 proof-state 速記</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>東西</th>
+              <th>它證明什麼</th>
+              <th>它不證明什麼</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Wiki</td>
+              <td>已審核的現況業務知識基線</td>
+              <td>本 Issue 想改什麼</td>
+            </tr>
+            <tr>
+              <td>Matt spec</td>
+              <td>本 Issue 的 change contract</td>
+              <td>程式已正確完成</td>
+            </tr>
+            <tr>
+              <td>Code / tests</td>
+              <td>實作與驗證 evidence</td>
+              <td>現存行為必然是正確 business truth</td>
+            </tr>
+            <tr>
+              <td>Review pass</td>
+              <td>固定 diff 對指定 axes 的審查結果</td>
+              <td>已 merge、已 close、已部署</td>
+            </tr>
+            <tr>
+              <td>Commit</td>
+              <td>變更已形成 Git snapshot</td>
+              <td>已進 target branch 或 remote</td>
+            </tr>
+            <tr>
+              <td>Merge + target verification</td>
+              <td>目標分支含變更且指定 checks 通過</td>
+              <td>remote / runtime 已更新</td>
+            </tr>
+            <tr>
+              <td>Push / deployment evidence</td>
+              <td>remote history / live runtime 的個別狀態</td>
+              <td>彼此不能互相替代</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>整合時的六條硬規則</h2>
+        <ol>
+          <li>一個 responsibility 只准有一個 owner。</li>
+          <li>自動 router 管風險；人工 router 管工作意圖，兩者不互相取代。</li>
+          <li>Matt spec 是唯一 change contract；高風險 plan 只能引用它。</li>
+          <li>同類 TDD、debug、outgoing review 各合併成一份，不保留兩套並列觸發。</li>
+          <li>Review、commit、merge、push、deployment 是不同 proof state。</li>
+          <li>Child 不更新 Wiki；Parent / Standalone 在完整 Issue 收尾時 reconciliation。</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Sources</h2>
+        <ul class="sources">
+          <li><a href="file:///Users/ron/.codex/skills/using-superpowers/SKILL.md">using-superpowers</a></li>
+          <li><a href="file:///Users/ron/.codex/skills/brainstorming/SKILL.md">brainstorming</a></li>
+          <li><a href="file:///Users/ron/.codex/skills/writing-plans/SKILL.md">writing-plans</a></li>
+          <li><a href="file:///Users/ron/.codex/skills/test-driven-development/SKILL.md">test-driven-development</a></li>
+          <li><a href="file:///Users/ron/.codex/skills/systematic-debugging/SKILL.md">systematic-debugging</a></li>
+          <li><a href="file:///Users/ron/.codex/skills/verification-before-completion/SKILL.md">verification-before-completion</a></li>
+          <li><a href="../skills/engineering/ask-matt/SKILL.md">ask-matt</a></li>
+          <li><a href="../skills/engineering/to-spec/SKILL.md">to-spec</a></li>
+          <li><a href="../skills/engineering/to-tickets/SKILL.md">to-tickets</a></li>
+          <li><a href="../skills/engineering/tdd/SKILL.md">Matt tdd</a></li>
+          <li><a href="../skills/engineering/diagnosing-bugs/SKILL.md">diagnosing-bugs</a></li>
+          <li><a href="../skills/engineering/code-review/SKILL.md">code-review</a></li>
+          <li><a href="../research/deep-wiki-matt-current-business-baseline-spec.md">既有 Wiki / finish-issue spec</a></li>
+        </ul>
+      </section>
+
+      <footer>
+        <a href="../lessons/0001-two-systems-one-workflow.html">← 回到第一課</a>
+      </footer>
+    </main>
+  </body>
+</html>

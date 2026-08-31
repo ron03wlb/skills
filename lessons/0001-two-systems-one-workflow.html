@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>第一課：兩套 skills，不是兩條流程</title>
+    <link rel="stylesheet" href="../assets/lesson.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Lesson 0001 · 約 10 分鐘</div>
+        <h1>兩套 skills，不是兩條流程</h1>
+        <p class="lede">
+          這堂課的 tangible win：你會得到一個不打架的心智模型，能把
+          Superpowers 與 Matt 放在不同層，而不是把同名 skills 全部串起來。
+        </p>
+        <p class="scope">
+          比較範圍是你目前本機的 13 個 Superpowers-derived Codex skills，以及
+          <code>/Users/ron/Documents/Workspace/skills</code> 這個 Matt fork 的 promoted skills。
+          不是對兩個品牌所有歷史版本的泛論。
+        </p>
+      </header>
+
+      <section>
+        <h2>先記住一句話</h2>
+        <div class="principle">
+          <strong>Superpowers 決定「怎樣做才安全可信」；Matt 決定「這件工作怎樣從想法走到交付」。</strong>
+        </div>
+
+        <div class="grid">
+          <article class="card role-super">
+            <h3>Superpowers：政策層</h3>
+            <p>
+              自動判斷 read-only、mechanical、standard、high-risk；守住授權、最小變更、
+              工作樹隔離、驗證與交付證據。
+            </p>
+          </article>
+          <article class="card role-matt">
+            <h3>Matt：工作流層</h3>
+            <p>
+              由人選擇入口，透過 grilling、spec、tickets、TDD、review 與 issue tracker，
+              把模糊想法轉成可執行工作。
+            </p>
+          </article>
+          <article class="card role-own">
+            <h3>你的流程：責任層</h3>
+            <p>
+              以 Superpowers 包住 Matt；Wiki 保存現況業務基線，Matt spec 保存 change
+              contract，code/tests 只保存實作證據。
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>為什麼不能直接相加？</h2>
+        <p>
+          兩套系統在五個地方重疊。如果沒有先指定 owner，agent 會產生重複訪談、重複 plan、
+          重複 TDD、重複 review，最後還可能把「已 commit」誤報成「已交付」。
+        </p>
+        <div class="wide-table">
+          <table>
+            <thead>
+              <tr>
+                <th>重疊點</th>
+                <th>Superpowers</th>
+                <th>Matt</th>
+                <th>你的 owner</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>需求釐清</td>
+                <td><code>brainstorming</code></td>
+                <td><code>grill-with-docs</code></td>
+                <td>精確任務跳過；重大模糊才 grill，並維護 domain docs</td>
+              </tr>
+              <tr>
+                <td>規劃</td>
+                <td><code>writing-plans</code></td>
+                <td><code>to-spec</code> / <code>to-tickets</code></td>
+                <td>Matt spec 是唯一 change contract；plan 只補高風險操作</td>
+              </tr>
+              <tr>
+                <td>執行</td>
+                <td><code>executing-plans</code></td>
+                <td><code>implement</code></td>
+                <td>Matt implement 主導 ticket；Superpowers 提供授權與證據紀律</td>
+              </tr>
+              <tr>
+                <td>TDD / Debug</td>
+                <td>選擇性、授權清楚</td>
+                <td>seam、vertical slice、tight loop 更完整</td>
+                <td>各合併成一個 skill，不保留兩個並列入口</td>
+              </tr>
+              <tr>
+                <td>Review / 完成</td>
+                <td>風險 review、claim-to-evidence、branch finish</td>
+                <td>Standards + Spec review，然後 commit</td>
+                <td>三軸 review，再由 <code>finish-issue</code> 分階段收尾</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>第一版整合流程</h2>
+        <p>綠色守門規則在每一步都存在，但只有藍色工作流需要你主動選入口。</p>
+        <div class="flow" aria-label="整合流程">
+          <span class="step">Risk / authority gate</span>
+          <span class="arrow">→</span>
+          <span class="step">Wiki + CONTEXT preflight</span>
+          <span class="arrow">→</span>
+          <span class="step">Grill if ambiguous</span>
+          <span class="arrow">→</span>
+          <span class="step">Spec if durable</span>
+          <span class="arrow">→</span>
+          <span class="step">Tickets if multi-session</span>
+          <span class="arrow">→</span>
+          <span class="step">Implement + TDD</span>
+          <span class="arrow">→</span>
+          <span class="step">3-axis review</span>
+          <span class="arrow">→</span>
+          <span class="step">Evidence gate</span>
+          <span class="arrow">→</span>
+          <span class="step">finish-issue</span>
+        </div>
+
+        <div class="warning">
+          <strong>最關鍵的刪減：</strong>小而精確的 standard task 不需要先 grill、寫 spec、拆 tickets。
+          它只需要明確 acceptance、最小實作、適當測試與證據。流程強度應由風險與跨 session
+          需求決定，不由「skill 存在」決定。
+        </div>
+      </section>
+
+      <section>
+        <h2>三個 retrieval prompts</h2>
+        <p>先在腦中回答，再展開。能答對，才算開始建立 storage strength。</p>
+
+        <details>
+          <summary>1. 為什麼 <code>writing-plans</code> 不能和 Matt spec 並列為需求權威？</summary>
+          <p>
+            因為同一變更若有兩份可獨立修改的需求文件，衝突時無法判斷哪份有效。Matt spec
+            應是 change contract；高風險 plan 只記執行順序、復原與驗證，並引用 spec。
+          </p>
+        </details>
+
+        <details>
+          <summary>2. 什麼任務應該跳過 <code>grill-with-docs</code>？</summary>
+          <p>
+            需求精確、repository evidence 足夠，而且不同解讀不會改變行為、範圍、架構或重要結果的任務。
+          </p>
+        </details>
+
+        <details>
+          <summary>3. Review 通過後，為什麼還不能說 Issue 完成？</summary>
+          <p>
+            Review 只證明 diff 的 Standards、Spec、Wiki 相容性。Merge preflight、baseline
+            reconciliation、target verification、Issue closure 與 worktree cleanup 都是獨立 proof state。
+          </p>
+        </details>
+      </section>
+
+      <section>
+        <h2>下一堂課前的小練習</h2>
+        <p>
+          請拿你最近的一個真實開發任務，只回答四個欄位：<strong>模糊度、規模、風險、完成邊界</strong>。
+          下一輪我們會用它測試這份流程是否能正確路由；若不能，先修流程，再寫 skills。
+        </p>
+      </section>
+
+      <section>
+        <h2>Primary sources</h2>
+        <ul class="sources">
+          <li>
+            <a href="file:///Users/ron/.codex/skills/using-superpowers/SKILL.md">using-superpowers</a>
+            — 本機 action / impact / risk router。
+          </li>
+          <li>
+            <a href="../skills/engineering/ask-matt/SKILL.md">ask-matt</a>
+            — 本機 Matt 完整 flow router；本課建議先讀這一份。
+          </li>
+          <li>
+            <a href="../research/deep-wiki-matt-current-business-baseline-spec.md">
+              Deep Wiki × Matt baseline spec
+            </a>
+            — 你已確認的 authority 與完整 Issue 收尾契約。
+          </li>
+        </ul>
+        <p>任何不清楚的地方，直接問 agent；教學會依你的回答調整下一堂課。</p>
+      </section>
+
+      <footer>
+        <a href="../reference/superpowers-vs-matt-workflow.html">開啟完整比較速查表 →</a>
+      </footer>
+    </main>
+  </body>
+</html>
