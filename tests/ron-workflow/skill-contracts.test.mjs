@@ -465,6 +465,19 @@ test("daily-journal is a model-invoked personal skill without promotion", () => 
   assert.equal(existsSync("docs/personal/daily-journal.md"), false);
 });
 
+test("daily-journal turns a completed reflection into an adaptive English micro-lesson", () => {
+  const skill = read("skills/personal/daily-journal/SKILL.md");
+
+  assert.match(skill, /simple English by default.*simpler English.*Traditional Chinese support/isu);
+  assert.match(skill, /hold corrections.*reflection is complete/isu);
+  assert.match(skill, /low-energy.*one sentence.*normally.*two.*three.*distinct/isu);
+  assert.match(skill, /Prioritize.*user's own English.*Chinese journal content.*recurring/isu);
+  assert.match(skill, /English source.*Original.*Natural English.*Traditional Chinese meaning.*Reusable pattern/isu);
+  assert.match(skill, /Chinese source.*omit.*Original.*Natural English.*Traditional Chinese meaning.*Reusable pattern/isu);
+  assert.match(skill, /one learning point per sentence/iu);
+  assert.match(skill, /no substantive detail.*no lesson.*invent/isu);
+});
+
 test("confirm-understanding requires a bounded evidence calibration before alignment", () => {
   const skill = read("skills/productivity/confirm-understanding/SKILL.md");
   const docs = read("docs/productivity/confirm-understanding.md");

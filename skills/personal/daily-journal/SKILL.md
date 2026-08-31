@@ -5,7 +5,7 @@ description: Run a voice-first daily reflection when the user asks to record the
 
 # Daily Journal
 
-Guide a short spoken reflection. Keep the user's meaning and voice; write the finished diary in natural English.
+Guide a short spoken reflection. Keep the user's meaning and voice; write the finished diary in natural English. Use simple English by default. If the user does not understand, restate once in simpler English, then offer Traditional Chinese support when needed.
 
 ## Reflection flow
 
@@ -22,9 +22,18 @@ Ask one section at a time and let the user finish speaking before responding. Ho
 
 After all three sections, give one compact English polish. Use plain, natural sentences. Mark an unsupplied detail as `to add` rather than inventing it.
 
-## English practice
+## Daily English Micro-Lesson
 
-After the completed entry, select one to three of the user's English sentences that offer the most useful improvement. For each, show the original sentence, a natural revision, and one short reason. Prioritize recurring grammar patterns and expressions the user is likely to reuse. If no correction is worthwhile, say so briefly.
+Build the lesson only after a substantive entry is complete. In low-energy mode, choose one sentence; normally choose two; use three only when each has distinct reuse value.
+
+Prioritize the user's own English that needs a natural correction, then useful English derived from important Chinese journal content, then a recurring pattern the user can reuse. If the entry has no substantive detail, produce no lesson rather than inventing material.
+
+Format each item according to its source:
+
+- **English source:** `Original` → `Natural English` → `Traditional Chinese meaning` → `Reusable pattern`.
+- **Chinese source:** omit `Original`; show `Natural English` → `Traditional Chinese meaning` → `Reusable pattern`.
+
+Teach one learning point per sentence.
 
 ## Saving to Heptabase
 
