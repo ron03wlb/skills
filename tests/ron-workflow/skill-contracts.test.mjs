@@ -435,7 +435,7 @@ test("record-closed-issue-reconciliation is exact, immutable, and model-invoked"
   assert.match(docs, /## Prerequisites.*configured Issue tracker.*active.*verify-target-before-push.*complete.*draft.*human.*confirmed/isu);
 
   assert.match(skill, /confirmed packet.*affected Issue.*completion-note identity.*Issue target branch.*execution baseline.*candidate.*diagnostic fingerprint.*remedy Issue.*completion-note identity.*candidate.*complete tracker comment draft/isu);
-  assert.match(skill, /affected Issue.*closed.*sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable from.*target.*not.*baseline.*worktree.*absent/isu);
+  assert.match(skill, /affected Issue.*closed.*sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable from.*target.*not reachable from.*baseline.*worktree.*absent/isu);
   assert.match(skill, /diagnostic fingerprint.*command.*exit code.*failure count.*ordered failure identities.*source locators.*assertion or error identities/isu);
   assert.match(skill, /clean temporary worktrees.*exact affected baseline.*candidate.*identical.*fingerprint.*no additional candidate failure/isu);
   assert.match(skill, /exactly one closed remedy Issue.*explicitly own.*complete correction.*valid passing completion.*candidate.*reachable.*same.*target/isu);
@@ -469,7 +469,7 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(verify, /after.*freeze.*member.*before.*ordinary completion-evidence rejection.*one.*closed affected Issue/isu);
-  assert.match(verify, /sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable.*`V`.*not.*`B`.*worktree.*absent/isu);
+  assert.match(verify, /sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable.*`V`.*not reachable.*`B`.*worktree.*absent/isu);
   assert.match(verify, /later valid completion.*invalidating evidence.*open Issue.*registered worktree.*coverage.*review.*additional historical failure.*ineligible/isu);
   assert.match(verify, /clean temporary worktrees.*exact.*baseline.*candidate.*command.*exit code.*failure count.*ordered failure identities.*source locators.*assertion or error identities/isu);
   assert.match(verify, /identical diagnostic fingerprint.*no additional candidate failure/isu);
@@ -506,7 +506,8 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
     target: "features/ron",
     baseline: "baseline-13",
     candidate: "candidate-13",
-    candidateReachable: true,
+    candidateReachableFromTarget: true,
+    candidateReachableFromBaseline: false,
     worktreeRegistered: false,
     completions: [{ id: "completion-13", otherwiseValid: true, nonPassingCommands: [fingerprint] }],
     laterValidCompletion: false,
@@ -531,8 +532,8 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
     const [completion] = candidate.completions;
     assert.equal(completion.otherwiseValid, true, "completion must be otherwise valid");
     assert.equal(completion.nonPassingCommands.length, 1, "completion needs exactly one non-passing command");
-    assert.equal(candidate.candidateReachable, true, "affected candidate must be reachable");
-    assert.notEqual(candidate.candidate, candidate.baseline, "candidate cannot equal baseline");
+    assert.equal(candidate.candidateReachableFromTarget, true, "affected candidate must be reachable from target");
+    assert.equal(candidate.candidateReachableFromBaseline, false, "affected candidate must not be reachable from baseline");
     assert.equal(candidate.worktreeRegistered, false, "affected worktree must be absent");
     assert.equal(candidate.laterValidCompletion, false, "later valid completion makes reconciliation ineligible");
     assert.equal(candidate.otherInvalidatingEvidence, false, "other invalidating evidence makes reconciliation ineligible");
@@ -564,6 +565,7 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
   };
   assert.deepEqual(reconcile(), { restart: "Entry", affectedCandidate: "candidate-13", remedyCandidate: "candidate-14" });
   assert.throws(() => reconcile({ candidate: { ...affected, state: "OPEN" } }), /must be closed/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, candidateReachableFromBaseline: true } }), /must not be reachable from baseline/u);
   assert.throws(() => reconcile({ candidate: { ...affected, laterValidCompletion: true } }), /later valid completion/u);
   assert.throws(() => reconcile({ candidate: { ...affected, worktreeRegistered: true } }), /worktree must be absent/u);
   assert.throws(() => reconcile({ candidate: { ...affected, reviewFailure: true } }), /review failure/u);

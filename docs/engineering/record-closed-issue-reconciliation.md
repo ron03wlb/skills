@@ -28,7 +28,7 @@ The repository needs a configured Issue tracker. An active `verify-target-before
 
 ## One immutable record
 
-The leading idea is **reconciliation**, not retroactive completion. The helper revalidates the closed affected Issue, its sole historical failure, the exact remedy Issue, both candidates, and matching diagnostics immediately before mutation. It reuses one exact `closed_issue_evidence_reconciliation:v1` record or appends it on the affected closed Issue and reads it back once.
+The leading idea is **reconciliation**, not retroactive completion. The helper revalidates the closed affected Issue, its sole historical failure, the affected candidate reachable from the target but not reachable from its execution baseline, the exact remedy Issue, both candidates, and matching diagnostics immediately before mutation. It reuses one exact `closed_issue_evidence_reconciliation:v1` record or appends it on the affected closed Issue and reads it back once.
 
 Malformed, duplicate, edited, conflicting, drifting, unavailable, partial, ambiguous, multiple-failure, multiple-fingerprint, or multiple-remedy evidence stops without repair. The record never contains aggregate range refs, current verification output, worktree paths, logs, hashes, or readiness.
 

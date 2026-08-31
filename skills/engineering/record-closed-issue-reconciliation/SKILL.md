@@ -15,7 +15,7 @@ Reject a standalone or manual invocation without that active recovery packet and
 
 ## Revalidate eligibility and diagnostics
 
-Re-read the affected Issue's complete ordered history. Require the affected Issue to be closed, its sole immutable completion note to be otherwise valid with exactly one non-passing command, its candidate reachable from the Issue target but not its execution baseline, and its exact Issue worktree absent. Any later valid completion, other invalidating evidence, ordinary open Issue, registered worktree, coverage failure, review failure, or additional historical failure stops without writing.
+Re-read the affected Issue's complete ordered history. Require the affected Issue to be closed, its sole immutable completion note to be otherwise valid with exactly one non-passing command, its candidate reachable from the Issue target but not reachable from its execution baseline, and its exact Issue worktree absent. Any later valid completion, other invalidating evidence, ordinary open Issue, registered worktree, coverage failure, review failure, or additional historical failure stops without writing.
 
 Create clean temporary worktrees at the exact affected baseline and candidate and rerun the one failed command read-only. Build each diagnostic fingerprint from the exact command, exit code, failure count, ordered failure identities, source locators, and assertion or error identities. Require identical baseline and candidate fingerprints and no additional candidate failure. Remove only those clean temporary diagnostic worktrees after the comparison.
 

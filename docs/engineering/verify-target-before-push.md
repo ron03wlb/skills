@@ -42,7 +42,7 @@ After exact read-back, the old gate is discarded. Verification starts from fresh
 
 ## Closed Issue evidence reconciliation
 
-One historical completion-evidence failure is eligible only after candidate reachability freezes the member set and before ordinary completion rejection. The affected Issue must be closed with one otherwise-valid immutable completion, exactly one non-passing command, a candidate reachable from the target but different from the execution baseline, and no remaining Issue worktree. A later valid completion, other invalidating evidence, open Issue, worktree registration, coverage or review failure, or an additional historical failure stops without writing.
+One historical completion-evidence failure is eligible only after candidate reachability freezes the member set and before ordinary completion rejection. The affected Issue must be closed with one otherwise-valid immutable completion, exactly one non-passing command, a candidate reachable from the target but not reachable from the execution baseline, and no remaining Issue worktree. A later valid completion, other invalidating evidence, open Issue, worktree registration, coverage or review failure, or an additional historical failure stops without writing.
 
 The verifier reruns the failed command in clean temporary worktrees at the exact affected baseline and candidate. The command, exit code, failure count, ordered failure identities, source locators, and assertion or error identities must form an identical fingerprint with no additional candidate failure. Exactly one closed remedy Issue must explicitly own the complete correction and have a valid passing completion on the same target. Both affected and remedy candidates must be reachable from the frozen target.
 
