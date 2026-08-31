@@ -849,6 +849,7 @@ test("remediation journal authority is scoped to the exact dispatch attempt with
     type: "remediation.recorded",
     at: "2026-08-30T00:02:00.000Z",
     issueId: "13",
+    attempt: 1,
     fingerprint: "selector-loopback",
     cycle: 1,
     adapter: "gradle-loopback-safe",
@@ -864,6 +865,7 @@ test("remediation journal authority is scoped to the exact dispatch attempt with
         runId: "remediation-attempt-run",
       },
     });
+    assert.throws(() => appendRemediation({ attempt: undefined }), /remediation attempt is required/iu);
     assert.throws(() => appendRemediation(), /preceding dispatch/u);
     writer.append({
       type: "dispatch.recorded",
@@ -898,7 +900,47 @@ test("remediation journal authority is scoped to the exact dispatch attempt with
       store.readEvents("remediation-attempt-run")
         .filter(({ type }) => type === "remediation.recorded")
         .map(({ attempt }) => attempt ?? null),
-      [null, 2],
+      [1, 2],
+    );
+
+    const legacyRunId = "legacy-remediation-run";
+    const legacyEvents = [
+      {
+        ...grantFor("SINGLE"),
+        runIdentity: { ...grantFor("SINGLE").runIdentity, runId: legacyRunId },
+      },
+      {
+        ...dispatchEvent("13", 1, 2),
+        taskRef,
+      },
+      {
+        schema: "dag-run-event:v1",
+        sequence: 3,
+        type: "remediation.recorded",
+        at: "2026-08-30T00:02:00.000Z",
+        issueId: "13",
+        fingerprint: "selector-loopback",
+        cycle: 1,
+        adapter: "gradle-loopback-safe",
+      },
+    ];
+    const legacyRunDirectory = join(
+      gitCommonDir,
+      "matt-workflow-control",
+      "runs",
+      legacyRunId,
+    );
+    mkdirSync(legacyRunDirectory, { recursive: true });
+    writeFileSync(
+      join(legacyRunDirectory, "events.jsonl"),
+      `${legacyEvents.map((event) => JSON.stringify(event)).join("\n")}\n`,
+      "utf8",
+    );
+    assert.deepEqual(
+      store.readEvents(legacyRunId)
+        .filter(({ type }) => type === "remediation.recorded")
+        .map(({ attempt }) => attempt ?? null),
+      [null],
     );
   } finally {
     writer.release();

@@ -75,7 +75,7 @@ export const normalizeEventDraft = (eventDraft) => (
     : eventDraft
 );
 
-export function validateEventDraft(event) {
+export function validateEventDraft(event, { allowLegacyRemediation = false } = {}) {
   if (!isRecord(event)) throw new TypeError("Journal event must be an object");
   if (Object.hasOwn(event, "schema") || Object.hasOwn(event, "sequence")) {
     throw new TypeError("Journal schema and sequence are store-owned");
@@ -136,6 +136,9 @@ export function validateEventDraft(event) {
       break;
     case "remediation.recorded":
       requireText(event.issueId, "remediation issueId");
+      if (event.attempt === undefined && !allowLegacyRemediation) {
+        throw new TypeError("Remediation attempt is required for new journal events");
+      }
       if (event.attempt !== undefined) requirePositiveInteger(event.attempt, "remediation attempt", 3);
       requireText(event.fingerprint, "remediation fingerprint");
       requirePositiveInteger(event.cycle, "remediation cycle", 1);
@@ -275,7 +278,7 @@ export function validateJournal(events, options = {}) {
       throw new TypeError(`Invalid journal event at sequence ${index + 1}`);
     }
     const { schema: _schema, sequence: _sequence, ...draft } = event;
-    validateEventDraft(draft);
+    validateEventDraft(draft, { allowLegacyRemediation: true });
     validateEventSemantics(validated, draft, options);
     validated.push(event);
   }
