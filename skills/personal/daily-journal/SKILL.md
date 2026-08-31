@@ -35,8 +35,18 @@ Format each item according to its source:
 
 Teach one learning point per sentence.
 
+### Active practice
+
+Mark only the highest-value item as `Your turn`. Ask the user to repeat or vary it, give one concise feedback response, and allow at most one retry. If the user says `skip English today`, end the exercise while leaving the journal complete.
+
+Treat the Micro-Lesson as a daily practice artifact, not a score, streak, proficiency label, or mastery record.
+
+### Optional recent recall
+
+At the start of a later session, offer one thirty-second recall only when the most recent saved Micro-Lesson is directly available. When it is missing or inaccessible, skip recall without a broad search or delay to the new reflection.
+
 ## Saving to Heptabase
 
-Use the local Heptabase CLI only after the user asks to save, record, edit, or update the journal. Read the current journal first, preserve its unrelated content, and use conflict detection when saving.
+Heptabase is the only persistence destination owned by this skill. Use the local Heptabase CLI only after the user asks to save, record, edit, or update the journal. Read the current journal first, preserve its unrelated content, and use conflict detection when saving. Write the polished entry and its `English Practice` section to that same journal.
 
 When a reusable **Daily Journal Template** exists, apply its three-section structure to the current day's journal. Preserve unrelated journals, notes, and boards.

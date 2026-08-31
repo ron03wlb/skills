@@ -478,6 +478,18 @@ test("daily-journal turns a completed reflection into an adaptive English micro-
   assert.match(skill, /no substantive detail.*no lesson.*invent/isu);
 });
 
+test("daily-journal bounds active practice, recall, and Heptabase writes", () => {
+  const skill = read("skills/personal/daily-journal/SKILL.md");
+
+  assert.match(skill, /highest-value.*`Your turn`.*repeat or vary.*one concise feedback.*at most one retry/isu);
+  assert.match(skill, /`skip English today`.*journal.*complete/isu);
+  assert.match(skill, /practice artifact.*not.*score.*streak.*proficiency.*mastery/isu);
+  assert.match(skill, /thirty-second recall.*most recent saved.*directly available.*skip.*broad search.*delay/isu);
+  assert.match(skill, /Heptabase is the only persistence destination/iu);
+  assert.match(skill, /only after.*asks to save, record, edit, or update.*Read the current journal.*conflict detection.*`English Practice`.*same journal/isu);
+  assert.match(skill, /Preserve unrelated journals, notes, and boards/iu);
+});
+
 test("confirm-understanding requires a bounded evidence calibration before alignment", () => {
   const skill = read("skills/productivity/confirm-understanding/SKILL.md");
   const docs = read("docs/productivity/confirm-understanding.md");
