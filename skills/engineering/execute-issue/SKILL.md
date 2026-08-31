@@ -51,8 +51,6 @@ Expected paths and symbols are non-exhaustive planning evidence, not an allowlis
 
 Before review, prepare the prospective `workflowArtifacts` declaration for this attempt. Use an explicit empty list when there are none; otherwise give each entry one exact repository-relative path (`path`), truthful requirement source (`requirementSource`), and concise purpose (`purpose`). Every declared path must be unique and changed inside the exact Execution baseline-to-candidate diff. It is eligible only when repository or skill instructions required that non-contract plan, execution log, or equivalent artifact inside this Issue worktree.
 
-The `workflowArtifacts` completion-note cutover instant is `2026-08-31T03:25:20Z`. Every completion note whose immutable tracker-server creation timestamp is at or after that UTC instant is prospective and the field is required. Only a note whose server creation timestamp is definitely earlier is legacy. A producer or note body cannot self-declare legacy status or substitute a body timestamp, candidate commit time, or schema marker for the tracker timestamp.
-
 Classification is behavioral, never extension-based. Runtime, public-contract, routing, Acceptance Criteria, governance, arbitrary, ambiguous, falsely sourced, or unowned documentation remains ordinary material scope and cannot enter `workflowArtifacts`. For each declared path, verify its Execution baseline-to-candidate diff ownership, then pass the prospective declaration to `code-review` so both axes inspect the artifact and its claimed requirement. A missing or false declaration is an in-scope review finding; changed behavior or ownership remains a Scope change.
 
 The declaration supplies scope classification only. It never supplies Issue-to-candidate mapping, contribution coverage, review, verification authority, or an exemption from focused verification, the repository full suite, cleanliness, or ref stability.
@@ -73,6 +71,8 @@ Confirm findings against source, tests, and the Spec. Fix every confirmed in-sco
 ## Completion note
 
 Rerun required final verification. Declare `implementation_complete` only when final verification passes, Standards and Spec are clean, the Issue worktree is clean, and its `HEAD` equals the reviewed candidate.
+
+Before the completion note, append or reuse exactly one immutable `workflow_artifacts_adopted:v1` record in this Issue's ordered tracker history, including local-file tracker history, and read it back once. Bind the exact Issue, Issue target branch and worktree, topic branch and worktree, Execution baseline, and final candidate for this attempt. A missing, duplicate, malformed, mismatched, or unreadable record stops without writing completion; write or read-back uncertainty reports unresolved tracker ambiguity and a retry reuses one exact record instead of duplicating it. The record makes this completion prospective, so `workflowArtifacts` is required. An older completion without one matching preceding record remains legacy; never add the marker retroactively. The record is compatibility evidence only and grants no implementation, review, coverage, verification, close, push, or deployment authority. A conflict-resolution rerun with a new baseline or candidate requires its own exact adoption record.
 
 Write one compact tracker completion note containing:
 

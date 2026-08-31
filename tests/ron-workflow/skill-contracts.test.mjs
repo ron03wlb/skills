@@ -469,7 +469,6 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 
 
 test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
-  const workflowArtifactsCutover = "2026-08-31T03:25:20Z";
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const review = read("skills/engineering/code-review/SKILL.md");
   const close = read("skills/engineering/close-issue/SKILL.md");
@@ -478,17 +477,17 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
 
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
   assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
-  assert.match(execute, /cutover instant.*immutable tracker-server creation timestamp.*UTC instant.*field.*required/isu);
-  assert.ok(execute.includes(workflowArtifactsCutover), "execute-issue omits the stable workflowArtifacts cutover");
+  assert.match(execute, /final verification.*Standards.*Spec.*clean.*worktree.*clean.*HEAD.*reviewed candidate.*Before the completion note.*append or reuse.*`workflow_artifacts_adopted:v1`.*ordered tracker history.*local-file tracker.*read it back.*Issue.*target branch.*worktree.*topic branch.*worktree.*Execution baseline.*final candidate/isu);
+  assert.match(execute, /record makes this completion prospective.*`workflowArtifacts` is required.*older completion.*without.*matching preceding record.*legacy/isu);
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {
     assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
-    assert.match(consumer, /immutable tracker-server creation timestamp.*cutover instant.*at or after.*prospective.*without.*`workflowArtifacts`.*stop/isu);
-    assert.match(consumer, /server creation timestamp.*earlier.*legacy completion note.*without.*`workflowArtifacts`.*original contract/isu);
-    assert.match(consumer, /missing.*ambiguous.*unreadable tracker timestamp.*stops.*body timestamp.*candidate commit time.*schema marker/isu);
-    assert.ok(consumer.includes(workflowArtifactsCutover), "completion-note consumer omits the stable workflowArtifacts cutover");
+    assert.match(consumer, /ordered tracker history.*local-file tracker.*`workflow_artifacts_adopted:v1`.*precedes.*completion note.*matches.*Issue.*target branch.*worktree.*topic branch.*worktree.*Execution baseline.*final candidate/isu);
+    assert.match(consumer, /matching record.*prospective.*without.*`workflowArtifacts`.*stop.*No matching record.*older completion note.*legacy.*original contract/isu);
+    assert.match(consumer, /duplicate.*malformed.*mismatched.*unreadable.*exact attempt.*stop.*another exact attempt.*do not classify/isu);
     assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
+    assert.match(consumer, /adoption record.*compatibility evidence only.*grants no.*implementation.*review.*coverage.*verification.*close.*push.*deployment authority/isu);
   }
   assert.match(verify, /declared workflow artifact.*Standards review.*Spec review.*selected-range coverage.*focused verification.*full suite.*cleanliness.*ref-stability/isu);
   assert.match(matt, /completion note.*`workflowArtifacts`.*scope classification.*coverage.*verification/isu);
@@ -496,6 +495,10 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   for (const name of ["execute-issue", "code-review", "close-issue", "verify-target-before-push"]) {
     assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflowArtifacts/u, `${name} metadata omits workflowArtifacts`);
     assert.match(read(`docs/engineering/${name}.md`), /workflowArtifacts/u, `${name} docs omit workflowArtifacts`);
+  }
+  for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
+    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflow_artifacts_adopted:v1/u, `${name} metadata omits adoption evidence`);
+    assert.match(read(`docs/engineering/${name}.md`), /workflow_artifacts_adopted:v1/u, `${name} docs omit adoption evidence`);
   }
   assert.match(read("docs/engineering/ask-matt.md"), /workflowArtifacts/u);
   for (const path of ["README.md", "skills/engineering/README.md"]) {
@@ -531,11 +534,24 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
       ambiguous: true,
     }],
   ]);
-  const validateWorkflowArtifacts = (completion, { noteCreatedAt = "2026-08-31T03:25:19Z" } = {}) => {
+  const attempt = {
+    issue: 20,
+    targetBranch: "features/ron",
+    targetWorktree: "C:/repo",
+    topicBranch: "codex/issue-20",
+    topicWorktree: "C:/worktree",
+    executionBaseline: "baseline-sha",
+    finalCandidate: "candidate-sha",
+  };
+  const matchingAdoption = { kind: "workflow_artifacts_adopted:v1", ...attempt };
+  const validateWorkflowArtifacts = (completion, { adoptionRecords = [] } = {}) => {
+    const matchingRecords = adoptionRecords.filter((record) =>
+      record.kind === "workflow_artifacts_adopted:v1"
+      && Object.entries(attempt).every(([key, value]) => record[key] === value)
+      && record.precedesCompletion === true);
+    assert.ok(matchingRecords.length <= 1, "ambiguous workflow artifact adoption records");
     if (!Object.hasOwn(completion, "workflowArtifacts")) {
-      const createdAtMs = Date.parse(noteCreatedAt);
-      assert.equal(Number.isFinite(createdAtMs), true, "completion note has unreadable tracker creation time");
-      assert.equal(createdAtMs < Date.parse(workflowArtifactsCutover), true, "prospective completion note cannot omit workflowArtifacts");
+      assert.equal(matchingRecords.length, 0, "prospective completion note cannot omit workflowArtifacts");
       return { legacy: true, artifacts: [] };
     }
     assert.ok(Array.isArray(completion.workflowArtifacts), "workflowArtifacts must be an explicit list");
@@ -568,15 +584,29 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   };
   assert.equal(validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validTextLog] }).artifacts.length, 2);
   assert.deepEqual(validateWorkflowArtifacts({ verification: "legacy-pass" }), { legacy: true, artifacts: [] });
-  for (const noteCreatedAt of [workflowArtifactsCutover, "2026-08-31T03:25:21Z"]) {
-    assert.throws(
-      () => validateWorkflowArtifacts({ verification: "prospective-pass" }, { noteCreatedAt }),
-      /prospective completion note cannot omit workflowArtifacts/u,
-    );
-  }
   assert.throws(
-    () => validateWorkflowArtifacts({ verification: "unknown-pass" }, { noteCreatedAt: "not-a-server-time" }),
-    /unreadable tracker creation time/u,
+    () => validateWorkflowArtifacts(
+      { ...attempt, verification: "prospective-pass" },
+      { adoptionRecords: [{ ...matchingAdoption, precedesCompletion: true }] },
+    ),
+    /prospective completion note cannot omit workflowArtifacts/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { ...attempt, verification: "ambiguous-pass" },
+      { adoptionRecords: [
+        { ...matchingAdoption, precedesCompletion: true },
+        { ...matchingAdoption, precedesCompletion: true },
+      ] },
+    ),
+    /ambiguous workflow artifact adoption records/u,
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts(
+      { ...attempt, verification: "different-attempt-legacy" },
+      { adoptionRecords: [{ ...matchingAdoption, executionBaseline: "other-baseline", precedesCompletion: true }] },
+    ),
+    { legacy: true, artifacts: [] },
   );
   for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
     assert.throws(

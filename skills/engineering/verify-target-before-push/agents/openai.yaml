@@ -1,7 +1,7 @@
 interface:
   display_name: "Verify Target Before Push"
   short_description: "Verify exact ranges and recover coverage"
-  default_prompt: "Use $verify-target-before-push to select a local-ahead or already-pushed completion-note range, validate any workflowArtifacts without treating them as coverage authority, prove coverage and any Successor verification evidence, and run one aggregate gate; for eligible direct-contribution coverage recovery, require exact human confirmation, invoke the bounded helper, and restart from fresh Entry without pushing."
+  default_prompt: "Use $verify-target-before-push to select a local-ahead or already-pushed completion-note range, classify workflowArtifacts compatibility from exact attempt-scoped workflow_artifacts_adopted:v1 records without treating them as coverage authority, prove coverage and any Successor verification evidence, and run one aggregate gate; for eligible direct-contribution coverage recovery, require exact human confirmation, invoke the bounded helper, and restart from fresh Entry without pushing."
 
 policy:
   allow_implicit_invocation: false

@@ -1,4 +1,4 @@
 interface:
   display_name: "Execute Issue"
   short_description: "Execute one human- or DAG-authorized Issue"
-  default_prompt: "Use $execute-issue only for a direct human request or an exact Issue and Spec authorized by a valid read-back DAG Run Grant; preserve its dedicated-worktree, review, completion-note, and no-close boundaries, and declare exact workflowArtifacts or an explicit empty list without granting coverage authority."
+  default_prompt: "Use $execute-issue only for a direct human request or an exact Issue and Spec authorized by a valid read-back DAG Run Grant; preserve its dedicated-worktree, review, completion-note, and no-close boundaries, read back one exact attempt-scoped workflow_artifacts_adopted:v1 record, and declare exact workflowArtifacts or an explicit empty list without granting coverage authority."
