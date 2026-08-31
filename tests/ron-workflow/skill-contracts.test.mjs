@@ -478,14 +478,15 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
   assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
   assert.match(execute, /first prospective completion.*repository.*tracker.*parent or linked Spec.*Issue target branch.*Spec's ordered history.*local-file tracker.*`workflow_artifacts_contract_adopted:v1`/isu);
+  assert.match(execute, /Concurrent first completions.*payload-identical physical records.*collapse.*idempotently.*logical adoption.*earliest history position.*never append another.*exact payload.*visible/isu);
   assert.match(execute, /must precede every prospective completion.*adoption makes.*all later completions.*prospective.*`workflowArtifacts` is required.*completion.*precedes adoption.*no adoption record.*legacy/isu);
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {
     assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
-    assert.match(consumer, /parent or linked Spec's ordered history.*local-file tracker.*`workflow_artifacts_contract_adopted:v1`.*repository.*tracker.*Spec.*Issue target branch.*precedes.*completion note.*prospective.*without.*`workflowArtifacts`.*stop/isu);
+    assert.match(consumer, /parent or linked Spec's ordered history.*local-file tracker.*logical `workflow_artifacts_contract_adopted:v1`.*repository.*tracker.*Spec.*Issue target branch.*payload-identical physical records.*logical adoption.*earliest history position.*precedes.*completion note.*prospective.*without.*`workflowArtifacts`.*stop/isu);
     assert.match(consumer, /completion.*precedes adoption.*scope has no adoption record.*legacy.*original contract/isu);
-    assert.match(consumer, /duplicate.*malformed.*mismatched.*unreadable.*plausibly bound.*repository.*tracker.*Spec.*stop.*well-formed record.*another exact scope.*does not classify/isu);
+    assert.match(consumer, /malformed.*mismatched.*unreadable.*payload-conflicting.*plausibly bound.*repository.*tracker.*Spec.*stop.*well-formed record.*another exact scope.*does not classify/isu);
     assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
     assert.match(consumer, /Spec-scoped adoption record.*compatibility evidence only.*grants no.*implementation.*review.*coverage.*verification.*close.*push.*deployment authority/isu);
   }
@@ -560,8 +561,10 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
       assert.equal(record.targetBranch, adoptionScope.targetBranch, "mismatched workflow artifact adoption scope");
       assert.equal(Number.isInteger(record.historyOrder), true, "unreadable workflow artifact adoption order");
     }
-    assert.ok(plausiblyBoundRecords.length <= 1, "ambiguous workflow artifact adoption records");
-    const precedingAdoption = plausiblyBoundRecords[0]?.historyOrder < completion.historyOrder;
+    const earliestAdoptionOrder = plausiblyBoundRecords.length === 0
+      ? undefined
+      : Math.min(...plausiblyBoundRecords.map(({ historyOrder }) => historyOrder));
+    const precedingAdoption = earliestAdoptionOrder < completion.historyOrder;
     if (!Object.hasOwn(completion, "workflowArtifacts")) {
       assert.equal(precedingAdoption, false, "prospective completion note cannot omit workflowArtifacts");
       return { legacy: true, artifacts: [] };
@@ -600,12 +603,26 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
     () => validateWorkflowArtifacts({ historyOrder: 20 }, { adoptionRecords: [matchingAdoption] }),
     /prospective completion note cannot omit workflowArtifacts/u,
   );
+  assert.deepEqual(
+    validateWorkflowArtifacts(
+      { historyOrder: 20, workflowArtifacts: [] },
+      { adoptionRecords: [matchingAdoption, { ...matchingAdoption, historyOrder: 11 }] },
+    ),
+    { legacy: false, artifacts: [] },
+  );
   assert.throws(
     () => validateWorkflowArtifacts(
       { historyOrder: 20 },
       { adoptionRecords: [matchingAdoption, { ...matchingAdoption, historyOrder: 11 }] },
     ),
-    /ambiguous workflow artifact adoption records/u,
+    /prospective completion note cannot omit workflowArtifacts/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { historyOrder: 20 },
+      { adoptionRecords: [matchingAdoption, { ...matchingAdoption, targetBranch: "other-target", historyOrder: 11 }] },
+    ),
+    /mismatched workflow artifact adoption scope/u,
   );
   assert.deepEqual(
     validateWorkflowArtifacts({ historyOrder: 5 }, { adoptionRecords: [matchingAdoption] }),
