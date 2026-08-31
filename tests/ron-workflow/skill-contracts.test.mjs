@@ -444,6 +444,27 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("daily-journal is a model-invoked personal skill without promotion", () => {
+  const skillPath = "skills/personal/daily-journal/SKILL.md";
+  const metadataPath = "skills/personal/daily-journal/agents/openai.yaml";
+
+  assert.equal(existsSync(skillPath), true, "daily-journal needs one repository-owned skill");
+  assert.equal(existsSync(metadataPath), true, "daily-journal needs Codex metadata");
+
+  const skill = read(skillPath);
+  const metadata = read(metadataPath);
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(read("skills/personal/README.md"), /\[daily-journal\]\(\.\/daily-journal\/SKILL\.md\)/u);
+  assert.match(read("skills/engineering/ask-matt/SKILL.md"), /daily reflection.*`\/daily-journal`/isu);
+  assert.match(read("docs/engineering/ask-matt.md"), /daily reflection.*daily-journal/isu);
+
+  const manifest = JSON.parse(read(".claude-plugin/plugin.json")).skills;
+  assert.equal(manifest.includes("./skills/personal/daily-journal"), false);
+  assert.doesNotMatch(read("README.md"), /skills\/personal\/daily-journal/u);
+  assert.equal(existsSync("docs/personal/daily-journal.md"), false);
+});
+
 test("confirm-understanding requires a bounded evidence calibration before alignment", () => {
   const skill = read("skills/productivity/confirm-understanding/SKILL.md");
   const docs = read("docs/productivity/confirm-understanding.md");

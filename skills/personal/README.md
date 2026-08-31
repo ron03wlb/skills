@@ -2,6 +2,7 @@
 
 Skills tied to my own setup, not promoted in the plugin.
 
+- **[daily-journal](./daily-journal/SKILL.md)** — Guide a voice-first reflection and finish with a short, personally relevant English practice.
 - **[edit-article](./edit-article/SKILL.md)** — Edit and improve articles by restructuring sections, improving clarity, and tightening prose.
 - **[greenfield-architecture-patterns](./greenfield-architecture-patterns/SKILL.md)** — Compare proportionate architecture patterns when a greenfield risk justifies deeper design.
 - **[greenfield-cost-model](./greenfield-cost-model/SKILL.md)** — Model twelve-month cash, effort, growth, and exit costs before a Matt Spec.

@@ -25,6 +25,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 
 ## Other starting points
 
+- A personal daily reflection → `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 - Raw request → `/triage`; reproduced failure → `/diagnosing-bugs`.
 - Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source research → `/research`.
 - Architecture → `/improve-codebase-architecture`; terminology → `/domain-modeling`; module seams → `/codebase-design`.

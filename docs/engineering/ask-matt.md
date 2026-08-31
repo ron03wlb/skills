@@ -44,6 +44,8 @@ The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://
 
 ## Other routes and phase boundaries
 
+For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
+
 Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) is the reference for skills and other agent-facing documents.
 
 At a phase boundary, choose whether to continue, clear, create a [handoff](https://aihero.dev/skills-handoff), delegate a bounded subtask, or compact. Do not switch context strategies mid-phase unless the remaining work can be split cleanly.
