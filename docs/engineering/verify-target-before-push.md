@@ -28,6 +28,8 @@ The leading idea is **aggregate coverage**. Completion notes plus Git reachabili
 
 Overlapping Issue contributions are valid. A read-back `direct_target_contribution:v1` record is the fourth coverage source; its owning Tracker Spec or Issue joins aggregate Spec review. Reachable open Issues, closed unreachable candidates, invalidated completion evidence, or unexplained commits stop the gate without repair.
 
+When present, `workflowArtifacts` names exact required non-contract paths, requirement sources, and purposes inside a member's ordinary Issue contribution. The verifier validates their candidate diff ownership and review evidence; legacy completion notes without the field retain their original contract. Declared artifacts remain visible to aggregate Standards and Spec review, selected-range coverage, focused verification, the full suite, cleanliness, and ref stability. The declaration is never an additional coverage source or verification authority.
+
 **Successor verification evidence** handles one narrow retirement case. A later member may retire an earlier path-specific command only when its candidate descends from the earlier candidate, its Acceptance Criteria own every required path, its completion proves those paths absent and names passing current-behavior commands, those commands run at the final target, and the paths remain absent there. Partial ownership, inferred deletion or rename, missing proof, ambiguous ancestry, or a non-path-specific command makes the gate fail closed.
 
 ## Confirmation-gated recovery

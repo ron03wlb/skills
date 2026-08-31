@@ -468,6 +468,129 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 });
 
 
+test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const review = read("skills/engineering/code-review/SKILL.md");
+  const close = read("skills/engineering/close-issue/SKILL.md");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+
+  assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
+  assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
+  assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
+  assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
+  for (const consumer of [close, verify]) {
+    assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
+    assert.match(consumer, /legacy completion note.*without.*`workflowArtifacts`.*original contract/isu);
+    assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
+  }
+  assert.match(verify, /declared workflow artifact.*Standards review.*Spec review.*selected-range coverage.*focused verification.*full suite.*cleanliness.*ref-stability/isu);
+  assert.match(matt, /completion note.*`workflowArtifacts`.*scope classification.*coverage.*verification/isu);
+
+  for (const name of ["execute-issue", "code-review", "close-issue", "verify-target-before-push"]) {
+    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflowArtifacts/u, `${name} metadata omits workflowArtifacts`);
+    assert.match(read(`docs/engineering/${name}.md`), /workflowArtifacts/u, `${name} docs omit workflowArtifacts`);
+  }
+  assert.match(read("docs/engineering/ask-matt.md"), /workflowArtifacts/u);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /execute-issue.*workflowArtifacts/iu);
+    assert.match(read(path), /code-review.*workflow artifact/iu);
+    assert.match(read(path), /close-issue.*workflowArtifacts/iu);
+    assert.match(read(path), /verify-target-before-push.*workflowArtifacts/iu);
+  }
+
+  const changedArtifacts = new Map([
+    ["superpowers/docs/plans/issue.md", {
+      requirementSource: "AGENTS.md High-risk writing-plans",
+      purpose: "Preserve resumable public-contract delivery decisions",
+      effect: "required-non-contract",
+      ambiguous: false,
+    }],
+    ["evidence/run-log.txt", {
+      requirementSource: "execute-issue verification record",
+      purpose: "Retain the exact required verification log",
+      effect: "required-non-contract",
+      ambiguous: false,
+    }],
+    ["docs/public-api.md", {
+      requirementSource: "Issue #20",
+      purpose: "Change the public API contract",
+      effect: "public-contract",
+      ambiguous: false,
+    }],
+    ["notes/unclear.md", {
+      requirementSource: "unknown",
+      purpose: "Unclear ownership",
+      effect: "required-non-contract",
+      ambiguous: true,
+    }],
+  ]);
+  const validateWorkflowArtifacts = (completion) => {
+    if (!Object.hasOwn(completion, "workflowArtifacts")) return { legacy: true, artifacts: [] };
+    assert.ok(Array.isArray(completion.workflowArtifacts), "workflowArtifacts must be an explicit list");
+    const seen = new Set();
+    for (const artifact of completion.workflowArtifacts) {
+      assert.deepEqual(Object.keys(artifact).sort(), ["path", "purpose", "requirementSource"]);
+      assert.match(artifact.path, /^(?![A-Za-z]:|\/|.*(?:^|\/)\.\.(?:\/|$)).+/u, "artifact path must be repository-relative");
+      assert.equal(seen.has(artifact.path), false, `duplicate workflow artifact ${artifact.path}`);
+      seen.add(artifact.path);
+      const changed = changedArtifacts.get(artifact.path);
+      assert.ok(changed, `declared path is not changed in the Issue contribution: ${artifact.path}`);
+      assert.equal(artifact.requirementSource, changed.requirementSource, `false requirement source for ${artifact.path}`);
+      assert.equal(artifact.purpose, changed.purpose, `false purpose for ${artifact.path}`);
+      assert.equal(changed.effect, "required-non-contract", `ordinary material scope cannot be classified: ${artifact.path}`);
+      assert.equal(changed.ambiguous, false, `ambiguous workflow artifact ${artifact.path}`);
+    }
+    return { legacy: false, artifacts: completion.workflowArtifacts };
+  };
+
+  assert.deepEqual(validateWorkflowArtifacts({ workflowArtifacts: [] }), { legacy: false, artifacts: [] });
+  const validPlan = {
+    path: "superpowers/docs/plans/issue.md",
+    requirementSource: "AGENTS.md High-risk writing-plans",
+    purpose: "Preserve resumable public-contract delivery decisions",
+  };
+  const validTextLog = {
+    path: "evidence/run-log.txt",
+    requirementSource: "execute-issue verification record",
+    purpose: "Retain the exact required verification log",
+  };
+  assert.equal(validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validTextLog] }).artifacts.length, 2);
+  assert.deepEqual(validateWorkflowArtifacts({ verification: "legacy-pass" }), { legacy: true, artifacts: [] });
+  for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
+    assert.throws(
+      () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path }] }),
+      /repository-relative/u,
+    );
+  }
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path: "missing.md" }] }),
+    /not changed in the Issue contribution/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, requirementSource: "invented" }] }),
+    /false requirement source/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{
+      path: "docs/public-api.md",
+      requirementSource: "Issue #20",
+      purpose: "Change the public API contract",
+    }] }),
+    /ordinary material scope cannot be classified/u,
+  );
+  assert.throws(() => validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validPlan] }), /duplicate workflow artifact/u);
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{
+      path: "notes/unclear.md",
+      requirementSource: "unknown",
+      purpose: "Unclear ownership",
+    }] }),
+    /ambiguous workflow artifact/u,
+  );
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");

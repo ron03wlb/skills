@@ -49,6 +49,12 @@ Expected paths and symbols are non-exhaustive planning evidence, not an allowlis
 - Record a concise **Material plan deviation** and covered `AC-n` when the implementation path changes but behavior and Acceptance Criteria do not.
 - A **Scope change** to behavior, Acceptance Criteria, target, exclusions, independent outcomes, or ownership stops and returns to planning.
 
+Before review, prepare the prospective `workflowArtifacts` declaration for this attempt. Use an explicit empty list when there are none; otherwise give each entry one exact repository-relative path (`path`), truthful requirement source (`requirementSource`), and concise purpose (`purpose`). Every declared path must be unique and changed inside the exact Execution baseline-to-candidate diff. It is eligible only when repository or skill instructions required that non-contract plan, execution log, or equivalent artifact inside this Issue worktree.
+
+Classification is behavioral, never extension-based. Runtime, public-contract, routing, Acceptance Criteria, governance, arbitrary, ambiguous, falsely sourced, or unowned documentation remains ordinary material scope and cannot enter `workflowArtifacts`. For each declared path, verify its Execution baseline-to-candidate diff ownership, then pass the prospective declaration to `code-review` so both axes inspect the artifact and its claimed requirement. A missing or false declaration is an in-scope review finding; changed behavior or ownership remains a Scope change.
+
+The declaration supplies scope classification only. It never supplies Issue-to-candidate mapping, contribution coverage, review, verification authority, or an exemption from focused verification, the repository full suite, cleanliness, or ref stability.
+
 Run affected verification after each slice or repair. Before review, run the Issue's required final verification, including focused checks, typechecking where configured, and the repository-required full suite. Record exact commands and results.
 
 If implementation evidence reveals a **Late prerequisite discovery**, stop before prerequisite-dependent verification. Preserve coherent checkpoint commits and record/read back `implementation_blocked` once with the exact artifact path. With unchanged Acceptance Criteria and approved schema outcome, instruct the human to invoke `/pre-execute-issue <Issue-ID> <artifact-path>`; after its matching attestation, resume the same worktree and candidate lane. Changed behavior, acceptance, target, exclusions, or ownership is a Scope change that returns to `/to-spec` or `/to-tickets`. Never auto-invoke, execute the artifact, roll back, or silently expand scope.
@@ -71,6 +77,7 @@ Write one compact tracker completion note containing:
 - Issue and linked Spec; Issue target branch/worktree, topic branch/worktree, baseline, and final candidate;
 - Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
 - `manualAttestations`: every consumed `manual_prerequisite_complete:v1` artifact path, or an empty list;
+- `workflowArtifacts`: the reviewed prospective entries with exact `path`, `requirementSource`, and `purpose`, or an explicit empty list;
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.
 
