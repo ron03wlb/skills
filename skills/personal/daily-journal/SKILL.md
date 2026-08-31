@@ -43,7 +43,7 @@ Treat the Micro-Lesson as a daily practice artifact, not a score, streak, profic
 
 ### Optional recent recall
 
-At the start of a later session, offer one thirty-second recall only when the most recent saved Micro-Lesson is directly available. When it is missing or inaccessible, skip recall without a broad search or delay to the new reflection.
+At the start of a later session, offer one thirty-second recall only when the most recent saved Micro-Lesson is directly available. When it is missing or inaccessible, skip recall without a broad search or delay to the new reflection. Treat the response only as practice; do not infer proficiency or mastery from it.
 
 ## Saving to Heptabase
 

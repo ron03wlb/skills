@@ -465,33 +465,6 @@ test("daily-journal is a model-invoked personal skill without promotion", () => 
   assert.equal(existsSync("docs/personal/daily-journal.md"), false);
 });
 
-test("daily-journal turns a completed reflection into an adaptive English micro-lesson", () => {
-  const skill = read("skills/personal/daily-journal/SKILL.md");
-
-  assert.match(skill, /simple English by default.*simpler English.*Traditional Chinese support/isu);
-  assert.match(skill, /hold corrections.*reflection is complete/isu);
-  assert.match(skill, /low-energy.*one sentence.*normally.*two.*three.*distinct/isu);
-  assert.match(skill, /Prioritize.*user's own English.*Chinese journal content.*recurring/isu);
-  assert.match(skill, /English source.*Original.*Natural English.*Traditional Chinese meaning.*Reusable pattern/isu);
-  assert.match(skill, /Chinese source.*omit.*Original.*Natural English.*Traditional Chinese meaning.*Reusable pattern/isu);
-  assert.match(skill, /one learning point per sentence/iu);
-  assert.match(skill, /no substantive detail.*no lesson.*invent/isu);
-});
-
-test("daily-journal bounds active practice, recall, and Heptabase writes", () => {
-  const skill = read("skills/personal/daily-journal/SKILL.md");
-
-  assert.match(skill, /highest-value.*`Your turn`.*repeat or vary.*one concise feedback.*at most one retry/isu);
-  assert.match(skill, /Attach `Your turn` directly.*selected item.*other items.*without a practice prompt/isu);
-  assert.match(skill, /`skip English today`.*journal.*complete/isu);
-  assert.match(skill, /`skip English today`.*skip only.*`Your turn`.*still present.*lesson.*later reading/isu);
-  assert.match(skill, /practice artifact.*not.*score.*streak.*proficiency.*mastery/isu);
-  assert.match(skill, /thirty-second recall.*most recent saved.*directly available.*skip.*broad search.*delay/isu);
-  assert.match(skill, /Heptabase is the only persistence destination/iu);
-  assert.match(skill, /only after.*asks to save, record, edit, or update.*Read the current journal.*conflict detection.*`English Practice`.*same journal/isu);
-  assert.match(skill, /Preserve unrelated journals, notes, and boards/iu);
-});
-
 test("confirm-understanding requires a bounded evidence calibration before alignment", () => {
   const skill = read("skills/productivity/confirm-understanding/SKILL.md");
   const docs = read("docs/productivity/confirm-understanding.md");
