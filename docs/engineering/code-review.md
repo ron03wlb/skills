@@ -34,6 +34,8 @@ The defining idea is the **two axes**. **Standards** asks whether the diff confo
 
 They run as parallel sub-agents so neither pollutes the other's context, and the final report presents them under separate `## Standards` and `## Spec` headings with a per-axis summary. There is deliberately no single winner across axes.
 
+During Issue execution, both axes also receive the prospective `workflowArtifacts` declaration. Standards validates each exact path, requirement source, purpose, and Issue-contribution ownership. Spec verifies that the artifact is a required non-contract plan, execution log, or equivalent rather than public-contract, routing, Acceptance Criteria, governance, runtime, arbitrary, ambiguous, or unowned scope. File extensions decide nothing, and the declaration grants no coverage or verification authority.
+
 ## It's working if
 
 - It pins and confirms the fixed point first (`git rev-parse`), failing fast on a bad ref or empty candidate; a WIP candidate may consist only of explicitly in-scope untracked files.

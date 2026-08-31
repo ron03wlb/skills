@@ -49,6 +49,12 @@ Expected paths and symbols are non-exhaustive planning evidence, not an allowlis
 - Record a concise **Material plan deviation** and covered `AC-n` when the implementation path changes but behavior and Acceptance Criteria do not.
 - A **Scope change** to behavior, Acceptance Criteria, target, exclusions, independent outcomes, or ownership stops and returns to planning.
 
+Before review, prepare the prospective `workflowArtifacts` declaration for this attempt. Use an explicit empty list when there are none; otherwise give each entry one exact repository-relative path (`path`), truthful requirement source (`requirementSource`), and concise purpose (`purpose`). Every declared path must be unique and changed inside the exact Execution baseline-to-candidate diff. It is eligible only when repository or skill instructions required that non-contract plan, execution log, or equivalent artifact inside this Issue worktree.
+
+Classification is behavioral, never extension-based. Runtime, public-contract, routing, Acceptance Criteria, governance, arbitrary, ambiguous, falsely sourced, or unowned documentation remains ordinary material scope and cannot enter `workflowArtifacts`. For each declared path, verify its Execution baseline-to-candidate diff ownership, then pass the prospective declaration to `code-review` so both axes inspect the artifact and its claimed requirement. A missing or false declaration is an in-scope review finding; changed behavior or ownership remains a Scope change.
+
+The declaration supplies scope classification only. It never supplies Issue-to-candidate mapping, contribution coverage, review, verification authority, or an exemption from focused verification, the repository full suite, cleanliness, or ref stability.
+
 Run affected verification after each slice or repair. Before review, run the Issue's required final verification, including focused checks, typechecking where configured, and the repository-required full suite. Record exact commands and results.
 
 If implementation evidence reveals a **Late prerequisite discovery**, stop before prerequisite-dependent verification. Preserve coherent checkpoint commits and record/read back `implementation_blocked` once with the exact artifact path. With unchanged Acceptance Criteria and approved schema outcome, instruct the human to invoke `/pre-execute-issue <Issue-ID> <artifact-path>`; after its matching attestation, resume the same worktree and candidate lane. Changed behavior, acceptance, target, exclusions, or ownership is a Scope change that returns to `/to-spec` or `/to-tickets`. Never auto-invoke, execute the artifact, roll back, or silently expand scope.
@@ -66,11 +72,18 @@ Confirm findings against source, tests, and the Spec. Fix every confirmed in-sco
 
 Rerun required final verification. Declare `implementation_complete` only when final verification passes, Standards and Spec are clean, the Issue worktree is clean, and its `HEAD` equals the reviewed candidate.
 
+Before the first prospective completion under an exact repository, tracker, parent or linked Spec, and Issue target branch, inspect that Spec and its exact child histories, including local-file tracker histories, for one logical `workflow_artifacts_contract_adopted:v1` record. If none exists, freeze every already read-back valid completion without `workflowArtifacts` into `legacyCompletionFrontier`, then append one durable adoption record binding the exact four scope identities plus that explicit list, including an empty list. Each frontier entry binds the exact Issue, tracker-native immutable completion-note identity when available or durable local record locator, and SHA-256 of the exact note body. Read the adoption back once; otherwise reuse the existing logical record. Do not infer order across parent and child histories: after adoption, a completion without `workflowArtifacts` is legacy only when its exact identity and body digest occur in the frozen frontier. Missing, duplicate, malformed, mismatched, unreadable, or digest-mismatched frontier evidence stops.
+
+Concurrent first completions may publish multiple payload-identical physical adoption records; collapse them idempotently into one logical record and never append another after any exact payload is visible. Malformed, mismatched, unreadable, or payload-conflicting adoption records plausibly bound to the same repository, tracker, and Spec stop without writing completion; write or read-back uncertainty reports unresolved tracker ambiguity. A scope with no adoption record remains legacy-compatible. Never add a completion to the frontier retroactively. The record is compatibility evidence only and grants no implementation, review, coverage, verification, close, push, or deployment authority.
+
+Determine plausible binding from the record kind and its physical parent or linked-Spec tracker location before validating payload scope fields. Never filter out a malformed record by a repository, tracker, Spec, or target field that the record itself is required to prove.
+
 Write one compact tracker completion note containing:
 
 - Issue and linked Spec; Issue target branch/worktree, topic branch/worktree, baseline, and final candidate;
 - Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
 - `manualAttestations`: every consumed `manual_prerequisite_complete:v1` artifact path, or an empty list;
+- `workflowArtifacts`: the reviewed prospective entries with exact `path`, `requirementSource`, and `purpose`, or an explicit empty list;
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.
 

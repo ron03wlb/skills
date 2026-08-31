@@ -468,6 +468,287 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 });
 
 
+test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const review = read("skills/engineering/code-review/SKILL.md");
+  const close = read("skills/engineering/close-issue/SKILL.md");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+
+  assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
+  assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
+  assert.match(execute, /first prospective completion.*repository.*tracker.*parent or linked Spec.*Issue target branch.*Spec and its exact child histories.*local-file tracker histories.*logical `workflow_artifacts_contract_adopted:v1`/isu);
+  assert.match(execute, /Spec and its exact child histories.*local-file tracker histories.*freeze.*valid completion.*without `workflowArtifacts`.*`legacyCompletionFrontier`.*empty list.*Issue.*immutable completion-note identity.*durable local record locator.*SHA-256.*exact note body/isu);
+  assert.match(execute, /Do not infer order across parent and child histories.*completion without `workflowArtifacts`.*legacy only.*exact identity.*body digest.*frozen frontier/isu);
+  assert.match(execute, /Concurrent first completions.*payload-identical physical adoption records.*collapse.*idempotently.*logical record.*never append another.*exact payload.*visible/isu);
+  assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
+  assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
+  for (const consumer of [close, verify]) {
+    assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
+    assert.match(consumer, /parent or linked Spec.*logical `workflow_artifacts_contract_adopted:v1`.*repository.*tracker.*Spec.*Issue target branch.*`legacyCompletionFrontier`.*empty list.*Issue.*immutable completion-note identity.*durable local record locator.*SHA-256.*exact note body/isu);
+    assert.match(consumer, /Do not compare order across parent and child histories.*completion without `workflowArtifacts`.*legacy only.*exact identity.*body digest.*frozen frontier.*otherwise.*stop/isu);
+    assert.match(consumer, /scope with no adoption record.*legacy.*original contract/isu);
+    assert.match(consumer, /malformed.*mismatched.*unreadable.*payload-conflicting.*plausibly bound.*repository.*tracker.*Spec.*stop.*well-formed record.*another exact scope.*does not classify/isu);
+    assert.match(consumer, /plausible binding.*record kind.*physical parent or linked-Spec tracker location.*before validating payload scope fields.*Never filter out.*malformed record.*repository.*tracker.*Spec.*target field.*required to prove/isu);
+    assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
+    assert.match(consumer, /Spec-scoped adoption record.*compatibility evidence only.*grants no.*implementation.*review.*coverage.*verification.*close.*push.*deployment authority/isu);
+  }
+  assert.match(verify, /declared workflow artifact.*Standards review.*Spec review.*selected-range coverage.*focused verification.*full suite.*cleanliness.*ref-stability/isu);
+  assert.match(matt, /completion note.*`workflowArtifacts`.*scope classification.*coverage.*verification/isu);
+
+  for (const name of ["execute-issue", "code-review", "close-issue", "verify-target-before-push"]) {
+    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflowArtifacts/u, `${name} metadata omits workflowArtifacts`);
+    assert.match(read(`docs/engineering/${name}.md`), /workflowArtifacts/u, `${name} docs omit workflowArtifacts`);
+  }
+  for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
+    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflow_artifacts_contract_adopted:v1/u, `${name} metadata omits adoption evidence`);
+    assert.match(read(`docs/engineering/${name}.md`), /workflow_artifacts_contract_adopted:v1/u, `${name} docs omit adoption evidence`);
+  }
+  assert.match(read("docs/engineering/ask-matt.md"), /workflowArtifacts/u);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /execute-issue.*workflowArtifacts/iu);
+    assert.match(read(path), /code-review.*workflow artifact/iu);
+    assert.match(read(path), /close-issue.*workflowArtifacts/iu);
+    assert.match(read(path), /verify-target-before-push.*workflowArtifacts/iu);
+  }
+
+  const changedArtifacts = new Map([
+    ["superpowers/docs/plans/issue.md", {
+      requirementSource: "AGENTS.md High-risk writing-plans",
+      purpose: "Preserve resumable public-contract delivery decisions",
+      effect: "required-non-contract",
+      ambiguous: false,
+    }],
+    ["evidence/run-log.txt", {
+      requirementSource: "execute-issue verification record",
+      purpose: "Retain the exact required verification log",
+      effect: "required-non-contract",
+      ambiguous: false,
+    }],
+    ["docs/public-api.md", {
+      requirementSource: "Issue #20",
+      purpose: "Change the public API contract",
+      effect: "public-contract",
+      ambiguous: false,
+    }],
+    ["notes/unclear.md", {
+      requirementSource: "unknown",
+      purpose: "Unclear ownership",
+      effect: "required-non-contract",
+      ambiguous: true,
+    }],
+  ]);
+  const adoptionScope = {
+    repository: "ron03wlb/skills",
+    tracker: "github:ron03wlb/skills",
+    spec: 19,
+    targetBranch: "features/ron",
+  };
+  const legacyCompletion = {
+    issue: 18,
+    evidenceId: "github-comment:123",
+    bodySha256: "a".repeat(64),
+  };
+  const matchingAdoption = {
+    kind: "workflow_artifacts_contract_adopted:v1",
+    ...adoptionScope,
+    legacyCompletionFrontier: [legacyCompletion],
+  };
+  const locatedInScope = (payload) => ({
+    location: { tracker: adoptionScope.tracker, spec: adoptionScope.spec },
+    payload,
+  });
+  const locatedElsewhere = (payload) => ({
+    location: { tracker: adoptionScope.tracker, spec: 99 },
+    payload,
+  });
+  const validateWorkflowArtifacts = (completion, { adoptionRecords = [] } = {}) => {
+    const plausiblyBoundRecords = adoptionRecords
+      .filter(({ location, payload }) =>
+        payload.kind === "workflow_artifacts_contract_adopted:v1"
+        && location.tracker === adoptionScope.tracker
+        && location.spec === adoptionScope.spec)
+      .map(({ payload }) => payload);
+    for (const record of plausiblyBoundRecords) {
+      assert.deepEqual(
+        Object.keys(record).sort(),
+        ["kind", "legacyCompletionFrontier", "repository", "spec", "targetBranch", "tracker"],
+        "malformed workflow artifact adoption record",
+      );
+      assert.equal(record.targetBranch, adoptionScope.targetBranch, "mismatched workflow artifact adoption scope");
+      assert.ok(Array.isArray(record.legacyCompletionFrontier), "unreadable legacy completion frontier");
+      const seenLegacyEvidence = new Set();
+      for (const legacy of record.legacyCompletionFrontier) {
+        assert.deepEqual(Object.keys(legacy).sort(), ["bodySha256", "evidenceId", "issue"], "malformed legacy completion frontier entry");
+        assert.match(legacy.bodySha256, /^[a-f0-9]{64}$/u, "invalid legacy completion body digest");
+        const identity = `${legacy.issue}:${legacy.evidenceId}`;
+        assert.equal(seenLegacyEvidence.has(identity), false, "duplicate legacy completion frontier entry");
+        seenLegacyEvidence.add(identity);
+      }
+    }
+    const canonicalPayloads = new Set(plausiblyBoundRecords.map((record) => JSON.stringify({
+      ...record,
+      legacyCompletionFrontier: [...record.legacyCompletionFrontier].sort((a, b) => `${a.issue}:${a.evidenceId}`.localeCompare(`${b.issue}:${b.evidenceId}`)),
+    })));
+    assert.ok(canonicalPayloads.size <= 1, "conflicting workflow artifact adoption records");
+    const adopted = plausiblyBoundRecords.length > 0;
+    const listedLegacy = adopted && plausiblyBoundRecords[0].legacyCompletionFrontier.some((legacy) =>
+      legacy.issue === completion.issue
+      && legacy.evidenceId === completion.evidenceId
+      && legacy.bodySha256 === completion.bodySha256);
+    if (!Object.hasOwn(completion, "workflowArtifacts")) {
+      assert.equal(adopted && !listedLegacy, false, "prospective completion note cannot omit workflowArtifacts");
+      return { legacy: true, artifacts: [] };
+    }
+    assert.ok(Array.isArray(completion.workflowArtifacts), "workflowArtifacts must be an explicit list");
+    const seen = new Set();
+    for (const artifact of completion.workflowArtifacts) {
+      assert.deepEqual(Object.keys(artifact).sort(), ["path", "purpose", "requirementSource"]);
+      assert.match(artifact.path, /^(?![A-Za-z]:|\/|.*(?:^|\/)\.\.(?:\/|$)).+/u, "artifact path must be repository-relative");
+      assert.equal(seen.has(artifact.path), false, `duplicate workflow artifact ${artifact.path}`);
+      seen.add(artifact.path);
+      const changed = changedArtifacts.get(artifact.path);
+      assert.ok(changed, `declared path is not changed in the Issue contribution: ${artifact.path}`);
+      assert.equal(artifact.requirementSource, changed.requirementSource, `false requirement source for ${artifact.path}`);
+      assert.equal(artifact.purpose, changed.purpose, `false purpose for ${artifact.path}`);
+      assert.equal(changed.effect, "required-non-contract", `ordinary material scope cannot be classified: ${artifact.path}`);
+      assert.equal(changed.ambiguous, false, `ambiguous workflow artifact ${artifact.path}`);
+    }
+    return { legacy: false, artifacts: completion.workflowArtifacts };
+  };
+
+  assert.deepEqual(validateWorkflowArtifacts({ workflowArtifacts: [] }), { legacy: false, artifacts: [] });
+  const validPlan = {
+    path: "superpowers/docs/plans/issue.md",
+    requirementSource: "AGENTS.md High-risk writing-plans",
+    purpose: "Preserve resumable public-contract delivery decisions",
+  };
+  const validTextLog = {
+    path: "evidence/run-log.txt",
+    requirementSource: "execute-issue verification record",
+    purpose: "Retain the exact required verification log",
+  };
+  assert.equal(validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validTextLog] }).artifacts.length, 2);
+  assert.deepEqual(validateWorkflowArtifacts({ verification: "legacy-pass" }), { legacy: true, artifacts: [] });
+  assert.throws(
+    () => validateWorkflowArtifacts({
+      issue: 20,
+      evidenceId: "github-comment:456",
+      bodySha256: "b".repeat(64),
+    }, { adoptionRecords: [locatedInScope(matchingAdoption)] }),
+    /prospective completion note cannot omit workflowArtifacts/u,
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts(
+      {
+        issue: 20,
+        evidenceId: "github-comment:456",
+        bodySha256: "b".repeat(64),
+        workflowArtifacts: [],
+      },
+      { adoptionRecords: [locatedInScope(matchingAdoption), locatedInScope({ ...matchingAdoption })] },
+    ),
+    { legacy: false, artifacts: [] },
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedInScope(matchingAdoption), locatedInScope({ ...matchingAdoption })] },
+    ),
+    /prospective completion note cannot omit workflowArtifacts/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [
+        locatedInScope(matchingAdoption),
+        locatedInScope({ ...matchingAdoption, legacyCompletionFrontier: [] }),
+      ] },
+    ),
+    /conflicting workflow artifact adoption records/u,
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts({ ...legacyCompletion }, { adoptionRecords: [locatedInScope(matchingAdoption)] }),
+    { legacy: true, artifacts: [] },
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts({ issue: 20, evidenceId: "local:record-1", bodySha256: "c".repeat(64) }),
+    { legacy: true, artifacts: [] },
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedInScope({
+        kind: "workflow_artifacts_contract_adopted:v1",
+        repository: adoptionScope.repository,
+        tracker: adoptionScope.tracker,
+        spec: adoptionScope.spec,
+        targetBranch: adoptionScope.targetBranch,
+      })] },
+    ),
+    /malformed workflow artifact adoption record/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedInScope({ ...matchingAdoption, targetBranch: "other-target" })] },
+    ),
+    /mismatched workflow artifact adoption scope/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedInScope({
+        kind: "workflow_artifacts_contract_adopted:v1",
+        tracker: adoptionScope.tracker,
+        spec: adoptionScope.spec,
+        targetBranch: adoptionScope.targetBranch,
+        legacyCompletionFrontier: [],
+      })] },
+    ),
+    /malformed workflow artifact adoption record/u,
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedElsewhere(matchingAdoption)] },
+    ),
+    { legacy: true, artifacts: [] },
+  );
+  for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
+    assert.throws(
+      () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path }] }),
+      /repository-relative/u,
+    );
+  }
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path: "missing.md" }] }),
+    /not changed in the Issue contribution/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, requirementSource: "invented" }] }),
+    /false requirement source/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{
+      path: "docs/public-api.md",
+      requirementSource: "Issue #20",
+      purpose: "Change the public API contract",
+    }] }),
+    /ordinary material scope cannot be classified/u,
+  );
+  assert.throws(() => validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validPlan] }), /duplicate workflow artifact/u);
+  assert.throws(
+    () => validateWorkflowArtifacts({ workflowArtifacts: [{
+      path: "notes/unclear.md",
+      requirementSource: "unknown",
+      purpose: "Unclear ownership",
+    }] }),
+    /ambiguous workflow artifact/u,
+  );
+});
+
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");

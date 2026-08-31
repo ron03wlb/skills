@@ -1,4 +1,4 @@
 interface:
   display_name: "Close Issue"
   short_description: "Close one human- or DAG-authorized Issue"
-  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant bound to the exact Issue or parent, then resume the idempotent merge, worktree removal, and tracker closure path without widening authority."
+  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant bound to the exact Issue or parent, classify workflowArtifacts compatibility from one exact preceding Spec-scoped workflow_artifacts_contract_adopted:v1 record without granting coverage authority, then resume the idempotent merge, worktree removal, and tracker closure path without widening authority."

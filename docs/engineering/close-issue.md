@@ -28,6 +28,8 @@ The merge uses the latest recorded target and exact reviewed candidate. An alrea
 
 Cleanup removes only the registered clean Issue worktree after candidate reachability is proved. Tracker closure happens last and is read back. A partial run reports the remaining action without repairing product code, rerunning review, pushing, or rolling back a successful merge.
 
+For new completion notes, closeout validates every `workflowArtifacts` path, requirement source, purpose, contribution ownership, and candidate-bound review result before merging. One logical `workflow_artifacts_contract_adopted:v1` record in the parent or linked Spec binds the exact repository, tracker, Spec, and Issue target branch plus a frozen `legacyCompletionFrontier` of note identities or durable local locators and body digests. In an adopted scope, only exact frontier members may omit the field; no parent-child history ordering is inferred. Payload-identical concurrent records collapse; malformed, conflicting, or digest-mismatched evidence stops. Plausible binding comes from physical Spec history before payload validation, so missing scope fields fail closed instead of becoming unadopted. A truly unadopted scope remains legacy-compatible. The record and declaration classify compatibility and required non-contract documentation but never supply candidate identity, contribution coverage, verification authority, or a closeout bypass.
+
 ## Parent closure
 
 A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Decomposition publication record, proves every exact child is closed and every child candidate reaches the same target, then closes only the parent. It does not claim aggregate `push_ready`.

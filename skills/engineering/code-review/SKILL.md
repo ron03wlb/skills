@@ -58,7 +58,13 @@ Each smell reads *what it is* → *how to fix*; match it against the diff:
 - **Middle Man** — a class or function that mostly just delegates onward. → cut it, call the real target direct.
 - **Refused Bequest** — a subclass or implementer that ignores or overrides most of what it inherits. → drop the inheritance, use composition.
 
-### 4. Spawn both sub-agents in parallel
+### 4. Validate prospective workflow artifacts
+
+When `execute-issue` supplies a prospective `workflowArtifacts` declaration, include its exact entries in both axes. An explicit empty list means no workflow artifact is claimed. Otherwise require each unique repository-relative `path` to appear in the candidate, with one truthful `requirementSource` and `purpose`. Only a repository- or skill-required non-contract plan, execution log, or equivalent artifact inside this Issue contribution qualifies.
+
+Classification is behavioral, never extension-based. The Standards axis checks the requirement source, exact path ownership, and repository-instruction compliance. The Spec axis checks that the file stays non-contract and inside the published scope. Public-contract, routing, Acceptance Criteria, governance, runtime, arbitrary, ambiguous, falsely sourced, or unowned documentation is ordinary material scope; report it rather than accepting the declaration. The field never supplies coverage, review, or verification authority.
+
+### 5. Spawn both sub-agents in parallel
 
 Send a single message with two `Agent` tool calls. Use the `general-purpose` subagent for both.
 
@@ -66,17 +72,19 @@ Send a single message with two `Agent` tool calls. Use the `general-purpose` sub
 
 - The candidate diff command, commit list, in-scope untracked path contents, and explicit unrelated-path exclusions.
 - The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
-- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
+- The prospective `workflowArtifacts` declaration when supplied, including an explicit empty list.
+- The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); (b) any baseline smell you spot: name it and quote the hunk; and (c) any workflow-artifact path, requirement source, purpose, or Issue-contribution ownership that is missing, false, duplicate, ambiguous, or inconsistent with repository instructions. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
 **Spec sub-agent prompt** — include:
 
 - The candidate diff command, commit list, in-scope untracked path contents, and explicit unrelated-path exclusions.
 - The path or fetched contents of the spec.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
+- The prospective `workflowArtifacts` declaration when supplied, including an explicit empty list.
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; and (d) any declared workflow artifact that changes runtime, public contract, routing, Acceptance Criteria, governance, or otherwise remains arbitrary, ambiguous, or unowned ordinary material scope. Quote the spec line for each finding. Under 400 words."
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
-### 5. Aggregate
+### 6. Aggregate
 
 Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 

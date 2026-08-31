@@ -1,3 +1,4 @@
 interface:
   display_name: "Code Review"
   short_description: "Review risky diffs against standards and spec"
+  default_prompt: "Review Standards and Spec independently from one fixed point, including any prospective workflowArtifacts paths, requirement sources, purposes, contribution ownership, and non-contract behavior."

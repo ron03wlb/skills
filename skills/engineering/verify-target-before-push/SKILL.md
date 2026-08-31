@@ -31,6 +31,16 @@ Execution completion notes are the sole Issue-to-commit mapping authority. Deriv
 
 For every member require the completion note's exact Issue identity, parent or linked Spec, Issue target branch, topic branch and worktree, Execution baseline, candidate `C`, Planning Seal, `manualAttestations` artifact paths including an empty list when none were consumed, Standards and Spec review identities and clean results, verification identity, exact commands and passing results, and a closed tracker state. Require every recorded review and verification candidate identity to bind exact `C`; require `C` to exist locally and remain an ancestor of `V`. Missing, unreadable, duplicate, ambiguous, mismatched, or candidate-invalidating evidence stops without substitution.
 
+Before interpreting an absent field, inspect the parent or linked Spec for the logical `workflow_artifacts_contract_adopted:v1` record that exactly matches the completion's repository, tracker, Spec, and Issue target branch. Collapse multiple payload-identical physical records into one logical adoption. Validate its explicit `legacyCompletionFrontier`, including an empty list: every unique entry must bind one exact Issue, tracker-native immutable completion-note identity when available or durable local record locator, and SHA-256 of the exact note body. Do not compare order across parent and child histories. When the scope is adopted, a completion without `workflowArtifacts` remains legacy only if its exact identity and body digest occur in that frozen frontier; otherwise verification must stop. Missing, duplicate, malformed, unreadable, or digest-mismatched frontier evidence stops. A scope with no adoption record remains readable as legacy under its original contract; never retrofit it. Malformed, mismatched, unreadable, or payload-conflicting adoption records plausibly bound to the same repository, tracker, and Spec stop, while a well-formed record for another exact scope does not classify this one.
+
+Determine plausible binding from the record kind and its physical parent or linked-Spec tracker location before validating payload scope fields. Never filter out a malformed record by a repository, tracker, Spec, or target field that the record itself is required to prove.
+
+When a completion note contains `workflowArtifacts`, validate its explicit list. Every entry requires one unique repository-relative path (`path`), truthful requirement source (`requirementSource`), and purpose (`purpose`); the path must be changed inside the exact execution-baseline-to-candidate contribution and bound to that candidate's clean Standards and Spec review. Reject false sources plus runtime, public-contract, routing, Acceptance Criteria, governance, arbitrary, ambiguous, or unowned material scope.
+
+`workflowArtifacts` supplies scope classification only, never contribution coverage or verification authority. Every declared workflow artifact remains visible to Standards review, Spec review, selected-range coverage, focused verification, the repository full suite, cleanliness, and ref-stability checks.
+
+The Spec-scoped adoption record is compatibility evidence only and grants no implementation, review, coverage, verification, close, push, or deployment authority.
+
 Do not use a closeout receipt, integration candidate, commit-message Issue identity, merge-message parsing, or a manually repeated Issue list. Freeze the member set before review.
 
 ## Prove selected-range coverage
@@ -44,7 +54,7 @@ Enumerate every material commit in `B..V`. Explain each one through at least one
 
 For every `direct_target_contribution:v1` record, validate its exact tracker location, owner scope, target, ordered full SHAs, Git ancestry, current whole-commit diff, fixed classification, human attestation, target-range-only statement, and strict eligibility. The owning Tracker Specs or Issues join the aggregate Spec review. A malformed, duplicate, conflicting, mismatched, unavailable, partially written, unreachable, ineligible, or ambiguously owned record stops without substitution.
 
-Issue contributions are many-to-many: overlapping contribution ranges are valid and require no unique owner. A commit with no valid explanation stops before aggregate review. Never infer ownership from commit or merge messages, and never accept an unexplained material commit.
+Issue contributions are many-to-many: overlapping contribution ranges are valid and require no unique owner. A declared workflow artifact changed inside a member's exact contribution uses that ordinary member contribution as its coverage source; the declaration adds no fifth source. A commit with no valid explanation stops before aggregate review. Never infer ownership from commit or merge messages, and never accept an unexplained material commit.
 
 ## Recover eligible uncovered contributions
 
@@ -62,7 +72,7 @@ After exact record read-back, discard the failed gate completely and automatical
 
 ## Run one aggregate gate
 
-Invoke Matt `code-review` on committed diff `B...V`. Run the Standards axis against the aggregate diff and the Spec axis against every member Issue, every parent or linked Spec, and every owning Tracker Spec or Issue for accepted Direct target contributions. Both axes must be clean.
+Invoke Matt `code-review` on committed diff `B...V`. Run the Standards axis against the aggregate diff and every member's declared workflow-artifact requirement sources; run the Spec axis against every member Issue, every parent or linked Spec, every declared workflow artifact, and every owning Tracker Spec or Issue for accepted Direct target contributions. Both axes must be clean.
 
 Collect the focused verification commands recorded by member completion notes with their exact Issue and candidate origins, then deduplicate exact commands. Every command remains applicable at exact `V` unless it has valid **Successor verification evidence**. That evidence is allowed only for a path-specific command when one later member candidate descends from every earlier candidate that recorded the command, the later Issue Acceptance Criteria explicitly retire every repository path required by the command, its completion evidence records those paths absent and identifies passing current-behavior commands, every identified current-behavior command remains applicable and is included in the focused set, and every retired path remains absent at `V`.
 
