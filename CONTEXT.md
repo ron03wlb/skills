@@ -62,6 +62,38 @@ _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
 _Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping
 
+**Workflow-required documentation artifact**:
+A non-contract plan, execution log, or equivalent documentation artifact required by repository or skill instructions while executing one Issue. When created or changed only in that Issue worktree and committed inside its reviewed candidate range, the **Issue contribution** owns it without expanding product scope.
+_Avoid_: Public-contract documentation, arbitrary Markdown change, direct target edit
+
+**Workflow artifact declaration**:
+The prospective `workflowArtifacts` list in an **Execution completion note**, containing one exact repository-relative path, requirement source, and purpose for each **Workflow-required documentation artifact**, or an explicit empty list. It supplies reviewable scope classification, not separate contribution authority.
+_Avoid_: Path glob, coverage receipt, legacy-note requirement
+
+**Closed Issue evidence reconciliation**:
+The append-only, human-authorized correction that may admit one already-closed **Issue contribution** to a **Target verification set** without declaring its historical candidate implementation-complete. Its original **Execution completion note** remains immutable and invalid when that note records non-passing final verification.
+_Avoid_: Retroactive completion, verification waiver, Direct target contribution recovery
+
+**Closed Issue reconciliation recovery**:
+The confirmation-gated recovery prepared while `verify-target-before-push` derives members after freezing its exact range, only after read-only diagnostics and remedy evidence satisfy **Closed Issue evidence reconciliation** eligibility. After exact human confirmation, the verifier automatically invokes model-invoked `record-closed-issue-reconciliation`, then starts fresh from Entry and runs aggregate verification once without requiring another slash command.
+_Avoid_: Separate public command, attest-target-contribution, in-place gate continuation
+
+**Closed Issue reconciliation record**:
+The append-only read-back `closed_issue_evidence_reconciliation:v1` tracker comment written only to the affected closed Issue's ordered history. It binds that Issue and immutable completion note, its target branch, execution baseline, candidate and single failure, one **Reconciliation remedy Issue** and candidate, and exact human authority; aggregate range refs and verification results are omitted so each fresh verifier independently proves current reachability and quality.
+_Avoid_: Push-ready receipt, range-bound exception, historical completion replacement, edited correction
+
+**Reconciliation diagnostic**:
+A non-authorizing exact-baseline and exact-candidate probe that compares one failed command through a human-readable structured fingerprint: exit code, failure count, ordered failure identities, source locators, and assertion or error identities. Variable timing, duration, temporary paths, and stack noise are excluded; an expected matching failure is provenance evidence, never passing verification or merge authority.
+_Avoid_: Verification result, baseline-failure waiver, normal closeout gate
+
+**Reconciliation verification**:
+The authorization-bearing exact-target verification for one **Closed Issue evidence reconciliation**. Every command must pass before the affected **Issue contribution** may enter the **Target verification set**.
+_Avoid_: Candidate diagnostic, partial pass, historical completion proof
+
+**Reconciliation remedy Issue**:
+The exact closed **Executable Issue** whose published scope and delivered diff explicitly correct the historical failure named by a **Closed Issue evidence reconciliation**. Its valid passing candidate and the affected candidate must both be reachable from the reconciliation's exact aggregate target.
+_Avoid_: Coincidental target pass, human cause attestation, Direct target contribution
+
 **Direct target contribution**:
 An exact material target-branch commit or commit set containing only explicit human-directed, non-product workflow or governance maintenance that is outside an **Executable Issue** by design and not explained by an **Issue contribution**, referenced **Planning Seal**, or necessary merge topology. A matching **Direct target contribution record** may admit it to a **Target verification set**, but active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, and every mixed commit are ineligible.
 _Avoid_: Product implementation, partial-path attestation, SHA allowlist, retroactive completion note

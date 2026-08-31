@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Keep required execution docs inside Issue contributions
+
+A non-contract plan, execution log, or equivalent documentation artifact required while one Issue executes is created or changed only in that Issue worktree and committed within its reviewed candidate range. The resulting **Issue contribution** owns the artifact, and its presence alone does not expand product scope or create a separate target-coverage requirement. This rule never classifies by file extension: documentation that changes public behavior, skills, routing, acceptance, governance contracts, or other executable expectations remains normal Issue scope; pre-execution glossary and ADR planning changes remain owned by a **Planning Seal**, explicit eligible target-only governance maintenance remains a **Direct target contribution**, and every unowned or ambiguous document change still blocks verification.
+
+New execution completion notes declare every such artifact through `workflowArtifacts`, using an exact repository-relative path, the repository instruction or skill that required it, and its purpose; executions with none record an empty list. Standards and Spec review validate the exact file and reject any declaration that changes runtime, public contract, Acceptance Criteria, routing, or governance behavior. The declaration is prospective and is not contribution authority: an older completion note without the field remains readable under its original contract, while its files still receive ordinary contribution coverage and review.
+
+A declaration must name a path changed within that Issue's exact baseline-to-candidate diff and remains visible in aggregate review. It only prevents a validated required non-contract artifact from being mistaken for product scope expansion; it never exempts selected-range coverage, Standards review, focused verification, the repository full suite, cleanliness, or ref stability. A missing path, false requirement source, public-contract effect, or mismatch with the committed diff invalidates the new completion evidence and returns to normal Issue execution repair.
+
+Target verification routes every material document commit through its evidence owner rather than bypassing paths or extensions. A tracker-only Spec with no target commit is outside `B..V`; an approved planning commit requires a valid referenced Planning Seal; documents inside another reachable closed Issue candidate make that Issue an ordinary verified member, while a reachable open Issue still blocks; and eligible explicit target-only governance maintenance retains Direct target contribution recovery. Arbitrary, unowned, ambiguously owned, or public-contract documentation never becomes scope-neutral merely because it is Markdown.
