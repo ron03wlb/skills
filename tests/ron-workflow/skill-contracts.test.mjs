@@ -469,7 +469,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 
 
 test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
-  const workflowArtifactsCutover = "b1fcf9930056b1f1b907e380cd9015bd6162899d";
+  const workflowArtifactsCutover = "2026-08-31T03:25:20Z";
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const review = read("skills/engineering/code-review/SKILL.md");
   const close = read("skills/engineering/close-issue/SKILL.md");
@@ -478,14 +478,15 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
 
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
   assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
-  assert.match(execute, /cutover commit.*candidate.*Git ancestry.*field.*required/isu);
+  assert.match(execute, /cutover instant.*immutable tracker-server creation timestamp.*UTC instant.*field.*required/isu);
   assert.ok(execute.includes(workflowArtifactsCutover), "execute-issue omits the stable workflowArtifacts cutover");
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {
     assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
-    assert.match(consumer, /Git ancestry.*cutover commit.*ancestor.*candidate.*prospective.*without.*`workflowArtifacts`.*stop/isu);
-    assert.match(consumer, /reverse ancestry.*legacy completion note.*without.*`workflowArtifacts`.*candidate.*ancestor.*cutover.*divergent.*stops/isu);
+    assert.match(consumer, /immutable tracker-server creation timestamp.*cutover instant.*at or after.*prospective.*without.*`workflowArtifacts`.*stop/isu);
+    assert.match(consumer, /server creation timestamp.*earlier.*legacy completion note.*without.*`workflowArtifacts`.*original contract/isu);
+    assert.match(consumer, /missing.*ambiguous.*unreadable tracker timestamp.*stops.*body timestamp.*candidate commit time.*schema marker/isu);
     assert.ok(consumer.includes(workflowArtifactsCutover), "completion-note consumer omits the stable workflowArtifacts cutover");
     assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
   }
@@ -530,9 +531,11 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
       ambiguous: true,
     }],
   ]);
-  const validateWorkflowArtifacts = (completion, { candidateRelation = "legacy" } = {}) => {
+  const validateWorkflowArtifacts = (completion, { noteCreatedAt = "2026-08-31T03:25:19Z" } = {}) => {
     if (!Object.hasOwn(completion, "workflowArtifacts")) {
-      assert.equal(candidateRelation, "legacy", `${candidateRelation} completion note cannot omit workflowArtifacts`);
+      const createdAtMs = Date.parse(noteCreatedAt);
+      assert.equal(Number.isFinite(createdAtMs), true, "completion note has unreadable tracker creation time");
+      assert.equal(createdAtMs < Date.parse(workflowArtifactsCutover), true, "prospective completion note cannot omit workflowArtifacts");
       return { legacy: true, artifacts: [] };
     }
     assert.ok(Array.isArray(completion.workflowArtifacts), "workflowArtifacts must be an explicit list");
@@ -565,12 +568,16 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   };
   assert.equal(validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validTextLog] }).artifacts.length, 2);
   assert.deepEqual(validateWorkflowArtifacts({ verification: "legacy-pass" }), { legacy: true, artifacts: [] });
-  for (const candidateRelation of ["prospective", "divergent", "unreadable"]) {
+  for (const noteCreatedAt of [workflowArtifactsCutover, "2026-08-31T03:25:21Z"]) {
     assert.throws(
-      () => validateWorkflowArtifacts({ verification: "pass" }, { candidateRelation }),
-      new RegExp(`${candidateRelation} completion note cannot omit workflowArtifacts`, "u"),
+      () => validateWorkflowArtifacts({ verification: "prospective-pass" }, { noteCreatedAt }),
+      /prospective completion note cannot omit workflowArtifacts/u,
     );
   }
+  assert.throws(
+    () => validateWorkflowArtifacts({ verification: "unknown-pass" }, { noteCreatedAt: "not-a-server-time" }),
+    /unreadable tracker creation time/u,
+  );
   for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
     assert.throws(
       () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path }] }),
