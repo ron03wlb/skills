@@ -489,6 +489,7 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
     assert.match(consumer, /Do not compare order across parent and child histories.*completion without `workflowArtifacts`.*legacy only.*exact identity.*body digest.*frozen frontier.*otherwise.*stop/isu);
     assert.match(consumer, /scope with no adoption record.*legacy.*original contract/isu);
     assert.match(consumer, /malformed.*mismatched.*unreadable.*payload-conflicting.*plausibly bound.*repository.*tracker.*Spec.*stop.*well-formed record.*another exact scope.*does not classify/isu);
+    assert.match(consumer, /plausible binding.*record kind.*physical parent or linked-Spec tracker location.*before validating payload scope fields.*Never filter out.*malformed record.*repository.*tracker.*Spec.*target field.*required to prove/isu);
     assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
     assert.match(consumer, /Spec-scoped adoption record.*compatibility evidence only.*grants no.*implementation.*review.*coverage.*verification.*close.*push.*deployment authority/isu);
   }
@@ -553,12 +554,21 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
     ...adoptionScope,
     legacyCompletionFrontier: [legacyCompletion],
   };
+  const locatedInScope = (payload) => ({
+    location: { tracker: adoptionScope.tracker, spec: adoptionScope.spec },
+    payload,
+  });
+  const locatedElsewhere = (payload) => ({
+    location: { tracker: adoptionScope.tracker, spec: 99 },
+    payload,
+  });
   const validateWorkflowArtifacts = (completion, { adoptionRecords = [] } = {}) => {
-    const plausiblyBoundRecords = adoptionRecords.filter((record) =>
-      record.kind === "workflow_artifacts_contract_adopted:v1"
-      && record.repository === adoptionScope.repository
-      && record.tracker === adoptionScope.tracker
-      && record.spec === adoptionScope.spec);
+    const plausiblyBoundRecords = adoptionRecords
+      .filter(({ location, payload }) =>
+        payload.kind === "workflow_artifacts_contract_adopted:v1"
+        && location.tracker === adoptionScope.tracker
+        && location.spec === adoptionScope.spec)
+      .map(({ payload }) => payload);
     for (const record of plausiblyBoundRecords) {
       assert.deepEqual(
         Object.keys(record).sort(),
@@ -625,7 +635,7 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
       issue: 20,
       evidenceId: "github-comment:456",
       bodySha256: "b".repeat(64),
-    }, { adoptionRecords: [matchingAdoption] }),
+    }, { adoptionRecords: [locatedInScope(matchingAdoption)] }),
     /prospective completion note cannot omit workflowArtifacts/u,
   );
   assert.deepEqual(
@@ -636,26 +646,29 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
         bodySha256: "b".repeat(64),
         workflowArtifacts: [],
       },
-      { adoptionRecords: [matchingAdoption, { ...matchingAdoption }] },
+      { adoptionRecords: [locatedInScope(matchingAdoption), locatedInScope({ ...matchingAdoption })] },
     ),
     { legacy: false, artifacts: [] },
   );
   assert.throws(
     () => validateWorkflowArtifacts(
       { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
-      { adoptionRecords: [matchingAdoption, { ...matchingAdoption }] },
+      { adoptionRecords: [locatedInScope(matchingAdoption), locatedInScope({ ...matchingAdoption })] },
     ),
     /prospective completion note cannot omit workflowArtifacts/u,
   );
   assert.throws(
     () => validateWorkflowArtifacts(
       { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
-      { adoptionRecords: [matchingAdoption, { ...matchingAdoption, legacyCompletionFrontier: [] }] },
+      { adoptionRecords: [
+        locatedInScope(matchingAdoption),
+        locatedInScope({ ...matchingAdoption, legacyCompletionFrontier: [] }),
+      ] },
     ),
     /conflicting workflow artifact adoption records/u,
   );
   assert.deepEqual(
-    validateWorkflowArtifacts({ ...legacyCompletion }, { adoptionRecords: [matchingAdoption] }),
+    validateWorkflowArtifacts({ ...legacyCompletion }, { adoptionRecords: [locatedInScope(matchingAdoption)] }),
     { legacy: true, artifacts: [] },
   );
   assert.deepEqual(
@@ -665,22 +678,42 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   assert.throws(
     () => validateWorkflowArtifacts(
       { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
-      { adoptionRecords: [{
+      { adoptionRecords: [locatedInScope({
         kind: "workflow_artifacts_contract_adopted:v1",
         repository: adoptionScope.repository,
         tracker: adoptionScope.tracker,
         spec: adoptionScope.spec,
         targetBranch: adoptionScope.targetBranch,
-      }] },
+      })] },
     ),
     /malformed workflow artifact adoption record/u,
   );
   assert.throws(
     () => validateWorkflowArtifacts(
       { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
-      { adoptionRecords: [{ ...matchingAdoption, targetBranch: "other-target" }] },
+      { adoptionRecords: [locatedInScope({ ...matchingAdoption, targetBranch: "other-target" })] },
     ),
     /mismatched workflow artifact adoption scope/u,
+  );
+  assert.throws(
+    () => validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedInScope({
+        kind: "workflow_artifacts_contract_adopted:v1",
+        tracker: adoptionScope.tracker,
+        spec: adoptionScope.spec,
+        targetBranch: adoptionScope.targetBranch,
+        legacyCompletionFrontier: [],
+      })] },
+    ),
+    /malformed workflow artifact adoption record/u,
+  );
+  assert.deepEqual(
+    validateWorkflowArtifacts(
+      { issue: 20, evidenceId: "github-comment:456", bodySha256: "b".repeat(64) },
+      { adoptionRecords: [locatedElsewhere(matchingAdoption)] },
+    ),
+    { legacy: true, artifacts: [] },
   );
   for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
     assert.throws(

@@ -76,6 +76,8 @@ Before the first prospective completion under an exact repository, tracker, pare
 
 Concurrent first completions may publish multiple payload-identical physical adoption records; collapse them idempotently into one logical record and never append another after any exact payload is visible. Malformed, mismatched, unreadable, or payload-conflicting adoption records plausibly bound to the same repository, tracker, and Spec stop without writing completion; write or read-back uncertainty reports unresolved tracker ambiguity. A scope with no adoption record remains legacy-compatible. Never add a completion to the frontier retroactively. The record is compatibility evidence only and grants no implementation, review, coverage, verification, close, push, or deployment authority.
 
+Determine plausible binding from the record kind and its physical parent or linked-Spec tracker location before validating payload scope fields. Never filter out a malformed record by a repository, tracker, Spec, or target field that the record itself is required to prove.
+
 Write one compact tracker completion note containing:
 
 - Issue and linked Spec; Issue target branch/worktree, topic branch/worktree, baseline, and final candidate;

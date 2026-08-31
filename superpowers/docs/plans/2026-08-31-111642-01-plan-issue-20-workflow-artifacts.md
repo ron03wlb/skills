@@ -11,7 +11,7 @@
 
 ### Outcome 2: Make every producer, reviewer, and consumer enforce one contract
 - Work: Update `execute-issue`, `code-review`, `close-issue`, and `verify-target-before-push` so new notes produce and validate the field consistently, both review axes inspect declarations, and legacy notes retain their original validity.
-- Risks/open questions: The field and adoption record must never supply candidate mapping, contribution coverage, or a bypass for ordinary material documentation. Wall-clock, skill-repository, optional attempt, or cross-resource-order cutovers cannot classify staggered consumer repositories and local-file trackers, so consumers use one Spec-scoped logical record with an explicit content-addressed legacy frontier, reconcile identical concurrent publications, and fail malformed, conflicting, or digest-mismatched evidence closed.
+- Risks/open questions: The field and adoption record must never supply candidate mapping, contribution coverage, or a bypass for ordinary material documentation. Wall-clock, skill-repository, optional attempt, or cross-resource-order cutovers cannot classify staggered consumer repositories and local-file trackers, so consumers use one Spec-scoped logical record with an explicit content-addressed legacy frontier, determine plausible binding from physical tracker location before payload validation, reconcile identical concurrent publications, and fail malformed, conflicting, or digest-mismatched evidence closed.
 - Verify: `node --test tests/ron-workflow/skill-contracts.test.mjs`
 
 ### Outcome 3: Synchronize promoted surfaces without expanding packaging
