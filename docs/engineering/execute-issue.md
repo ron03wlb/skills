@@ -30,6 +30,8 @@ Confirmed review findings are repaired for at most ten waves per invocation. `im
 
 Every new completion note also contains `workflowArtifacts`: either an explicit empty list or exact repository-relative paths with the repository or skill requirement source and purpose. The prospective declaration is reviewed against the exact Issue contribution. It accepts required non-contract plans and execution logs by behavior, not extension, while public-contract, routing, Acceptance Criteria, governance, runtime, arbitrary, ambiguous, or unowned documents remain ordinary material scope. The field classifies scope only; it never supplies contribution coverage, review, or verification authority.
 
+The stable cutover is Git ancestry of commit `b1fcf9930056b1f1b907e380cd9015bd6162899d`: every candidate that contains that commit must carry the field. Only candidates proved to be ancestors of the cutover retain their original legacy contract; divergent or unreadable ancestry stops instead of guessing from a timestamp or self-declared marker.
+
 If closeout stops because the target is dirty or close progress is partial, invoking `execute-issue` again only checks the recorded identities and evidence, reports the still-valid completion, and stops. It does not rerun baseline checks, focused checks, final verification, the full suite, review, commits, or tracker writes. Preserve and resolve the target work, then retry `/close-issue <Issue-ID>`.
 
 After a close conflict, the human may explicitly start one successor attempt in the same branch and worktree from the latest target when the original Acceptance Criteria and ownership are unchanged. The new completion becomes current; a scope change returns to planning.

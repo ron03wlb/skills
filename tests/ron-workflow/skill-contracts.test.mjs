@@ -469,6 +469,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 
 
 test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
+  const workflowArtifactsCutover = "b1fcf9930056b1f1b907e380cd9015bd6162899d";
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const review = read("skills/engineering/code-review/SKILL.md");
   const close = read("skills/engineering/close-issue/SKILL.md");
@@ -477,11 +478,15 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
 
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
   assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
+  assert.match(execute, /cutover commit.*candidate.*Git ancestry.*field.*required/isu);
+  assert.ok(execute.includes(workflowArtifactsCutover), "execute-issue omits the stable workflowArtifacts cutover");
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {
     assert.match(consumer, /`workflowArtifacts`.*path.*requirement source.*purpose.*baseline.*candidate/isu);
-    assert.match(consumer, /legacy completion note.*without.*`workflowArtifacts`.*original contract/isu);
+    assert.match(consumer, /Git ancestry.*cutover commit.*ancestor.*candidate.*prospective.*without.*`workflowArtifacts`.*stop/isu);
+    assert.match(consumer, /reverse ancestry.*legacy completion note.*without.*`workflowArtifacts`.*candidate.*ancestor.*cutover.*divergent.*stops/isu);
+    assert.ok(consumer.includes(workflowArtifactsCutover), "completion-note consumer omits the stable workflowArtifacts cutover");
     assert.match(consumer, /scope classification only.*never.*contribution coverage.*verification authority/isu);
   }
   assert.match(verify, /declared workflow artifact.*Standards review.*Spec review.*selected-range coverage.*focused verification.*full suite.*cleanliness.*ref-stability/isu);
@@ -525,8 +530,11 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
       ambiguous: true,
     }],
   ]);
-  const validateWorkflowArtifacts = (completion) => {
-    if (!Object.hasOwn(completion, "workflowArtifacts")) return { legacy: true, artifacts: [] };
+  const validateWorkflowArtifacts = (completion, { candidateRelation = "legacy" } = {}) => {
+    if (!Object.hasOwn(completion, "workflowArtifacts")) {
+      assert.equal(candidateRelation, "legacy", `${candidateRelation} completion note cannot omit workflowArtifacts`);
+      return { legacy: true, artifacts: [] };
+    }
     assert.ok(Array.isArray(completion.workflowArtifacts), "workflowArtifacts must be an explicit list");
     const seen = new Set();
     for (const artifact of completion.workflowArtifacts) {
@@ -557,6 +565,12 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   };
   assert.equal(validateWorkflowArtifacts({ workflowArtifacts: [validPlan, validTextLog] }).artifacts.length, 2);
   assert.deepEqual(validateWorkflowArtifacts({ verification: "legacy-pass" }), { legacy: true, artifacts: [] });
+  for (const candidateRelation of ["prospective", "divergent", "unreadable"]) {
+    assert.throws(
+      () => validateWorkflowArtifacts({ verification: "pass" }, { candidateRelation }),
+      new RegExp(`${candidateRelation} completion note cannot omit workflowArtifacts`, "u"),
+    );
+  }
   for (const path of ["C:/outside.md", "../outside.md", "/outside.md"]) {
     assert.throws(
       () => validateWorkflowArtifacts({ workflowArtifacts: [{ ...validPlan, path }] }),

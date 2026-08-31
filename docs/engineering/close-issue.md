@@ -28,7 +28,7 @@ The merge uses the latest recorded target and exact reviewed candidate. An alrea
 
 Cleanup removes only the registered clean Issue worktree after candidate reachability is proved. Tracker closure happens last and is read back. A partial run reports the remaining action without repairing product code, rerunning review, pushing, or rolling back a successful merge.
 
-For new completion notes, closeout validates every `workflowArtifacts` path, requirement source, purpose, contribution ownership, and candidate-bound review result before merging. A missing field remains valid only as legacy completion evidence under its original contract. The declaration classifies required non-contract documentation but never supplies candidate identity, contribution coverage, verification authority, or a closeout bypass.
+For new completion notes, closeout validates every `workflowArtifacts` path, requirement source, purpose, contribution ownership, and candidate-bound review result before merging. It classifies notes by candidate Git ancestry against cutover commit `b1fcf9930056b1f1b907e380cd9015bd6162899d`: a candidate containing the cutover must have the field, and only a candidate proved to be an ancestor of the cutover may omit it as legacy completion evidence under its original contract. Divergent or unreadable ancestry stops. The declaration classifies required non-contract documentation but never supplies candidate identity, contribution coverage, verification authority, or a closeout bypass.
 
 ## Parent closure
 
