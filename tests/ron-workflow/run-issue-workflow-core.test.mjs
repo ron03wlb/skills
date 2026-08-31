@@ -536,6 +536,7 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.deepEqual(remediable.legalActions, [{
     type: "remediate_environment",
     issueId: "13",
+    attempt: 1,
     fingerprint: "selector-loopback",
     cycle: 1,
   }]);
@@ -544,7 +545,7 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
     journal: [grant, dispatchEvent("13")],
   });
   assert.deepEqual(remediationConsumesExecutionCapacity.legalActions, [
-    { type: "remediate_environment", issueId: "13", fingerprint: "selector-loopback", cycle: 1 },
+    { type: "remediate_environment", issueId: "13", attempt: 1, fingerprint: "selector-loopback", cycle: 1 },
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
     { type: "dispatch_issue", issueId: "15", attempt: 1 },
   ]);
@@ -564,6 +565,58 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   });
   assert.equal(unresolved.nodes[0].state, "FAILED");
   assert.equal(unresolved.diagnoses[0].reasonCode, "environment_unresolved");
+  assert.deepEqual(unresolved.diagnoses[0].attemptedRecovery, [{
+    adapter: "gradle-loopback-safe",
+    attempt: 1,
+    cycle: 1,
+  }]);
+
+  const laterAttemptJournal = [
+    grant,
+    dispatchEvent("13", 1, 2),
+    {
+      schema: "dag-run-event:v1",
+      sequence: 3,
+      type: "remediation.recorded",
+      at: "2026-08-30T00:03:00.000Z",
+      issueId: "13",
+      fingerprint: "selector-loopback",
+      cycle: 1,
+      adapter: "gradle-loopback-safe",
+    },
+    retryEvent("13", 1, 4),
+    dispatchEvent("13", 2, 5),
+  ];
+  const laterAttempt = reduceRun({ ...facts([environmentFailure]), journal: laterAttemptJournal });
+  assert.equal(laterAttempt.nodes[0].state, "RETRYING");
+  assert.deepEqual(laterAttempt.legalActions, [{
+    type: "remediate_environment",
+    issueId: "13",
+    attempt: 2,
+    fingerprint: "selector-loopback",
+    cycle: 1,
+  }]);
+
+  const laterAttemptUnresolved = reduceRun({
+    ...facts([environmentFailure]),
+    journal: [...laterAttemptJournal, {
+      schema: "dag-run-event:v1",
+      sequence: 6,
+      type: "remediation.recorded",
+      at: "2026-08-30T00:06:00.000Z",
+      issueId: "13",
+      attempt: 2,
+      fingerprint: "selector-loopback",
+      cycle: 1,
+      adapter: "gradle-loopback-safe",
+    }],
+  });
+  assert.equal(laterAttemptUnresolved.nodes[0].state, "FAILED");
+  assert.deepEqual(laterAttemptUnresolved.diagnoses[0].attemptedRecovery, [{
+    adapter: "gradle-loopback-safe",
+    attempt: 2,
+    cycle: 1,
+  }]);
 
   const partialCloseouts = reduceRun(facts([
     { ...node("13"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" },
@@ -786,6 +839,72 @@ function pausedJournal(pause) {
     },
   ];
 }
+
+test("remediation journal authority is scoped to the exact dispatch attempt with legacy compatibility", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-remediation-attempt-");
+  const store = createRunStore({ gitCommonDir });
+  const writer = store.acquireWriter("remediation-attempt-run");
+  const taskRef = { threadId: "thread-13", hostId: "local" };
+  const appendRemediation = (event = {}) => writer.append({
+    type: "remediation.recorded",
+    at: "2026-08-30T00:02:00.000Z",
+    issueId: "13",
+    fingerprint: "selector-loopback",
+    cycle: 1,
+    adapter: "gradle-loopback-safe",
+    ...event,
+  });
+
+  try {
+    writer.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      runIdentity: {
+        ...grantFor("SINGLE").runIdentity,
+        runId: "remediation-attempt-run",
+      },
+    });
+    assert.throws(() => appendRemediation(), /preceding dispatch/u);
+    writer.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:01:00.000Z",
+      issueId: "13",
+      attempt: 1,
+      taskRef,
+    });
+    appendRemediation();
+    assert.throws(() => appendRemediation(), /one remediation cycle.*attempt 1/iu);
+    assert.throws(() => appendRemediation({ attempt: 2 }), /current dispatch attempt 1/iu);
+    writer.append({
+      type: "retry.recorded",
+      at: "2026-08-30T00:03:00.000Z",
+      issueId: "13",
+      attempt: 1,
+      reason: "transient_terminal_failure",
+      priorTaskRef: taskRef,
+      replacement: null,
+    });
+    writer.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:04:00.000Z",
+      issueId: "13",
+      attempt: 2,
+      taskRef,
+    });
+    assert.throws(() => appendRemediation({ attempt: 1 }), /current dispatch attempt 2/iu);
+    appendRemediation({ attempt: 2 });
+    assert.throws(() => appendRemediation({ attempt: 2 }), /one remediation cycle.*attempt 2/iu);
+    assert.deepEqual(
+      store.readEvents("remediation-attempt-run")
+        .filter(({ type }) => type === "remediation.recorded")
+        .map(({ attempt }) => attempt ?? null),
+      [null, 2],
+    );
+  } finally {
+    writer.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("the single writer appends ordered control events and atomically rebuilds disposable status", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("dag-run-store-");

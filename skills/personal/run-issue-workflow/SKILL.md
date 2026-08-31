@@ -66,6 +66,8 @@ Dispatch no more than `max_parallel` execution or remediation actions at once. C
 
 Repeat reconciliation and execute only the returned legal actions:
 
+Treat `status.run.controlRevision` as the authority revision for that exact action batch. Immediately before each mutating `dispatch_issue`, `remediate_environment`, `close_issue`, `close_parent`, `settle_pause`, or `settle_stop` action, re-read the journal and compare its latest control revision. When the revision differs, abandon every remaining action in the stale batch and return to full reconciliation. A control appended after an action starts does not cancel it, but it fences every later mutating action. `reconcile_run` remains read-only.
+
 - `reconcile_run`: reacquire every owning source and rebuild status. It is read-only until a valid Grant exists.
 - `dispatch_issue`: create or continue the Issue's one Codex task, then let that task invoke `execute-issue`. Journal the exact attempt and task reference.
 - `remediate_environment`: apply only the exact recognized adapter once for that Issue attempt and fingerprint, journal it, rerun the exact failed command in the same lane, and preserve its real result.
@@ -87,7 +89,7 @@ Cached tracker data never authorizes dispatch, completion, or closeout. After an
 
 On restart, resolve any exact selector-known Run identity and node set from local authority before the first Tracker read. If that read and all probes fail, preserve the known Run and affected nodes in the diagnosis instead of returning an anonymous outage.
 
-The only recognized automatic environment adapter in v1 is the Windows Gradle case: a `Selector.open()` probe whose exact result includes `java.io.IOException: Unable to establish loopback connection` may invoke `gradle-loopback-safe` for one reversible, process-local remediation cycle. Every other Gradle, JVM, tool, or environment failure remains untouched. A repeated exact fingerprint becomes `environment_unresolved`; a different failure is classified independently.
+The only recognized automatic environment adapter in v1 is the Windows Gradle case: a `Selector.open()` probe whose exact result includes `java.io.IOException: Unable to establish loopback connection` may invoke `gradle-loopback-safe` for one reversible, process-local remediation cycle. Every other Gradle, JVM, tool, or environment failure remains untouched. A repeated exact fingerprint in the same dispatch attempt becomes `environment_unresolved`; the same fingerprint in a later valid attempt or a different failure is classified independently. A legacy `remediation.recorded` event without `attempt` is attributed only to the latest preceding dispatch for that Issue; missing, mismatched, future, duplicate, or otherwise ambiguous attempt evidence fails closed without rewriting the journal.
 
 ## Stop with a diagnosis
 

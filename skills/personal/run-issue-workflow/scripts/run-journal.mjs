@@ -27,7 +27,7 @@ const eventFields = new Map([
   ["retry.recorded", new Set([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
   ])],
-  ["remediation.recorded", new Set(["type", "at", "issueId", "fingerprint", "cycle", "adapter"])],
+  ["remediation.recorded", new Set(["type", "at", "issueId", "attempt", "fingerprint", "cycle", "adapter"])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
 ]);
@@ -136,6 +136,7 @@ export function validateEventDraft(event) {
       break;
     case "remediation.recorded":
       requireText(event.issueId, "remediation issueId");
+      if (event.attempt !== undefined) requirePositiveInteger(event.attempt, "remediation attempt", 3);
       requireText(event.fingerprint, "remediation fingerprint");
       requirePositiveInteger(event.cycle, "remediation cycle", 1);
       requireText(event.adapter, "remediation adapter");
@@ -231,12 +232,30 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     }
   }
   if (event.type === "remediation.recorded") {
-    const duplicate = events.some((item) => (
-      item.type === "remediation.recorded"
-      && item.issueId === event.issueId
-      && item.fingerprint === event.fingerprint
+    const latestDispatch = events.findLast((item) => (
+      item.type === "dispatch.recorded" && item.issueId === event.issueId
     ));
-    if (duplicate) throw new TypeError("Only one remediation cycle is allowed per exact fingerprint");
+    if (!latestDispatch) {
+      throw new TypeError("Remediation requires one preceding dispatch for the same Issue");
+    }
+    const attempt = event.attempt ?? latestDispatch.attempt;
+    if (attempt !== latestDispatch.attempt) {
+      throw new TypeError(`Remediation attempt must match current dispatch attempt ${latestDispatch.attempt}`);
+    }
+    let precedingAttempt = null;
+    const duplicate = events.some((item) => {
+      if (item.type === "dispatch.recorded" && item.issueId === event.issueId) {
+        precedingAttempt = item.attempt;
+        return false;
+      }
+      return item.type === "remediation.recorded"
+        && item.issueId === event.issueId
+        && item.fingerprint === event.fingerprint
+        && (item.attempt ?? precedingAttempt) === attempt;
+    });
+    if (duplicate) {
+      throw new TypeError(`Only one remediation cycle is allowed per exact fingerprint in dispatch attempt ${attempt}`);
+    }
   }
   if (["pause.transitioned", "stop.transitioned"].includes(event.type)) {
     const expectedCommand = event.type === "pause.transitioned" ? "PAUSE" : "STOP";

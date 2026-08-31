@@ -447,7 +447,7 @@ test("tracker exhaustion probes 5, 15, and 30 seconds and takes no workflow acti
   }
 });
 
-test("the exact Windows Gradle loopback fingerprint gets one process-local remediation", async () => {
+test("the exact Windows Gradle remediation carries its dispatch attempt", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   const trackerState = {
@@ -514,15 +514,23 @@ test("the exact Windows Gradle loopback fingerprint gets one process-local remed
     assert.deepEqual(remediationCalls, [{
       adapter: "gradle-loopback-safe",
       issueId: "15",
+      attempt: 1,
       taskRef,
       fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
       cycle: 1,
     }]);
     assert.deepEqual(
       events.filter(({ type }) => type === "remediation.recorded")
-        .map(({ issueId, fingerprint, cycle, adapter }) => ({ issueId, fingerprint, cycle, adapter })),
+        .map(({ issueId, attempt, fingerprint, cycle, adapter }) => ({
+          issueId,
+          attempt,
+          fingerprint,
+          cycle,
+          adapter,
+        })),
       [{
         issueId: "15",
+        attempt: 1,
         fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
         cycle: 1,
         adapter: "gradle-loopback-safe",
@@ -851,6 +859,123 @@ test("reconcile_run reacquires owning facts before waiting on active work", asyn
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const [command, terminalState, transitionType] of [
+  ["PAUSE", "PAUSED", "pause.transitioned"],
+  ["STOP", "STOPPED", "stop.transitioned"],
+]) {
+  test(`${command} control revision abandons stale legal actions after the current action`, async () => {
+    const { root, store } = createStoreFixture();
+    const closeTaskRef = { threadId: "thread-13", hostId: "local" };
+    const remediationTaskRef = { threadId: "thread-14", hostId: "local" };
+    let clockMinute = 0;
+    const now = () => `2026-08-30T10:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
+    const seed = store.acquireWriter(multiIdentity.runId);
+    seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
+    seed.append({ type: "dispatch.recorded", at: now(), issueId: "13", attempt: 1, taskRef: closeTaskRef });
+    seed.append({ type: "dispatch.recorded", at: now(), issueId: "14", attempt: 1, taskRef: remediationTaskRef });
+    seed.release();
+
+    let appendControl;
+    let closeWaits = 0;
+    const tasks = {
+      async findIssueLane() { throw new Error("stale dispatch must not start"); },
+      async create() { throw new Error("stale dispatch must not create a lane"); },
+      async read(taskRef) {
+        assert.deepEqual(taskRef, closeTaskRef);
+        return {
+          closeRequest: {
+            state: "ACCEPTED",
+            runId: multiIdentity.runId,
+            issueId: "13",
+          },
+        };
+      },
+      async message() { throw new Error("accepted close must not be sent again"); },
+      async wait(taskRefs) {
+        assert.deepEqual(taskRefs, [closeTaskRef]);
+        closeWaits += 1;
+        appendControl({ type: "control.revised", at: now(), revision: 1, command });
+        return { coordinatorActive: true, taskSettled: true };
+      },
+    };
+    const tracker = { async read() { return {}; } };
+    const environment = {
+      async remediate() { throw new Error("stale remediation must not start"); },
+    };
+    const panel = {
+      async open({ appendEvent }) {
+        appendControl = appendEvent;
+        return { async close() {} };
+      },
+    };
+    const reconcile = async ({ journal }) => {
+      const taskRefs = Object.fromEntries(journal
+        .filter(({ type }) => type === "dispatch.recorded")
+        .map(({ issueId, taskRef }) => [issueId, taskRef]));
+      return reconciliation({
+        runIdentity: multiIdentity,
+        taskRefs,
+        nodes: [
+          {
+            issueId: "13",
+            blockers: [],
+            trackerState: "OPEN",
+            taskState: "NONE",
+            completionState: "COMPLETE",
+            candidateReachable: false,
+            worktreeState: "PRESENT",
+          },
+          {
+            issueId: "14",
+            blockers: [],
+            trackerState: "OPEN",
+            taskState: "ENVIRONMENT_FAILURE",
+            completionState: "NONE",
+            candidateReachable: false,
+            worktreeState: "PRESENT",
+            failure: { fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT },
+          },
+          {
+            issueId: "15",
+            blockers: [],
+            trackerState: "OPEN",
+            taskState: "NONE",
+            completionState: "NONE",
+            candidateReachable: false,
+            worktreeState: "ABSENT",
+          },
+        ],
+      });
+    };
+
+    try {
+      const coordinator = createCoordinator({
+        store,
+        tracker,
+        tasks,
+        reconcile,
+        environment,
+        panel,
+        now,
+        sleep: async () => {},
+      });
+      const status = await coordinator.run({ specId: "12" });
+      const events = store.readEvents(multiIdentity.runId);
+
+      assert.equal(status.run.state, terminalState);
+      assert.equal(closeWaits, 1);
+      assert.equal(events.some(({ type }) => type === "remediation.recorded"), false);
+      assert.equal(events.some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "15"), false);
+      assert.deepEqual(
+        events.filter(({ type }) => type === transitionType).map(({ revision }) => revision),
+        [1],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 for (const [command, action, terminalState] of [
   ["PAUSE", "pause.transitioned", "PAUSED"],

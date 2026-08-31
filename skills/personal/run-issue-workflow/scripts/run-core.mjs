@@ -281,7 +281,8 @@ export function reduceRun(input) {
   const latestDispatchByIssue = new Map();
   const retryCountByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
   const remediationCountByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
-  const remediationCyclesByIssueAndFingerprint = new Map();
+  const remediationCyclesByIssueAttemptAndFingerprint = new Map();
+  const resolvedRemediations = [];
   for (const event of input.journal) {
     if (event.type === "dispatch.recorded" && dispatchAttemptsByIssue.has(event.issueId)) {
       dispatchAttemptsByIssue.set(
@@ -294,11 +295,13 @@ export function reduceRun(input) {
       retryCountByIssue.set(event.issueId, retryCountByIssue.get(event.issueId) + 1);
     }
     if (event.type === "remediation.recorded") {
-      const key = `${event.issueId}\0${event.fingerprint}`;
-      remediationCyclesByIssueAndFingerprint.set(
+      const attempt = event.attempt ?? latestDispatchByIssue.get(event.issueId)?.attempt;
+      const key = `${event.issueId}\0${attempt}\0${event.fingerprint}`;
+      remediationCyclesByIssueAttemptAndFingerprint.set(
         key,
-        Math.max(remediationCyclesByIssueAndFingerprint.get(key) ?? 0, event.cycle ?? 0),
+        Math.max(remediationCyclesByIssueAttemptAndFingerprint.get(key) ?? 0, event.cycle ?? 0),
       );
+      resolvedRemediations.push({ ...event, attempt });
       if (remediationCountByIssue.has(event.issueId)) {
         remediationCountByIssue.set(event.issueId, remediationCountByIssue.get(event.issueId) + 1);
       }
@@ -331,11 +334,12 @@ export function reduceRun(input) {
     } else if (blockerStates.some(([, blockerState]) => blockerState !== "SUCCEEDED")) {
       state = "PENDING";
     } else {
-      const remediationKey = `${issueId}\0${node.failure?.fingerprint ?? ""}`;
+      const attempt = latestDispatchByIssue.get(issueId)?.attempt ?? 0;
+      const remediationKey = `${issueId}\0${attempt}\0${node.failure?.fingerprint ?? ""}`;
       state = reduceNodeState(
         node,
         dispatchAttemptsByIssue.get(issueId),
-        remediationCyclesByIssueAndFingerprint.get(remediationKey) ?? 0,
+        remediationCyclesByIssueAttemptAndFingerprint.get(remediationKey) ?? 0,
       );
     }
     stateById.set(issueId, state);
@@ -376,14 +380,22 @@ export function reduceRun(input) {
     }
     if (state === "FAILED" && node.taskState === "ENVIRONMENT_FAILURE") {
       const fingerprint = node.failure?.fingerprint ?? "unknown";
-      const cycles = remediationCyclesByIssueAndFingerprint.get(`${node.issueId}\0${fingerprint}`) ?? 0;
+      const attempt = latestDispatchByIssue.get(node.issueId)?.attempt ?? 0;
+      const cycles = remediationCyclesByIssueAttemptAndFingerprint
+        .get(`${node.issueId}\0${attempt}\0${fingerprint}`) ?? 0;
       return [diagnosis({
         reasonCode: REASON_CODES.environmentUnresolved,
-        evidence: [`Environment fingerprint ${fingerprint} remained after remediation.`],
-        attemptedRecovery: input.journal
-          .filter((event) => event.type === "remediation.recorded" && event.issueId === node.issueId && event.fingerprint === fingerprint)
-          .map(({ adapter, cycle }) => ({ adapter, cycle })),
-        noAutomaticTransition: "One remediation cycle per exact fingerprint is the limit.",
+        evidence: [`Environment fingerprint ${fingerprint} remained after remediation for Issue ${node.issueId} attempt ${attempt}.`],
+        attemptedRecovery: resolvedRemediations
+          .filter((event) => event.issueId === node.issueId
+            && event.attempt === attempt
+            && event.fingerprint === fingerprint)
+          .map(({ adapter, attempt: remediationAttempt, cycle }) => ({
+            adapter,
+            attempt: remediationAttempt,
+            cycle,
+          })),
+        noAutomaticTransition: "One remediation cycle per dispatch attempt and exact fingerprint is the limit.",
         affectedNodes: [node.issueId],
         allNodes: allNodeIds,
         retryCount: cycles,
@@ -528,9 +540,12 @@ export function reduceRun(input) {
     const node = byId.get(issueId);
     if (node.taskState !== "ENVIRONMENT_FAILURE") return [];
     if (!isText(node.failure?.fingerprint)) return [];
+    const attempt = latestDispatchByIssue.get(issueId)?.attempt;
+    if (!Number.isInteger(attempt)) return [];
     return [{
       type: "remediate_environment",
       issueId,
+      attempt,
       fingerprint: node.failure.fingerprint,
       cycle: 1,
     }];

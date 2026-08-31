@@ -34,6 +34,14 @@ const CLOSE_WRITER_CONTENTION = new Set([
   "TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH",
   "TARGET_CLOSE_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
 ]);
+const MUTATING_ACTION_TYPES = new Set([
+  "dispatch_issue",
+  "remediate_environment",
+  "close_issue",
+  "close_parent",
+  "settle_pause",
+  "settle_stop",
+]);
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTaskRef = (value) => value && isText(value.threadId) && isText(value.hostId);
@@ -525,6 +533,7 @@ export function createCoordinator({
       type: "remediation.recorded",
       at: now(),
       issueId: action.issueId,
+      attempt: action.attempt,
       fingerprint: action.fingerprint,
       cycle: action.cycle,
       adapter,
@@ -532,6 +541,7 @@ export function createCoordinator({
     await environment.remediate({
       adapter,
       issueId: action.issueId,
+      attempt: action.attempt,
       taskRef,
       fingerprint: action.fingerprint,
       cycle: action.cycle,
@@ -720,7 +730,16 @@ export function createCoordinator({
           }
 
           let deferredEnvironmentStop = null;
+          let controlRevisionChanged = false;
           for (const action of lastStatus.legalActions) {
+            if (MUTATING_ACTION_TYPES.has(action.type)) {
+              const latestControl = store.readEvents(runIdentity.runId)
+                .findLast(({ type }) => type === "control.revised");
+              if ((latestControl?.revision ?? 0) !== lastStatus.run.controlRevision) {
+                controlRevisionChanged = true;
+                break;
+              }
+            }
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
               if (stopped) return stopped;
@@ -750,6 +769,7 @@ export function createCoordinator({
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
           }
+          if (controlRevisionChanged) continue;
           if (deferredEnvironmentStop) {
             const trackerResult = await readTracker(selectedRequest);
             if (!trackerResult.available) {
