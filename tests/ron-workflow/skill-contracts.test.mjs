@@ -461,6 +461,133 @@ test("record-closed-issue-reconciliation is exact, immutable, and model-invoked"
 });
 
 
+test("closed Issue evidence reconciliation is narrow and restarts fresh target verification", () => {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(verify, /after.*freeze.*member.*before.*ordinary completion-evidence rejection.*one.*closed affected Issue/isu);
+  assert.match(verify, /sole immutable completion note.*otherwise valid.*exactly one non-passing command.*candidate.*reachable.*`V`.*not.*`B`.*worktree.*absent/isu);
+  assert.match(verify, /later valid completion.*invalidating evidence.*open Issue.*registered worktree.*coverage.*review.*additional historical failure.*ineligible/isu);
+  assert.match(verify, /clean temporary worktrees.*exact.*baseline.*candidate.*command.*exit code.*failure count.*ordered failure identities.*source locators.*assertion or error identities/isu);
+  assert.match(verify, /identical diagnostic fingerprint.*no additional candidate failure/isu);
+  assert.match(verify, /exactly one closed remedy Issue.*explicitly own.*complete correction.*valid passing completion.*both candidates.*reachable.*`V`/isu);
+  assert.match(verify, /original.*completion notes.*Issue states.*immutable/isu);
+  assert.match(verify, /`closed_issue_evidence_reconciliation:v1`.*reuse one exact matching.*without.*duplicate/isu);
+  assert.match(verify, /present.*complete reconciliation packet.*complete tracker comment draft.*human confirms that exact packet once/isu);
+  assert.match(verify, /invoke.*`\/record-closed-issue-reconciliation`.*without.*manual slash command/isu);
+  assert.match(verify, /exact.*read-back.*discard.*stopped gate.*fresh.*Entry.*re-freeze/isu);
+  assert.match(verify, /reconciliation record.*affected.*remedy.*candidates.*reachable.*exact diagnostic.*current target/isu);
+  assert.match(verify, /collect.*every exact command.*deduplicate.*repository-required full suite.*duplicate.*run.*once/isu);
+  assert.match(verify, /local-ahead.*push_ready.*already-pushed.*read-only/isu);
+  assert.match(verify, /malformed.*duplicate.*edited.*conflicting.*drifting.*unavailable.*partial.*ambiguous.*stops without writing/isu);
+  assert.match(verify, /reconciliation.*never.*reopen.*edit.*completion.*attest-target-contribution.*readiness/isu);
+
+  assert.match(verifyMetadata, /closed Issue evidence reconciliation.*exact human confirmation.*fresh.*Entry/isu);
+  assert.match(verifyDocs, /Closed Issue evidence reconciliation.*one historical.*complete.*draft.*exact human confirmation.*fresh.*Entry/isu);
+  assert.match(verifyDocs, /both.*candidate.*reachable.*full suite.*once.*local-ahead.*already-pushed/isu);
+  assert.match(matt, /closed historical completion-evidence failure.*complete reconciliation.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
+  assert.match(matt, /no separate manual.*reconciliation command/iu);
+  assert.match(mattDocs, /closed historical.*complete reconciliation draft.*confirmation.*fresh.*Entry/isu);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /verify-target-before-push.*closed-Issue.*recovery/iu);
+  }
+
+  const fingerprint = Object.freeze({
+    command: "node --test --test-name-pattern=router tests/ron-workflow/skill-contracts.test.mjs",
+    exitCode: 1,
+    failureCount: 1,
+    failures: [{ identity: "router exposes the Issue worktree flow", source: "skill-contracts.test.mjs:1168", error: "ERR_ASSERTION" }],
+  });
+  const affected = Object.freeze({
+    state: "CLOSED",
+    target: "features/ron",
+    baseline: "baseline-13",
+    candidate: "candidate-13",
+    candidateReachable: true,
+    worktreeRegistered: false,
+    completions: [{ id: "completion-13", otherwiseValid: true, nonPassingCommands: [fingerprint] }],
+    laterValidCompletion: false,
+    otherInvalidatingEvidence: false,
+    coverageFailure: false,
+    reviewFailure: false,
+  });
+  const remedy = Object.freeze({
+    id: "14",
+    state: "CLOSED",
+    target: "features/ron",
+    completion: "completion-14",
+    candidate: "candidate-14",
+    ownsCompleteCorrection: true,
+    completionPassing: true,
+    candidateReachable: true,
+  });
+
+  const requireEligible = (candidate) => {
+    assert.equal(candidate.state, "CLOSED", "affected Issue must be closed");
+    assert.equal(candidate.completions.length, 1, "affected Issue needs one immutable completion");
+    const [completion] = candidate.completions;
+    assert.equal(completion.otherwiseValid, true, "completion must be otherwise valid");
+    assert.equal(completion.nonPassingCommands.length, 1, "completion needs exactly one non-passing command");
+    assert.equal(candidate.candidateReachable, true, "affected candidate must be reachable");
+    assert.notEqual(candidate.candidate, candidate.baseline, "candidate cannot equal baseline");
+    assert.equal(candidate.worktreeRegistered, false, "affected worktree must be absent");
+    assert.equal(candidate.laterValidCompletion, false, "later valid completion makes reconciliation ineligible");
+    assert.equal(candidate.otherInvalidatingEvidence, false, "other invalidating evidence makes reconciliation ineligible");
+    assert.equal(candidate.coverageFailure, false, "coverage failure is not reconcilable");
+    assert.equal(candidate.reviewFailure, false, "review failure is not reconcilable");
+    return completion;
+  };
+  const sameFingerprint = (left, right) => assert.deepEqual(right, left, "diagnostic fingerprints must be identical");
+  const requireRemedy = (candidate, remedies) => {
+    assert.equal(remedies.length, 1, "exactly one remedy Issue is required");
+    const [exactRemedy] = remedies;
+    assert.equal(exactRemedy.state, "CLOSED", "remedy Issue must be closed");
+    assert.equal(exactRemedy.target, candidate.target, "remedy must use the same target");
+    assert.equal(exactRemedy.ownsCompleteCorrection, true, "remedy must own the complete correction");
+    assert.equal(exactRemedy.completionPassing, true, "remedy completion must pass");
+    assert.equal(exactRemedy.candidateReachable, true, "remedy candidate must be reachable");
+    return exactRemedy;
+  };
+  const reconcile = ({ candidate = affected, baselineDiagnostic = fingerprint, candidateDiagnostic = fingerprint, remedies = [remedy], records = [], draft = "exact-draft", confirmedDraft = "exact-draft", readBack = "exact-draft" } = {}) => {
+    const completion = requireEligible(candidate);
+    assert.deepEqual(completion.nonPassingCommands[0], candidateDiagnostic, "candidate has an additional failure");
+    sameFingerprint(baselineDiagnostic, candidateDiagnostic);
+    const exactRemedy = requireRemedy(candidate, remedies);
+    assert.equal(confirmedDraft, draft, "human must confirm the exact packet");
+    assert.ok(records.length <= 1, "duplicate reconciliation records stop");
+    if (records.length === 1) assert.equal(records[0], draft, "conflicting reconciliation record stops");
+    assert.equal(readBack, draft, "exact reconciliation read-back is required");
+    return { restart: "Entry", affectedCandidate: candidate.candidate, remedyCandidate: exactRemedy.candidate };
+  };
+  assert.deepEqual(reconcile(), { restart: "Entry", affectedCandidate: "candidate-13", remedyCandidate: "candidate-14" });
+  assert.throws(() => reconcile({ candidate: { ...affected, state: "OPEN" } }), /must be closed/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, laterValidCompletion: true } }), /later valid completion/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, worktreeRegistered: true } }), /worktree must be absent/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, reviewFailure: true } }), /review failure/u);
+  assert.throws(() => reconcile({ candidateDiagnostic: { ...fingerprint, failureCount: 2 } }), /additional failure/u);
+  assert.throws(() => reconcile({ remedies: [remedy, { ...remedy, id: "15" }] }), /exactly one remedy/u);
+  assert.throws(() => reconcile({ records: ["exact-draft", "exact-draft"] }), /duplicate/u);
+  assert.throws(() => reconcile({ confirmedDraft: "different" }), /exact packet/u);
+
+  const runFreshAggregate = ({ mode, memberCommands, fullSuiteCommand }) => {
+    assert.match(mode, /^(?:local-ahead|already-pushed)$/u);
+    const commands = [...new Set(memberCommands.flat())];
+    const focused = commands.filter((command) => command !== fullSuiteCommand);
+    const executed = [...focused, fullSuiteCommand];
+    assert.equal(executed.filter((command) => command === fullSuiteCommand).length, 1, "full suite runs exactly once");
+    return { result: mode === "local-ahead" ? "push_ready:v1" : "range_verified:v1", focused, executed };
+  };
+  const memberCommands = [["test:13", "test:shared", "test:full"], ["test:14", "test:shared", "test:full"]];
+  const local = runFreshAggregate({ mode: "local-ahead", memberCommands, fullSuiteCommand: "test:full" });
+  assert.deepEqual(local, { result: "push_ready:v1", focused: ["test:13", "test:shared", "test:14"], executed: ["test:13", "test:shared", "test:14", "test:full"] });
+  const pushed = runFreshAggregate({ mode: "already-pushed", memberCommands, fullSuiteCommand: "test:full" });
+  assert.equal(pushed.result, "range_verified:v1");
+});
+
+
 test("target coverage recovery is confirmation-gated and restarts aggregate verification", () => {
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");

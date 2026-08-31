@@ -12,7 +12,7 @@ npx skills update verify-target-before-push
 
 ## What it does
 
-`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. When coverage alone finds eligible direct target contributions, it may recover their narrow authority evidence after one exact human confirmation.
+`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. It has two narrow confirmation-gated recoveries: eligible direct target contribution coverage and one eligible closed Issue historical completion-evidence failure.
 
 It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison.
 
@@ -32,13 +32,23 @@ When present, `workflowArtifacts` names exact required non-contract paths, requi
 
 **Successor verification evidence** handles one narrow retirement case. A later member may retire an earlier path-specific command only when its candidate descends from the earlier candidate, its Acceptance Criteria own every required path, its completion proves those paths absent and names passing current-behavior commands, those commands run at the final target, and the paths remain absent there. Partial ownership, inferred deletion or rename, missing proof, ambiguous ancestry, or a non-path-specific command makes the gate fail closed.
 
-## Confirmation-gated recovery
+## Direct contribution recovery
 
 Recovery begins only when the frozen range has uncovered commits and every one is explicit human-directed, non-product workflow or governance maintenance outside an Executable Issue by design. Active behavior or source, tests, configuration, dependencies, migrations, security, data, public APIs, mixed commits, partial paths, ambiguous ownership, and every non-coverage failure are ineligible and cause no tracker write.
 
 Existing exact records are reused. Otherwise the skill shows the complete owner, target, classification, full-SHA, purpose, and tracker-comment draft, then waits for one exact human confirmation. It invokes [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution) automatically; no separate manual command is required.
 
 After exact read-back, the old gate is discarded. Verification starts from fresh Entry, freezes current identities again, rebuilds members and direct contributions, and reruns the complete aggregate gate. The helper never pushes, and only a passing fresh local-ahead gate may write `push_ready`; already-pushed mode still returns only a Range verification result.
+
+## Closed Issue evidence reconciliation
+
+One historical completion-evidence failure is eligible only after candidate reachability freezes the member set and before ordinary completion rejection. The affected Issue must be closed with one otherwise-valid immutable completion, exactly one non-passing command, a candidate reachable from the target but different from the execution baseline, and no remaining Issue worktree. A later valid completion, other invalidating evidence, open Issue, worktree registration, coverage or review failure, or an additional historical failure stops without writing.
+
+The verifier reruns the failed command in clean temporary worktrees at the exact affected baseline and candidate. The command, exit code, failure count, ordered failure identities, source locators, and assertion or error identities must form an identical fingerprint with no additional candidate failure. Exactly one closed remedy Issue must explicitly own the complete correction and have a valid passing completion on the same target. Both affected and remedy candidates must be reachable from the frozen target.
+
+An existing exact immutable reconciliation record is reused. Otherwise the verifier shows the complete affected, diagnostic, remedy, and tracker-comment draft and waits for one exact human confirmation. It invokes [record-closed-issue-reconciliation](https://aihero.dev/skills-record-closed-issue-reconciliation) automatically; no separate manual reconciliation command is required. Neither Issue state nor either completion note is edited.
+
+After exact read-back, the stopped gate is discarded and verification starts from fresh Entry. It freezes the range and histories again, revalidates both candidates and the record, collects and deduplicates every exact completion command, and runs the repository full suite once even when that command was also recorded by a member. Both local-ahead and already-pushed modes run this fresh gate; only passing local-ahead may emit `push_ready`, while already-pushed remains read-only.
 
 ## Honest results
 
@@ -51,7 +61,7 @@ Both results bind exact baseline, target, members, coverage, review, executed ve
 - A local-ahead run rejects a missing, ambiguous, or empty upstream range.
 - An already-pushed run requires an explicit immutable comparison and writes no `push_ready` note.
 - Completion-note membership and every material commit are proved before one aggregate gate runs.
-- Recovery presents one complete draft, writes only after exact confirmation, and restarts from Entry after exact read-back.
+- Either recovery presents one complete draft, writes only after exact confirmation, and restarts from Entry after exact read-back.
 
 ## Where it fits
 
