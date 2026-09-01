@@ -176,7 +176,6 @@ Skills I use daily for code work.
 
 **User-invoked**
 
-- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./skills/engineering/push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
@@ -193,6 +192,7 @@ Skills I use daily for code work.
 
 **Model-invoked**
 
+- **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Prepare and attest one exact declared Issue prerequisite through content-bound Operator SQL outcomes.
 - **[prepare-prerequisite-artifact](./skills/engineering/prepare-prerequisite-artifact/SKILL.md)** — Build one adapter-bound, fail-closed Operator SQL prerequisite candidate without touching an external environment.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue, declaring exact `workflowArtifacts`, while preserving completion across recorded-target movement.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.

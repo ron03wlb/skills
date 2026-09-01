@@ -423,43 +423,59 @@ test("re-entrant to-tickets behavior stays synchronized across promoted surfaces
 });
 
 
-test("manual prerequisite attestation is one-step and sufficient", () => {
+test("pre-execute-issue owns the content-bound Prerequisite candidate and Operator SQL handoff", () => {
   const preExecute = read("skills/engineering/pre-execute-issue/SKILL.md");
   const preExecuteMetadata = read("skills/engineering/pre-execute-issue/agents/openai.yaml");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
-  const executeDocs = read("docs/engineering/execute-issue.md");
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   const mattDocs = read("docs/engineering/ask-matt.md");
 
-  assert.match(preExecute, /^disable-model-invocation:\s*true$/mu);
-  assert.match(preExecuteMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
-  assert.match(preExecuteDocs, /agent won't reach for it on its own/iu);
+  assert.doesNotMatch(preExecute, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(preExecuteMetadata, /^policy:/mu);
+  assert.match(preExecute, /^description:.*Use when.*directly.*active `execute-issue` lane/mu);
+  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or an active `execute-issue` lane reaches for it automatically/iu);
+  assert.match(preExecuteMetadata, /exact declared prerequisite.*content-bound.*`APPLIED` or `NO_OP`/isu);
 
-  assert.match(preExecute, /Require only.*exact Issue ID.*exact repository-relative artifact path/isu);
-  assert.match(preExecute, /human explicitly says.*already executed or applied/isu);
-  assert.match(preExecute, /manual_prerequisite_complete:v1.*issue:.*artifact:.*attested_by: human.*statement: executed/isu);
-  assert.match(preExecute, /same Issue.*normalized artifact path.*without writing a duplicate/isu);
-  assert.match(preExecute, /Do not require.*resolver.*setup step.*target environment.*database identity.*credentials.*artifact hash.*worktree.*artifact-only commit.*postflight.*DB access.*external verification.*`WAITING_MANUAL`.*`READY`.*second invocation/isu);
+  assert.match(preExecute, /direct `\/pre-execute-issue <Issue-ID>`.*active `execute-issue` handoff/isu);
+  assert.match(preExecute, /Issue or linked Spec.*exact.*declared.*repository-relative artifact.*unchanged-scope late discovery/isu);
+  assert.match(preExecute, /No declaration.*skip.*arbitrary `\.sql`.*never trigger/isu);
+  assert.match(preExecute, /missing.*multiple.*ambiguous.*contradictory.*stop.*without.*worktree.*tracker/isu);
+
+  assert.match(preExecute, /recorded Issue target.*unique Issue topic branch.*Issue worktree/isu);
+  assert.match(preExecute, /create or reuse.*dirty.*mismatched.*ambiguous.*stop.*without cleanup.*unrelated/isu);
+  assert.match(preExecute, /On retry.*existing `manual_prerequisite_complete:v2`.*candidate.*blob.*outcome.*worktree.*branch.*ancestry.*reuse.*never prepare or present/isu);
+  assert.match(preExecute, /matching clean valid.*Prerequisite candidate.*full candidate commit.*Git blob.*repository-relative path.*validation.*Standards.*Spec/isu);
+  assert.match(preExecute, /otherwise.*`prepare-prerequisite-artifact`.*matching.*candidate.*blob.*path.*validation.*clean review/isu);
+  assert.match(preExecute, /present.*committed.*Operator SQL.*human.*never execute.*connect.*database.*recovery.*cleanup.*retry/isu);
+
+  assert.match(preExecute, /exactly `APPLIED` or `NO_OP`.*generic success.*one focused.*clarification/isu);
+  assert.match(preExecute, /manual_prerequisite_complete:v2.*issue:.*candidate:.*blob:.*artifact:.*outcome:/isu);
+  assert.match(preExecute, /same Issue.*candidate.*blob.*normalized artifact path.*outcome.*reuse.*without writing a duplicate/isu);
+  assert.match(preExecute, /legacy.*manual_prerequisite_complete:v1.*readable.*cannot authorize.*newly generated/isu);
+  assert.match(preExecute, /error.*SQL failure.*missing.*other value.*no attestation.*no.*resume.*no.*retry/isu);
   assert.match(preExecute, /Tracker write or read-back failure.*unresolved persistence.*never claim/isu);
-  assert.match(preExecute, /Never execute or replay the artifact/iu);
-  assert.match(preExecute, /Never create or modify a worktree.*mutate an external environment/isu);
 
-  assert.match(execute, /No declared Manual prerequisite.*ordinary Issue execution/isu);
-  assert.match(execute, /manual_prerequisite_complete:v1.*same Issue.*normalized repository-relative path.*sufficient/isu);
-  assert.match(execute, /missing.*exact command `\/pre-execute-issue <Issue-ID> <artifact-path>`/isu);
-  assert.match(execute, /later matching attestation.*resolves.*prerequisite-only blocked state.*resume.*existing Issue lane/isu);
-  assert.match(execute, /Late prerequisite discovery.*exact artifact path.*matching attestation.*resume the same worktree and candidate lane/isu);
-  assert.doesNotMatch(execute, /`discover`|`prepare`|`verify`|`NOT_REQUIRED`|`REQUIRED`/u);
+  assert.match(preExecute, /direct invocation.*stop.*after.*attestation.*no implementation authority/isu);
+  assert.match(preExecute, /active.*same.*execution lane.*fresh.*Issue.*target.*artifact.*candidate.*blob.*branch.*worktree.*ancestry/isu);
+  assert.match(preExecute, /never.*integrate.*close.*push.*deploy.*broaden.*external cleanup/isu);
 
   for (const path of [
     "docs/engineering/pre-execute-issue.md",
-    "docs/engineering/execute-issue.md",
     "docs/engineering/ask-matt.md",
   ]) assert.doesNotMatch(read(path), /\]\((?:\.\/|\.\.\/)/u, `${path} has a relative published link`);
-  assert.match(matt, /published.*Issue.*`\/pre-execute-issue.*artifact-path.*once.*attestation.*`\/execute-issue`/isu);
-  assert.match(mattDocs, /pre-execute-issue.*names one artifact.*records that attestation once.*execute-issue/isu);
-  assert.match(executeDocs, /one human attestation.*exact executed artifact.*pre-execute-issue/isu);
+
+  assert.match(preExecuteDocs, /## What it does.*## When to reach for it.*## Prerequisites.*## Where it fits/isu);
+  assert.match(preExecuteDocs, /exact declared prerequisite.*Prerequisite candidate.*Operator SQL.*`APPLIED`.*`NO_OP`/isu);
+  assert.match(preExecuteDocs, /direct.*stops.*active.*same.*execution lane/isu);
+  assert.match(matt, /published.*Issue.*`\/pre-execute-issue <Issue-ID>`.*prepare.*Operator SQL.*content-bound.*attestation/isu);
+  assert.match(matt, /direct.*stops.*active.*same.*execution lane/isu);
+  assert.match(mattDocs, /pre-execute-issue.*declared prerequisite.*prepare.*Operator SQL.*content-bound.*attestation/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    const readme = read(path);
+    const modelHeading = path === "README.md" ? "\n**Model-invoked**\n" : "\n## Model-invoked\n";
+    assert.match(readme.slice(readme.indexOf(modelHeading)), /pre-execute-issue.*prepare.*attest.*prerequisite/iu);
+  }
 });
 
 

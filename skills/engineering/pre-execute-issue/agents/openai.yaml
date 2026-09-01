@@ -1,7 +1,4 @@
 interface:
   display_name: "Pre-Execute Issue"
-  short_description: "Record one executed Issue artifact"
-  default_prompt: "Use $pre-execute-issue to record that sql/v0.4.20.sql was already executed for Issue #108."
-
-policy:
-  allow_implicit_invocation: false
+  short_description: "Prepare and attest one exact prerequisite"
+  default_prompt: "Use $pre-execute-issue for one exact declared prerequisite, present its content-bound Operator SQL candidate for human execution, and record only the reported `APPLIED` or `NO_OP` outcome."
