@@ -26,13 +26,26 @@ const createGitFixture = (prefix) => {
   return { repo, rawGit, git, isAncestor };
 };
 
-const createPushReadyReceipt = ({ target, baseline, head, members, coverage, commands, results, successorDispositions = [] }) => ({
+const createPushReadyReceipt = ({
+  target,
+  baseline,
+  head,
+  members,
+  coverage,
+  commands,
+  results,
+  reconciliationRecords = [],
+  directTargetContributions = [],
+  successorDispositions = [],
+}) => ({
   schema: "push_ready:v1",
   mode: "local-ahead",
   target,
   baseline,
   head,
   members,
+  reconciliationRecords,
+  directTargetContributions,
   coverage,
   standards: "clean",
   spec: "clean",
@@ -1714,25 +1727,99 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     assert.match(receipt.baseline, /^[0-9a-f]{40}$/u, "receipt baseline is malformed");
     assert.match(receipt.head, /^[0-9a-f]{40}$/u, "receipt verified target SHA is malformed");
     assert.equal(receipt.head, currentHead, "receipt is stale for current target HEAD");
-    assert.ok(Array.isArray(receipt.members) && receipt.members.length > 0, "receipt member structure is malformed");
-    assert.ok(Array.isArray(receipt.coverage) && receipt.coverage.length > 0, "receipt coverage evidence is malformed");
+    assert.ok(
+      Array.isArray(receipt.members)
+        && receipt.members.length > 0
+        && receipt.members.every((member) => member
+          && (typeof member.issue === "string" || Number.isInteger(member.issue))
+          && /^[0-9a-f]{40}$/u.test(member.candidate)),
+      "receipt member structure is malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.reconciliationRecords)
+        && receipt.reconciliationRecords.every((identity) => typeof identity === "string" && identity.length > 0),
+      "receipt reconciliation identities are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.directTargetContributions)
+        && receipt.directTargetContributions.every((identity) => typeof identity === "string" && identity.length > 0),
+      "receipt Direct target contribution identities are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.coverage)
+        && receipt.coverage.length > 0
+        && receipt.coverage.every((entry) => entry
+          && /^[0-9a-f]{40}$/u.test(entry.commit)
+          && typeof entry.source === "string"
+          && entry.source.length > 0),
+      "receipt coverage evidence is malformed",
+    );
     assert.equal(receipt.standards, "clean", "receipt Standards evidence is not clean");
     assert.equal(receipt.spec, "clean", "receipt Spec evidence is not clean");
-    assert.ok(Array.isArray(receipt.commands) && receipt.commands.length > 0, "receipt commands are malformed");
-    assert.ok(Array.isArray(receipt.results) && receipt.results.every(({ result }) => result === "pass"), "receipt results are not passing");
+    assert.ok(
+      Array.isArray(receipt.commands)
+        && receipt.commands.length > 0
+        && receipt.commands.every((command) => typeof command === "string" && command.length > 0)
+        && new Set(receipt.commands).size === receipt.commands.length,
+      "receipt commands are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.results)
+        && receipt.results.length === receipt.commands.length
+        && receipt.results.every(({ command, result }, index) => command === receipt.commands[index] && result === "pass"),
+      "receipt results are not exact passing command evidence",
+    );
+    assert.ok(
+      Array.isArray(receipt.successorDispositions)
+        && receipt.successorDispositions.every((disposition) => disposition
+          && typeof disposition.command === "string"
+          && Array.isArray(disposition.origins)
+          && disposition.origins.length > 0
+          && disposition.origins.every((origin) => origin
+            && (typeof origin.issue === "string" || Number.isInteger(origin.issue))
+            && /^[0-9a-f]{40}$/u.test(origin.candidate))
+          && Array.isArray(disposition.retiredPaths)
+          && disposition.retiredPaths.length > 0
+          && disposition.successor
+          && (typeof disposition.successor.issue === "string" || Number.isInteger(disposition.successor.issue))
+          && /^[0-9a-f]{40}$/u.test(disposition.successor.candidate)
+          && typeof disposition.acceptanceCriteria === "string"
+          && Array.isArray(disposition.absenceProof)
+          && Array.isArray(disposition.currentBehaviorCommands)
+          && disposition.currentBehaviorCommands.length > 0
+          && Array.isArray(disposition.currentBehaviorResults)
+          && disposition.currentBehaviorResults.length === disposition.currentBehaviorCommands.length
+          && disposition.currentBehaviorResults.every(({ command, result }, index) => command === disposition.currentBehaviorCommands[index] && result === "pass")),
+      "receipt Successor verification evidence is malformed",
+    );
     assert.equal(receipt.worktree, "clean", "receipt worktree evidence is not clean");
     return receipt;
   };
 
+  const gitValues = (...args) => {
+    try {
+      const output = git(...args);
+      return output === "" ? [] : output.split(/\r?\n/u);
+    } catch {
+      return [];
+    }
+  };
+
   const configuredUpstreams = () => {
-    const remoteName = git("config", "--get", "branch.target.remote");
-    const remoteRef = git("config", "--get", "branch.target.merge");
-    if (!remoteName || !remoteRef) return [];
-    return [{
-      remote: remoteName,
-      remoteRef,
-      trackingRef: `refs/remotes/${remoteName}/${remoteRef.replace(/^refs\/heads\//u, "")}`,
-    }];
+    const remoteNames = gitValues("config", "--get-all", "branch.target.remote");
+    const remoteRefs = gitValues("config", "--get-all", "branch.target.merge");
+    return remoteNames.flatMap((remoteName) => remoteRefs.flatMap((remoteRef) => {
+      if (remoteName === "." || !remoteRef.startsWith("refs/heads/")) return [];
+      const fetchUrls = gitValues("remote", "get-url", "--all", remoteName);
+      const pushUrls = gitValues("remote", "get-url", "--push", "--all", remoteName);
+      return fetchUrls.flatMap((fetchUrl) => pushUrls.map((pushUrl) => ({
+        remote: remoteName,
+        remoteRef,
+        fetchUrl,
+        pushUrl,
+        trackingRef: `refs/remotes/${remoteName}/${remoteRef.replace(/^refs\/heads\//u, "")}`,
+      })));
+    }));
   };
 
   const validateFetchedGate = ({ receipt, frozenReceiptText, currentReceiptText, frozenUpstreams, currentUpstreams, fetchedTip, targetHead }) => {
@@ -1756,14 +1843,7 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     performPush,
     readReceiptText,
     readUpstreams = configuredUpstreams,
-    readFetchedTip,
-    readPostFetchReceiptText,
-    readPostFetchUpstreams,
-    readPostFetchTargetHead,
     readRemoteHeads,
-    readPostPushReceiptText,
-    readPostPushUpstreams,
-    readPostPushTargetHead,
   } = {}) => {
     const target = "target";
     const currentHead = git("rev-parse", target);
@@ -1786,11 +1866,11 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     validateFetchedGate({
       receipt,
       frozenReceiptText,
-      currentReceiptText: readPostFetchReceiptText?.() ?? (readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead)),
+      currentReceiptText: readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead),
       frozenUpstreams,
-      currentUpstreams: readPostFetchUpstreams?.() ?? readUpstreams(),
-      fetchedTip: readFetchedTip?.() ?? git("rev-parse", upstream.trackingRef),
-      targetHead: readPostFetchTargetHead?.() ?? git("rev-parse", target),
+      currentUpstreams: readUpstreams(),
+      fetchedTip: git("rev-parse", upstream.trackingRef),
+      targetHead: git("rev-parse", target),
     });
     try {
       if (performPush) performPush();
@@ -1802,10 +1882,10 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     validatePostPush({
       receipt,
       frozenReceiptText,
-      currentReceiptText: readPostPushReceiptText?.() ?? (readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead)),
+      currentReceiptText: readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead),
       frozenUpstreams,
-      currentUpstreams: readPostPushUpstreams?.() ?? readUpstreams(),
-      targetHead: readPostPushTargetHead?.() ?? git("rev-parse", target),
+      currentUpstreams: readUpstreams(),
+      targetHead: git("rev-parse", target),
       remoteHeads: readRemoteHeads?.() ?? (remoteOutput === "" ? [] : remoteOutput.split(/\r?\n/u).map((line) => line.split(/\s+/u)[0])),
     });
     return receipt.head;
@@ -1842,11 +1922,26 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     assert.throws(() => selectReceipt({ receipts: [{ ...receipt, mode: "already-pushed" }], target: "target", currentHead: head }), /local-ahead/u);
     assert.throws(() => selectReceipt({ receipts: [{ ...receipt, target: "other" }], target: "target", currentHead: head }), /target mismatch/u);
     assert.throws(() => selectReceipt({ receipts: [{ ...receipt, head: baseline }], target: "target", currentHead: head }), /stale/u);
-    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, results: [{ result: "fail" }] }], target: "target", currentHead: head }), /not passing/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, members: [null] }], target: "target", currentHead: head }), /member structure/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, reconciliationRecords: [null] }], target: "target", currentHead: head }), /reconciliation identities/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, directTargetContributions: [null] }], target: "target", currentHead: head }), /Direct target contribution identities/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, coverage: [null] }], target: "target", currentHead: head }), /coverage evidence/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, results: [] }], target: "target", currentHead: head }), /exact passing command evidence/u);
+    assert.throws(
+      () => selectReceipt({ receipts: [{ ...receipt, results: [{ command: "another command", result: "pass" }] }], target: "target", currentHead: head }),
+      /exact passing command evidence/u,
+    );
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, successorDispositions: null }], target: "target", currentHead: head }), /Successor verification evidence/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, successorDispositions: [{ command: "incomplete" }] }], target: "target", currentHead: head }), /Successor verification evidence/u);
     assert.throws(() => deliver({ readReceiptText: () => "not-json" }), /receipt is malformed/u);
     assert.throws(() => deliver({ readReceiptText: () => JSON.stringify([receipt, receipt]) }), /exactly one/u);
     assert.throws(() => deliver({ readUpstreams: () => [] }), /unique configured upstream/u);
     assert.throws(() => deliver({ readUpstreams: () => [...upstreams, ...upstreams] }), /unique configured upstream/u);
+    assert.ok(upstreams[0].fetchUrl.length > 0 && upstreams[0].pushUrl.length > 0, "upstream URL identities must be frozen");
+    git("config", "--add", "branch.target.remote", "origin");
+    assert.equal(configuredUpstreams().length, 2, "multi-valued branch config must remain ambiguous");
+    assert.throws(() => deliver(), /unique configured upstream/u);
+    git("config", "--replace-all", "branch.target.remote", "origin");
     const receiptText = JSON.stringify(receipt);
     const fetchedGate = {
       receipt,
@@ -1873,6 +1968,10 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     );
     assert.throws(
       () => validateFetchedGate({ ...fetchedGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /upstream or ref drift after fetch/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentUpstreams: [{ ...upstreams[0], fetchUrl: "drifted" }] }),
       /upstream or ref drift after fetch/u,
     );
 
@@ -1910,6 +2009,10 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     );
     assert.throws(
       () => validatePostPush({ ...postPushGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /post-push upstream or ref drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentUpstreams: [{ ...upstreams[0], pushUrl: "drifted" }] }),
       /post-push upstream or ref drift/u,
     );
 
