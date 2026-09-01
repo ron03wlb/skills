@@ -12,7 +12,7 @@ npx skills update record-closed-issue-reconciliation
 
 ## What it does
 
-`record-closed-issue-reconciliation` appends or reuses one immutable tracker record after a closed Issue's historical failure and one exact remedy Issue have been proved against identical baseline and candidate diagnostics.
+`record-closed-issue-reconciliation` appends or reuses one immutable tracker record for either a historical failed-command diagnostic with one exact remedy Issue or a historical command representation with one exact descendant proof.
 
 It records narrow human authority for fresh exact-target verification. It never repairs the original completion, waives the failed command, or grants push readiness.
 
@@ -20,11 +20,11 @@ It records narrow human authority for fresh exact-target verification. It never 
 
 The agent reaches for it automatically only from an active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) recovery after showing the complete draft and receiving one exact human confirmation. Do not invoke it manually; a standalone invocation stops without writing.
 
-Reach for [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) when a frozen target range contains the one eligible historical case. Ordinary product fixes still use [execute-issue](https://aihero.dev/skills-execute-issue).
+Reach for [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) when a frozen target range contains either eligible historical case. Ordinary product fixes still use [execute-issue](https://aihero.dev/skills-execute-issue).
 
 ## Prerequisites
 
-The repository needs a configured Issue tracker. An active `verify-target-before-push` recovery must supply the exact affected and remedy identities, identical diagnostic fingerprint, complete tracker comment draft, and evidence that the human confirmed that exact packet.
+The repository needs a configured Issue tracker. An active `verify-target-before-push` recovery must supply either the exact affected/remedy identities and identical diagnostic fingerprint or the exact affected/descendant identities and placeholder mapping, plus the complete tracker comment draft and evidence that the human confirmed that exact packet.
 
 ## One immutable record
 
@@ -32,10 +32,12 @@ The leading idea is **reconciliation**, not retroactive completion. The helper r
 
 Malformed, duplicate, edited, conflicting, drifting, unavailable, partial, ambiguous, multiple-failure, multiple-fingerprint, or multiple-remedy evidence stops without repair. The record never contains aggregate range refs, current verification output, worktree paths, logs, hashes, or readiness.
 
+The same model-invoked helper also owns command representation reconciliation. It revalidates the sole unambiguous placeholder, unique repository full-suite command, descendant candidate ancestry, descendant passing completion, frozen-target pass, and exact confirmation before appending or reusing `closed_issue_command_representation_reconciliation:v1`. That record grants only selected-range membership eligibility; the original completion stays invalid and fresh aggregate verification remains the verifier's job.
+
 ## It's working if
 
 - The original completion and both Issue states remain unchanged.
-- One exact affected-Issue record binds the affected evidence, one diagnostic fingerprint, one remedy, and human exact-target-verification authority.
+- One exact affected-Issue record binds either one diagnostic/remedy proof or one placeholder/descendant mapping and its narrow human authority.
 - The active verifier discards its stopped gate and starts fresh only after exact read-back.
 
 ## Where it fits

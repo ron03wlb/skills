@@ -26,6 +26,35 @@ const createGitFixture = (prefix) => {
   return { repo, rawGit, git, isAncestor };
 };
 
+const createPushReadyReceipt = ({
+  target,
+  baseline,
+  head,
+  members,
+  coverage,
+  commands,
+  results,
+  reconciliationRecords = [],
+  directTargetContributions = [],
+  successorDispositions = [],
+}) => ({
+  schema: "push_ready:v1",
+  mode: "local-ahead",
+  target,
+  baseline,
+  head,
+  members,
+  reconciliationRecords,
+  directTargetContributions,
+  coverage,
+  standards: "clean",
+  spec: "clean",
+  commands,
+  results,
+  successorDispositions,
+  worktree: "clean",
+});
+
 test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () => {
   const manifest = JSON.parse(read(".claude-plugin/plugin.json")).skills.sort();
   const expected = [];
@@ -691,6 +720,152 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
 });
 
 
+test("historical command placeholder reconciliation is exact and fresh-entry only", () => {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const helper = read("skills/engineering/record-closed-issue-reconciliation/SKILL.md");
+  const helperMetadata = read("skills/engineering/record-closed-issue-reconciliation/agents/openai.yaml");
+  const helperDocs = read("docs/engineering/record-closed-issue-reconciliation.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(verify, /exactly one.*unambiguous.*historical placeholder.*otherwise valid.*immutable completion.*repository-required full-suite command/isu);
+  assert.match(verify, /literal repository-root command.*prose.*summar(?:y|ies).*multiple placeholders.*multiple possible commands.*inferred expansions.*ineligible/isu);
+  assert.match(verify, /later descendant Issue.*candidate.*descend.*affected candidate.*valid.*completion.*exact literal command.*pass/isu);
+  assert.match(verify, /freshly frozen target.*same command.*pass.*coincidental current pass.*non-descendant.*different command.*unavailable.*ambiguity.*stop/isu);
+  assert.match(verify, /affected.*descendant.*Issue.*completion.*candidate.*target.*ancestry.*identit/isu);
+  assert.match(verify, /affected candidate.*reachable.*`V`.*not.*`B`.*descendant.*candidate.*reachable.*`V`/isu);
+  assert.match(verify, /complete command representation recovery packet.*record draft.*human confirms.*exact packet/isu);
+  assert.match(verify, /`closed_issue_command_representation_reconciliation:v1`.*reuse.*exact matching.*without.*duplicate/isu);
+  assert.match(verify, /record read-back.*selected-range membership eligibility only.*original completion.*invalid.*not `implementation_complete`/isu);
+  assert.match(verify, /discard.*stopped gate.*fresh.*Entry.*mapped literal command.*aggregate command set.*deduplicate.*full suite.*once/isu);
+  assert.match(verify, /both.*local-ahead.*already-pushed.*same.*recovery/isu);
+  assert.match(verify, /never.*edit.*history.*guess.*reopen.*attest-target-contribution.*repair.*push.*deploy/isu);
+
+  assert.match(helper, /active `\/verify-target-before-push`.*either.*failed-command diagnostic packet.*command representation packet/isu);
+  assert.match(helper, /command representation.*sole.*unambiguous placeholder.*unique repository-required full-suite command.*later descendant.*passing completion.*freshly frozen target.*same command.*pass/isu);
+  assert.match(helper, /before mutation.*affected.*descendant.*completion.*candidate.*target.*ancestry.*command.*draft.*drift.*stops without writing/isu);
+  assert.match(helper, /active verifier-owned.*freshly frozen target result.*never.*rerun the mapped command.*exact-target verification/isu);
+  assert.match(helper, /closed_issue_command_representation_reconciliation:v1\s+affected:\s+issue: <affected Issue ID>\s+completion: <immutable completion-note identity>\s+target: <Issue target branch>\s+baseline: <full execution baseline SHA>\s+candidate: <full affected candidate SHA>\s+placeholder: <exact historical placeholder>\s+mapped_command: <exact repository-required full-suite command>\s+descendant:\s+issue: <descendant Issue ID>\s+completion: <immutable descendant completion-note identity>\s+candidate: <full descendant candidate SHA>\s+authorized_by: human\s+statement: authorized for selected-range membership eligibility only; original completion remains invalid/isu);
+  assert.match(helper, /record contains only.*affected.*placeholder.*mapped_command.*descendant.*authorized_by.*statement/isu);
+  assert.match(helper, /reuse.*exact matching.*command representation.*record.*without.*duplicate/isu);
+  assert.match(helper, /malformed.*duplicate.*edited.*partial.*stale.*drifting.*conflicting.*unreadable.*ambiguous.*stops/isu);
+  assert.match(helper, /never.*edit.*history.*retroactively.*complete.*reopen.*push.*deploy/isu);
+
+  assert.match(verifyMetadata, /historical command placeholder.*exact human confirmation.*fresh.*Entry/isu);
+  assert.match(helperMetadata, /failed-command.*command representation.*exact human confirmation/isu);
+  assert.match(verifyDocs, /command representation.*one unambiguous placeholder.*descendant.*exact literal.*frozen target.*fresh.*Entry/isu);
+  assert.match(helperDocs, /failed-command diagnostic.*command representation.*same model-invoked helper/isu);
+  assert.match(matt, /historical command placeholder.*descendant.*exact full-suite command.*freshly frozen target pass.*current-only pass.*does not qualify.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
+  assert.match(mattDocs, /historical command placeholder.*descendant.*exact full-suite command.*confirmation.*fresh.*Entry/isu);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /record-closed-issue-reconciliation.*failed-command.*command-representation/iu);
+    assert.match(read(path), /verify-target-before-push.*command-placeholder/iu);
+  }
+
+  const fullSuiteCommand = "node --test tests/ron-workflow/*.test.mjs";
+  const placeholder = "<repository-required full-suite command>";
+  const affected = Object.freeze({
+    issue: "13",
+    state: "CLOSED",
+    target: "features/ron",
+    baseline: "baseline-13",
+    candidate: "candidate-13",
+    completion: "completion-13",
+    completionOtherwiseValid: true,
+    nonExecutableEntries: [placeholder],
+    candidateReachableFromTarget: true,
+    candidateReachableFromBaseline: false,
+    worktreeRegistered: false,
+    worktreeExists: false,
+    laterValidCompletion: false,
+    otherInvalidatingEvidence: false,
+  });
+  const descendant = Object.freeze({
+    issue: "14",
+    state: "CLOSED",
+    target: "features/ron",
+    completion: "completion-14",
+    candidate: "candidate-14",
+    descendsFromAffected: true,
+    candidateReachable: true,
+    recordedCommands: [fullSuiteCommand],
+    commandResults: [{ command: fullSuiteCommand, result: "pass" }],
+  });
+
+  const reconcile = ({
+    candidate = affected,
+    commandChoices = [fullSuiteCommand],
+    descendants = [descendant],
+    frozenTargetResult = { command: fullSuiteCommand, result: "pass" },
+    records = [],
+    draft = "exact-command-representation-draft",
+    confirmedDraft = "exact-command-representation-draft",
+    readBack = "exact-command-representation-draft",
+  } = {}) => {
+    assert.equal(candidate.state, "CLOSED", "affected Issue must be closed");
+    assert.equal(candidate.completionOtherwiseValid, true, "completion must be otherwise valid");
+    assert.equal(candidate.nonExecutableEntries.length, 1, "exactly one placeholder is required");
+    assert.equal(candidate.nonExecutableEntries[0], placeholder, "entry must be one unambiguous placeholder");
+    assert.equal(candidate.candidateReachableFromTarget, true, "affected candidate must be reachable from target");
+    assert.equal(candidate.candidateReachableFromBaseline, false, "affected candidate must not be reachable from baseline");
+    assert.equal(candidate.worktreeRegistered, false, "affected worktree must not be registered");
+    assert.equal(candidate.worktreeExists, false, "affected worktree path must be absent");
+    assert.equal(candidate.laterValidCompletion, false, "later valid completion makes recovery ineligible");
+    assert.equal(candidate.otherInvalidatingEvidence, false, "other invalidating evidence makes recovery ineligible");
+    assert.equal(commandChoices.length, 1, "repository full-suite command must be unique");
+    const [mappedCommand] = commandChoices;
+    assert.equal(descendants.length, 1, "exactly one descendant command proof is required");
+    const [exactDescendant] = descendants;
+    assert.equal(exactDescendant.state, "CLOSED", "descendant Issue must be closed");
+    assert.equal(exactDescendant.target, candidate.target, "descendant target must match");
+    assert.equal(exactDescendant.descendsFromAffected, true, "descendant candidate must descend from affected candidate");
+    assert.equal(exactDescendant.candidateReachable, true, "descendant candidate must be reachable from target");
+    assert.equal(exactDescendant.recordedCommands.includes(mappedCommand), true, "descendant must record the exact mapped command");
+    assert.equal(exactDescendant.commandResults.find(({ command }) => command === mappedCommand)?.result, "pass", "descendant command must pass");
+    assert.deepEqual(frozenTargetResult, { command: mappedCommand, result: "pass" }, "frozen target must pass the same command");
+    assert.equal(confirmedDraft, draft, "human must confirm the exact packet");
+    assert.ok(records.length <= 1, "duplicate command representation records stop");
+    if (records.length === 1) assert.equal(records[0], draft, "conflicting command representation record stops");
+    assert.equal(readBack, draft, "exact command representation read-back is required");
+    return { restart: "Entry", mappedCommand, completionState: "invalid" };
+  };
+
+  assert.deepEqual(reconcile(), { restart: "Entry", mappedCommand: fullSuiteCommand, completionState: "invalid" });
+  assert.deepEqual(reconcile({ records: ["exact-command-representation-draft"] }), { restart: "Entry", mappedCommand: fullSuiteCommand, completionState: "invalid" });
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: [placeholder, "<other>"] } }), /exactly one placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: ["full suite passed"] } }), /unambiguous placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: ["run the full test suite"] } }), /unambiguous placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, candidateReachableFromTarget: false } }), /reachable from target/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, candidateReachableFromBaseline: true } }), /not be reachable from baseline/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, worktreeRegistered: true } }), /must not be registered/u);
+  assert.throws(() => reconcile({ commandChoices: [fullSuiteCommand, "npm test"] }), /must be unique/u);
+  assert.throws(() => reconcile({ descendants: [] }), /exactly one descendant/u);
+  assert.throws(() => reconcile({ descendants: [descendant, { ...descendant, issue: "15" }] }), /exactly one descendant/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, descendsFromAffected: false }] }), /must descend/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, candidateReachable: false }] }), /reachable from target/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, recordedCommands: ["npm test"] }] }), /exact mapped command/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, commandResults: [{ command: fullSuiteCommand, result: "fail" }] }] }), /must pass/u);
+  assert.throws(() => reconcile({ frozenTargetResult: { command: fullSuiteCommand, result: "fail" } }), /frozen target/u);
+  assert.throws(() => reconcile({ records: ["exact-command-representation-draft", "exact-command-representation-draft"] }), /duplicate/u);
+  assert.throws(() => reconcile({ confirmedDraft: "different" }), /exact packet/u);
+  assert.throws(() => reconcile({ readBack: "drifted" }), /exact command representation read-back/u);
+
+  const runFreshGate = ({ mode, mappedCommand = fullSuiteCommand, memberCommands = [["test:13"], [fullSuiteCommand]] }) => {
+    assert.match(mode, /^(?:local-ahead|already-pushed)$/u);
+    const commands = [...new Set(memberCommands.flat())];
+    assert.equal(commands.includes(mappedCommand), true, "mapped literal command must enter the aggregate command set");
+    const executed = [...commands.filter((command) => command !== fullSuiteCommand), fullSuiteCommand];
+    assert.equal(executed.filter((command) => command === fullSuiteCommand).length, 1, "repository full suite runs exactly once");
+    return { restart: "Entry", result: mode === "local-ahead" ? "push_ready:v1" : "range_verified:v1", executed };
+  };
+  assert.deepEqual(runFreshGate({ mode: "local-ahead" }), { restart: "Entry", result: "push_ready:v1", executed: ["test:13", fullSuiteCommand] });
+  assert.equal(runFreshGate({ mode: "already-pushed" }).result, "range_verified:v1");
+  assert.throws(() => runFreshGate({ mode: "local-ahead", memberCommands: [["test:13"]] }), /must enter the aggregate command set/u);
+});
+
+
 test("target coverage recovery is confirmation-gated and restarts aggregate verification", () => {
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
@@ -1178,7 +1353,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
       assert.doesNotMatch(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as user-invoked`);
       assert.match(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as model-invoked`);
     }
-    for (const name of ["verify-target-before-push"]) {
+    for (const name of ["verify-target-before-push", "push-target"]) {
       assert.match(userInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must list ${name} as user-invoked`);
       assert.doesNotMatch(modelInvoked, new RegExp(`\\[${name}\\]`, "u"), `${path} must not list ${name} as model-invoked`);
     }
@@ -1474,7 +1649,17 @@ test("aggregate target verification selects exact ranges and covers completion-n
       successorDispositions,
     };
     if (range.mode === "already-pushed") return { schema: "range_verified:v1", ...result };
-    const ready = { schema: "push_ready:v1", ...result };
+    const ready = createPushReadyReceipt({
+      target: range.targetRef,
+      baseline: range.baseline,
+      head: range.head,
+      members: result.members,
+      coverage: [...new Set(contributionSets.flatMap((commits) => [...commits]))]
+        .map((commit) => ({ commit, source: "member contribution" })),
+      commands: result.commands,
+      results: result.results,
+      successorDispositions: result.successorDispositions,
+    });
     git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(ready), range.head);
     return JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", range.head));
   };
@@ -1746,6 +1931,395 @@ test("aggregate target verification selects exact ranges and covers completion-n
   }
 });
 
+test("push-target consumes one current receipt for one exact non-force push", () => {
+  const skill = read("skills/engineering/push-target/SKILL.md");
+  const metadata = read("skills/engineering/push-target/agents/openai.yaml");
+  const docs = read("docs/engineering/push-target.md");
+
+  assert.match(skill, /^disable-model-invocation:\s*true$/mu);
+  assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(metadata, /explicitly named target branch.*current local-ahead push_ready/isu);
+  assert.doesNotMatch(metadata, /features\/ron/iu);
+  assert.doesNotMatch(skill, /^description:\s*Use when\b/mu);
+  assert.match(skill, /named existing local target branch.*exact local `HEAD`.*refs\/notes\/matt-push-ready.*exactly one.*push_ready:v1/isu);
+  assert.match(skill, /mode.*local-ahead.*target.*baseline.*verified target SHA.*member.*evidence.*current.*HEAD/isu);
+  assert.match(skill, /missing.*duplicate.*malformed.*stale.*mismatched.*already-pushed.*ambiguous.*stops? before.*remote mutation/isu);
+  assert.match(skill, /unique configured upstream.*fetch.*immediately before.*receipt baseline.*fetched upstream tip.*local target `HEAD`.*receipt target SHA/isu);
+  assert.match(skill, /fetch URL.*push URL.*same.*single endpoint/isu);
+  assert.match(skill, /fetch.*--no-tags.*exact.*upstream ref.*remote-tracking ref/isu);
+  assert.match(skill, /baseline.*ancestor.*`V`.*non-empty/isu);
+  assert.match(skill, /ref drift.*receipt drift.*stops? before push/isu);
+  assert.match(skill, /one ordinary non-force push.*exact verified local target.*configured upstream ref/isu);
+  assert.match(skill, /git push --no-follow-tags <frozen-push-url> refs\/heads\/<target>:<upstream-ref>/u);
+  assert.match(skill, /frozen push URL.*remote alias.*push\.followTags/isu);
+  assert.match(skill, /read.*remote ref.*exact receipt target SHA.*success/isu);
+  assert.match(skill, /rejection.*transport failure.*remote mismatch.*post-push ambiguity.*unresolved delivery.*never.*retry/isu);
+  assert.match(skill, /never.*pull.*merge.*rebase.*force-push.*receipt rewrite.*automatic reverification.*deploy/isu);
+  assert.match(skill, /never changes product files.*commits.*branches.*worktrees.*Issues.*labels.*completion notes.*verification evidence/isu);
+  assert.match(docs, /agent won't reach for it on its own/iu);
+  assert.match(docs, /push_ready.*fetch.*ordinary non-force push.*remote read-back/isu);
+  assert.match(docs, /## What it does.*## When to reach for it.*## Where it fits/isu);
+
+  for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
+    assert.match(read(`skills/engineering/${name}/SKILL.md`), /never[^.]*push/isu, `${name} must remain non-pushing`);
+  }
+  for (const path of ["skills/engineering/ask-matt/SKILL.md", "docs/engineering/ask-matt.md"]) {
+    assert.match(read(path), /verify-target-before-push.*push_ready.*push-target.*ordinary non-force push.*reads?.*remote ref.*back/isu);
+  }
+
+  const { repo, rawGit, git, isAncestor } = createGitFixture("skills-push-target-fixture-");
+  const remote = mkdtempSync(join(tmpdir(), "skills-push-target-remote-"));
+  execFileSync("git", ["init", "--bare", remote], { encoding: "utf8" });
+
+  const selectReceipt = ({ receipts, target, currentHead }) => {
+    assert.equal(receipts.length, 1, "exactly one push_ready receipt is required");
+    const [receipt] = receipts;
+    assert.equal(receipt?.schema, "push_ready:v1", "receipt schema is malformed");
+    assert.equal(receipt.mode, "local-ahead", "only local-ahead receipts are pushable");
+    assert.equal(receipt.target, target, "receipt target mismatch");
+    assert.match(receipt.baseline, /^[0-9a-f]{40}$/u, "receipt baseline is malformed");
+    assert.match(receipt.head, /^[0-9a-f]{40}$/u, "receipt verified target SHA is malformed");
+    assert.equal(receipt.head, currentHead, "receipt is stale for current target HEAD");
+    assert.ok(
+      Array.isArray(receipt.members)
+        && receipt.members.length > 0
+        && receipt.members.every((member) => member
+          && (typeof member.issue === "string" || Number.isInteger(member.issue))
+          && /^[0-9a-f]{40}$/u.test(member.candidate)),
+      "receipt member structure is malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.reconciliationRecords)
+        && receipt.reconciliationRecords.every((identity) => typeof identity === "string" && identity.length > 0),
+      "receipt reconciliation identities are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.directTargetContributions)
+        && receipt.directTargetContributions.every((identity) => typeof identity === "string" && identity.length > 0),
+      "receipt Direct target contribution identities are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.coverage)
+        && receipt.coverage.length > 0
+        && receipt.coverage.every((entry) => entry
+          && /^[0-9a-f]{40}$/u.test(entry.commit)
+          && typeof entry.source === "string"
+          && entry.source.length > 0),
+      "receipt coverage evidence is malformed",
+    );
+    assert.equal(receipt.standards, "clean", "receipt Standards evidence is not clean");
+    assert.equal(receipt.spec, "clean", "receipt Spec evidence is not clean");
+    assert.ok(
+      Array.isArray(receipt.commands)
+        && receipt.commands.length > 0
+        && receipt.commands.every((command) => typeof command === "string" && command.length > 0)
+        && new Set(receipt.commands).size === receipt.commands.length,
+      "receipt commands are malformed",
+    );
+    assert.ok(
+      Array.isArray(receipt.results)
+        && receipt.results.length === receipt.commands.length
+        && receipt.results.every(({ command, result }, index) => command === receipt.commands[index] && result === "pass"),
+      "receipt results are not exact passing command evidence",
+    );
+    assert.ok(
+      Array.isArray(receipt.successorDispositions)
+        && receipt.successorDispositions.every((disposition) => disposition
+          && typeof disposition.command === "string"
+          && Array.isArray(disposition.origins)
+          && disposition.origins.length > 0
+          && disposition.origins.every((origin) => origin
+            && (typeof origin.issue === "string" || Number.isInteger(origin.issue))
+            && /^[0-9a-f]{40}$/u.test(origin.candidate))
+          && Array.isArray(disposition.retiredPaths)
+          && disposition.retiredPaths.length > 0
+          && disposition.successor
+          && (typeof disposition.successor.issue === "string" || Number.isInteger(disposition.successor.issue))
+          && /^[0-9a-f]{40}$/u.test(disposition.successor.candidate)
+          && typeof disposition.acceptanceCriteria === "string"
+          && Array.isArray(disposition.absenceProof)
+          && Array.isArray(disposition.currentBehaviorCommands)
+          && disposition.currentBehaviorCommands.length > 0
+          && Array.isArray(disposition.currentBehaviorResults)
+          && disposition.currentBehaviorResults.length === disposition.currentBehaviorCommands.length
+          && disposition.currentBehaviorResults.every(({ command, result }, index) => command === disposition.currentBehaviorCommands[index] && result === "pass")),
+      "receipt Successor verification evidence is malformed",
+    );
+    assert.equal(receipt.worktree, "clean", "receipt worktree evidence is not clean");
+    return receipt;
+  };
+
+  const gitValues = (...args) => {
+    try {
+      const output = git(...args);
+      return output === "" ? [] : output.split(/\r?\n/u);
+    } catch {
+      return [];
+    }
+  };
+
+  const configuredUpstreams = () => {
+    const remoteNames = gitValues("config", "--get-all", "branch.target.remote");
+    const remoteRefs = gitValues("config", "--get-all", "branch.target.merge");
+    return remoteNames.flatMap((remoteName) => remoteRefs.flatMap((remoteRef) => {
+      if (remoteName === "." || !remoteRef.startsWith("refs/heads/")) return [];
+      const fetchUrls = gitValues("remote", "get-url", "--all", remoteName);
+      const pushUrls = gitValues("remote", "get-url", "--push", "--all", remoteName);
+      return fetchUrls.flatMap((fetchUrl) => pushUrls.map((pushUrl) => ({
+        remote: remoteName,
+        remoteRef,
+        fetchUrl,
+        pushUrl,
+        trackingRef: `refs/remotes/${remoteName}/${remoteRef.replace(/^refs\/heads\//u, "")}`,
+      })));
+    }));
+  };
+
+  const validateFetchedGate = ({ receipt, frozenReceiptText, currentReceiptText, frozenUpstreams, currentUpstreams, fetchedTip, targetHead }) => {
+    assert.equal(currentReceiptText, frozenReceiptText, "receipt drift after fetch");
+    assert.deepEqual(currentUpstreams, frozenUpstreams, "upstream or ref drift after fetch");
+    assert.equal(fetchedTip, receipt.baseline, "upstream drift or already-pushed receipt");
+    assert.equal(targetHead, receipt.head, "local target drift");
+    assert.equal(isAncestor(receipt.baseline, receipt.head), true, "receipt baseline is not an ancestor");
+    assert.notEqual(receipt.baseline, receipt.head, "receipt range is empty");
+  };
+
+  const validatePostPush = ({ receipt, frozenReceiptText, currentReceiptText, frozenUpstreams, currentUpstreams, targetHead, remoteHeads }) => {
+    assert.equal(currentReceiptText, frozenReceiptText, "post-push receipt drift is ambiguous");
+    assert.deepEqual(currentUpstreams, frozenUpstreams, "post-push upstream or ref drift is ambiguous");
+    assert.equal(targetHead, receipt.head, "post-push local target drift is ambiguous");
+    assert.equal(remoteHeads.length, 1, "remote read-back is missing or ambiguous");
+    assert.equal(remoteHeads[0], receipt.head, "remote read-back mismatch leaves unresolved delivery");
+  };
+
+  const deliver = ({
+    performPush,
+    readReceiptText,
+    readUpstreams = configuredUpstreams,
+    readRemoteHeads,
+  } = {}) => {
+    const target = "target";
+    const currentHead = git("rev-parse", target);
+    const frozenReceiptText = readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead);
+    let parsedReceipt;
+    try {
+      parsedReceipt = JSON.parse(frozenReceiptText);
+    } catch {
+      throw new Error("receipt is malformed");
+    }
+    const receipt = selectReceipt({
+      receipts: Array.isArray(parsedReceipt) ? parsedReceipt : [parsedReceipt],
+      target,
+      currentHead,
+    });
+    const frozenUpstreams = readUpstreams();
+    assert.equal(frozenUpstreams.length, 1, "target must have one unique configured upstream");
+    const [upstream] = frozenUpstreams;
+    assert.equal(upstream.fetchUrl, upstream.pushUrl, "fetch and push URL must be the same single endpoint");
+    git("fetch", "--no-tags", upstream.fetchUrl, `${upstream.remoteRef}:${upstream.trackingRef}`);
+    validateFetchedGate({
+      receipt,
+      frozenReceiptText,
+      currentReceiptText: readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead),
+      frozenUpstreams,
+      currentUpstreams: readUpstreams(),
+      fetchedTip: git("rev-parse", upstream.trackingRef),
+      targetHead: git("rev-parse", target),
+    });
+    try {
+      if (performPush) performPush();
+      else rawGit("push", "--no-follow-tags", upstream.pushUrl, `refs/heads/${target}:${upstream.remoteRef}`);
+    } catch {
+      throw new Error("unresolved delivery after one rejected or failed push");
+    }
+    const remoteOutput = git("ls-remote", "--refs", upstream.pushUrl, upstream.remoteRef);
+    validatePostPush({
+      receipt,
+      frozenReceiptText,
+      currentReceiptText: readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead),
+      frozenUpstreams,
+      currentUpstreams: readUpstreams(),
+      targetHead: git("rev-parse", target),
+      remoteHeads: readRemoteHeads?.() ?? (remoteOutput === "" ? [] : remoteOutput.split(/\r?\n/u).map((line) => line.split(/\s+/u)[0])),
+    });
+    return receipt.head;
+  };
+
+  try {
+    writeFileSync(join(repo, "base.txt"), "base\n");
+    git("add", "base.txt");
+    git("commit", "-m", "base");
+    const baseline = git("rev-parse", "HEAD");
+    git("remote", "add", "origin", remote);
+    git("push", "-u", "origin", "target");
+
+    writeFileSync(join(repo, "verified.txt"), "verified\n");
+    git("add", "verified.txt");
+    git("commit", "-m", "verified target");
+    const head = git("rev-parse", "HEAD");
+    const unrelated = git("commit-tree", git("rev-parse", "HEAD^{tree}"), "-m", "unrelated baseline");
+    const receipt = createPushReadyReceipt({
+      target: "target",
+      baseline,
+      head,
+      members: [{ issue: "30", candidate: head }],
+      coverage: [{ commit: head, source: "Issue 30" }],
+      commands: ["node --test tests/ron-workflow/*.test.mjs"],
+      results: [{ command: "node --test tests/ron-workflow/*.test.mjs", result: "pass" }],
+    });
+    git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(receipt), head);
+    git("tag", "-a", "remote-only", baseline, "-m", "remote-only tag");
+    rawGit("push", "origin", "refs/tags/remote-only:refs/tags/remote-only");
+    git("tag", "-d", "remote-only");
+    git("tag", "-a", "local-only", head, "-m", "local-only tag");
+    git("config", "push.followTags", "true");
+    rawGit("push", "origin", `${baseline}:refs/heads/other`);
+    const upstreams = configuredUpstreams();
+
+    assert.throws(() => selectReceipt({ receipts: [], target: "target", currentHead: head }), /exactly one/u);
+    assert.throws(() => selectReceipt({ receipts: [receipt, receipt], target: "target", currentHead: head }), /exactly one/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, schema: "range_verified:v1" }], target: "target", currentHead: head }), /schema is malformed/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, mode: "already-pushed" }], target: "target", currentHead: head }), /local-ahead/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, target: "other" }], target: "target", currentHead: head }), /target mismatch/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, head: baseline }], target: "target", currentHead: head }), /stale/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, members: [null] }], target: "target", currentHead: head }), /member structure/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, reconciliationRecords: [null] }], target: "target", currentHead: head }), /reconciliation identities/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, directTargetContributions: [null] }], target: "target", currentHead: head }), /Direct target contribution identities/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, coverage: [null] }], target: "target", currentHead: head }), /coverage evidence/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, results: [] }], target: "target", currentHead: head }), /exact passing command evidence/u);
+    assert.throws(
+      () => selectReceipt({ receipts: [{ ...receipt, results: [{ command: "another command", result: "pass" }] }], target: "target", currentHead: head }),
+      /exact passing command evidence/u,
+    );
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, successorDispositions: null }], target: "target", currentHead: head }), /Successor verification evidence/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, successorDispositions: [{ command: "incomplete" }] }], target: "target", currentHead: head }), /Successor verification evidence/u);
+    assert.throws(() => deliver({ readReceiptText: () => "not-json" }), /receipt is malformed/u);
+    assert.throws(() => deliver({ readReceiptText: () => JSON.stringify([receipt, receipt]) }), /exactly one/u);
+    assert.throws(() => deliver({ readUpstreams: () => [] }), /unique configured upstream/u);
+    assert.throws(() => deliver({ readUpstreams: () => [...upstreams, ...upstreams] }), /unique configured upstream/u);
+    assert.ok(upstreams[0].fetchUrl.length > 0 && upstreams[0].pushUrl.length > 0, "upstream URL identities must be frozen");
+    assert.throws(
+      () => deliver({
+        readUpstreams: () => [{ ...upstreams[0], pushUrl: `${upstreams[0].pushUrl}-split` }],
+        performPush: () => {},
+        readRemoteHeads: () => [head],
+      }),
+      /fetch and push URL.*same.*endpoint/u,
+    );
+    git("config", "--add", "branch.target.remote", "origin");
+    assert.equal(configuredUpstreams().length, 2, "multi-valued branch config must remain ambiguous");
+    assert.throws(() => deliver(), /unique configured upstream/u);
+    git("config", "--replace-all", "branch.target.remote", "origin");
+    const receiptText = JSON.stringify(receipt);
+    const fetchedGate = {
+      receipt,
+      frozenReceiptText: receiptText,
+      currentReceiptText: receiptText,
+      frozenUpstreams: upstreams,
+      currentUpstreams: upstreams,
+      fetchedTip: baseline,
+      targetHead: head,
+    };
+    assert.throws(() => validateFetchedGate({ ...fetchedGate, fetchedTip: head }), /upstream drift/u);
+    assert.throws(() => validateFetchedGate({ ...fetchedGate, targetHead: baseline }), /local target drift/u);
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, receipt: { ...receipt, baseline: unrelated }, fetchedTip: unrelated }),
+      /not an ancestor/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, receipt: { ...receipt, baseline: head }, fetchedTip: head }),
+      /range is empty/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentReceiptText: JSON.stringify({ ...receipt, commands: ["drifted"] }) }),
+      /receipt drift after fetch/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /upstream or ref drift after fetch/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentUpstreams: [{ ...upstreams[0], fetchUrl: "drifted" }] }),
+      /upstream or ref drift after fetch/u,
+    );
+
+    let rejectionAttempts = 0;
+    assert.throws(
+      () => deliver({ performPush: () => { rejectionAttempts += 1; throw new Error("rejected"); } }),
+      /unresolved delivery/u,
+    );
+    assert.equal(rejectionAttempts, 1, "push rejection must not be retried");
+
+    let mismatchAttempts = 0;
+    assert.throws(
+      () => deliver({ performPush: () => { mismatchAttempts += 1; }, readRemoteHeads: () => [baseline] }),
+      /remote read-back mismatch/u,
+    );
+    assert.equal(mismatchAttempts, 1, "remote mismatch must not trigger another push");
+    const postPushGate = {
+      receipt,
+      frozenReceiptText: receiptText,
+      currentReceiptText: receiptText,
+      frozenUpstreams: upstreams,
+      currentUpstreams: upstreams,
+      targetHead: head,
+      remoteHeads: [head],
+    };
+    assert.throws(() => validatePostPush({ ...postPushGate, remoteHeads: [] }), /missing or ambiguous/u);
+    assert.throws(() => validatePostPush({ ...postPushGate, remoteHeads: [head, head] }), /missing or ambiguous/u);
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, targetHead: baseline }),
+      /post-push local target drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentReceiptText: JSON.stringify({ ...receipt, commands: ["drifted"] }) }),
+      /post-push receipt drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /post-push upstream or ref drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentUpstreams: [{ ...upstreams[0], pushUrl: "drifted" }] }),
+      /post-push upstream or ref drift/u,
+    );
+
+    const before = {
+      branch: git("branch", "--show-current"),
+      note: git("notes", "--ref=refs/notes/matt-push-ready", "show", head),
+      status: git("status", "--porcelain=v1"),
+      localTags: git("tag", "--list"),
+      remoteOnlyTag: git("ls-remote", "--refs", "origin", "refs/tags/remote-only"),
+      unrelatedRemoteBranch: git("ls-remote", "--refs", "origin", "refs/heads/other"),
+    };
+    assert.equal(deliver(), head);
+    assert.equal(git("ls-remote", "--refs", "origin", "refs/heads/target").split(/\s+/u)[0], head);
+    assert.deepEqual(
+      {
+        branch: git("branch", "--show-current"),
+        note: git("notes", "--ref=refs/notes/matt-push-ready", "show", head),
+        status: git("status", "--porcelain=v1"),
+        localTags: git("tag", "--list"),
+        remoteOnlyTag: git("ls-remote", "--refs", "origin", "refs/tags/remote-only"),
+        unrelatedRemoteBranch: git("ls-remote", "--refs", "origin", "refs/heads/other"),
+      },
+      before,
+      "delivery must preserve local branch, receipt, files, and clean state",
+    );
+    assert.equal(git("ls-remote", "--refs", "origin", "refs/tags/local-only"), "", "push must not follow local tags");
+
+    let alreadyPushedAttempts = 0;
+    assert.throws(
+      () => deliver({ performPush: () => { alreadyPushedAttempts += 1; } }),
+      /already-pushed/u,
+    );
+    assert.equal(alreadyPushedAttempts, 0, "already-pushed evidence stops before another push");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
+
 test("setup-ron is retired and remove-ron is a narrow user-invoked cleanup", () => {
   assert.equal(existsSync("skills/engineering/setup-ron"), false);
   assert.equal(existsSync("docs/engineering/setup-ron.md"), false);
@@ -1808,6 +2382,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/execute-issue`/u);
   assert.match(matt, /`\/close-issue`/u);
   assert.match(matt, /`\/verify-target-before-push/iu);
+  assert.match(matt, /`\/push-target/iu);
   assert.match(matt, /`\/grilling`/u);
   assert.match(matt, /`\/explain-decision`/u);
   assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
@@ -1818,6 +2393,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /coordinator.*does not create.*broaden.*leaf.*authority/isu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(matt, /Before push.*verify-target-before-push.*local-ahead.*completion notes.*already-pushed.*explicit.*range.*aggregate review.*verification once/isu);
+  assert.match(matt, /push_ready.*push-target.*unique configured upstream.*ordinary non-force push.*reads?.*remote ref.*back/isu);
   assert.match(matt, /to-spec.*sole authority.*Single-Issue.*Multi-Issue/isu);
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
@@ -1851,6 +2427,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
     "execute-issue",
     "close-issue",
     "verify-target-before-push",
+    "push-target",
   ]) {
     const page = read(`docs/engineering/${name}.md`);
     assert.doesNotMatch(page, /\]\((?:\.\/|\.\.\/)/u);
@@ -1948,11 +2525,13 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
+    "skills/engineering/push-target/SKILL.md",
     "docs/engineering/implement.md",
     "docs/engineering/pre-execute-issue.md",
     "docs/engineering/execute-issue.md",
     "docs/engineering/close-issue.md",
     "docs/engineering/verify-target-before-push.md",
+    "docs/engineering/push-target.md",
     "docs/adr/0021-focus-ron-on-local-issue-delivery.md",
     "docs/adr/0022-use-issue-native-execution-and-closeout.md",
     "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md",

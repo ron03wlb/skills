@@ -39,6 +39,7 @@
     "./skills/engineering/attest-target-contribution",
     "./skills/engineering/record-closed-issue-reconciliation",
     "./skills/engineering/verify-target-before-push",
+    "./skills/engineering/push-target",
     "./skills/engineering/prototype",
     "./skills/engineering/research",
     "./skills/engineering/domain-modeling",
