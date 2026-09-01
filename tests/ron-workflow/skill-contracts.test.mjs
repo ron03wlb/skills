@@ -132,6 +132,49 @@ test("code-review owns requested and material-risk review activation", () => {
   }
 });
 
+test("code review advisory and confirmed code review finding route to Aggregate repair Issue during target verification", () => {
+  const review = read("skills/engineering/code-review/SKILL.md");
+  const reviewDocs = read("docs/engineering/code-review.md");
+  const reviewMetadata = read("skills/engineering/code-review/agents/openai.yaml");
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const routerDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(review, /Coordinator.*classif(?:y|ies).*observation.*Confirmed code review finding.*Code review advisory/isu);
+  assert.match(review, /Confirmed code review finding.*exact.*repository or Spec evidence.*violation/isu);
+  assert.match(review, /Code review advisory.*visible.*does not fail.*consume.*repair wave.*trigger repair/isu);
+  assert.match(review, /advisory.*never.*persistent dismissal.*tracker waiver.*Git note.*SHA allowlist/isu);
+  assert.match(review, /Standards.*Spec.*separate.*classif/isu);
+
+  for (const consumer of [execute, executeDocs, executeMetadata]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+  }
+  assert.match(execute, /both axes.*no Confirmed code review finding.*clean/isu);
+  assert.match(execute, /advisories.*do not.*fail.*repair.*repair wave.*durable waiver/isu);
+
+  assert.match(verify, /only.*Confirmed code review finding.*withholds.*push readiness/isu);
+  assert.match(verify, /Code review advisory.*visible.*does not block.*trigger repair.*waiver/isu);
+  assert.match(verify, /confirmed.*finding.*affected Issue.*Spec.*same target branch/isu);
+  assert.match(verify, /default.*new human-created Aggregate repair Issue/isu);
+  assert.match(verify, /never creates or executes.*Aggregate repair Issue.*repairs product code.*reopens.*earlier Issue.*edits.*completion note/isu);
+  for (const consumer of [verifyDocs, verifyMetadata, router, routerDocs]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+    assert.match(consumer, /Aggregate repair Issue/iu);
+  }
+
+  for (const consumer of [reviewDocs, reviewMetadata]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+  }
+});
+
 test("Wiki is one independent user-invoked documentation control", () => {
   const skill = read("skills/engineering/wiki/SKILL.md");
   const metadata = read("skills/engineering/wiki/agents/openai.yaml");

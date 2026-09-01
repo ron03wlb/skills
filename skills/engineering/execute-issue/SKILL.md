@@ -61,12 +61,12 @@ If implementation evidence reveals a **Late prerequisite discovery**, stop befor
 
 ## Review and repair
 
-Commit the candidate and invoke Matt `code-review` against the recorded baseline and Issue or linked Spec. Require both independent axes to be clean:
+Commit the candidate and invoke Matt `code-review` against the recorded baseline and Issue or linked Spec. Keep its Standards and Spec axes separate and apply its shared evidence classification. Require both axes to contain no Confirmed code review finding before treating them as clean:
 
-- **Standards:** repository instructions and documented standards are satisfied.
-- **Spec:** every Acceptance Criterion and exclusion is satisfied without scope creep.
+- **Standards:** no exact repository evidence proves a violation of repository instructions or documented standards.
+- **Spec:** no exact Spec evidence proves an Acceptance Criterion, exclusion, or scope mismatch.
 
-Confirm findings against source, tests, and the Spec. Fix every confirmed in-scope finding, run affected verification, commit the repair, and rerun the full two-axis review. Allow at most 10 repair waves per invocation; a wave counts only when code repair begins. Tool failures, duplicates, and unsupported findings do not count. If wave 10 remains unclean, preserve the latest verified commit, publish the blocked terminal state above, and leave the Issue open.
+Confirm observations against source, tests, repository standards, and the Spec. Each Code review advisory remains visible; collectively, Code review advisories do not fail execution, trigger repair, consume a repair wave, or create durable waiver state. Fix every Confirmed code review finding that is in scope, run affected verification, commit the repair, and rerun the full two-axis review. Allow at most 10 repair waves per invocation; a wave counts only when code repair begins. Tool failures, duplicates, unsupported findings, smells, preferences, and suggestions remain advisories and do not count. If wave 10 remains unclean, preserve the latest verified commit, publish the blocked terminal state above, and leave the Issue open.
 
 ## Completion note
 

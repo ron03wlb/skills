@@ -50,6 +50,12 @@ An existing exact immutable reconciliation record is reused. Otherwise the verif
 
 After exact read-back, the stopped gate is discarded and verification starts from fresh Entry. It freezes the range and histories again, revalidates both candidates and the record, collects and deduplicates every exact completion command, and runs the repository full suite once even when that command was also recorded by a member. Both local-ahead and already-pushed modes run this fresh gate; only passing local-ahead may emit `push_ready`, while already-pushed remains read-only.
 
+## Review findings and repair ownership
+
+Aggregate review keeps Standards and Spec separate and uses the same evidence gate as Issue execution. Only a Coordinator-verified **Confirmed code review finding** backed by exact repository or Spec evidence withholds push readiness. A **Code review advisory** stays visible but does not block, trigger repair, consume a repair wave, or create persistent waiver state.
+
+For a Confirmed aggregate finding, the result names the exact evidence, affected Issue and Spec identities, and same target branch. The default correction owner is a new human-created **Aggregate repair Issue** on that target. `verify-target-before-push` never creates or executes that Issue, repairs product code, reopens an earlier Issue, or edits an immutable completion note; a human must explicitly create and authorize the normal planning, execution, closeout, and fresh verification flow.
+
 ## Honest results
 
 A `push_ready` result belongs only to local-ahead mode and exact current target `HEAD`. A **Range verification result** belongs only to the explicit already-pushed comparison and never grants retroactive push readiness.
@@ -61,6 +67,7 @@ Both results bind exact baseline, target, members, coverage, review, executed ve
 - A local-ahead run rejects a missing, ambiguous, or empty upstream range.
 - An already-pushed run requires an explicit immutable comparison and writes no `push_ready` note.
 - Completion-note membership and every material commit are proved before one aggregate gate runs.
+- Code review advisories remain visible without blocking; only exact-evidence Confirmed code review findings withhold a result and point to a human-created Aggregate repair Issue.
 - Either recovery presents one complete draft, writes only after exact confirmation, and restarts from Entry after exact read-back.
 
 ## Where it fits
