@@ -626,7 +626,7 @@ test("historical command placeholder reconciliation is exact and fresh-entry onl
   assert.match(helperMetadata, /failed-command.*command representation.*exact human confirmation/isu);
   assert.match(verifyDocs, /command representation.*one unambiguous placeholder.*descendant.*exact literal.*frozen target.*fresh.*Entry/isu);
   assert.match(helperDocs, /failed-command diagnostic.*command representation.*same model-invoked helper/isu);
-  assert.match(matt, /historical command placeholder.*descendant.*exact full-suite command.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
+  assert.match(matt, /historical command placeholder.*descendant.*exact full-suite command.*freshly frozen target pass.*current-only pass.*does not qualify.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
   assert.match(mattDocs, /historical command placeholder.*descendant.*exact full-suite command.*confirmation.*fresh.*Entry/isu);
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     assert.match(read(path), /record-closed-issue-reconciliation.*failed-command.*command-representation/iu);
