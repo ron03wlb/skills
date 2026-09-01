@@ -433,7 +433,7 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
   assert.doesNotMatch(preExecute, /^disable-model-invocation:/mu);
   assert.doesNotMatch(preExecuteMetadata, /^policy:/mu);
   assert.match(preExecute, /^description:.*Use when.*directly.*active `execute-issue` lane/mu);
-  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or an active `execute-issue` lane reaches for it automatically/iu);
+  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or the agent can reach it from an active `execute-issue` handoff.*exact unresolved Manual prerequisite/iu);
   assert.match(preExecuteMetadata, /exact declared prerequisite.*content-bound.*`APPLIED` or `NO_OP`/isu);
 
   assert.match(preExecute, /direct `\/pre-execute-issue <Issue-ID>`.*active `execute-issue` handoff/isu);

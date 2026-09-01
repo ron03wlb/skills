@@ -18,7 +18,7 @@ The human remains the only database operator. The skill never executes SQL, conn
 
 ## When to reach for it
 
-Type `/pre-execute-issue <Issue-ID>`, or an active `execute-issue` lane reaches for it automatically when one exact declared Manual prerequisite lacks a matching attestation.
+Type `/pre-execute-issue <Issue-ID>`, or the agent can reach it from an active `execute-issue` handoff that already binds one exact unresolved Manual prerequisite.
 
 Reach for it when a published Issue declares one exact artifact that must be prepared and run by a human before implementation can continue. An arbitrary `.sql` file never starts this flow.
 
