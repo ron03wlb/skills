@@ -433,7 +433,7 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
   assert.doesNotMatch(preExecute, /^disable-model-invocation:/mu);
   assert.doesNotMatch(preExecuteMetadata, /^policy:/mu);
   assert.match(preExecute, /^description:.*Use when.*directly.*active `execute-issue` lane/mu);
-  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or the agent can reach it from an active `execute-issue` handoff.*exact unresolved Manual prerequisite/iu);
+  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or `execute-issue` automatically reaches it from an active authorized lane.*exact unresolved Manual prerequisite/iu);
   assert.match(preExecuteMetadata, /exact declared prerequisite.*content-bound.*`APPLIED` or `NO_OP`/isu);
 
   assert.match(preExecute, /direct `\/pre-execute-issue <Issue-ID>`.*active `execute-issue` handoff/isu);
@@ -467,15 +467,63 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
   assert.match(preExecuteDocs, /## What it does.*## When to reach for it.*## Prerequisites.*## Where it fits/isu);
   assert.match(preExecuteDocs, /exact declared prerequisite.*Prerequisite candidate.*Operator SQL.*`APPLIED`.*`NO_OP`/isu);
   assert.match(preExecuteDocs, /direct.*stops.*active.*same.*execution lane/isu);
-  assert.match(matt, /published.*Issue.*`\/pre-execute-issue <Issue-ID>`.*prepare.*Operator SQL.*content-bound.*attestation/isu);
-  assert.match(matt, /direct.*stops.*active.*same.*execution lane/isu);
-  assert.match(mattDocs, /pre-execute-issue.*declared prerequisite.*prepare.*Operator SQL.*content-bound.*attestation/isu);
+  assert.match(matt, /published.*Issue.*`execute-issue` automatically invokes `pre-execute-issue`.*prepare.*Operator SQL.*content-bound.*Direct `\/pre-execute-issue <Issue-ID>`/isu);
+  assert.match(matt, /same authorized lane.*Direct.*stops/isu);
+  assert.match(mattDocs, /pre-execute-issue.*declared.*prerequisite.*attestation.*prepare.*Operator SQL.*content-bound/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     const readme = read(path);
     const modelHeading = path === "README.md" ? "\n**Model-invoked**\n" : "\n## Model-invoked\n";
     assert.match(readme.slice(readme.indexOf(modelHeading)), /pre-execute-issue.*prepare.*attest.*prerequisite/iu);
   }
+});
+
+
+test("execute-issue routes exact prerequisites and preserves content-bound attestations", () => {
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
+  const close = read("skills/engineering/close-issue/SKILL.md");
+  const closeDocs = read("docs/engineering/close-issue.md");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const routerDocs = read("docs/engineering/ask-matt.md");
+  const context = read("CONTEXT.md");
+
+  assert.match(execute, /No declared Manual prerequisite preserves ordinary Issue execution/iu);
+  assert.match(execute, /one exact declared artifact.*(?:without|has no).*matching valid attestation.*invoke.*model-invoked `pre-execute-issue`.*same.*direct-human or DAG-authorized lane/isu);
+  assert.match(execute, /arbitrary `\.sql` files.*repository scanning.*never trigger/isu);
+  assert.match(execute, /missing.*multiple.*ambiguous.*conflicting.*changed-scope declarations.*stop/isu);
+  assert.doesNotMatch(execute, /give the exact command `\/pre-execute-issue <Issue-ID> <artifact-path>`/iu);
+
+  assert.match(execute, /manual_prerequisite_complete:v2.*tracker-native.*identity.*Issue.*candidate.*Git blob.*artifact/isu);
+  assert.match(execute, /manual_prerequisite_complete:v2.*`APPLIED`.*`NO_OP`.*outcome/isu);
+  assert.match(execute, /legacy.*manual_prerequisite_complete:v1.*only.*legacy non-generated artifact.*cannot authorize.*generated/isu);
+  assert.match(execute, /reuse.*same Issue topic branch and worktree.*Prerequisite candidate.*ancestor.*final implementation candidate/isu);
+  assert.match(execute, /fresh.*Issue.*Spec.*target.*Planning Seal.*candidate.*blob.*branch.*worktree.*blocker.*scope.*ancestry.*Return only.*original lane/isu);
+
+  assert.match(execute, /Late prerequisite discovery.*coherent checkpoint commits.*behavior.*Acceptance Criteria.*target.*exclusions.*schema outcome.*ownership.*unchanged.*automatically invoke.*`pre-execute-issue`/isu);
+  assert.match(execute, /Scope change.*`\/to-spec` or `\/to-tickets`.*without artifact preparation.*silent expansion/isu);
+  assert.doesNotMatch(execute, /Late prerequisite discovery.*record\/read back `implementation_blocked`.*instruct the human/isu);
+
+  assert.match(execute, /`manualAttestations`.*tracker-native.*identity.*Issue.*candidate.*blob.*artifact.*outcome.*explicit empty list/isu);
+  for (const consumer of [close, verify]) {
+    assert.match(consumer, /`manualAttestations`.*v2.*tracker-native.*identity.*Issue.*candidate.*blob.*artifact.*outcome.*Prerequisite candidate.*ancestor/isu);
+    assert.match(consumer, /v1.*legacy non-generated artifact.*generated.*stop/isu);
+  }
+
+  assert.match(executeMetadata, /exact.*prerequisite.*same authorized lane.*content-bound.*completion/isu);
+  assert.match(executeDocs, /automatically.*pre-execute-issue.*same.*lane.*content-bound.*candidate.*blob.*outcome/isu);
+  assert.match(preExecuteDocs, /execute-issue.*automatically.*one exact unresolved Manual prerequisite/isu);
+  assert.match(router, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
+  assert.match(routerDocs, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
+  assert.match(closeDocs, /content-bound.*manual attestation.*candidate.*blob.*outcome.*ancestry/isu);
+  assert.match(verifyDocs, /content-bound.*manual attestation.*candidate.*blob.*outcome.*ancestry/isu);
+  assert.doesNotMatch(context, /`pre-execute-issue` never creates or reuses an \*\*Issue worktree\*\*/u);
+  assert.doesNotMatch(context, /human may invoke `\/pre-execute-issue <Issue-ID> <artifact-path>`/u);
+  assert.match(context, /`execute-issue` automatically invokes `pre-execute-issue`.*same authorized lane/isu);
 });
 
 
@@ -1295,7 +1343,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(verify, /candidate `C`.*reachable from `V`.*not.*`B`.*member/isu);
   assert.match(verify, /reachable member.*Issue.*open.*stops/isu);
   assert.match(verify, /For every member.*closed tracker state/isu);
-  assert.match(verify, /For every member.*topic branch.*worktree.*Planning Seal.*`manualAttestations` artifact paths.*empty list.*Standards.*Spec review identities.*clean results/isu);
+  assert.match(verify, /For every member.*topic branch.*worktree.*Planning Seal.*explicit `manualAttestations` list.*empty list.*Standards.*Spec review identities.*clean results/isu);
   assert.match(verify, /completion note.*exact Issue identity.*verification identity.*commands.*passing results/isu);
   assert.match(verify, /review and verification.*candidate identity.*exact `C`/isu);
   assert.match(verify, /open unreachable.*concurrent.*outside.*closed unreachable.*contradictory/isu);
@@ -1543,8 +1591,23 @@ test("aggregate target verification selects exact ranges and covers completion-n
       assert.equal(completion[axis].result, "clean", `${issue.id}: ${axis} is not clean`);
     }
     assert.ok(Array.isArray(completion.manualAttestations), `${issue.id}: missing manual attestation list`);
-    assert.equal(new Set(completion.manualAttestations).size, completion.manualAttestations.length, `${issue.id}: duplicate manual attestation`);
-    assert.ok(completion.manualAttestations.every((path) => typeof path === "string" && path.length > 0), `${issue.id}: invalid manual attestation path`);
+    const attestationIdentities = new Set();
+    for (const attestation of completion.manualAttestations) {
+      assert.equal(typeof attestation, "object", `${issue.id}: invalid manual attestation`);
+      assert.match(attestation.kind ?? "", /^manual_prerequisite_complete:v[12]$/u, `${issue.id}: invalid manual attestation kind`);
+      assert.equal(typeof attestation.identity, "string", `${issue.id}: missing manual attestation identity`);
+      assert.equal(attestationIdentities.has(attestation.identity), false, `${issue.id}: duplicate manual attestation identity`);
+      attestationIdentities.add(attestation.identity);
+      assert.equal(attestation.issue, issue.id, `${issue.id}: mismatched manual attestation Issue`);
+      assert.equal(typeof attestation.artifact, "string", `${issue.id}: invalid manual attestation artifact`);
+      if (attestation.kind === "manual_prerequisite_complete:v1") {
+        assert.equal(attestation.generated, false, `${issue.id}: legacy v1 cannot authorize generated content`);
+        continue;
+      }
+      assert.match(attestation.outcome ?? "", /^(?:APPLIED|NO_OP)$/u, `${issue.id}: invalid v2 outcome`);
+      assert.equal(isAncestor(attestation.candidate, completion.candidate), true, `${issue.id}: Prerequisite candidate is outside final ancestry`);
+      assert.equal(git("rev-parse", `${attestation.candidate}:${attestation.artifact}`), attestation.blob, `${issue.id}: mismatched v2 blob`);
+    }
     assert.equal(completion.verification.candidate, completion.candidate, `${issue.id}: mismatched verification candidate`);
     assert.ok(Array.isArray(completion.verification.commands) && completion.verification.commands.length > 0, `${issue.id}: missing verification commands`);
     assert.ok(Array.isArray(completion.verification.results), `${issue.id}: missing verification results`);
@@ -1706,6 +1769,11 @@ test("aggregate target verification selects exact ranges and covers completion-n
     commandFacts.set(ambiguousPathCommand, { kind: "ambiguous" });
     commandFacts.set(emptyPathCommand, { kind: "path", requiredPaths: [] });
     git("checkout", "-b", "issue-a", planningSeal);
+    writeFileSync(join(repo, "prerequisite-a.sql"), "SELECT 'APPLIED';\n");
+    git("add", "prerequisite-a.sql");
+    git("commit", "-m", "prerequisite A");
+    const prerequisiteCandidateA = git("rev-parse", "HEAD");
+    const prerequisiteBlobA = git("rev-parse", `${prerequisiteCandidateA}:prerequisite-a.sql`);
     writeFileSync(join(repo, "a.txt"), "A\n");
     writeFileSync(join(repo, retiredScript), "export const preserved = true;\n");
     writeFileSync(join(repo, retiredTest), "export const covered = true;\n");
@@ -1762,14 +1830,28 @@ test("aggregate target verification selects exact ranges and covers completion-n
       issue: "A",
       baseline: planningSeal,
       commands: ["test:shared", "test:a", retiredScriptCommand, retiredTestCommand, mixedRetirementCommand, ambiguousPathCommand, emptyPathCommand],
-      manualAttestations: ["sql/a.sql"],
+      manualAttestations: [{
+        kind: "manual_prerequisite_complete:v2",
+        identity: "attestation-A-v2",
+        issue: "A",
+        candidate: prerequisiteCandidateA,
+        blob: prerequisiteBlobA,
+        artifact: "prerequisite-a.sql",
+        outcome: "APPLIED",
+      }],
     });
     const successB = completion({
       candidate: candidateB,
       issue: "B",
       baseline: planningSeal,
       commands: ["test:shared", "test:b"],
-      manualAttestations: [],
+      manualAttestations: [{
+        kind: "manual_prerequisite_complete:v1",
+        identity: "attestation-B-v1",
+        issue: "B",
+        artifact: "legacy-b.sql",
+        generated: false,
+      }],
       successorEvidence: { absentPaths: [retiredScript, retiredTest], currentBehaviorCommands: ["test:b"] },
     });
     const successOpen = completion({ candidate: openCandidate, issue: "OPEN-OUTSIDE", commands: ["test:open"] });
@@ -1779,6 +1861,31 @@ test("aggregate target verification selects exact ranges and covers completion-n
       { id: "B", state: "CLOSED", retirements: [{ criterion: "AC-6", paths: [retiredScript, retiredTest] }], execution: [successB] },
       { id: "OPEN-OUTSIDE", state: "OPEN", execution: [successOpen] },
     ];
+    assert.throws(
+      () => currentCompletion({
+        id: "A",
+        execution: [{ ...successA, manualAttestations: [{ ...successA.manualAttestations[0], blob: planningSeal }] }],
+      }),
+      /mismatched v2 blob/u,
+    );
+    assert.throws(
+      () => currentCompletion({
+        id: "LEGACY-GENERATED",
+        execution: [completion({
+          candidate: candidateB,
+          issue: "LEGACY-GENERATED",
+          commands: ["test:legacy"],
+          manualAttestations: [{
+            kind: "manual_prerequisite_complete:v1",
+            identity: "attestation-generated-v1",
+            issue: "LEGACY-GENERATED",
+            artifact: "generated.sql",
+            generated: true,
+          }],
+        })],
+      }),
+      /legacy v1 cannot authorize generated content/u,
+    );
     const replaceSuccessorEvidence = (successorEvidence) => completeIssues.map((issue) => issue.id === "B"
       ? { ...issue, execution: [{ ...successB, verification: { ...successB.verification, successorEvidence } }] }
       : issue);

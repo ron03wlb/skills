@@ -32,7 +32,7 @@ Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/sk
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
-[pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) owns one exact declared prerequisite after an Issue is published. Direct human entry or an authorized active lane can use it to create or reuse the Issue worktree, invoke `prepare-prerequisite-artifact` when needed, present the committed Operator SQL, and record one content-bound v2 attestation for `APPLIED` or `NO_OP`. Direct entry stops after read-back; active entry returns only to the same execution lane after fresh identity and ancestry checks.
+[execute-issue](https://aihero.dev/skills-execute-issue) automatically invokes [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) in the same authorized lane when one exact declared or unchanged-scope late prerequisite lacks a matching attestation. The prerequisite flow creates or reuses the Issue worktree, invokes `prepare-prerequisite-artifact` when needed, presents the committed Operator SQL, and returns one content-bound v2 identity for `APPLIED` or `NO_OP` after fresh checks. Direct `/pre-execute-issue <Issue-ID>` remains available but stops after read-back and never resumes implementation by itself.
 
 [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact) is model-invoked and not a public starting route. From an exact active prerequisite-preparation handoff, it uses the repository adapter to build one validated, independently reviewed, fail-closed Operator SQL candidate without executing it or touching an external environment.
 

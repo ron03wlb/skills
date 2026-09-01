@@ -23,7 +23,7 @@ An explicit conflict-resolution rerun is the only completion-preserving exceptio
 
 For a real blocked exit before completion or after candidate-invalidating evidence, append `implementation_blocked` with the reason and the target, worktree, baseline, and candidate identities that exist. Read it back once. Tracker write or read-back failure reports unresolved tracker ambiguity and never claims supersession or completion; never publish this state solely because the target moved.
 
-Capture the local branch from which the Issue worktree is created as the Issue target branch, plus its worktree and current `HEAD` once as the execution baseline. That recorded branch is the only default merge destination. Preserve unrelated work and do not repeatedly re-confirm unchanged identities. Any number of Issue worktrees may execute concurrently against the same recorded target.
+Capture the exact local branch that will own the Issue worktree as the Issue target branch and its current `HEAD` once as the execution baseline before any prerequisite handoff. That recorded branch is the only default merge destination. After prerequisite routing, record the selected Issue worktree and topic branch identities once; reuse an exact worktree created or reused by `pre-execute-issue` instead of creating a second lane. Preserve unrelated work and do not repeatedly re-confirm unchanged identities. Any number of Issue worktrees may execute concurrently against the same recorded target.
 
 Require any Planning Seal to exist locally and be an ancestor of the execution baseline. Perform a seal-currency check: the target must have no uncommitted planning-artifact delta owned by this Issue or Spec. This check is not scope authority. Missing, stale, unreachable, or ambiguously owned planning evidence stops; tell the human to invoke `/to-spec` or `/to-tickets`.
 
@@ -31,13 +31,15 @@ Require any Planning Seal to exist locally and be an ancestor of the execution b
 
 ### Manual prerequisite attestation
 
-At Entry, inspect the published Issue and comments for any exact repository artifact that the Issue declares must be executed or applied by a human. No declared Manual prerequisite preserves ordinary Issue execution.
+At Entry, inspect the published Issue, linked Spec, and ordered comments for an exact repository-relative artifact declared as a human-executed or human-applied Manual prerequisite. No declared Manual prerequisite preserves ordinary Issue execution. Arbitrary `.sql` files, undeclared paths, and repository scanning never trigger prerequisite routing.
 
-For each declared artifact, a read-back `manual_prerequisite_complete:v1` note with the same Issue and normalized repository-relative path is sufficient. Trust that human attestation without requiring a repository resolver, setup step, target identity, credentials, DB access, artifact hash, artifact-only commit, postflight output, external verification, `WAITING_MANUAL`, or `READY`. Never execute or replay the artifact.
+Resolve at most one exact declaration. Missing path identity, multiple declarations, ambiguous ownership, conflicting Issue or Spec evidence, and changed-scope declarations stop without guessed selection, worktree cleanup, tracker repair, or artifact preparation.
 
-If an attestation is missing, stop before worktree creation or prerequisite-dependent implementation and give the exact command `/pre-execute-issue <Issue-ID> <artifact-path>`. Do not write a duplicate prerequisite-only `implementation_blocked` note when the current execution history already records the same missing artifact. A later matching attestation resolves that prerequisite-only blocked state and permits execution to resume in the existing Issue lane.
+For one exact declared artifact, first search the ordered history for a matching successful attestation. A `manual_prerequisite_complete:v2` is valid only when its tracker-native immutable identity and exact Issue, Prerequisite candidate, Git blob, normalized artifact path, and `APPLIED` or `NO_OP` outcome read back unchanged. Require that candidate and blob to exist locally, that the path at the candidate resolves to the blob, and later require that candidate to be an ancestor of the final implementation candidate. A legacy `manual_prerequisite_complete:v1` may authorize only its exact path-bound legacy non-generated artifact; it cannot authorize generated content or substitute for an existing Prerequisite candidate.
 
-Record the selected Issue worktree and topic branch identities once and run a cheap relevant baseline check.
+When one exact declared artifact has no matching valid attestation, invoke the model-invoked `pre-execute-issue` skill in the same direct-human or DAG-authorized lane. Pass the unchanged lane authority, exact Issue and linked Spec, recorded target and execution baseline, approved scope, declaration, and any already-selected branch or worktree identity. Never stop merely to ask for a second slash command, write a prerequisite-only `implementation_blocked` note, execute the artifact, or broaden the Grant.
+
+After exact attestation read-back returns control, independently re-read the original direct-human authority or exact DAG Run Grant and freshly validate the Issue, linked Spec, target, Planning Seal, Prerequisite candidate, blob, artifact, outcome, topic branch, worktree, blockers, scope, and ancestry. Return only to the original lane. Reuse the same Issue topic branch and worktree, require the Prerequisite candidate to remain an ancestor of the final implementation candidate, and run the cheap relevant baseline check there. Any drift or a direct `pre-execute-issue` invocation without this active caller stops without implementation.
 
 ## Implement and verify
 
@@ -57,7 +59,7 @@ The declaration supplies scope classification only. It never supplies Issue-to-c
 
 Run affected verification after each slice or repair. Before review, run the Issue's required final verification, including focused checks, typechecking where configured, and the repository-required full suite. Record exact commands and results.
 
-If implementation evidence reveals a **Late prerequisite discovery**, stop before prerequisite-dependent verification. Preserve coherent checkpoint commits and record/read back `implementation_blocked` once with the exact artifact path. With unchanged Acceptance Criteria and approved schema outcome, instruct the human to invoke `/pre-execute-issue <Issue-ID> <artifact-path>`; after its matching attestation, resume the same worktree and candidate lane. Changed behavior, acceptance, target, exclusions, or ownership is a Scope change that returns to `/to-spec` or `/to-tickets`. Never auto-invoke, execute the artifact, roll back, or silently expand scope.
+If implementation evidence reveals a **Late prerequisite discovery**, stop before prerequisite-dependent verification and preserve coherent checkpoint commits in the existing Issue worktree. When behavior, Acceptance Criteria, target, exclusions, schema outcome, and ownership remain unchanged, bind the one exact discovered artifact as a Necessary discovery and automatically invoke `pre-execute-issue` in the same active lane. After exact attestation read-back, repeat the fresh authority, identity, worktree, blocker, scope, and ancestry checks above and continue from the same branch. A change to any of those scope dimensions is a Scope change that returns to `/to-spec` or `/to-tickets` without artifact preparation or silent expansion. Never execute the artifact, run recovery, roll back external state, create a second lane, or convert failure into an attestation.
 
 ## Review and repair
 
@@ -70,7 +72,7 @@ Confirm observations against source, tests, repository standards, and the Spec. 
 
 ## Completion note
 
-Rerun required final verification. Declare `implementation_complete` only when final verification passes, Standards and Spec are clean, the Issue worktree is clean, and its `HEAD` equals the reviewed candidate.
+Rerun required final verification. Declare `implementation_complete` only when final verification passes, Standards and Spec are clean, the Issue worktree is clean, and its `HEAD` equals the reviewed candidate. Re-read every consumed Manual execution attestation and require each v2 Prerequisite candidate to remain an ancestor of that final candidate; missing, conflicting, edited, unreachable, or path/blob-mismatched evidence stops completion.
 
 Before the first prospective completion under an exact repository, tracker, parent or linked Spec, and Issue target branch, inspect that Spec and its exact child histories, including local-file tracker histories, for one logical `workflow_artifacts_contract_adopted:v1` record. If none exists, freeze every already read-back valid completion without `workflowArtifacts` into `legacyCompletionFrontier`, then append one durable adoption record binding the exact four scope identities plus that explicit list, including an empty list. Each frontier entry binds the exact Issue, tracker-native immutable completion-note identity when available or durable local record locator, and SHA-256 of the exact note body. Read the adoption back once; otherwise reuse the existing logical record. Do not infer order across parent and child histories: after adoption, a completion without `workflowArtifacts` is legacy only when its exact identity and body digest occur in the frozen frontier. Missing, duplicate, malformed, mismatched, unreadable, or digest-mismatched frontier evidence stops.
 
@@ -82,7 +84,7 @@ Write one compact tracker completion note containing:
 
 - Issue and linked Spec; Issue target branch/worktree, topic branch/worktree, baseline, and final candidate;
 - Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
-- `manualAttestations`: every consumed `manual_prerequisite_complete:v1` artifact path, or an empty list;
+- `manualAttestations`: every consumed attestation, or an explicit empty list. A v2 entry records `kind: manual_prerequisite_complete:v2`, its tracker-native immutable identity, Issue, Prerequisite candidate, Git blob, artifact, and outcome; a v1 entry records its immutable identity, Issue, and exact legacy non-generated artifact path. Never degrade v2 to a path string or infer a missing field;
 - `workflowArtifacts`: the reviewed prospective entries with exact `path`, `requirementSource`, and `purpose`, or an explicit empty list;
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.

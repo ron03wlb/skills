@@ -24,7 +24,7 @@ Reach for it after Issue closeout when you need aggregate evidence for a local p
 
 ## Completion-note coverage
 
-The leading idea is **aggregate coverage**. Completion notes plus Git reachability derive the member set; every material range commit must be covered by a member contribution, its Planning Seal, necessary merge topology, or a valid Direct target contribution record before aggregate review begins. Manual prerequisite attestations remain artifact-path metadata and do not create a separate commit range.
+The leading idea is **aggregate coverage**. Completion notes plus Git reachability derive the member set; every material range commit must be covered by a member contribution, its Planning Seal, necessary merge topology, or a valid Direct target contribution record before aggregate review begins. Every content-bound manual attestation is re-read by immutable tracker identity and must preserve its Issue, Prerequisite candidate, blob, artifact, outcome, and ancestry to the member candidate. Legacy v1 or historical path-only evidence remains limited to an exact legacy non-generated artifact. These attestations remain member metadata and never create a separate commit range, coverage source, verification result, or push authority.
 
 Overlapping Issue contributions are valid. A read-back `direct_target_contribution:v1` record is the fourth coverage source; its owning Tracker Spec or Issue joins aggregate Spec review. Reachable open Issues, closed unreachable candidates, invalidated completion evidence, or unexplained commits stop the gate without repair.
 

@@ -18,7 +18,7 @@ The human remains the only database operator. The skill never executes SQL, conn
 
 ## When to reach for it
 
-Type `/pre-execute-issue <Issue-ID>`, or the agent can reach it from an active `execute-issue` handoff that already binds one exact unresolved Manual prerequisite.
+Type `/pre-execute-issue <Issue-ID>`, or `execute-issue` automatically reaches it from an active authorized lane for one exact unresolved Manual prerequisite.
 
 Reach for it when a published Issue declares one exact artifact that must be prepared and run by a human before implementation can continue. An arbitrary `.sql` file never starts this flow.
 
@@ -34,7 +34,7 @@ You execute the committed Operator SQL and report only `APPLIED` or `NO_OP`. The
 
 ## Direct stop or active return
 
-A direct invocation stops after the attestation is read back. An active handoff returns only to the same authorized execution lane after fresh Issue, target, artifact, candidate, blob, branch, worktree, and ancestry checks. Neither route grants integration, closeout, push, deployment, or database authority.
+A direct invocation stops after the attestation is read back. An active handoff returns only to the same authorized execution lane after fresh Issue, linked Spec, target, Planning Seal, artifact, candidate, blob, branch, worktree, blocker, scope, and ancestry checks. `execute-issue` independently repeats those checks and retains the Prerequisite candidate in final ancestry. Neither route grants integration, closeout, push, deployment, or database authority.
 
 ## It's working if
 

@@ -518,10 +518,10 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **Decision ticket** is an **Issue** (a child of a `wayfinder:map`)
 - **Ron removal** deletes only the exact **Ron repository footprint** and leaves historical or active delivery objects intact
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
-- `pre-execute-issue` never creates or reuses an **Issue worktree**; it only records a **Manual execution attestation**
+- Direct or active-lane `pre-execute-issue` creates or reuses only the unique **Issue worktree**, records a **Manual execution attestation**, and never grants implementation authority to a direct invocation
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/execute-issue <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`
-- After a Tracker Spec or child Issue is written, the human may invoke `/pre-execute-issue <Issue-ID> <artifact-path>` to record one **Manual execution attestation** without making it a mandatory delivery stage
+- After a Tracker Spec or child Issue is written, the human may invoke `/pre-execute-issue <Issue-ID>` directly; `execute-issue` automatically invokes it in the same authorized lane only when one exact declared or unchanged-scope late prerequisite lacks a matching **Manual execution attestation**
 - The human's exact artifact-path statement is the prerequisite authority; generic skills do not require target identity, credentials, DB access, resolver adoption, postflight output, hashes, or environment verification
 - `/to-spec` classifies automatically from Spec and source evidence; only material ambiguity that can change **Delivery routing** permits one blocking question with a recommendation, and uncertainty never defaults to either Single-Issue or Multi-Issue
 - `ask-matt`, `/to-tickets`, and `execute-issue` consume **Delivery routing** without duplicating or overriding its classification criteria
