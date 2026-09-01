@@ -82,6 +82,10 @@ _Avoid_: Separate public command, attest-target-contribution, in-place gate cont
 The append-only read-back `closed_issue_evidence_reconciliation:v1` tracker comment written only to the affected closed Issue's ordered history. It binds that Issue and immutable completion note, its target branch, execution baseline, candidate and single failure, one **Reconciliation remedy Issue** and candidate, and exact human authority; aggregate range refs and verification results are omitted so each fresh verifier independently proves current reachability and quality.
 _Avoid_: Push-ready receipt, range-bound exception, historical completion replacement, edited correction
 
+**Closed Issue command representation reconciliation**:
+The narrow append-only, human-confirmed recovery for one immutable completion entry that is non-executable only because it contains one unambiguous placeholder. The existing reconciliation helper may map it to the unique repository-required literal command only when a later descendant Issue records that exact command passing and current target verification reruns it successfully; the original note remains invalid, and the record grants selected-range eligibility only.
+_Avoid_: Command guessing, prose normalization, retroactive completion
+
 **Reconciliation diagnostic**:
 A non-authorizing exact-baseline and exact-candidate probe that compares one failed command through a human-readable structured fingerprint: exit code, failure count, ordered failure identities, source locators, and assertion or error identities. Variable timing, duration, temporary paths, and stack noise are excluded; an expected matching failure is provenance evidence, never passing verification or merge authority.
 _Avoid_: Verification result, baseline-failure waiver, normal closeout gate
@@ -258,9 +262,17 @@ _Avoid_: Closeout receipt union, explicit Issue manifest, merge-message discover
 The proof that a later member of one **Target verification set** makes an earlier path-specific focused command inapplicable at exact target `V`: the later candidate descends from the earlier candidate, its Acceptance Criteria explicitly retire every repository path named by that command, its completion evidence proves those paths absent and current replacement behavior passing, and the paths remain absent at `V`. It replaces only that command's final-target applicability and never waives the earlier candidate, completion note, review, or contribution evidence.
 _Avoid_: Ignored failed command, inferred deletion, historical evidence rewrite
 
+**Verification command**:
+A literal command line recorded with its exact result and executable unchanged from the repository root. Natural-language observations, summaries, placeholders, and inferred expansions remain non-authorizing history and never enter an aggregate command set.
+_Avoid_: Prose check, `<...>` placeholder, reconstructed invocation
+
 **Push-ready receipt**:
 The local read-back `push_ready` record produced only when a non-empty local unpushed **Target verification set**, aggregate Standards/multi-Spec review, required verification, and closed-candidate reachability all pass on one exact target `HEAD`. It is never issued retroactively for an already-pushed range, and later target movement invalidates it.
 _Avoid_: Issue integration receipt, push command, production verification
+
+**Push target operation**:
+The explicit human-invoked remote-delivery action that consumes one current **Push-ready receipt** for an exact local target whose verified baseline still matches its uniquely configured fetched upstream, performs only an ordinary non-force push of the verified commit, and confirms the resulting remote ref. Any target or upstream drift stops the operation; it adds no review, repair, tracker, deployment, or automatic-push authority.
+_Avoid_: Automatic verifier push, generic unchecked push, force push
 
 **Range verification result**:
 The non-push-readiness result produced when `verify-target-before-push` validates one explicit already-pushed merge request, pull request, or exact base/head range. It proves only that frozen range and never retroactively grants a **Push-ready receipt**.
@@ -275,16 +287,48 @@ A human-owned external action named by one exact repository artifact path that m
 _Avoid_: Agent-executed migration, resolver-driven preflight, automatic environment mutation
 
 **Prerequisite inspection**:
-The optional one-step recording of a completed **Manual prerequisite** after a Tracker Spec or child Issue is published. It does not prepare the artifact, verify an external target, create a worktree, or change **Delivery routing**.
-_Avoid_: Mandatory delivery stage, target verification, artifact preparation
+The optional public prerequisite workflow after a Tracker Spec or child Issue is published, entered only for an exact **Manual prerequisite** artifact declared by that Issue or Spec or discovered and resolved to an exact path during execution. It may invoke **Prerequisite preparation** when the artifact is not ready, then pauses until the human performs the prerequisite and records one **Manual execution attestation**; an Issue with no exact declaration skips this workflow, and arbitrary `.sql` files never trigger it.
+_Avoid_: Mandatory delivery stage, target verification, automatic external execution
+
+**Prerequisite preparation**:
+A bounded model-invoked `prepare-prerequisite-artifact` operation automatically invoked by `pre-execute-issue` when one exact declared **Prerequisite artifact** is not ready. It calls the repository adapter to discover evidence, create or repair the artifact, and rerun static validation after each material edit, then stops after at most ten repair waves. The adapter is repository code consumed by this operation, not a skill or a human command. A passing result makes the artifact ready for human execution but supplies no **Manual execution attestation**.
+_Avoid_: Database execution, human attestation, unlimited repair loop
+
+**Prerequisite preparation profile**:
+Versioned consumer-repository evidence installed and validated once during repository onboarding or an explicitly authorized setup Issue, naming one repository-owned adapter with read-only `discover`, artifact-writing `prepare`, and read-only `validate` operations. The adapter owns database-product-and-version-appropriate executable assertions for preconditions, backup integrity, and postconditions, plus the locking and transaction strategy needed to prevent state drift during execution. Runtime prerequisite workflows only consume it; a missing, broken, or incomplete profile stops without creating or modifying adapter infrastructure inside the product Issue.
+_Avoid_: Per-run user inventory, runtime adapter bootstrap, guessed SQL dialect
 
 **Prerequisite artifact**:
-The exact repository file that the human states was already executed or applied for one Issue.
-_Avoid_: Generated prerequisite, target-state evidence, external credential
+The exact repository file prepared and statically validated for one Issue's **Manual prerequisite**, then named by the human when execution or application is complete.
+_Avoid_: Target-state evidence, external credential, ambiguous path
+
+**Operator SQL**:
+The single primary **Prerequisite artifact** presented for normal human database execution, ordered into exactly three sections: read-only preflight that aborts on a failed execution condition; backup of the exact affected data plus validated recovery SQL kept commented and inert; and only then the authorized mutation or insertion with applicable postcondition checks. It is safe to invoke repeatedly under a three-state preflight: an absent backup plus repository-defined pre-mutation state permits the first backup and mutation; an integrity-valid existing backup plus complete postconditions returns successful no-op without another write; every partial, contradictory, or unproved combination aborts. Each precondition, backup-integrity check, and postcondition is a database-native fail-closed assertion emitted by the **Prerequisite preparation profile**: mismatch terminates execution with an error, while diagnostic `SELECT` output is supplemental and never authorizes progress through human inspection. After the persistent backup is created and validated, the adapter revalidates and locks the exact target state immediately before mutation. Transaction-capable DML runs in an explicit transaction and commits only after every postcondition passes; any error rolls back the mutation while retaining the backup. A DDL or other change that cannot provide an equivalent safe transaction and recovery boundary stops and returns to planning or a human decision. Successful completion emits exactly one **Operator SQL outcome**; an error or missing outcome is unsuccessful. The primary SQL never deletes or overwrites the backup. Safe recovery is a readiness condition for data-changing SQL: UPDATE or DELETE restores exact backed-up rows, INSERT removes only stable keys created by this operation, and an artifact without truthful recovery stops rather than disguising irreversibility. The same logical backup name may be reused for a separately authorized new operation only after human cleanup and fresh pre-mutation proof. The backup otherwise remains after the primary operation until that cleanup; the artifact and Issue workflow neither generate nor retain cleanup SQL.
+_Avoid_: Mutation before backup, unlocked target drift, partial DML commit, visual-only gate, active recovery statement, unsafe or fictional recovery, backup overwrite, repeated mutation, embedded or automatic cleanup
+
+**Operator SQL outcome**:
+The single database-emitted terminal value `APPLIED` or `NO_OP`. `APPLIED` means the authorized mutation committed after every postcondition passed; `NO_OP` means an integrity-valid existing backup and complete postconditions proved that no write was needed. Either is a successful prerequisite outcome; an SQL error, missing value, or any other value is not. The human reports only the exact emitted value; no database version, path, hash, or complete log is required. A generic success statement without the outcome receives one focused clarification, while a failure needs only its error text.
+_Avoid_: Free-form success text, inferred outcome, partial-success status
+
+**Prerequisite artifact readiness**:
+The state of one exact **Prerequisite artifact** after every repository-declared deterministic validation passes and independent Standards and Spec review has no **Confirmed code review finding**. Validation and confirmed-finding repairs share one ten-wave **Prerequisite preparation** budget; readiness authorizes only presentation for human execution and does not attest an external outcome.
+_Avoid_: Syntax-only pass, advisory blocker, execution receipt
+
+**Prerequisite candidate**:
+The clean local checkpoint commit in the exact Issue worktree that contains one ready **Prerequisite artifact** and binds its repository-relative path and Git blob identity. A direct prerequisite invocation may create or reuse that Issue branch and worktree and commit only the declared artifact; the human executes that committed content, and later Issue execution must reuse the worktree and retain the candidate in its ancestry.
+_Avoid_: Uncommitted SQL, path-only identity, target-branch commit
 
 **Manual execution attestation**:
-The append-only `manual_prerequisite_complete:v1` tracker note that records the human's statement that one exact **Prerequisite artifact** was executed for one Issue. It authorizes workflow continuation but does not prove the external target outcome.
-_Avoid_: Database verification receipt, `WAITING_MANUAL`, `READY`, environment audit
+The append-only tracker note that records the human's statement that one exact **Prerequisite artifact** completed with one successful **Operator SQL outcome** for one Issue. Legacy `manual_prerequisite_complete:v1` remains path-bound; a newly generated artifact uses content-bound `manual_prerequisite_complete:v2` referencing its exact **Prerequisite candidate**, Git blob, path, and reported outcome. Either successful outcome authorizes workflow continuation but does not independently prove the external target state.
+_Avoid_: Database verification receipt, path-only generated artifact, environment audit
+
+**Prerequisite execution failure**:
+The human-reported unsuccessful execution, SQL error, or missing or unknown **Operator SQL outcome** for one exact **Operator SQL**, which produces no **Manual execution attestation** or **Prerequisite continuation**. It stops automatic progress, retry, and rollback until read-only diagnosis establishes the external state and a separately authorized correction creates a newly validated and reviewed **Prerequisite candidate**.
+_Avoid_: Automatic retry, assumed rollback, partial-success attestation
+
+**Prerequisite continuation**:
+The return from a completed **Prerequisite inspection** to the same active `execute-issue` lane that invoked it, after exact **Manual execution attestation** read-back and fresh Issue, target, and artifact checks. A directly invoked prerequisite workflow has no implementation authority and stops after attestation.
+_Avoid_: Implicit execute grant, stale-state resume, second manual command
 
 **Executable Issue**:
 An open **Issue** that is one dependency-ready execution unit with numbered **Acceptance Criteria**, one embedded **Implementation Plan**, a valid **Planning Seal**, and the target identity needed by `execute-issue`. A **Single-Issue Spec** is executable itself; `/to-tickets` produces executable child Issues for a **Multi-Issue Spec**.
@@ -450,6 +494,14 @@ _Avoid_: Custom execute reviewer protocol, focused/full profile, Wiki review
 A Standards violation or Spec mismatch supported by exact repository or Spec evidence and verified by the Coordinator. Reviewer preference, unsupported inference, duplicate reporting, and tool failure do not qualify.
 _Avoid_: Reviewer opinion, Wiki finding, majority vote
 
+**Code review advisory**:
+A reported smell, preference, or suggestion that lacks the exact repository or Spec evidence required for a **Confirmed code review finding**. It remains visible to the current review but cannot block a clean result, trigger repair, or create durable waiver authority.
+_Avoid_: Confirmed finding, permanent dismissal, SHA allowlist
+
+**Aggregate repair Issue**:
+A new **Executable Issue** that owns one or more **Confirmed code review findings** discovered only after their contributing Issues are integrated and closed. It targets the same branch and binds the exact aggregate finding plus affected Issue and Spec identities; the earlier Issues remain closed unless a human explicitly authorizes reopening one.
+_Avoid_: Automatic Issue reopening, verifier-owned repair, implicit historical owner
+
 **Material repair wave**:
 One bounded pass in which the single writable owner addresses confirmed Standards or Spec findings inside the unchanged Issue scope, verifies the repair, and produces a new candidate. One `execute-issue` invocation permits at most ten waves; only an explicit later invocation starts a new limit, and no durable counter is maintained.
 
@@ -532,16 +584,18 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **Acceptance Criteria**, **Implementation Plan** steps, and verification use compact many-to-many `Covers: AC-n` references: every criterion has at least one step and verification, every step covers at least one criterion, and no separate matrix or orphan is allowed
 - Before publication, `/to-spec` compares the criterion IDs with the IDs covered by plan steps and verification and stops on any missing ID or uncovered step; this is a prompt-level invariant backed by contract tests, not a separate parser or matrix artifact
 - `execute-issue` applies **Necessary discovery** automatically without duplicating the candidate's path list in tracker evidence, records only **Material plan deviations**, and returns every **Scope change** to planning
-- A **Late prerequisite discovery** preserves coherent checkpoints and stops before schema-dependent verification; unchanged scope routes to `/pre-execute-issue <Issue-ID> <artifact-path>`, while changed schema outcome or acceptance returns to planning
+- A **Late prerequisite discovery** preserves coherent checkpoints and stops before schema-dependent verification; unchanged scope routes the exact discovered artifact through `pre-execute-issue`, while changed schema outcome or acceptance returns to planning
 - A one-outcome Spec that cannot fit one execution and review cycle is still a **Multi-Issue Spec**; `/to-tickets` prefers independently verifiable vertical slices and uses expand-contract when no single wide change can remain green as a vertical slice
 - `/to-tickets` reuses that seal or creates one successor for approved in-Spec planning changes; public scope expansion returns to `/to-spec`
 - `execute-issue` verifies the **Planning Seal** is an ancestor of its execution baseline and never creates or repairs the seal
-- `execute-issue` reads the Issue and comments at Entry: an undeclared **Manual prerequisite** preserves the ordinary route, while a matching **Manual execution attestation** permits execution
-- `execute-issue` never invokes `pre-execute-issue`, executes a **Prerequisite artifact**, or performs a **Manual prerequisite** automatically
+- `execute-issue` reads the Issue and comments at Entry: no exact declared **Manual prerequisite** preserves the ordinary route, while a matching **Manual execution attestation** permits execution
+- When one exact declared or late-discovered prerequisite lacks a matching attestation, `execute-issue` automatically invokes `pre-execute-issue` in the same authorized lane; arbitrary `.sql` files never trigger it, and neither skill executes the artifact or performs the external prerequisite
 - **Execution readiness** requires satisfied blockers and clear Issue or linked-Spec scope
-- A declared **Manual prerequisite** reaches `execute-issue` through one matching read-back **Manual execution attestation**; no declared prerequisite preserves the ordinary route
-- `pre-execute-issue` accepts the human statement, writes and reads back the attestation once, and never prepares, validates, hashes, commits, executes, or externally verifies the artifact
-- A matching existing attestation is reused without a duplicate note; only missing or ambiguous artifact identity requires one focused human clarification
+- A direct `/pre-execute-issue <Issue-ID>` invocation and an active `execute-issue` handoff both resolve only the exact artifact declared by the Issue or Spec or exact late-discovery evidence; missing or consequentially contradictory identity stops for one focused decision
+- When that artifact is not ready, `pre-execute-issue` automatically invokes model-invoked `prepare-prerequisite-artifact`, which consumes the repository adapter's `discover`, `prepare`, and `validate` operations and shares one ten-wave deterministic-validation and Standards/Spec-review repair budget
+- A ready generated **Operator SQL** is a clean committed **Prerequisite candidate** presented for human execution; the workflow never connects to or mutates the database, automatically retries a failed execution, runs recovery, or performs cleanup
+- A human-reported `APPLIED` or `NO_OP` records and reads back content-bound `manual_prerequisite_complete:v2`; legacy path-only v1 remains readable but cannot authorize a newly generated artifact
+- A matching existing attestation is reused without a duplicate note; direct `pre-execute-issue` stops after attestation, while an active `execute-issue` handoff resumes the same lane only after fresh exact identity and ancestry checks
 - Tracker write or read-back failure is reported as unresolved persistence and never misrepresented as a completed attestation
 - An **Issue Context Packet** may be rebuilt from the Issue and latest **Issue Progress Checkpoint**
 - An **Execution completion note** hands one unchanged reviewed candidate from `execute-issue` to separately invoked `close-issue`
@@ -566,7 +620,12 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Recovery requires one exact human confirmation before its separate model-invoked helper writes authority evidence, then automatically starts a fresh `/verify-target-before-push`; the failed gate neither writes the record nor continues from its stopping point
 - A **Direct target contribution** is eligible only for explicit human-directed, non-product workflow or governance maintenance outside an **Executable Issue** by design; active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, and mixed commits return to normal Issue delivery without partial-path attestation
 - **Successor verification evidence** may replace only an earlier path-specific focused command that is inapplicable at exact `V`; every referenced path requires explicit later-member retirement, absence proof, passing current-behavior evidence, and descendant ancestry, while partial, inferred, renamed, or non-path-specific cases stop
+- A **Verification command** enters aggregate verification only as one literal repository-root command; prose, summaries, placeholders, and inferred expansions are non-authorizing
+- One **Closed Issue command representation reconciliation** may recover selected-range eligibility only for an unambiguous historical placeholder with later-descendant exact-command success, fresh target success, and explicit human confirmation; it never edits or validates the original completion note
 - `/verify-target-before-push` performs aggregate Standards, every member Spec, deduplicated focused verification, and the repository full suite once on exact target `V`; local-ahead mode writes a current **Push-ready receipt**, while explicit already-pushed mode returns only a **Range verification result**
+- A **Code review advisory** remains visible but cannot block aggregate review, trigger repair, or create waiver authority; only a Coordinator-confirmed exact Standards or Spec violation is a **Confirmed code review finding**
+- A confirmed aggregate finding withholds push readiness and defaults to a new human-created **Aggregate repair Issue**; the verifier never creates or executes repairs, and earlier Issues remain closed unless the human explicitly authorizes reopening one
+- A human-invoked `/push-target <target>` consumes only a current local-ahead **Push-ready receipt**, fetches and rechecks the unique upstream and exact target, performs one ordinary non-force push, and reads the remote ref back; any drift stops without pull, merge, rebase, force push, or automatic reverification
 - A **Subagent Task Brief** is derived from one **Issue Context Packet**
 - A **Decision Explanation Packet** produces a non-authoritative **Decision Card**
 - A **Wiki validation result** combines a deterministic **Wiki validation pipeline** result with an independent **Wiki semantic review** result without merging their proof authority
