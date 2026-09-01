@@ -1,4 +1,4 @@
 interface:
   display_name: "Record Closed Issue Reconciliation"
   short_description: "Record exact historical evidence authority"
-  default_prompt: "Use $record-closed-issue-reconciliation only for the exact packet handed off by /verify-target-before-push after exact human confirmation; revalidate both historical diagnostics and remedy evidence, append or reuse one immutable record, and read it back without changing completion or readiness."
+  default_prompt: "Use $record-closed-issue-reconciliation only for the exact failed-command or command representation packet handed off by /verify-target-before-push after exact human confirmation; revalidate the packet's diagnostic-remedy or placeholder-descendant evidence, append or reuse one immutable record, and read it back without changing completion or readiness."

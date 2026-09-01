@@ -12,7 +12,7 @@ npx skills update verify-target-before-push
 
 ## What it does
 
-`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. It has two narrow confirmation-gated recoveries: eligible direct target contribution coverage and one eligible closed Issue historical completion-evidence failure.
+`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. It has three narrow confirmation-gated recoveries: eligible direct target contribution coverage, one eligible closed Issue historical failed-command case, and one eligible historical command placeholder.
 
 It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison.
 
@@ -50,6 +50,14 @@ An existing exact immutable reconciliation record is reused. Otherwise the verif
 
 After exact read-back, the stopped gate is discarded and verification starts from fresh Entry. It freezes the range and histories again, revalidates both candidates and the record, collects and deduplicates every exact completion command, and runs the repository full suite once even when that command was also recorded by a member. Both local-ahead and already-pushed modes run this fresh gate; only passing local-ahead may emit `push_ready`, while already-pushed remains read-only.
 
+## Historical command representation recovery
+
+Command representation recovery is separate from a genuinely failed command. It applies only when one otherwise-valid immutable completion has one unambiguous placeholder in place of the repository-required full-suite command. Prose, summaries, multiple placeholders, multiple possible commands, inferred expansions, or any other invalid evidence remain non-executable and stop without a tracker write.
+
+The verifier proves one later descendant Issue whose candidate descends from the affected candidate and whose valid completion records the exact literal full-suite command passing. It also reruns that same command on the frozen target before showing one complete record draft for exact human confirmation. A current pass alone, non-descendant evidence, another command, or ambiguity never qualifies.
+
+The same model-invoked [record-closed-issue-reconciliation](https://aihero.dev/skills-record-closed-issue-reconciliation) helper appends or reuses the affected-Issue command representation record. The original completion remains invalid; read-back grants only selected-range membership eligibility. The verifier then discards the stopped gate, starts from fresh Entry, includes the mapped literal in the aggregate command set, and runs the full suite exactly once in either evidence mode.
+
 ## Honest results
 
 A `push_ready` result belongs only to local-ahead mode and exact current target `HEAD`. A **Range verification result** belongs only to the explicit already-pushed comparison and never grants retroactive push readiness.
@@ -61,7 +69,7 @@ Both results bind exact baseline, target, members, coverage, review, executed ve
 - A local-ahead run rejects a missing, ambiguous, or empty upstream range.
 - An already-pushed run requires an explicit immutable comparison and writes no `push_ready` note.
 - Completion-note membership and every material commit are proved before one aggregate gate runs.
-- Either recovery presents one complete draft, writes only after exact confirmation, and restarts from Entry after exact read-back.
+- Each eligible recovery presents one complete draft, writes only after exact confirmation, and restarts from Entry after exact read-back.
 
 ## Where it fits
 
