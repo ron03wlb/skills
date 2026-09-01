@@ -18,9 +18,9 @@ Missing, duplicate, malformed, stale, mismatched, already-pushed, or ambiguous r
 
 ## Revalidate the configured upstream after fetch
 
-Resolve the named target's unique configured upstream as one Git remote and one full remote branch ref. A missing remote, missing upstream ref, multiple plausible destinations, local `.` remote, implicit default, or need to guess from `origin`, the current checkout, URLs, or push configuration stops. Freeze the remote name, remote URL identity, remote ref, receipt, local target ref, baseline `B`, and verified target `V`.
+Resolve the named target's unique configured upstream as one Git remote and one full remote branch ref. Resolve exactly one fetch URL and one push URL and require them to be the same resolved URL, proving one single endpoint for baseline validation, delivery, and read-back. A split fetch/push endpoint, missing remote, missing upstream ref, multiple plausible destinations, local `.` remote, implicit default, or need to guess from `origin`, the current checkout, URLs, or push configuration stops. Freeze the remote name, identical fetch and push URL, remote ref, receipt, local target ref, baseline `B`, and verified target `V`.
 
-Fetch that exact remote immediately before delivery. After fetch, resolve the exact fetched upstream tip and reread the local target, upstream configuration, and receipt. Continue only when the receipt baseline equals the fetched upstream tip, local target `HEAD` equals the receipt target SHA, `B` is an ancestor of `V`, `B..V` is non-empty, and the remote, upstream ref, local ref, receipt, and their object identities have not drifted. Any upstream drift, local-target drift, ref drift, receipt drift, empty range, missing object, or ancestry failure stops before push.
+Fetch immediately before delivery with `git fetch --no-tags <frozen-fetch-url> <upstream-ref>:<remote-tracking-ref>`. The frozen URL and explicit refspec prevent remote-name configuration or automatic tag following from widening the fetch beyond the exact upstream branch and its normal remote-tracking ref. After fetch, resolve the exact fetched upstream tip and reread the local target, upstream configuration, and receipt. Continue only when the receipt baseline equals the fetched upstream tip, local target `HEAD` equals the receipt target SHA, `B` is an ancestor of `V`, `B..V` is non-empty, and the remote, URLs, upstream ref, local ref, receipt, and their object identities have not drifted. Any upstream drift, local-target drift, ref drift, receipt drift, empty range, missing object, or ancestry failure stops before push.
 
 Do not pull, merge, rebase, reset, switch, create, delete, or rewrite a branch while reconciling drift. A stale or already-pushed receipt returns to the human; fresh readiness comes only from a separately invoked `/verify-target-before-push <target>`.
 
@@ -29,15 +29,15 @@ Do not pull, merge, rebase, reset, switch, create, delete, or rewrite a branch w
 Perform one ordinary non-force push of the exact verified local target ref to the exact configured upstream ref, using an explicit refspec equivalent to:
 
 ```bash
-git push <upstream-remote> refs/heads/<target>:<upstream-ref>
+git push --no-follow-tags <frozen-push-url> refs/heads/<target>:<upstream-ref>
 ```
 
-Never use force, force-with-lease, mirror, all-branches, tag-following, deletion, wildcard, or additional refspecs. Never push Git notes, tags, another branch, or a symbolic default. Issue the push command at most once.
+Use the frozen push URL rather than the remote alias so remote-scoped mirror or additional-push configuration cannot widen the operation; `--no-follow-tags` neutralizes repository or user `push.followTags` configuration. Never use force, force-with-lease, mirror, all-branches, tag-following, deletion, wildcard, or additional refspecs. Never push Git notes, tags, another branch, or a symbolic default. Issue the push command at most once.
 
-After the command returns, query that exact remote branch ref directly, require exactly one readable remote SHA, and claim success only when it equals the exact receipt target SHA `V`. Reread the local target, upstream configuration, and receipt once more; any rejection, transport failure, remote mismatch, missing or duplicate remote result, local or configuration drift, or post-push ambiguity is unresolved delivery. Report the frozen identities and observed result, but never retry, widen the refspec, repair, pull, merge, rebase, force-push, or automatically reverify.
+After the command returns, query the exact remote branch ref from that same frozen push URL, require exactly one readable remote SHA, and claim success only when it equals the exact receipt target SHA `V`. Reread the local target, upstream configuration, and receipt once more; any rejection, transport failure, remote mismatch, missing or duplicate remote result, local or configuration drift, or post-push ambiguity is unresolved delivery. Report the frozen identities and observed result, but never retry, widen the refspec, repair, pull, merge, rebase, force-push, or automatically reverify.
 
 ## Preserve every other boundary
 
-The only authorized external-state change is the one exact configured remote branch ref; the preceding fetch may update only normal remote-tracking refs. This skill never changes product files, commits, branches, worktrees, Issues, labels, completion notes, or verification evidence. It never closes an Issue, edits or consumes the receipt as state, pushes another ref, changes another external environment, or deploys.
+The only authorized external-state change is the one exact configured remote branch ref; the preceding fetch may update only the exact normal remote-tracking ref and fetch metadata, never tags. This skill never changes product files, commits, branches, worktrees, Issues, labels, completion notes, or verification evidence. It never closes an Issue, edits or consumes the receipt as state, pushes another ref, changes another external environment, or deploys.
 
 It never pulls, merges, rebases, force-pushes, performs a receipt rewrite, starts automatic reverification, or deploys. A successful read-back proves only that remote ref equality for exact `V`; it is not deployment, runtime, or production evidence.

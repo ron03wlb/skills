@@ -1888,9 +1888,13 @@ test("push-target consumes one current receipt for one exact non-force push", ()
   assert.match(skill, /mode.*local-ahead.*target.*baseline.*verified target SHA.*member.*evidence.*current.*HEAD/isu);
   assert.match(skill, /missing.*duplicate.*malformed.*stale.*mismatched.*already-pushed.*ambiguous.*stops? before.*remote mutation/isu);
   assert.match(skill, /unique configured upstream.*fetch.*immediately before.*receipt baseline.*fetched upstream tip.*local target `HEAD`.*receipt target SHA/isu);
+  assert.match(skill, /fetch URL.*push URL.*same.*single endpoint/isu);
+  assert.match(skill, /fetch.*--no-tags.*exact.*upstream ref.*remote-tracking ref/isu);
   assert.match(skill, /baseline.*ancestor.*`V`.*non-empty/isu);
   assert.match(skill, /ref drift.*receipt drift.*stops? before push/isu);
   assert.match(skill, /one ordinary non-force push.*exact verified local target.*configured upstream ref/isu);
+  assert.match(skill, /git push --no-follow-tags <frozen-push-url> refs\/heads\/<target>:<upstream-ref>/u);
+  assert.match(skill, /frozen push URL.*remote alias.*push\.followTags/isu);
   assert.match(skill, /read.*remote ref.*exact receipt target SHA.*success/isu);
   assert.match(skill, /rejection.*transport failure.*remote mismatch.*post-push ambiguity.*unresolved delivery.*never.*retry/isu);
   assert.match(skill, /never.*pull.*merge.*rebase.*force-push.*receipt rewrite.*automatic reverification.*deploy/isu);
@@ -2054,7 +2058,8 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     const frozenUpstreams = readUpstreams();
     assert.equal(frozenUpstreams.length, 1, "target must have one unique configured upstream");
     const [upstream] = frozenUpstreams;
-    git("fetch", upstream.remote);
+    assert.equal(upstream.fetchUrl, upstream.pushUrl, "fetch and push URL must be the same single endpoint");
+    git("fetch", "--no-tags", upstream.fetchUrl, `${upstream.remoteRef}:${upstream.trackingRef}`);
     validateFetchedGate({
       receipt,
       frozenReceiptText,
@@ -2066,11 +2071,11 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     });
     try {
       if (performPush) performPush();
-      else rawGit("push", upstream.remote, `refs/heads/${target}:${upstream.remoteRef}`);
+      else rawGit("push", "--no-follow-tags", upstream.pushUrl, `refs/heads/${target}:${upstream.remoteRef}`);
     } catch {
       throw new Error("unresolved delivery after one rejected or failed push");
     }
-    const remoteOutput = git("ls-remote", "--refs", upstream.remote, upstream.remoteRef);
+    const remoteOutput = git("ls-remote", "--refs", upstream.pushUrl, upstream.remoteRef);
     validatePostPush({
       receipt,
       frozenReceiptText,
@@ -2106,6 +2111,12 @@ test("push-target consumes one current receipt for one exact non-force push", ()
       results: [{ command: "node --test tests/ron-workflow/*.test.mjs", result: "pass" }],
     });
     git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(receipt), head);
+    git("tag", "-a", "remote-only", baseline, "-m", "remote-only tag");
+    rawGit("push", "origin", "refs/tags/remote-only:refs/tags/remote-only");
+    git("tag", "-d", "remote-only");
+    git("tag", "-a", "local-only", head, "-m", "local-only tag");
+    git("config", "push.followTags", "true");
+    rawGit("push", "origin", `${baseline}:refs/heads/other`);
     const upstreams = configuredUpstreams();
 
     assert.throws(() => selectReceipt({ receipts: [], target: "target", currentHead: head }), /exactly one/u);
@@ -2130,6 +2141,14 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     assert.throws(() => deliver({ readUpstreams: () => [] }), /unique configured upstream/u);
     assert.throws(() => deliver({ readUpstreams: () => [...upstreams, ...upstreams] }), /unique configured upstream/u);
     assert.ok(upstreams[0].fetchUrl.length > 0 && upstreams[0].pushUrl.length > 0, "upstream URL identities must be frozen");
+    assert.throws(
+      () => deliver({
+        readUpstreams: () => [{ ...upstreams[0], pushUrl: `${upstreams[0].pushUrl}-split` }],
+        performPush: () => {},
+        readRemoteHeads: () => [head],
+      }),
+      /fetch and push URL.*same.*endpoint/u,
+    );
     git("config", "--add", "branch.target.remote", "origin");
     assert.equal(configuredUpstreams().length, 2, "multi-valued branch config must remain ambiguous");
     assert.throws(() => deliver(), /unique configured upstream/u);
@@ -2212,6 +2231,9 @@ test("push-target consumes one current receipt for one exact non-force push", ()
       branch: git("branch", "--show-current"),
       note: git("notes", "--ref=refs/notes/matt-push-ready", "show", head),
       status: git("status", "--porcelain=v1"),
+      localTags: git("tag", "--list"),
+      remoteOnlyTag: git("ls-remote", "--refs", "origin", "refs/tags/remote-only"),
+      unrelatedRemoteBranch: git("ls-remote", "--refs", "origin", "refs/heads/other"),
     };
     assert.equal(deliver(), head);
     assert.equal(git("ls-remote", "--refs", "origin", "refs/heads/target").split(/\s+/u)[0], head);
@@ -2220,10 +2242,14 @@ test("push-target consumes one current receipt for one exact non-force push", ()
         branch: git("branch", "--show-current"),
         note: git("notes", "--ref=refs/notes/matt-push-ready", "show", head),
         status: git("status", "--porcelain=v1"),
+        localTags: git("tag", "--list"),
+        remoteOnlyTag: git("ls-remote", "--refs", "origin", "refs/tags/remote-only"),
+        unrelatedRemoteBranch: git("ls-remote", "--refs", "origin", "refs/heads/other"),
       },
       before,
       "delivery must preserve local branch, receipt, files, and clean state",
     );
+    assert.equal(git("ls-remote", "--refs", "origin", "refs/tags/local-only"), "", "push must not follow local tags");
 
     let alreadyPushedAttempts = 0;
     assert.throws(

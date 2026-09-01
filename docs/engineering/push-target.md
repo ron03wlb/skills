@@ -24,13 +24,14 @@ Reach for it only after [verify-target-before-push](https://aihero.dev/skills-ve
 
 ## Drift stops delivery
 
-The operation freezes the receipt, target, upstream remote, baseline, and destination ref, then fetches and compares them again. A missing or ambiguous upstream, stale or malformed receipt, moved ref, empty range, rejection, transport error, or remote mismatch stops without pull, merge, rebase, force push, or retry.
+The operation freezes the receipt, target, upstream remote, baseline, and destination ref. Its configured fetch and push URLs must resolve to the same single endpoint. It fetches only the exact upstream ref with `--no-tags`, then compares every identity again. A split endpoint, missing or ambiguous upstream, stale or malformed receipt, moved ref, empty range, rejection, transport error, or remote mismatch stops without pull, merge, rebase, force push, or retry.
 
-Only the exact configured branch ref may change remotely. Local files, commits, branches, worktrees, tracker state, Git notes, tags, and every other remote ref remain untouched.
+The push uses the frozen endpoint, `--no-follow-tags`, and one explicit refspec. Only the exact configured branch ref may change remotely. Local files, commits, branches, worktrees, tracker state, Git notes, tags, and every other remote ref remain untouched.
 
 ## It's working if
 
 - One current local-ahead receipt names the exact target `HEAD`.
+- Fetch and push resolve to the same frozen endpoint, with tags excluded.
 - The fetched upstream tip still equals the receipt baseline.
 - One ordinary push is followed by exact remote-ref equality.
 - Any drift or ambiguity stops without repair or a second push.
