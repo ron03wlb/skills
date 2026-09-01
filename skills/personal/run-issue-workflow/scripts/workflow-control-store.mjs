@@ -195,11 +195,19 @@ const same = (left, right) => stableJson(left) === stableJson(right);
 
 export function createWorkflowControlStore({ gitCommonDir }) {
   if (!isText(gitCommonDir)) throw new TypeError("gitCommonDir is required");
-  const transactionsRoot = join(resolve(gitCommonDir), "matt-workflow-control", "workflow-checkpoints");
+  const controlRoot = join(resolve(gitCommonDir), "matt-workflow-control");
+  const transactionsRoot = join(controlRoot, "workflow-checkpoints");
+  const writersRoot = join(controlRoot, "workflow-checkpoint-writers");
 
   const fileFor = (scopeKey) => join(transactionsRoot, `${scopeKey.slice("sha256:".length)}.json`);
-  const lockFor = (scopeKey) => `${fileFor(scopeKey)}.writer.lock`;
-  const temporaryPrefixFor = (scopeKey) => `${fileFor(scopeKey)}.tmp-`;
+  const scopeHashFor = (scopeKey) => scopeKey.slice("sha256:".length);
+  const targetKeyFor = ({ repositoryId, target }) => digest({ repositoryId, target });
+  const lockFor = (scopeKey) => join(writersRoot, `${scopeHashFor(scopeKey)}.lock`);
+  const targetGateFor = (identity) => join(writersRoot, `target-${targetKeyFor(identity)}.lock`);
+  const temporaryPrefixFor = (scopeKey, identity) => join(
+    writersRoot,
+    `${scopeHashFor(scopeKey)}.target-${targetKeyFor(identity)}.tmp-`,
+  );
 
   const readFile = (path) => {
     try {
@@ -211,13 +219,15 @@ export function createWorkflowControlStore({ gitCommonDir }) {
   };
 
   const assertScopeStorageUnambiguous = (scopeKey) => {
-    if (!existsSync(transactionsRoot)) return;
+    if (!existsSync(writersRoot)) return;
     const path = fileFor(scopeKey);
     const lock = lockFor(scopeKey);
-    const prefix = temporaryPrefixFor(scopeKey);
-    const ambiguous = readdirSync(transactionsRoot)
-      .map((name) => join(transactionsRoot, name))
-      .filter((entry) => entry === lock || entry.startsWith(prefix));
+    const temporaryPrefix = `${scopeHashFor(scopeKey)}.target-`;
+    const ambiguous = readdirSync(writersRoot)
+      .map((name) => join(writersRoot, name))
+      .filter((entry) => entry === lock || (
+        entry.startsWith(join(writersRoot, temporaryPrefix)) && entry.includes(".tmp-")
+      ));
     if (ambiguous.length > 0) {
       throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", ambiguous.map((entry) => `Incomplete state: ${entry}`));
     }
@@ -239,28 +249,69 @@ export function createWorkflowControlStore({ gitCommonDir }) {
     return toView(transaction);
   };
 
+  const classifyPersisted = ({ repositoryId, target }) => {
+    const transactions = [];
+    const evidence = [];
+    if (existsSync(transactionsRoot)) {
+      for (const name of readdirSync(transactionsRoot)) {
+        const path = join(transactionsRoot, name);
+        if (!name.endsWith(".json")) {
+          evidence.push(`Unrecognized workflow checkpoint transaction state: ${path}`);
+          continue;
+        }
+        try {
+          const transaction = readFile(path);
+          if (transaction.identity.repositoryId === repositoryId && transaction.identity.target === target) {
+            transactions.push(toView(transaction));
+          }
+        } catch (error) {
+          evidence.push(...(error.evidence ?? [String(error.message)]));
+        }
+      }
+    }
+    return { transactions, evidence };
+  };
+
+  const transientEvidenceFor = ({ repositoryId, target }) => {
+    if (!existsSync(writersRoot)) return [];
+    const targetKey = targetKeyFor({ repositoryId, target });
+    const evidence = [];
+    for (const name of readdirSync(writersRoot)) {
+      const path = join(writersRoot, name);
+      const targetGateMatch = /^target-([a-f0-9]{64})\.lock$/u.exec(name);
+      if (targetGateMatch) {
+        if (targetGateMatch[1] === targetKey) evidence.push(`Target checkpoint creation is active: ${path}`);
+        continue;
+      }
+      const temporaryMatch = /^([a-f0-9]{64})\.target-([a-f0-9]{64})\.tmp-/u.exec(name);
+      if (temporaryMatch) {
+        if (temporaryMatch[2] === targetKey) evidence.push(`Partial checkpoint persistence is present: ${path}`);
+        continue;
+      }
+      const writerMatch = /^([a-f0-9]{64})\.lock$/u.exec(name);
+      if (writerMatch) {
+        const transactionPath = join(transactionsRoot, `${writerMatch[1]}.json`);
+        try {
+          const transaction = readFile(transactionPath);
+          if (transaction.identity.repositoryId === repositoryId && transaction.identity.target === target) {
+            evidence.push(`Checkpoint advancement is active: ${path}`);
+          }
+        } catch (error) {
+          evidence.push(...(error.evidence ?? [String(error.message)]));
+        }
+        continue;
+      }
+      evidence.push(`Unrecognized workflow checkpoint writer state: ${path}`);
+    }
+    return evidence;
+  };
+
   const classifyCheckpoints = ({ repositoryId, target }) => {
     if (!isText(repositoryId) || !isText(target)) {
       throw new TypeError("repositoryId and target are required");
     }
-    if (!existsSync(transactionsRoot)) return { state: "ABSENT", transactions: [], evidence: [] };
-    const transactions = [];
-    const evidence = [];
-    for (const name of readdirSync(transactionsRoot)) {
-      const path = join(transactionsRoot, name);
-      if (!name.endsWith(".json")) {
-        evidence.push(`Unrecognized or partially persisted workflow checkpoint state: ${path}`);
-        continue;
-      }
-      try {
-        const transaction = readFile(path);
-        if (transaction.identity.repositoryId === repositoryId && transaction.identity.target === target) {
-          transactions.push(toView(transaction));
-        }
-      } catch (error) {
-        evidence.push(...(error.evidence ?? [String(error.message)]));
-      }
-    }
+    const { transactions, evidence: persistedEvidence } = classifyPersisted({ repositoryId, target });
+    const evidence = [...persistedEvidence, ...transientEvidenceFor({ repositoryId, target })];
     if (evidence.length > 0) return { state: "UNKNOWN", transactions, evidence };
     const incomplete = transactions.filter(({ state }) => state === "INCOMPLETE");
     if (incomplete.length > 1) {
@@ -277,48 +328,72 @@ export function createWorkflowControlStore({ gitCommonDir }) {
     };
   };
 
+  const acquireTargetCreationGate = (identity) => {
+    mkdirSync(writersRoot, { recursive: true });
+    const gate = targetGateFor(identity);
+    try {
+      mkdirSync(gate);
+      syncDirectory(writersRoot);
+    } catch (error) {
+      if (["EEXIST", "ENOTEMPTY"].includes(error?.code)) {
+        throw fail("WORKFLOW_CHECKPOINT_WRITER_LOCKED", [`Target creation gate exists at ${gate}.`]);
+      }
+      throw error;
+    }
+    return () => {
+      rmSync(gate, { recursive: true, force: false });
+      syncDirectory(writersRoot);
+    };
+  };
+
   const createCheckpoint = (inputIdentity) => {
     const identity = normalizeIdentity(inputIdentity);
     const scopeKey = scopeKeyFor(identity);
     mkdirSync(transactionsRoot, { recursive: true });
-    assertScopeStorageUnambiguous(scopeKey);
-    const existing = readCheckpoint(identity);
-    if (existing) return existing;
-    const classification = classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    });
-    if (classification.state === "UNKNOWN") {
-      throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", classification.evidence);
-    }
-    if (classification.state === "INCOMPLETE") {
-      throw fail("WORKFLOW_CHECKPOINT_CONFLICT", [
-        "Another incomplete workflow checkpoint transaction already targets this repository and branch.",
-      ]);
-    }
-    const transaction = {
-      schema: WORKFLOW_CHECKPOINT_SCHEMA,
-      scopeKey,
-      transactionId: transactionIdFor(identity),
-      identity,
-      progress: [],
-    };
-    const path = fileFor(scopeKey);
-    const temporary = `${temporaryPrefixFor(scopeKey)}${process.pid}-${randomUUID()}`;
+    const releaseTargetGate = acquireTargetCreationGate(identity);
     try {
-      writeDurableFile(temporary, `${JSON.stringify(transaction, null, 2)}\n`);
-      try {
-        linkSync(temporary, path);
-        syncDirectory(transactionsRoot);
-      } catch (error) {
-        if (error?.code !== "EEXIST") throw error;
+      assertScopeStorageUnambiguous(scopeKey);
+      const existing = readCheckpoint(identity);
+      if (existing) return existing;
+      const classification = classifyPersisted({
+        repositoryId: identity.repositoryId,
+        target: identity.target,
+      });
+      if (classification.evidence.length > 0) {
+        throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", classification.evidence);
       }
+      if (classification.transactions.some(({ state }) => state === "INCOMPLETE")) {
+        throw fail("WORKFLOW_CHECKPOINT_CONFLICT", [
+          "Another incomplete workflow checkpoint transaction already targets this repository and branch.",
+        ]);
+      }
+      const transaction = {
+        schema: WORKFLOW_CHECKPOINT_SCHEMA,
+        scopeKey,
+        transactionId: transactionIdFor(identity),
+        identity,
+        progress: [],
+      };
+      const path = fileFor(scopeKey);
+      const temporary = `${temporaryPrefixFor(scopeKey, identity)}${process.pid}-${randomUUID()}`;
+      try {
+        writeDurableFile(temporary, `${JSON.stringify(transaction, null, 2)}\n`);
+        try {
+          linkSync(temporary, path);
+          syncDirectory(transactionsRoot);
+        } catch (error) {
+          if (error?.code !== "EEXIST") throw error;
+        }
+      } finally {
+        if (existsSync(temporary)) unlinkSync(temporary);
+        syncDirectory(writersRoot);
+      }
+      const persisted = readCheckpoint(identity);
+      if (!persisted) throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", ["Atomic checkpoint creation was not readable."]);
+      return persisted;
     } finally {
-      if (existsSync(temporary)) unlinkSync(temporary);
+      releaseTargetGate();
     }
-    const persisted = readCheckpoint(identity);
-    if (!persisted) throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", ["Atomic checkpoint creation was not readable."]);
-    return persisted;
   };
 
   const advanceCheckpoint = ({ identity: inputIdentity, stage, result }) => {
@@ -328,10 +403,11 @@ export function createWorkflowControlStore({ gitCommonDir }) {
     const scopeKey = scopeKeyFor(identity);
     const lock = lockFor(scopeKey);
     mkdirSync(transactionsRoot, { recursive: true });
+    mkdirSync(writersRoot, { recursive: true });
     assertScopeStorageUnambiguous(scopeKey);
     try {
       mkdirSync(lock);
-      syncDirectory(transactionsRoot);
+      syncDirectory(writersRoot);
     } catch (error) {
       if (["EEXIST", "ENOTEMPTY"].includes(error?.code)) {
         throw fail("WORKFLOW_CHECKPOINT_WRITER_LOCKED", [`Checkpoint writer lock exists at ${lock}.`]);
@@ -355,18 +431,19 @@ export function createWorkflowControlStore({ gitCommonDir }) {
         ...transaction,
         progress: [...transaction.progress, { stage, result }],
       });
-      const temporary = `${temporaryPrefixFor(scopeKey)}${process.pid}-${randomUUID()}`;
+      const temporary = `${temporaryPrefixFor(scopeKey, identity)}${process.pid}-${randomUUID()}`;
       try {
         writeDurableFile(temporary, `${JSON.stringify(advanced, null, 2)}\n`);
         renameSync(temporary, path);
         syncDirectory(transactionsRoot);
       } finally {
         if (existsSync(temporary)) unlinkSync(temporary);
+        syncDirectory(writersRoot);
       }
       return toView(readFile(path));
     } finally {
       rmSync(lock, { recursive: true, force: false });
-      syncDirectory(transactionsRoot);
+      syncDirectory(writersRoot);
     }
   };
 
