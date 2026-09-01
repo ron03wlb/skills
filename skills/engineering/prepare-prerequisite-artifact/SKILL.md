@@ -44,7 +44,7 @@ After creating and validating the persistent backup, revalidate and lock the exa
 
 Recovery statements stay commented and inert. UPDATE or DELETE recovery restores exact backed-up rows; INSERT recovery removes only stable keys created by this operation. DDL or transformation without truthful recovery stops. Recovery never runs automatically, and broad predicates, inferred keys, or fabricated rollback are invalid.
 
-Successful completion emits exactly one terminal outcome: `APPLIED` after a committed mutation, or `NO_OP` after an integrity-valid backup and complete postconditions prove no write is needed. An SQL error, missing outcome, or any other value is unsuccessful. The primary SQL never deletes or overwrites the backup, and no cleanup SQL is generated, retained in the primary artifact, or invoked.
+Successful completion emits exactly one terminal outcome: `APPLIED` after a committed mutation, or `NO_OP` after an integrity-valid backup and complete postconditions prove no write is needed. An SQL error, missing outcome, or any other value is unsuccessful. The primary SQL never deletes or overwrites the backup, and no cleanup SQL is generated, retained in the primary artifact, or invoked. The same logical backup name may be reused for a separately authorized new operation only after human cleanup and fresh pre-mutation proof.
 
 ## Share one validation and review budget
 

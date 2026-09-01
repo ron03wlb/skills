@@ -446,7 +446,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   assert.doesNotMatch(metadata, /^policy:/mu);
   assert.match(skill, /^description:.*Use when.*prerequisite-preparation handoff/mu);
   assert.match(metadata, /model-invoked.*exact prerequisite.*Operator SQL/isu);
-  assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(docs, /Type `\/prepare-prerequisite-artifact`, or the agent reaches for it automatically.*active prerequisite-preparation handoff/isu);
 
   assert.match(skill, /active prerequisite-preparation handoff.*exact Issue.*Issue target branch.*Issue worktree.*approved scope.*repository-relative artifact/isu);
   assert.match(skill, /unchanged.*Issue.*target.*worktree.*scope.*artifact.*before every material edit.*before (?:the )?candidate commit/isu);
@@ -463,6 +463,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   assert.match(skill, /recovery statements.*commented.*inert.*UPDATE or DELETE.*exact backed-up rows.*INSERT.*stable keys.*DDL or transformation.*stops/isu);
   assert.match(skill, /exactly one terminal outcome.*`APPLIED`.*`NO_OP`.*missing.*other value.*unsuccessful/isu);
   assert.match(skill, /never deletes or overwrites.*backup.*no cleanup SQL/isu);
+  assert.match(skill, /same logical backup name.*separately authorized new operation.*only after human cleanup.*fresh pre-mutation proof/isu);
 
   assert.match(skill, /after every material artifact edit.*`validate`.*independent Standards.*Spec review/isu);
   assert.match(skill, /share one maximum of ten material repair waves.*deterministic failure.*Confirmed code review finding/isu);
@@ -482,7 +483,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
   assert.equal(plugin.skills.includes("./skills/engineering/prepare-prerequisite-artifact"), true);
   assert.match(router, /prepare-prerequisite-artifact.*model-invoked.*not a public route.*active prerequisite-preparation handoff/isu);
-  assert.match(routerDocs, /prepare-prerequisite-artifact.*model-invoked.*not a public command.*Operator SQL/isu);
+  assert.match(routerDocs, /prepare-prerequisite-artifact.*model-invoked.*not a public starting route.*Operator SQL/isu);
   assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
   assert.match(docs, /## What it does/u);
   assert.match(docs, /## When to reach for it/u);
