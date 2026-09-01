@@ -14,6 +14,8 @@ npx skills update code-review
 
 `code-review` reviews committed or WIP candidate changes since a fixed point — a commit, branch, tag, or merge-base — along two separate axes: **Standards** (does the code follow this repo's documented conventions?) and **Spec** (does it implement what the originating issue or spec asked for?). It runs each axis as its own parallel sub-agent and reports them side by side. It never merges or re-ranks the two sets of findings — keeping them separate is the whole point, because a change can pass one axis and fail the other, and a single blended verdict lets one mask the other.
 
+Only a **Confirmed code review finding** blocks: the Coordinator must verify exact repository evidence for a Standards violation or exact Spec evidence for a mismatch. A **Code review advisory** lacks that proof and stays visible without failing the review or creating waiver state.
+
 ## When to reach for it
 
 Type `/code-review`, or the agent reaches for it automatically when you ask to review a branch, a PR, work-in-progress changes, or anything "since X".
@@ -36,10 +38,15 @@ They run as parallel sub-agents so neither pollutes the other's context, and the
 
 During Issue execution, both axes also receive the prospective `workflowArtifacts` declaration. Standards validates each exact path, requirement source, purpose, and Issue-contribution ownership. Spec verifies that the artifact is a required non-contract plan, execution log, or equivalent rather than public-contract, routing, Acceptance Criteria, governance, runtime, arbitrary, ambiguous, or unowned scope. File extensions decide nothing, and the declaration grants no coverage or verification authority.
 
+## Evidence decides what blocks
+
+The Coordinator checks every observation against its cited candidate hunk and governing source. Exact repository or Spec evidence makes a violation a Confirmed code review finding. Unsupported smells, preferences, suggestions, duplicates, and tool failures are Code review advisories: they remain visible, but do not fail a clean axis, trigger repair, consume a repair wave, or create a persistent dismissal, tracker waiver, Git note exception, or SHA allowlist. A later review can still confirm a real violation from fresh exact evidence.
+
 ## It's working if
 
 - It pins and confirms the fixed point first (`git rev-parse`), failing fast on a bad ref or empty candidate; a WIP candidate may consist only of explicitly in-scope untracked files.
 - Standards and Spec findings arrive in two distinct blocks, each citing its source — a repo standard or baseline smell for one, a quoted spec line for the other.
+- Each observation is labelled confirmed or advisory; an axis is clean when it has no Confirmed code review finding, even when Code review advisories remain visible.
 - When no spec can be found, the Spec axis reports "no spec available" instead of inventing requirements.
 
 ## Where it fits
