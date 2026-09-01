@@ -26,6 +26,22 @@ const createGitFixture = (prefix) => {
   return { repo, rawGit, git, isAncestor };
 };
 
+const createPushReadyReceipt = ({ target, baseline, head, members, coverage, commands, results, successorDispositions = [] }) => ({
+  schema: "push_ready:v1",
+  mode: "local-ahead",
+  target,
+  baseline,
+  head,
+  members,
+  coverage,
+  standards: "clean",
+  spec: "clean",
+  commands,
+  results,
+  successorDispositions,
+  worktree: "clean",
+});
+
 test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () => {
   const manifest = JSON.parse(read(".claude-plugin/plugin.json")).skills.sort();
   const expected = [];
@@ -1373,7 +1389,17 @@ test("aggregate target verification selects exact ranges and covers completion-n
       successorDispositions,
     };
     if (range.mode === "already-pushed") return { schema: "range_verified:v1", ...result };
-    const ready = { schema: "push_ready:v1", ...result };
+    const ready = createPushReadyReceipt({
+      target: range.targetRef,
+      baseline: range.baseline,
+      head: range.head,
+      members: result.members,
+      coverage: [...new Set(contributionSets.flatMap((commits) => [...commits]))]
+        .map((commit) => ({ commit, source: "member contribution" })),
+      commands: result.commands,
+      results: result.results,
+      successorDispositions: result.successorDispositions,
+    });
     git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(ready), range.head);
     return JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", range.head));
   };
@@ -1698,31 +1724,90 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     return receipt;
   };
 
-  const deliver = ({ upstreams, performPush, readFetchedTip, readTargetHead, readRemoteHead }) => {
-    const target = "target";
-    const currentHead = git("rev-parse", target);
-    const receipt = selectReceipt({
-      receipts: [JSON.parse(git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead))],
-      target,
-      currentHead,
-    });
-    assert.equal(upstreams.length, 1, "target must have one unique configured upstream");
-    const [upstream] = upstreams;
-    git("fetch", upstream.remote);
-    const fetchedTip = readFetchedTip?.() ?? git("rev-parse", upstream.trackingRef);
-    const targetHead = readTargetHead?.() ?? git("rev-parse", target);
+  const configuredUpstreams = () => {
+    const remoteName = git("config", "--get", "branch.target.remote");
+    const remoteRef = git("config", "--get", "branch.target.merge");
+    if (!remoteName || !remoteRef) return [];
+    return [{
+      remote: remoteName,
+      remoteRef,
+      trackingRef: `refs/remotes/${remoteName}/${remoteRef.replace(/^refs\/heads\//u, "")}`,
+    }];
+  };
+
+  const validateFetchedGate = ({ receipt, frozenReceiptText, currentReceiptText, frozenUpstreams, currentUpstreams, fetchedTip, targetHead }) => {
+    assert.equal(currentReceiptText, frozenReceiptText, "receipt drift after fetch");
+    assert.deepEqual(currentUpstreams, frozenUpstreams, "upstream or ref drift after fetch");
     assert.equal(fetchedTip, receipt.baseline, "upstream drift or already-pushed receipt");
     assert.equal(targetHead, receipt.head, "local target drift");
     assert.equal(isAncestor(receipt.baseline, receipt.head), true, "receipt baseline is not an ancestor");
     assert.notEqual(receipt.baseline, receipt.head, "receipt range is empty");
+  };
+
+  const validatePostPush = ({ receipt, frozenReceiptText, currentReceiptText, frozenUpstreams, currentUpstreams, targetHead, remoteHeads }) => {
+    assert.equal(currentReceiptText, frozenReceiptText, "post-push receipt drift is ambiguous");
+    assert.deepEqual(currentUpstreams, frozenUpstreams, "post-push upstream or ref drift is ambiguous");
+    assert.equal(targetHead, receipt.head, "post-push local target drift is ambiguous");
+    assert.equal(remoteHeads.length, 1, "remote read-back is missing or ambiguous");
+    assert.equal(remoteHeads[0], receipt.head, "remote read-back mismatch leaves unresolved delivery");
+  };
+
+  const deliver = ({
+    performPush,
+    readReceiptText,
+    readUpstreams = configuredUpstreams,
+    readFetchedTip,
+    readPostFetchReceiptText,
+    readPostFetchUpstreams,
+    readPostFetchTargetHead,
+    readRemoteHeads,
+    readPostPushReceiptText,
+    readPostPushUpstreams,
+    readPostPushTargetHead,
+  } = {}) => {
+    const target = "target";
+    const currentHead = git("rev-parse", target);
+    const frozenReceiptText = readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead);
+    let parsedReceipt;
+    try {
+      parsedReceipt = JSON.parse(frozenReceiptText);
+    } catch {
+      throw new Error("receipt is malformed");
+    }
+    const receipt = selectReceipt({
+      receipts: Array.isArray(parsedReceipt) ? parsedReceipt : [parsedReceipt],
+      target,
+      currentHead,
+    });
+    const frozenUpstreams = readUpstreams();
+    assert.equal(frozenUpstreams.length, 1, "target must have one unique configured upstream");
+    const [upstream] = frozenUpstreams;
+    git("fetch", upstream.remote);
+    validateFetchedGate({
+      receipt,
+      frozenReceiptText,
+      currentReceiptText: readPostFetchReceiptText?.() ?? (readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead)),
+      frozenUpstreams,
+      currentUpstreams: readPostFetchUpstreams?.() ?? readUpstreams(),
+      fetchedTip: readFetchedTip?.() ?? git("rev-parse", upstream.trackingRef),
+      targetHead: readPostFetchTargetHead?.() ?? git("rev-parse", target),
+    });
     try {
       if (performPush) performPush();
       else rawGit("push", upstream.remote, `refs/heads/${target}:${upstream.remoteRef}`);
     } catch {
       throw new Error("unresolved delivery after one rejected or failed push");
     }
-    const remoteHead = readRemoteHead?.() ?? git("ls-remote", "--refs", upstream.remote, upstream.remoteRef).split(/\s+/u)[0];
-    assert.equal(remoteHead, receipt.head, "remote read-back mismatch leaves unresolved delivery");
+    const remoteOutput = git("ls-remote", "--refs", upstream.remote, upstream.remoteRef);
+    validatePostPush({
+      receipt,
+      frozenReceiptText,
+      currentReceiptText: readPostPushReceiptText?.() ?? (readReceiptText?.() ?? git("notes", "--ref=refs/notes/matt-push-ready", "show", currentHead)),
+      frozenUpstreams,
+      currentUpstreams: readPostPushUpstreams?.() ?? readUpstreams(),
+      targetHead: readPostPushTargetHead?.() ?? git("rev-parse", target),
+      remoteHeads: readRemoteHeads?.() ?? (remoteOutput === "" ? [] : remoteOutput.split(/\r?\n/u).map((line) => line.split(/\s+/u)[0])),
+    });
     return receipt.head;
   };
 
@@ -1738,52 +1823,102 @@ test("push-target consumes one current receipt for one exact non-force push", ()
     git("add", "verified.txt");
     git("commit", "-m", "verified target");
     const head = git("rev-parse", "HEAD");
-    const receipt = {
-      schema: "push_ready:v1",
-      mode: "local-ahead",
+    const unrelated = git("commit-tree", git("rev-parse", "HEAD^{tree}"), "-m", "unrelated baseline");
+    const receipt = createPushReadyReceipt({
       target: "target",
       baseline,
       head,
       members: [{ issue: "30", candidate: head }],
       coverage: [{ commit: head, source: "Issue 30" }],
-      standards: "clean",
-      spec: "clean",
       commands: ["node --test tests/ron-workflow/*.test.mjs"],
       results: [{ command: "node --test tests/ron-workflow/*.test.mjs", result: "pass" }],
-      worktree: "clean",
-    };
+    });
     git("notes", "--ref=refs/notes/matt-push-ready", "add", "-m", JSON.stringify(receipt), head);
-    const upstreams = [{ remote: "origin", remoteRef: "refs/heads/target", trackingRef: "refs/remotes/origin/target" }];
+    const upstreams = configuredUpstreams();
 
     assert.throws(() => selectReceipt({ receipts: [], target: "target", currentHead: head }), /exactly one/u);
     assert.throws(() => selectReceipt({ receipts: [receipt, receipt], target: "target", currentHead: head }), /exactly one/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, schema: "range_verified:v1" }], target: "target", currentHead: head }), /schema is malformed/u);
     assert.throws(() => selectReceipt({ receipts: [{ ...receipt, mode: "already-pushed" }], target: "target", currentHead: head }), /local-ahead/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, target: "other" }], target: "target", currentHead: head }), /target mismatch/u);
+    assert.throws(() => selectReceipt({ receipts: [{ ...receipt, head: baseline }], target: "target", currentHead: head }), /stale/u);
     assert.throws(() => selectReceipt({ receipts: [{ ...receipt, results: [{ result: "fail" }] }], target: "target", currentHead: head }), /not passing/u);
-    assert.throws(() => deliver({ upstreams: [] }), /unique configured upstream/u);
-    assert.throws(() => deliver({ upstreams: [...upstreams, ...upstreams] }), /unique configured upstream/u);
-    assert.throws(() => deliver({ upstreams, readFetchedTip: () => head }), /upstream drift/u);
-    assert.throws(() => deliver({ upstreams, readTargetHead: () => baseline }), /local target drift/u);
+    assert.throws(() => deliver({ readReceiptText: () => "not-json" }), /receipt is malformed/u);
+    assert.throws(() => deliver({ readReceiptText: () => JSON.stringify([receipt, receipt]) }), /exactly one/u);
+    assert.throws(() => deliver({ readUpstreams: () => [] }), /unique configured upstream/u);
+    assert.throws(() => deliver({ readUpstreams: () => [...upstreams, ...upstreams] }), /unique configured upstream/u);
+    const receiptText = JSON.stringify(receipt);
+    const fetchedGate = {
+      receipt,
+      frozenReceiptText: receiptText,
+      currentReceiptText: receiptText,
+      frozenUpstreams: upstreams,
+      currentUpstreams: upstreams,
+      fetchedTip: baseline,
+      targetHead: head,
+    };
+    assert.throws(() => validateFetchedGate({ ...fetchedGate, fetchedTip: head }), /upstream drift/u);
+    assert.throws(() => validateFetchedGate({ ...fetchedGate, targetHead: baseline }), /local target drift/u);
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, receipt: { ...receipt, baseline: unrelated }, fetchedTip: unrelated }),
+      /not an ancestor/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, receipt: { ...receipt, baseline: head }, fetchedTip: head }),
+      /range is empty/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentReceiptText: JSON.stringify({ ...receipt, commands: ["drifted"] }) }),
+      /receipt drift after fetch/u,
+    );
+    assert.throws(
+      () => validateFetchedGate({ ...fetchedGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /upstream or ref drift after fetch/u,
+    );
 
     let rejectionAttempts = 0;
     assert.throws(
-      () => deliver({ upstreams, performPush: () => { rejectionAttempts += 1; throw new Error("rejected"); } }),
+      () => deliver({ performPush: () => { rejectionAttempts += 1; throw new Error("rejected"); } }),
       /unresolved delivery/u,
     );
     assert.equal(rejectionAttempts, 1, "push rejection must not be retried");
 
     let mismatchAttempts = 0;
     assert.throws(
-      () => deliver({ upstreams, performPush: () => { mismatchAttempts += 1; }, readRemoteHead: () => baseline }),
+      () => deliver({ performPush: () => { mismatchAttempts += 1; }, readRemoteHeads: () => [baseline] }),
       /remote read-back mismatch/u,
     );
     assert.equal(mismatchAttempts, 1, "remote mismatch must not trigger another push");
+    const postPushGate = {
+      receipt,
+      frozenReceiptText: receiptText,
+      currentReceiptText: receiptText,
+      frozenUpstreams: upstreams,
+      currentUpstreams: upstreams,
+      targetHead: head,
+      remoteHeads: [head],
+    };
+    assert.throws(() => validatePostPush({ ...postPushGate, remoteHeads: [] }), /missing or ambiguous/u);
+    assert.throws(() => validatePostPush({ ...postPushGate, remoteHeads: [head, head] }), /missing or ambiguous/u);
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, targetHead: baseline }),
+      /post-push local target drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentReceiptText: JSON.stringify({ ...receipt, commands: ["drifted"] }) }),
+      /post-push receipt drift/u,
+    );
+    assert.throws(
+      () => validatePostPush({ ...postPushGate, currentUpstreams: [{ ...upstreams[0], remoteRef: "refs/heads/drifted" }] }),
+      /post-push upstream or ref drift/u,
+    );
 
     const before = {
       branch: git("branch", "--show-current"),
       note: git("notes", "--ref=refs/notes/matt-push-ready", "show", head),
       status: git("status", "--porcelain=v1"),
     };
-    assert.equal(deliver({ upstreams }), head);
+    assert.equal(deliver(), head);
     assert.equal(git("ls-remote", "--refs", "origin", "refs/heads/target").split(/\s+/u)[0], head);
     assert.deepEqual(
       {
@@ -1797,7 +1932,7 @@ test("push-target consumes one current receipt for one exact non-force push", ()
 
     let alreadyPushedAttempts = 0;
     assert.throws(
-      () => deliver({ upstreams, performPush: () => { alreadyPushedAttempts += 1; } }),
+      () => deliver({ performPush: () => { alreadyPushedAttempts += 1; } }),
       /already-pushed/u,
     );
     assert.equal(alreadyPushedAttempts, 0, "already-pushed evidence stops before another push");
