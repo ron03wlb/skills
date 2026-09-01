@@ -22,11 +22,16 @@ You invoke this by typing `/push-target <target>` — the agent won't reach for 
 
 Reach for it only after [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) returns a current local-ahead `push_ready` receipt. If the target, upstream, or receipt has drifted, run verification again explicitly instead of asking this skill to reconcile the state.
 
+## Prerequisites
+
+- An explicitly named local target whose `HEAD` matches a current local-ahead `push_ready` receipt.
+- One unique configured upstream whose fetch and push URLs resolve to the same endpoint.
+
 ## Drift stops delivery
 
-The operation freezes the receipt, target, upstream remote, baseline, and destination ref. Its configured fetch and push URLs must resolve to the same single endpoint. It fetches only the exact upstream ref with `--no-tags`, then compares every identity again. A split endpoint, missing or ambiguous upstream, stale or malformed receipt, moved ref, empty range, rejection, transport error, or remote mismatch stops without pull, merge, rebase, force push, or retry.
+The operation freezes the receipt, target, upstream, baseline, destination ref, and endpoint as one identity set. Any ambiguity or drift stops delivery instead of repairing state or choosing a substitute destination.
 
-The push uses the frozen endpoint, `--no-follow-tags`, and one explicit refspec. Only the exact configured branch ref may change remotely. Local files, commits, branches, worktrees, tracker state, Git notes, tags, and every other remote ref remain untouched.
+Only the verified branch ref may change remotely. Local files, commits, branches, worktrees, tracker state, Git notes, tags, and every other remote ref remain untouched.
 
 ## It's working if
 
