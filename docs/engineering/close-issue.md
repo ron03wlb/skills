@@ -20,7 +20,7 @@ The defining constraint is idempotent close progress. An Executable Issue has ex
 
 Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete`, or an authorized coordinator reaches for it when its valid DAG Run Grant binds that exact Issue or completed parent. Without either authority, the agent stops before mutation.
 
-Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue, while keeping one writer at a time for each target branch whether the writer is a human or authorized coordinator. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
+Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue; its bounded closeout shares one target mutation writer with planning producers, so only one planning or delivery writer acts on a target branch at a time while other targets remain concurrent. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 
 ## Three observable actions
 

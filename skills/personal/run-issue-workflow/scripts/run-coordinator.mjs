@@ -301,8 +301,8 @@ export function createCoordinator({
     "readEvents",
     "acquireWriter",
     "readWriterLock",
-    "acquireCloseWriter",
-    "readCloseWriterLock",
+    "acquireTargetMutationWriter",
+    "readTargetMutationWriterLock",
   ]) requireMethod(store, method);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
@@ -456,27 +456,27 @@ export function createCoordinator({
     return null;
   };
 
-  const acquireTargetCloseWriter = (current, status) => {
+  const acquireTargetMutationWriter = (current, status) => {
     try {
       if (current.closeWriterReclaimProof) {
-        requireMethod(store, "reclaimCloseWriter");
-        return { writer: store.reclaimCloseWriter({
+        requireMethod(store, "reclaimTargetMutationWriter");
+        return { writer: store.reclaimTargetMutationWriter({
           target: current.runIdentity.target,
-          runId: current.runIdentity.runId,
+          operationId: current.runIdentity.runId,
           staleProof: current.closeWriterReclaimProof,
         }) };
       }
-      return { writer: store.acquireCloseWriter({
+      return { writer: store.acquireTargetMutationWriter({
         target: current.runIdentity.target,
-        runId: current.runIdentity.runId,
+        operationId: current.runIdentity.runId,
       }) };
     } catch (error) {
       if (!CLOSE_WRITER_CONTENTION.has(error?.message)) throw error;
-      const owner = store.readCloseWriterLock(current.runIdentity.target);
+      const owner = store.readTargetMutationWriterLock(current.runIdentity.target);
       return { stopped: diagnosedStop(status, {
         reasonCode: "close_writer_conflict",
         limitationClass: "unresolved-evidence",
-        evidence: [`${error.message}; observed target close-writer owner ${JSON.stringify(owner)}.`],
+        evidence: [`${error.message}; observed target mutation-writer owner ${JSON.stringify(owner)}.`],
         noAutomaticTransition: "Target closeout cannot race or replace an active or unproven writer.",
         affectedNodes: status.nodes.map(({ issueId }) => issueId),
         resumePredicates: ["target_close_writer_is_absent_or_exactly_reclaimable"],
@@ -498,7 +498,7 @@ export function createCoordinator({
       taskRef = existing[0];
       if (!isTaskRef(taskRef)) return { stopped: issueLaneMissing(status, action.issueId) };
     }
-    const acquired = acquireTargetCloseWriter(current, status);
+    const acquired = acquireTargetMutationWriter(current, status);
     if (acquired.stopped) return { stopped: acquired.stopped };
     const closeWriter = acquired.writer;
     let settled = false;
@@ -551,7 +551,7 @@ export function createCoordinator({
 
   const closeParent = async ({ action, current, status }) => {
     requireMethod(leaf, "closeParent");
-    const acquired = acquireTargetCloseWriter(current, status);
+    const acquired = acquireTargetMutationWriter(current, status);
     if (acquired.stopped) return { stopped: acquired.stopped };
     const closeWriter = acquired.writer;
     let settled = false;

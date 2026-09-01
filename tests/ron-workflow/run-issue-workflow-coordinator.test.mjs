@@ -1145,7 +1145,7 @@ test("re-entry observes an accepted close request instead of sending a duplicate
   }
 });
 
-test("a competing target close writer returns a structured stop before lane messaging", async () => {
+test("a competing target mutation writer returns a structured stop before lane messaging", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let clockMinute = 0;
@@ -1154,7 +1154,16 @@ test("a competing target close writer returns a structured stop before lane mess
   seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
   seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
   seed.release();
-  const competing = store.acquireCloseWriter({ target: identity.target, runId: "run-competing" });
+  const competing = store.acquireTargetMutationWriter({
+    target: identity.target,
+    operationId: "run-competing",
+  });
+  const sharedWriterStore = {
+    ...store,
+    acquireCloseWriter() { throw new Error("legacy close writer API must not drive new closeout"); },
+    readCloseWriterLock() { throw new Error("legacy close writer API must not drive new closeout"); },
+    reclaimCloseWriter() { throw new Error("legacy close writer API must not drive new closeout"); },
+  };
   let taskCalls = 0;
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
@@ -1177,7 +1186,14 @@ test("a competing target close writer returns a structured stop before lane mess
   });
 
   try {
-    const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
+    const coordinator = createCoordinator({
+      store: sharedWriterStore,
+      tracker,
+      tasks,
+      reconcile,
+      now,
+      sleep: async () => {},
+    });
     const status = await coordinator.run({ specId: "15" });
 
     assert.equal(status.run.state, "BLOCKED");
@@ -1185,7 +1201,7 @@ test("a competing target close writer returns a structured stop before lane mess
     assert.match(status.diagnoses.at(-1).evidence.join(" "), /run-competing/u);
     assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
     assert.equal(taskCalls, 0);
-    assert.equal(store.readCloseWriterLock(identity.target).runId, "run-competing");
+    assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, "run-competing");
   } finally {
     competing.release();
     rmSync(root, { recursive: true, force: true });
@@ -1203,9 +1219,13 @@ test("a lost close-writer reclaim race returns the same structured stop", async 
   seed.release();
   const racingStore = {
     ...store,
-    reclaimCloseWriter() { throw new Error("TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH"); },
-    readCloseWriterLock() {
-      return { runId: "run-race-winner", coordinatorInstanceId: "winner", generation: "new-generation" };
+    reclaimTargetMutationWriter() { throw new Error("TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH"); },
+    readTargetMutationWriterLock() {
+      return {
+        operationId: "run-race-winner",
+        coordinatorInstanceId: "winner",
+        generation: "new-generation",
+      };
     },
   };
   const tasks = Object.fromEntries(

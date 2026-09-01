@@ -20,7 +20,7 @@ The runtime adapters must provide current Tracker, Git/worktree/completion-note,
 
 The panel shows the current Run identity and state, published DAG edges, ready and active frontiers, task attempts, close evidence, diagnoses, and legal controls. It is a projection, not authority.
 
-- **Pause** stops new actions after active work and the close writer settle; the same bridge stays open while the Run is paused.
+- **Pause** stops new actions after active work and the target mutation writer settle; the same bridge stays open while the Run is paused.
 - **Resume** in that same panel revises a paused Run and lets reconciliation decide what is now legal.
 - **Stop** cooperatively revokes further work after active operations settle; it does not kill tasks or delete state.
 - **Refresh** reads the newest projection and appends no journal event.
