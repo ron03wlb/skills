@@ -517,6 +517,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   assert.match(executeMetadata, /exact.*prerequisite.*same authorized lane.*content-bound.*completion/isu);
   assert.match(executeDocs, /automatically.*pre-execute-issue.*same.*lane.*content-bound.*candidate.*blob.*outcome/isu);
   assert.match(preExecuteDocs, /execute-issue.*automatically.*one exact unresolved Manual prerequisite/isu);
+  assert.match(preExecuteDocs, /Issue or linked Spec.*exact.*artifact.*unchanged-scope late-discovery handoff/isu);
   assert.match(router, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
   assert.match(routerDocs, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
   assert.match(closeDocs, /content-bound.*manual attestation.*candidate.*blob.*outcome.*ancestry/isu);

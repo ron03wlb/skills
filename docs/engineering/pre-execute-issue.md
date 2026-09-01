@@ -24,7 +24,7 @@ Reach for it when a published Issue declares one exact artifact that must be pre
 
 ## Prerequisites
 
-The Issue or linked Spec must declare the exact repository-relative artifact and recorded target. Artifact preparation also requires the repository-owned adapter consumed by [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact); the runtime flow never installs or repairs that adapter.
+The Issue or linked Spec must declare the exact repository-relative artifact and recorded target, or an active `execute-issue` lane must bind one exact unchanged-scope late-discovery handoff to that target. Artifact preparation also requires the repository-owned adapter consumed by [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact); the runtime flow never installs or repairs that adapter.
 
 ## One content-bound handoff
 
