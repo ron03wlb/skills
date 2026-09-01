@@ -70,6 +70,30 @@ _Avoid_: Public-contract documentation, arbitrary Markdown change, direct target
 The prospective `workflowArtifacts` list in an **Execution completion note**, containing one exact repository-relative path, requirement source, and purpose for each **Workflow-required documentation artifact**, or an explicit empty list. It supplies reviewable scope classification, not separate contribution authority.
 _Avoid_: Path glob, coverage receipt, legacy-note requirement
 
+**Workflow artifact producer ownership**:
+The rule that a workflow operation which creates a repository artifact must either place it in its final authorized contribution or explicitly transfer it to the one workflow that owns that contribution. A downstream workflow may consume a proved handoff but never infer ownership or repair undeclared producer dirt.
+_Avoid_: Consumer cleanup, implicit ownership transfer, path-based ownership inference
+
+**Planning artifact handoff**:
+The explicit transfer of accepted glossary and ADR changes from `grill-with-docs` to `to-spec`, which alone may seal those exact changes in a **Planning Seal**. The transfer uses a user-visible **Planning handoff packet** rather than hidden durable workflow state and excludes durable workflow plans, scratch output, unaccepted drafts, and unrelated work.
+_Avoid_: Dirty-doc inference, Direct target contribution, generic planning handoff
+
+**Planning handoff packet**:
+The compact user-visible terminal output from `grill-with-docs` that binds its target and baseline to the accepted terms, ADR decisions, exact paths or hunks, and expected content identities for one later explicit `to-spec` invocation. It is scope provenance rather than commit authority; a missing or mismatched packet in a fresh task requires reconfirmation instead of inference.
+_Avoid_: Hidden planning journal, automatic `to-spec`, Planning Seal
+
+**Workflow plan checkpoint**:
+An exact target-branch commit produced by one workflow operation that contains only the durable plan required and created by that operation, with no pre-existing or unrelated work. It gives the plan a Git-durable identity before control passes to another operation.
+_Avoid_: Runtime sidecar, disposable plan, mixed checkpoint
+
+**Prospective Direct target contribution**:
+A **Workflow plan checkpoint** authorized by the explicit human invocation of the same producing workflow and bound to a matching **Direct target contribution record** before handoff. It is not recovery authority and never covers a pre-existing, modified, ambiguous, or mixed dirty path.
+_Avoid_: Second confirmation, generic auto-commit, verification recovery
+
+**Workflow checkpoint transaction**:
+The Git-common-dir provenance that binds one producing workflow, Spec, target baseline, initially clean state, exact plan path and generated content before a **Workflow plan checkpoint** is written. Reinvoking the same producer command may automatically resume an exact matching transaction from its first unsatisfied commit, attestation, publication, or handoff stage without regenerating the plan, duplicating a commit, or requiring a second confirmation; any mismatch stops and preserves the evidence. It is never the durable plan or contribution authority itself. An active or incomplete transaction blocks a conflicting producer or Run; after `handoff.completed` it remains as a small immutable receipt that downstream consumers may read idempotently, without automatic cleanup or a separate consumed state.
+_Avoid_: Final plan storage, mutable checkpoint, path-only recovery, automatic receipt cleanup
+
 **Closed Issue evidence reconciliation**:
 The append-only, human-authorized correction that may admit one already-closed **Issue contribution** to a **Target verification set** without declaring its historical candidate implementation-complete. Its original **Execution completion note** remains immutable and invalid when that note records non-passing final verification.
 _Avoid_: Retroactive completion, verification waiver, Direct target contribution recovery
@@ -103,20 +127,28 @@ An exact material target-branch commit or commit set containing only explicit hu
 _Avoid_: Product implementation, partial-path attestation, SHA allowlist, retroactive completion note
 
 **Direct target contribution record**:
-The append-only read-back `direct_target_contribution:v1` tracker comment on the exact **Tracker Spec** or **Issue** that owns a **Direct target contribution**. It binds explicit human authority, scope, target, and commit identity without claiming review, verification, or push readiness; Git owns ancestry and the aggregate gate proves quality.
+The append-only read-back `direct_target_contribution:v1` tracker comment on the exact **Tracker Spec** or **Issue** that owns a **Direct target contribution**. It binds explicit human authority, scope, target, and commit identity without claiming review, verification, or push readiness; the unchanged schema may be written prospectively only for a producer-owned **Workflow plan checkpoint**, while all recovery use remains confirmation-gated. One owner may accumulate multiple immutable records only when their commit sets are disjoint; exact matches are reused and every overlap or conflict stops. The creation proofs differ, but both paths grant the same target-range coverage semantics; Git owns ancestry and the aggregate gate proves quality.
 _Avoid_: Local Git note, repository manifest, verifier-created exception, historical test claim
 
 **Direct target contribution recovery**:
 The confirmation-gated recovery triggered only when a frozen `verify-target-before-push` coverage check reports exact uncovered material commits and every proposed commit satisfies **Direct target contribution** eligibility. The active workflow prepares the owner, scope, target, commit identities, and record draft; after one exact human confirmation, a separate model-invoked attestation helper writes and reads back the **Direct target contribution record**, then automatically starts a fresh target verification from Entry.
 _Avoid_: Silent or proactive attestation, manual slash-command requirement, non-coverage failure recovery, in-place gate continuation
 
+**Target mutation serialization**:
+The target-scoped rule that permits only one planning or delivery operation to write one target branch at a time. `to-spec` Planning Seals and workflow-plan checkpoints, `to-tickets` workflow-plan checkpoints, and `close-issue` integration share this writer boundary, while Issue worktrees and other targets remain concurrent.
+_Avoid_: Global execution lock, per-workflow target locks, concurrent target writers
+
 **Target integration serialization**:
-The target-scoped rule that permits only one `close-issue` writer for the same **Issue target branch** at a time, whether started directly by a human or by an authorized **DAG Run**. Issue executions and writers for other targets may proceed concurrently; advancing the target does not invalidate successful execution state.
-_Avoid_: Global execution lock, concurrent writers for the same target branch
+The `close-issue` specialization of **Target mutation serialization**, preserving one integration writer for an **Issue target branch** whether started directly by a human or by an authorized **DAG Run**. Target movement alone does not invalidate successful execution state.
+_Avoid_: Separate close-writer namespace, concurrent integration writers, execution lock
 
 **DAG Run**:
 A bounded orchestration attempt for one **Tracker Spec** and exact **Issue target branch**. A Single-Issue Spec forms one node bound directly to the Spec; a Multi-Issue Spec uses one read-back **Decomposition publication record**, dispatches its dependency-ready frontier in parallel, serializes closeout per target, and recomputes readiness after every **DAG node success**.
 _Avoid_: Separate Single-Issue runner, background repository automation, unbounded worker pool, UI session
+
+**Run-ready handoff**:
+The minimal deterministic proof from the immediate upstream producer that the selected Spec and target may enter a **DAG Run**. A Single-Issue Spec consumes `to-spec`'s `handoff.completed`. For a Multi-Issue Spec, `to-tickets` first consumes `to-spec`'s completed handoff, then emits one final `handoff.completed` that binds both immutable v1 record identities and the valid **Decomposition publication record**; Run consumes only that final handoff. In either route the target must be clean and no matching checkpoint transaction may remain active. It proves start readiness only and never repeats whole-commit eligibility, content, review, or aggregate coverage validation.
+_Avoid_: Multi-producer Run coordination, clean-target-only start, aggregate preflight, model-reconstructed handoff
 
 **DAG Run Grant**:
 The explicit human authority binding one **DAG Run** to its **Tracker Spec**, **Issue target branch**, and **Decomposition publication record** when the Spec is Multi-Issue. It permits automatic Issue execution and closeout until success or a defined stop, but never grants push, deploy, external-prerequisite execution, scope expansion, or ambiguous-state repair.
@@ -520,7 +552,15 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
 - Direct or active-lane `pre-execute-issue` creates or reuses only the unique **Issue worktree**, records a **Manual execution attestation**, and never grants implementation authority to a direct invocation
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
-- `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/execute-issue <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`
+- `grill-with-docs` transfers only accepted glossary and ADR changes through a **Planning artifact handoff**; `/to-spec` consumes that exact handoff as its owned **Planning Seal** delta
+- A **Planning handoff packet** is consumed directly inside the same task; a fresh task requires that packet or renewed human scope confirmation before `/to-spec` may commit planning artifacts
+- A `/to-tickets` producer commits its exact **Workflow plan checkpoint** and writes and reads back the matching prospective **Direct target contribution record** before any decomposition publication mutation
+- `to-spec` and `to-tickets` automatically invoke model-invoked `attest-target-contribution` with their exact prospective checkpoint packet; that helper is the only writer and returns the reused or appended v1 record identity without creating the commit or resuming the producer
+- A completed **Workflow checkpoint transaction** remains an immutable Git-common-dir receipt; only active or incomplete state blocks, and downstream reads neither mutate nor delete the receipt
+- Reinvoking the same `to-spec` or `to-tickets` command automatically resumes an exact matching incomplete checkpoint transaction at its first unsatisfied stage; mismatch preserves state and stops, while Run never performs producer recovery
+- `to-spec`, `to-tickets`, and `close-issue` acquire the same target-scoped **Target mutation serialization** writer before their first target mutation and release it after their bounded target write and required authority read-back; Issue execution never consumes this writer
+- `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/run-issue-workflow <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`, whose successful publication then routes the same parent to `/run-issue-workflow <Spec-ID>`
+- A Single-Issue Run consumes only `to-spec`'s completed handoff; for Multi-Issue, `to-tickets` consumes `to-spec`'s handoff and emits one final **Run-ready handoff** binding both checkpoint record identities and the decomposition, so Run never coordinates two producer transactions
 - After a Tracker Spec or child Issue is written, the human may invoke `/pre-execute-issue <Issue-ID>` directly; `execute-issue` automatically invokes it in the same authorized lane only when one exact declared or unchanged-scope late prerequisite lacks a matching **Manual execution attestation**
 - Prerequisite continuation requires the recorded **Issue target** plus a content-bound v2 **Manual execution attestation** binding its immutable tracker identity, exact **Issue**, Prerequisite candidate, Git blob, artifact path, and `APPLIED` or `NO_OP`; path-only v1 remains valid only for a legacy non-generated artifact, and neither form grants credentials, DB access, external verification, or broader authority
 - `/to-spec` classifies automatically from Spec and source evidence; only material ambiguity that can change **Delivery routing** permits one blocking question with a recommendation, and uncertainty never defaults to either Single-Issue or Multi-Issue
@@ -533,7 +573,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - One `/to-tickets <Spec-ID>` invocation automatically validates every tracker-supported identity source; matching evidence needs no per-child approval, while conflicting native relation, body, or **Decomposition key** evidence stops before repair
 - Owned blocking edges in an **Issue decomposition** are acyclic; a child may reference a verified **External blocker**, whose state gates the frontier without becoming `/to-tickets`-owned work
 - `/to-tickets` writes and reads back one **Decomposition publication record** only after every child and blocking edge matches; publication failure before that record remains recoverable through child-owned **Decomposition keys**
-- `/to-tickets` outputs `/execute-issue <Issue-ID>` only for the dependency-ready frontier and never prompts execution of blocked Issues
+- `/to-tickets` reports the dependency-ready frontier without asking the human to execute individual children, then outputs one `/run-issue-workflow <Spec-ID>` command for the reconciled parent; the Run alone dispatches ready children
 - A **DAG Run Grant** authorizes one **DAG Run** to dispatch every dependency-ready Issue, invoke `close-issue` after valid `implementation_complete`, and continue without per-Issue approval while its bound Spec, any required decomposition record, target, and scope remain unchanged
 - A Single-Issue **Tracker Spec** is a one-node **DAG Run**: the coordinator invokes `execute-issue`, validates `implementation_complete`, invokes `close-issue`, and requires **DAG node success** without a **Decomposition publication record**
 - A child releases its outgoing blocker edges only after **DAG node success**; a coordinator recomputes the dependency-ready frontier from read-back tracker and Git evidence rather than trusting worker or UI state
@@ -551,6 +591,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A **DAG cooperative pause** starts no new execution or closeout, lets current workers settle without force, and holds completed candidates until Resume revalidates all authoritative evidence
 - A **DAG graceful stop** revokes the active grant, lets current workers settle without destructive cleanup, records terminal stopped state, and requires a later explicit invocation plus **DAG run reconciliation** before work can continue
 - `/run-issue-workflow <Spec-ID>` is the exact user-facing start or resume entrypoint; every invocation performs **DAG run reconciliation** before renewing authority or taking an action
+- `/run-issue-workflow` derives one deterministic `READY`, `INCOMPLETE`, or `UNKNOWN` **Run-ready handoff** from the immediate upstream producer plus existing target, transaction, and tracker reads; only `READY` may start, `INCOMPLETE` reports the exact producer command to rerun, and Entry never repairs producer state, coordinates multiple producers, or repeats producer or aggregate validation
 - No-argument `/run-issue-workflow` applies **DAG run selection**: it automatically resumes one unique non-terminal Run, but zero candidates require a Spec ID and multiple candidates require explicit selection
 - After no-argument selection, reconciliation adopts valid manual completion and partial close progress, then automatically dispatches only the selected Run's remaining dependency-ready frontier
 - Invoking `/run-issue-workflow <Spec-ID>` is the sole Start authority: after a valid Single-Issue classification or Multi-Issue **Decomposition publication record** is reconciled, it opens the panel and immediately begins automatic execution without a second confirmation
