@@ -615,6 +615,44 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
 });
 
 
+test("prospective checkpoint attestation is transaction-bound and preserves recovery", () => {
+  const name = "attest-target-contribution";
+  const skill = read(`skills/engineering/${name}/SKILL.md`);
+  const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
+  const docs = read(`docs/engineering/${name}.md`);
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(skill, /two exact caller routes.*confirmation-gated recovery.*producer-owned prospective/isu);
+  assert.match(skill, /recovery.*active `\/verify-target-before-push`.*exact confirmed recovery packet.*human confirmed/isu);
+  assert.match(skill, /prospective.*currently active.*explicitly human-invoked.*`to-spec` or `to-tickets`.*producer.*owner Spec.*target.*transaction identity.*checkpoint commit.*plan purpose.*baseline.*read-back expectations/isu);
+  assert.match(skill, /manual helper.*stale invocation.*inferred plan.*downstream Run.*cross-route substitution.*stops without writing/isu);
+  assert.match(skill, /prospective.*no second human confirmation/isu);
+
+  assert.match(skill, /resolve.*owner.*frozen target refs.*matching.*Workflow checkpoint transaction.*checkpoint stage.*whole commit/isu);
+  assert.match(skill, /commit contains only.*exact generated Workflow plan checkpoint.*owned by.*transaction/isu);
+  assert.match(skill, /modified content.*mixed commits.*active skill behavior.*runtime or source.*tests.*configuration.*dependencies.*unrelated paths.*ambiguous ownership.*missing ancestry.*identity drift.*ineligible/isu);
+  assert.match(skill, /common.*owner.*target.*commit.*ancestry.*whole-diff.*ordered-history.*exact-reuse.*overlap.*read-back/isu);
+
+  assert.match(skill, /exact matching record.*reuse.*immutable tracker identity/isu);
+  assert.match(skill, /more than one.*same owner.*immutable disjoint.*checkpoint commit sets/isu);
+  assert.match(skill, /duplicate commit membership.*partial overlap.*conflicting purpose.*mixed recovery.*prospective grouping.*malformed or edited history.*multiple plausible records.*unavailable history.*partial persistence.*stops/isu);
+  assert.match(skill, /same existing `direct_target_contribution:v1`.*classification.*`attested_by: human`.*target-range-only/isu);
+  assert.match(skill, /return.*exact reused or appended.*immutable tracker identity.*active caller/isu);
+  assert.match(skill, /never creates commits or transactions.*resumes a producer.*publishes a Spec or decomposition.*starts Run/isu);
+
+  assert.match(metadata, /confirmed coverage recovery.*producer-owned prospective Workflow plan checkpoint.*no second confirmation/isu);
+  assert.match(docs, /two caller routes.*confirmation-gated recovery.*producer-owned prospective checkpoint/isu);
+  assert.match(docs, /standalone invocation.*stops/iu);
+  assert.match(matt, /`to-spec` and `to-tickets`.*Workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
+  assert.match(mattDocs, /`to-spec` and `to-tickets`.*workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /attest-target-contribution.*recovery.*producer-owned prospective.*workflow plan checkpoint/iu);
+  }
+});
+
+
 test("record-closed-issue-reconciliation is exact, immutable, and model-invoked", () => {
   const name = "record-closed-issue-reconciliation";
   const skill = read(`skills/engineering/${name}/SKILL.md`);

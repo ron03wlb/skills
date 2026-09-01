@@ -32,6 +32,8 @@ Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/sk
 
 A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
 
+`to-spec` and `to-tickets` settle each required workflow plan checkpoint by invoking model-invoked [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution) with the exact active producer packet. The helper needs no second confirmation for that checkpoint and returns only the reused or appended immutable record identity so the producer can continue its own publication or handoff.
+
 [execute-issue](https://aihero.dev/skills-execute-issue) automatically invokes [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) in the same authorized lane when one exact declared or unchanged-scope late prerequisite lacks a matching attestation. The prerequisite flow creates or reuses the Issue worktree, invokes `prepare-prerequisite-artifact` when needed, presents the committed Operator SQL, and returns one content-bound v2 identity for `APPLIED` or `NO_OP` after fresh checks. Direct `/pre-execute-issue <Issue-ID>` remains available but stops after read-back and never resumes implementation by itself.
 
 [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact) is model-invoked and not a public starting route. From an exact active prerequisite-preparation handoff, it uses the repository adapter to build one validated, independently reviewed, fail-closed Operator SQL candidate without executing it or touching an external environment.

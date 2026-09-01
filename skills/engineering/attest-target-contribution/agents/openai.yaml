@@ -1,4 +1,4 @@
 interface:
   display_name: "Attest Target Contribution"
   short_description: "Record eligible direct target authority"
-  default_prompt: "Use $attest-target-contribution only for the exact human-confirmed recovery packet handed off by /verify-target-before-push; append or reuse the minimal tracker record and read it back without granting push readiness."
+  default_prompt: "Use $attest-target-contribution only for an exact human-confirmed coverage recovery packet handed off by /verify-target-before-push or a producer-owned prospective Workflow plan checkpoint from the active explicitly invoked to-spec or to-tickets operation; require no second confirmation for that exact checkpoint, append or reuse the unchanged minimal tracker record, return its immutable identity, and grant no readiness."
