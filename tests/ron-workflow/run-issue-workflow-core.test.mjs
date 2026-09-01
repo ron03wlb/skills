@@ -28,6 +28,7 @@ import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts
 import {
   createWorkflowControlStore,
   WORKFLOW_CHECKPOINT_STAGES,
+  WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 
 const node = (issueId, blockers = []) => ({
@@ -130,6 +131,20 @@ const checkpointIdentity = (overrides = {}) => ({
   ...overrides,
 });
 
+const checkpointWriterOwner = (identity, operation) => {
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return {
+    schema: WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
+    operation,
+    scopeKey: `sha256:${digest({
+      repositoryId: identity.repositoryId,
+      specOperationId: identity.specOperationId,
+    })}`,
+    transactionId: `sha256:${digest(identity)}`,
+    identity,
+  };
+};
+
 test("workflow checkpoint transaction creation is exact and retryable", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-create-");
   try {
@@ -188,11 +203,19 @@ test("workflow checkpoint creation is atomically gated per target without blocki
     const targetGate = join(writersRoot, `target-${targetKey}.lock`);
     mkdirSync(writersRoot, { recursive: true });
     mkdirSync(targetGate);
+    writeFileSync(
+      join(targetGate, "owner.json"),
+      `${JSON.stringify(checkpointWriterOwner(identity, "create"), null, 2)}\n`,
+      "utf8",
+    );
 
-    assert.equal(store.classifyCheckpoints({
+    const active = store.classifyCheckpoints({
       repositoryId: identity.repositoryId,
       target: identity.target,
-    }).state, "UNKNOWN");
+    });
+    assert.equal(active.state, "ACTIVE");
+    assert.equal(active.activeTransaction.operation, "create");
+    assert.deepEqual(active.activeTransaction.identity, identity);
     assert.equal(store.classifyCheckpoints({
       repositoryId: identity.repositoryId,
       target: "features/another",
@@ -235,17 +258,32 @@ test("workflow checkpoint transient state blocks only its owning target", () => 
       target: first.target,
     })).digest("hex");
     mkdirSync(writersRoot, { recursive: true });
-    mkdirSync(join(writersRoot, `${scopeHash}.lock`));
+    const writerLock = join(writersRoot, `${scopeHash}.lock`);
+    mkdirSync(writerLock);
+    writeFileSync(
+      join(writerLock, "owner.json"),
+      `${JSON.stringify(checkpointWriterOwner(first, "advance"), null, 2)}\n`,
+      "utf8",
+    );
     writeFileSync(join(writersRoot, `${scopeHash}.target-${targetKey}.tmp-interrupted`), "partial", "utf8");
 
-    assert.equal(store.classifyCheckpoints({
+    const active = store.classifyCheckpoints({
       repositoryId: first.repositoryId,
       target: first.target,
-    }).state, "UNKNOWN");
+    });
+    assert.equal(active.state, "ACTIVE");
+    assert.equal(active.activeTransaction.operation, "advance");
+    assert.deepEqual(active.activeTransaction.identity, first);
     assert.equal(store.classifyCheckpoints({
       repositoryId: second.repositoryId,
       target: second.target,
     }).state, "INCOMPLETE");
+
+    rmSync(join(writerLock, "owner.json"));
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    }).state, "UNKNOWN");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
