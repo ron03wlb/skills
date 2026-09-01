@@ -178,6 +178,7 @@ Skills I use daily for code work.
 
 - **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution or closed-Issue recovery and no push.
+- **[push-target](./skills/engineering/push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
 - **[triage](./skills/engineering/triage/SKILL.md)** — Move issues through a state machine of triage roles.

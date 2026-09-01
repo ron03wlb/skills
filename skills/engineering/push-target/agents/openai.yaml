@@ -1,0 +1,7 @@
+interface:
+  display_name: "Push Target"
+  short_description: "Push one verified target and read it back"
+  default_prompt: "Use $push-target to consume the current local-ahead push_ready receipt for features/ron, fetch its unique configured upstream, push the exact verified target once without force, and prove the remote ref by read-back."
+
+policy:
+  allow_implicit_invocation: false
