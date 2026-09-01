@@ -157,6 +157,7 @@ test("code review advisory and confirmed code review finding route to Aggregate 
   }
   assert.match(execute, /both axes.*no Confirmed code review finding.*clean/isu);
   assert.match(execute, /advisories.*do not.*fail.*repair.*repair wave.*durable waiver/isu);
+  assert.match(execute, /smells.*preferences.*suggestions.*lack.*exact.*evidence.*advisories.*exact.*evidence.*Confirmed code review finding/isu);
 
   assert.match(verify, /only.*Confirmed code review finding.*withholds.*push readiness/isu);
   assert.match(verify, /Code review advisory.*visible.*does not block.*trigger repair.*waiver/isu);
