@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare Prerequisite Artifact"
+  short_description: "Build one fail-closed Operator SQL candidate"
+  default_prompt: "Use $prepare-prerequisite-artifact only from a model-invoked active handoff that binds one exact prerequisite artifact and repository adapter, then return its clean Operator SQL candidate identity without external execution."

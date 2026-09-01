@@ -21,6 +21,8 @@ Route the user's situation; do not perform the routed work.
 
 This manual leaf route remains the default public flow. A separately installed authorized coordinator route may use one valid **DAG Run Grant** to invoke the same `execute-issue` and `close-issue` leaves without per-Issue approval. The coordinator does not create or broaden leaf authority: each leaf revalidates the Grant and keeps its existing implementation, closeout, tracker, worktree, push, deploy, prerequisite, and scope boundaries. The Codex-only coordinator is neither promoted nor packaged by this shared skill set.
 
+`prepare-prerequisite-artifact` is model-invoked and not a public route. It accepts only an active prerequisite-preparation handoff that already binds one exact Issue artifact and repository adapter, builds a fail-closed Operator SQL candidate, and returns content identity without external execution or attestation.
+
 A Tracker Spec, including a local-file tracker record, uses `/execute-issue`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
 
 Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration even when review was not explicitly requested.

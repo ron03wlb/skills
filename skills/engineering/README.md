@@ -24,6 +24,7 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 
 Model- or user-reachable (rich trigger phrasing so the model can reach for them).
 
+- **[prepare-prerequisite-artifact](./prepare-prerequisite-artifact/SKILL.md)** — Build one adapter-bound, fail-closed Operator SQL prerequisite candidate without touching an external environment.
 - **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue, declaring exact `workflowArtifacts`, while preserving completion across recorded-target movement.
 - **[close-issue](./close-issue/SKILL.md)** — Validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
 - **[attest-target-contribution](./attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery.

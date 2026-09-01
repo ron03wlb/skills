@@ -434,6 +434,62 @@ test("manual prerequisite attestation is one-step and sufficient", () => {
 });
 
 
+test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL and repair wave contracts", () => {
+  const name = "prepare-prerequisite-artifact";
+  const skill = read(`skills/engineering/${name}/SKILL.md`);
+  const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
+  const docs = read(`docs/engineering/${name}.md`);
+  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const routerDocs = read("docs/engineering/ask-matt.md");
+
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(skill, /^description:.*Use when.*prerequisite-preparation handoff/mu);
+  assert.match(metadata, /model-invoked.*exact prerequisite.*Operator SQL/isu);
+  assert.match(docs, /agent reaches for it automatically/iu);
+
+  assert.match(skill, /active prerequisite-preparation handoff.*exact Issue.*Issue target branch.*Issue worktree.*approved scope.*repository-relative artifact/isu);
+  assert.match(skill, /unchanged.*Issue.*target.*worktree.*scope.*artifact.*before every material edit.*before (?:the )?candidate commit/isu);
+  assert.match(skill, /repository-owned adapter.*not a skill.*not a human command/isu);
+  assert.match(skill, /read-only `discover`.*artifact-writing `prepare`.*read-only `validate`/isu);
+  assert.match(skill, /database product.*version.*target environment.*authoritative inputs.*diagnostics.*pass conditions/isu);
+  assert.match(skill, /missing.*broken.*incomplete.*ambiguous.*contradictory.*stop.*without.*runtime setup.*infrastructure.*dialect guessing/isu);
+  assert.match(skill, /only.*exact declared artifact.*created or repaired.*pre-existing unrelated.*staged.*unstaged.*untracked.*preserv/isu);
+
+  assert.match(skill, /exactly three ordered sections.*preflight.*persistent exact backup.*authorized mutation.*postconditions/isu);
+  assert.match(skill, /absent backup.*pre-mutation state.*first.*backup.*mutation.*integrity-valid existing backup.*complete postconditions.*`NO_OP`.*partial.*contradictory.*unproved.*abort/isu);
+  assert.match(skill, /database-native fail-closed assertions.*diagnostic `SELECT`.*supplemental.*not.*operator-judgment/isu);
+  assert.match(skill, /revalidate.*lock.*immediately before mutation.*explicit transaction.*commit.*postcondition.*error.*rolls back.*retaining.*backup/isu);
+  assert.match(skill, /recovery statements.*commented.*inert.*UPDATE or DELETE.*exact backed-up rows.*INSERT.*stable keys.*DDL or transformation.*stops/isu);
+  assert.match(skill, /exactly one terminal outcome.*`APPLIED`.*`NO_OP`.*missing.*other value.*unsuccessful/isu);
+  assert.match(skill, /never deletes or overwrites.*backup.*no cleanup SQL/isu);
+
+  assert.match(skill, /after every material artifact edit.*`validate`.*independent Standards.*Spec review/isu);
+  assert.match(skill, /share one maximum of ten material repair waves.*deterministic failure.*Confirmed code review finding/isu);
+  assert.match(skill, /Code review advisories.*visible.*non-blocking.*tool failures.*no artifact edit.*do not consume.*wave/isu);
+  assert.match(skill, /wave ten.*fail.*stop.*without.*ready/isu);
+
+  assert.match(skill, /clean committed.*Prerequisite candidate.*full candidate commit.*Git blob.*repository-relative path/isu);
+  assert.match(skill, /blob.*bind.*content.*without.*duplicate SHA-256/isu);
+  assert.match(skill, /never execute SQL.*connect to or mutate.*database.*attest.*outcome.*run recovery.*cleanup.*integrate.*close.*push.*deploy.*tracker/isu);
+  assert.match(skill, /consumer adapter.*product-specific SQL.*outside/isu);
+
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    const readme = read(path);
+    const modelHeading = path === "README.md" ? "\n**Model-invoked**\n" : "\n## Model-invoked\n";
+    assert.match(readme.slice(readme.indexOf(modelHeading)), /prepare-prerequisite-artifact.*Operator SQL/iu);
+  }
+  const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
+  assert.equal(plugin.skills.includes("./skills/engineering/prepare-prerequisite-artifact"), true);
+  assert.match(router, /prepare-prerequisite-artifact.*model-invoked.*not a public route.*active prerequisite-preparation handoff/isu);
+  assert.match(routerDocs, /prepare-prerequisite-artifact.*model-invoked.*not a public command.*Operator SQL/isu);
+  assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
+  assert.match(docs, /## What it does/u);
+  assert.match(docs, /## When to reach for it/u);
+  assert.match(docs, /## Where it fits/u);
+});
+
+
 test("direct target contribution attestation is exact, minimal, and model-invoked", () => {
   const name = "attest-target-contribution";
   const skill = read(`skills/engineering/${name}/SKILL.md`);

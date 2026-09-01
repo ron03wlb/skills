@@ -33,6 +33,7 @@
     "./skills/engineering/wayfinder",
     "./skills/engineering/implement",
     "./skills/engineering/pre-execute-issue",
+    "./skills/engineering/prepare-prerequisite-artifact",
     "./skills/engineering/execute-issue",
     "./skills/engineering/close-issue",
     "./skills/engineering/attest-target-contribution",
