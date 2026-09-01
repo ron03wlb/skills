@@ -84,11 +84,18 @@ Send a single message with two `Agent` tool calls. Use the `general-purpose` sub
 
 If the spec is missing, skip the Spec sub-agent and note this in the final report.
 
-### 6. Aggregate
+### 6. Classify observations from exact evidence
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+After both reports return, the Coordinator classifies every observation as a Confirmed code review finding or Code review advisory, verifies it against the cited source and candidate, and keeps Standards and Spec separate:
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+- A **Confirmed code review finding** is a Standards violation proved by exact repository-standard evidence or a Spec mismatch proved by exact Spec evidence. The Coordinator must verify that the evidence applies to the cited candidate hunk.
+- A **Code review advisory** is a smell, preference, suggestion, duplicate, unsupported inference, or tool failure that lacks the exact repository or Spec evidence required to prove a violation. It remains visible in the current axis report but does not fail review, consume a repair wave, or trigger repair. An advisory never creates a persistent dismissal, tracker waiver, Git note exception, or SHA allowlist. A later fresh review may independently confirm a real violation from exact evidence.
+
+### 7. Aggregate
+
+Present the classified observations under `## Standards` and `## Spec` headings. Keep each sub-agent's text visible, adding only the Coordinator's confirmed or advisory label and evidence check. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+
+An axis is clean when it has no Confirmed code review finding; Code review advisories may remain visible in a clean result. End with a one-line summary giving confirmed and advisory counts per axis and the worst confirmed issue within each axis, if any. Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 
 ## Why two axes
 

@@ -177,7 +177,7 @@ Skills I use daily for code work.
 **User-invoked**
 
 - **[pre-execute-issue](./skills/engineering/pre-execute-issue/SKILL.md)** — Record that one exact Issue prerequisite artifact was already executed.
-- **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution or closed-Issue recovery and no push.
+- **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./skills/engineering/push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Grilling session that also builds your project's domain model, sharpening terminology and updating `CONTEXT.md` and ADRs inline.
@@ -196,7 +196,7 @@ Skills I use daily for code work.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue, declaring exact `workflowArtifacts`, while preserving completion across recorded-target movement.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
 - **[attest-target-contribution](./skills/engineering/attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery.
-- **[record-closed-issue-reconciliation](./skills/engineering/record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for one human-confirmed reconciliation.
+- **[record-closed-issue-reconciliation](./skills/engineering/record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for human-confirmed failed-command or command-representation reconciliation.
 - **[prototype](./skills/engineering/prototype/SKILL.md)** — Build a throwaway prototype to answer a design question — a runnable terminal app for state/logic questions, or several radically different UI variations toggleable from one route.
 - **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
 - **[research](./skills/engineering/research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.

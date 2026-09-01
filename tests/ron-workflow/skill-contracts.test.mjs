@@ -161,6 +161,50 @@ test("code-review owns requested and material-risk review activation", () => {
   }
 });
 
+test("code review advisory and confirmed code review finding route to Aggregate repair Issue during target verification", () => {
+  const review = read("skills/engineering/code-review/SKILL.md");
+  const reviewDocs = read("docs/engineering/code-review.md");
+  const reviewMetadata = read("skills/engineering/code-review/agents/openai.yaml");
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const routerDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(review, /Coordinator.*classif(?:y|ies).*observation.*Confirmed code review finding.*Code review advisory/isu);
+  assert.match(review, /Confirmed code review finding.*exact.*repository or Spec evidence.*violation/isu);
+  assert.match(review, /Code review advisory.*visible.*does not fail.*consume.*repair wave.*trigger repair/isu);
+  assert.match(review, /advisory.*never.*persistent dismissal.*tracker waiver.*Git note.*SHA allowlist/isu);
+  assert.match(review, /Standards.*Spec.*separate.*classif/isu);
+
+  for (const consumer of [execute, executeDocs, executeMetadata]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+  }
+  assert.match(execute, /both axes.*no Confirmed code review finding.*clean/isu);
+  assert.match(execute, /advisories.*do not.*fail.*repair.*repair wave.*durable waiver/isu);
+  assert.match(execute, /smells.*preferences.*suggestions.*lack.*exact.*evidence.*advisories.*exact.*evidence.*Confirmed code review finding/isu);
+
+  assert.match(verify, /only.*Confirmed code review finding.*withholds.*push readiness/isu);
+  assert.match(verify, /Code review advisory.*visible.*does not block.*trigger repair.*waiver/isu);
+  assert.match(verify, /confirmed.*finding.*affected Issue.*Spec.*same target branch/isu);
+  assert.match(verify, /default.*new human-created Aggregate repair Issue/isu);
+  assert.match(verify, /never creates or executes.*Aggregate repair Issue.*repairs product code.*reopens.*earlier Issue.*edits.*completion note/isu);
+  for (const consumer of [verifyDocs, verifyMetadata, router, routerDocs]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+    assert.match(consumer, /Aggregate repair Issue/iu);
+  }
+
+  for (const consumer of [reviewDocs, reviewMetadata]) {
+    assert.match(consumer, /Confirmed code review finding/iu);
+    assert.match(consumer, /Code review advisory/iu);
+  }
+});
+
 test("Wiki is one independent user-invoked documentation control", () => {
   const skill = read("skills/engineering/wiki/SKILL.md");
   const metadata = read("skills/engineering/wiki/agents/openai.yaml");
@@ -616,6 +660,152 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
   assert.deepEqual(local, { result: "push_ready:v1", focused: ["test:13", "test:shared", "test:14"], executed: ["test:13", "test:shared", "test:14", "test:full"] });
   const pushed = runFreshAggregate({ mode: "already-pushed", memberCommands, fullSuiteCommand: "test:full" });
   assert.equal(pushed.result, "range_verified:v1");
+});
+
+
+test("historical command placeholder reconciliation is exact and fresh-entry only", () => {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
+  const verifyDocs = read("docs/engineering/verify-target-before-push.md");
+  const helper = read("skills/engineering/record-closed-issue-reconciliation/SKILL.md");
+  const helperMetadata = read("skills/engineering/record-closed-issue-reconciliation/agents/openai.yaml");
+  const helperDocs = read("docs/engineering/record-closed-issue-reconciliation.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+
+  assert.match(verify, /exactly one.*unambiguous.*historical placeholder.*otherwise valid.*immutable completion.*repository-required full-suite command/isu);
+  assert.match(verify, /literal repository-root command.*prose.*summar(?:y|ies).*multiple placeholders.*multiple possible commands.*inferred expansions.*ineligible/isu);
+  assert.match(verify, /later descendant Issue.*candidate.*descend.*affected candidate.*valid.*completion.*exact literal command.*pass/isu);
+  assert.match(verify, /freshly frozen target.*same command.*pass.*coincidental current pass.*non-descendant.*different command.*unavailable.*ambiguity.*stop/isu);
+  assert.match(verify, /affected.*descendant.*Issue.*completion.*candidate.*target.*ancestry.*identit/isu);
+  assert.match(verify, /affected candidate.*reachable.*`V`.*not.*`B`.*descendant.*candidate.*reachable.*`V`/isu);
+  assert.match(verify, /complete command representation recovery packet.*record draft.*human confirms.*exact packet/isu);
+  assert.match(verify, /`closed_issue_command_representation_reconciliation:v1`.*reuse.*exact matching.*without.*duplicate/isu);
+  assert.match(verify, /record read-back.*selected-range membership eligibility only.*original completion.*invalid.*not `implementation_complete`/isu);
+  assert.match(verify, /discard.*stopped gate.*fresh.*Entry.*mapped literal command.*aggregate command set.*deduplicate.*full suite.*once/isu);
+  assert.match(verify, /both.*local-ahead.*already-pushed.*same.*recovery/isu);
+  assert.match(verify, /never.*edit.*history.*guess.*reopen.*attest-target-contribution.*repair.*push.*deploy/isu);
+
+  assert.match(helper, /active `\/verify-target-before-push`.*either.*failed-command diagnostic packet.*command representation packet/isu);
+  assert.match(helper, /command representation.*sole.*unambiguous placeholder.*unique repository-required full-suite command.*later descendant.*passing completion.*freshly frozen target.*same command.*pass/isu);
+  assert.match(helper, /before mutation.*affected.*descendant.*completion.*candidate.*target.*ancestry.*command.*draft.*drift.*stops without writing/isu);
+  assert.match(helper, /active verifier-owned.*freshly frozen target result.*never.*rerun the mapped command.*exact-target verification/isu);
+  assert.match(helper, /closed_issue_command_representation_reconciliation:v1\s+affected:\s+issue: <affected Issue ID>\s+completion: <immutable completion-note identity>\s+target: <Issue target branch>\s+baseline: <full execution baseline SHA>\s+candidate: <full affected candidate SHA>\s+placeholder: <exact historical placeholder>\s+mapped_command: <exact repository-required full-suite command>\s+descendant:\s+issue: <descendant Issue ID>\s+completion: <immutable descendant completion-note identity>\s+candidate: <full descendant candidate SHA>\s+authorized_by: human\s+statement: authorized for selected-range membership eligibility only; original completion remains invalid/isu);
+  assert.match(helper, /record contains only.*affected.*placeholder.*mapped_command.*descendant.*authorized_by.*statement/isu);
+  assert.match(helper, /reuse.*exact matching.*command representation.*record.*without.*duplicate/isu);
+  assert.match(helper, /malformed.*duplicate.*edited.*partial.*stale.*drifting.*conflicting.*unreadable.*ambiguous.*stops/isu);
+  assert.match(helper, /never.*edit.*history.*retroactively.*complete.*reopen.*push.*deploy/isu);
+
+  assert.match(verifyMetadata, /historical command placeholder.*exact human confirmation.*fresh.*Entry/isu);
+  assert.match(helperMetadata, /failed-command.*command representation.*exact human confirmation/isu);
+  assert.match(verifyDocs, /command representation.*one unambiguous placeholder.*descendant.*exact literal.*frozen target.*fresh.*Entry/isu);
+  assert.match(helperDocs, /failed-command diagnostic.*command representation.*same model-invoked helper/isu);
+  assert.match(matt, /historical command placeholder.*descendant.*exact full-suite command.*freshly frozen target pass.*current-only pass.*does not qualify.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
+  assert.match(mattDocs, /historical command placeholder.*descendant.*exact full-suite command.*confirmation.*fresh.*Entry/isu);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /record-closed-issue-reconciliation.*failed-command.*command-representation/iu);
+    assert.match(read(path), /verify-target-before-push.*command-placeholder/iu);
+  }
+
+  const fullSuiteCommand = "node --test tests/ron-workflow/*.test.mjs";
+  const placeholder = "<repository-required full-suite command>";
+  const affected = Object.freeze({
+    issue: "13",
+    state: "CLOSED",
+    target: "features/ron",
+    baseline: "baseline-13",
+    candidate: "candidate-13",
+    completion: "completion-13",
+    completionOtherwiseValid: true,
+    nonExecutableEntries: [placeholder],
+    candidateReachableFromTarget: true,
+    candidateReachableFromBaseline: false,
+    worktreeRegistered: false,
+    worktreeExists: false,
+    laterValidCompletion: false,
+    otherInvalidatingEvidence: false,
+  });
+  const descendant = Object.freeze({
+    issue: "14",
+    state: "CLOSED",
+    target: "features/ron",
+    completion: "completion-14",
+    candidate: "candidate-14",
+    descendsFromAffected: true,
+    candidateReachable: true,
+    recordedCommands: [fullSuiteCommand],
+    commandResults: [{ command: fullSuiteCommand, result: "pass" }],
+  });
+
+  const reconcile = ({
+    candidate = affected,
+    commandChoices = [fullSuiteCommand],
+    descendants = [descendant],
+    frozenTargetResult = { command: fullSuiteCommand, result: "pass" },
+    records = [],
+    draft = "exact-command-representation-draft",
+    confirmedDraft = "exact-command-representation-draft",
+    readBack = "exact-command-representation-draft",
+  } = {}) => {
+    assert.equal(candidate.state, "CLOSED", "affected Issue must be closed");
+    assert.equal(candidate.completionOtherwiseValid, true, "completion must be otherwise valid");
+    assert.equal(candidate.nonExecutableEntries.length, 1, "exactly one placeholder is required");
+    assert.equal(candidate.nonExecutableEntries[0], placeholder, "entry must be one unambiguous placeholder");
+    assert.equal(candidate.candidateReachableFromTarget, true, "affected candidate must be reachable from target");
+    assert.equal(candidate.candidateReachableFromBaseline, false, "affected candidate must not be reachable from baseline");
+    assert.equal(candidate.worktreeRegistered, false, "affected worktree must not be registered");
+    assert.equal(candidate.worktreeExists, false, "affected worktree path must be absent");
+    assert.equal(candidate.laterValidCompletion, false, "later valid completion makes recovery ineligible");
+    assert.equal(candidate.otherInvalidatingEvidence, false, "other invalidating evidence makes recovery ineligible");
+    assert.equal(commandChoices.length, 1, "repository full-suite command must be unique");
+    const [mappedCommand] = commandChoices;
+    assert.equal(descendants.length, 1, "exactly one descendant command proof is required");
+    const [exactDescendant] = descendants;
+    assert.equal(exactDescendant.state, "CLOSED", "descendant Issue must be closed");
+    assert.equal(exactDescendant.target, candidate.target, "descendant target must match");
+    assert.equal(exactDescendant.descendsFromAffected, true, "descendant candidate must descend from affected candidate");
+    assert.equal(exactDescendant.candidateReachable, true, "descendant candidate must be reachable from target");
+    assert.equal(exactDescendant.recordedCommands.includes(mappedCommand), true, "descendant must record the exact mapped command");
+    assert.equal(exactDescendant.commandResults.find(({ command }) => command === mappedCommand)?.result, "pass", "descendant command must pass");
+    assert.deepEqual(frozenTargetResult, { command: mappedCommand, result: "pass" }, "frozen target must pass the same command");
+    assert.equal(confirmedDraft, draft, "human must confirm the exact packet");
+    assert.ok(records.length <= 1, "duplicate command representation records stop");
+    if (records.length === 1) assert.equal(records[0], draft, "conflicting command representation record stops");
+    assert.equal(readBack, draft, "exact command representation read-back is required");
+    return { restart: "Entry", mappedCommand, completionState: "invalid" };
+  };
+
+  assert.deepEqual(reconcile(), { restart: "Entry", mappedCommand: fullSuiteCommand, completionState: "invalid" });
+  assert.deepEqual(reconcile({ records: ["exact-command-representation-draft"] }), { restart: "Entry", mappedCommand: fullSuiteCommand, completionState: "invalid" });
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: [placeholder, "<other>"] } }), /exactly one placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: ["full suite passed"] } }), /unambiguous placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, nonExecutableEntries: ["run the full test suite"] } }), /unambiguous placeholder/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, candidateReachableFromTarget: false } }), /reachable from target/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, candidateReachableFromBaseline: true } }), /not be reachable from baseline/u);
+  assert.throws(() => reconcile({ candidate: { ...affected, worktreeRegistered: true } }), /must not be registered/u);
+  assert.throws(() => reconcile({ commandChoices: [fullSuiteCommand, "npm test"] }), /must be unique/u);
+  assert.throws(() => reconcile({ descendants: [] }), /exactly one descendant/u);
+  assert.throws(() => reconcile({ descendants: [descendant, { ...descendant, issue: "15" }] }), /exactly one descendant/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, descendsFromAffected: false }] }), /must descend/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, candidateReachable: false }] }), /reachable from target/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, recordedCommands: ["npm test"] }] }), /exact mapped command/u);
+  assert.throws(() => reconcile({ descendants: [{ ...descendant, commandResults: [{ command: fullSuiteCommand, result: "fail" }] }] }), /must pass/u);
+  assert.throws(() => reconcile({ frozenTargetResult: { command: fullSuiteCommand, result: "fail" } }), /frozen target/u);
+  assert.throws(() => reconcile({ records: ["exact-command-representation-draft", "exact-command-representation-draft"] }), /duplicate/u);
+  assert.throws(() => reconcile({ confirmedDraft: "different" }), /exact packet/u);
+  assert.throws(() => reconcile({ readBack: "drifted" }), /exact command representation read-back/u);
+
+  const runFreshGate = ({ mode, mappedCommand = fullSuiteCommand, memberCommands = [["test:13"], [fullSuiteCommand]] }) => {
+    assert.match(mode, /^(?:local-ahead|already-pushed)$/u);
+    const commands = [...new Set(memberCommands.flat())];
+    assert.equal(commands.includes(mappedCommand), true, "mapped literal command must enter the aggregate command set");
+    const executed = [...commands.filter((command) => command !== fullSuiteCommand), fullSuiteCommand];
+    assert.equal(executed.filter((command) => command === fullSuiteCommand).length, 1, "repository full suite runs exactly once");
+    return { restart: "Entry", result: mode === "local-ahead" ? "push_ready:v1" : "range_verified:v1", executed };
+  };
+  assert.deepEqual(runFreshGate({ mode: "local-ahead" }), { restart: "Entry", result: "push_ready:v1", executed: ["test:13", fullSuiteCommand] });
+  assert.equal(runFreshGate({ mode: "already-pushed" }).result, "range_verified:v1");
+  assert.throws(() => runFreshGate({ mode: "local-ahead", memberCommands: [["test:13"]] }), /must enter the aggregate command set/u);
 });
 
 
