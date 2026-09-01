@@ -1691,6 +1691,8 @@ test("push-target consumes one current receipt for one exact non-force push", ()
 
   assert.match(skill, /^disable-model-invocation:\s*true$/mu);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
+  assert.match(metadata, /explicitly named target branch.*current local-ahead push_ready/isu);
+  assert.doesNotMatch(metadata, /features\/ron/iu);
   assert.doesNotMatch(skill, /^description:\s*Use when\b/mu);
   assert.match(skill, /named existing local target branch.*exact local `HEAD`.*refs\/notes\/matt-push-ready.*exactly one.*push_ready:v1/isu);
   assert.match(skill, /mode.*local-ahead.*target.*baseline.*verified target SHA.*member.*evidence.*current.*HEAD/isu);
