@@ -217,9 +217,11 @@ General workflow tools, not code-specific.
 - **[grill-me](./skills/productivity/grill-me/SKILL.md)** — Get relentlessly interviewed about a plan or design until every branch of the decision tree is resolved.
 - **[handoff](./skills/productivity/handoff/SKILL.md)** — Compact the current conversation into a handoff document so another agent can continue the work.
 - **[teach](./skills/productivity/teach/SKILL.md)** — Teach the user a new skill or concept over multiple sessions, using the current directory as a stateful teaching workspace.
-- **[writing-great-skills](./skills/productivity/writing-great-skills/SKILL.md)** — Reference for writing and editing skills well: the vocabulary and principles that make a skill predictable.
+- **[to-questionnaire](./skills/productivity/to-questionnaire/SKILL.md)** — Turn a decision you cannot fully answer into a Markdown questionnaire for the person who can.
+- **[wait-what](./skills/productivity/wait-what/SKILL.md)** — Re-pitch a message that did not land using plain English and the repository's ubiquitous language.
 
 **Model-invoked**
 
 - **[grilling](./skills/productivity/grilling/SKILL.md)** — Interview the user relentlessly about a plan, decision, or idea until every branch of the decision tree is resolved. The reusable loop behind `grill-me` and `grill-with-docs`.
 - **[explain-decision](./skills/productivity/explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
+- **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Write predictable skills, `AGENTS.md`, `CLAUDE.md`, and other documents consumed by agents.

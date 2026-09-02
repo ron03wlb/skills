@@ -42,7 +42,9 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - `/remove-ron` removes only the retired repository-local Ron footprint.
 - `/confirm-understanding` calibrates a mental model against named evidence.
 - `/explain-decision` compares one live choice without changing workflow state; `/grilling` pressure-tests a plan or decision without writing docs.
-- `/handoff` moves context to a fresh session; `/teach` runs a stateful learning workspace; `/writing-great-skills` is the skill-authoring reference.
+- `/to-questionnaire` turns a decision blocked on another person's knowledge into a questionnaire for that person.
+- `/wait-what` re-pitches the last message when it did not land, using plain English and the repository's ubiquitous language.
+- `/handoff` moves context to a fresh session; `/teach` runs a stateful learning workspace; `/writing-for-agents` is the reference for skills and other documents consumed by agents.
 - `/resolving-merge-conflicts` handles an already in-progress merge or rebase conflict.
 
 Use `/setup-matt-pocock-skills` once when tracker, labels, or domain-doc layout is not configured.

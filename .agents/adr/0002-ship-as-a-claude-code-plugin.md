@@ -28,3 +28,16 @@ The only robust ways to give Codex a single promoted-only path are (a) **restruc
 - `.claude-plugin/plugin.json`'s `version` tracks `package.json`'s version — bump both together on release. Claude uses the plugin `version` to decide when installed users see an update.
 - Repository validation is Codex-native: a deterministic contract test verifies manifest, promoted-skill, README, docs, and invocation-metadata parity, then `codex exec --ignore-user-config --ephemeral --sandbox read-only "<scoped review prompt>"` performs a scoped read-only review. The current Codex CLI has plugin management but no plugin-validation subcommand, so this proves the repository packaging contract rather than provider runtime installation.
 - Claude CLI is not a repository-validation dependency.
+
+## Update, 2026-08-05
+
+`mattpocock-skills` was accepted into **Claude Code's official marketplace** (configured name `claude-plugins-official`, source repo `anthropics/claude-plugins-official`), which every Claude Code install has by default. `claude plugins install mattpocock-skills` is now the documented route, and the direct marketplace-add path is superseded. The install wording lives in [.agents/install-block.md](../install-block.md).
+
+The official listing points at the upstream repo's git URL and reads `.claude-plugin/plugin.json` directly, so it does not depend on `.claude-plugin/marketplace.json`. That file is retained as a fallback for installing the repo directly from an unreleased commit or fork.
+
+Verified 2026-08-05, on Claude Code 2.1.222, against the live listing:
+
+- `claude plugins install mattpocock-skills` resolves with no marketplace added first and reports `mattpocock-skills@claude-plugins-official`.
+- `claude plugin details mattpocock-skills` then reports version 1.2.0 and loads the promoted skills.
+- The listing's `source` is `{"source": "url", "url": "https://github.com/mattpocock/skills.git", "sha": …}`: the **sha is pinned**, so a release reaches installed users when that pin moves, not the moment a tag is created.
+- The in-session `/plugin install mattpocock-skills` was not exercised because `/plugin` is unavailable in headless (`claude -p`) sessions. It runs the same resolver as the CLI, and the documented example form is `/plugin install <name>@claude-plugins-official`.
