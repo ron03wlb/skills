@@ -15,7 +15,7 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
 - **[wiki](./wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
-- **[to-spec](./to-spec/SKILL.md)** — Classify and publish an execution-ready Spec with a Planning Seal, mapped Acceptance Criteria, and one exact next command.
+- **[to-spec](./to-spec/SKILL.md)** — Publish an execution-ready Spec with a Planning Seal through a retry-safe Workflow checkpoint and emit its exact Run handoff or decomposition command.
 - **[to-tickets](./to-tickets/SKILL.md)** — Reconcile one Issue decomposition, publish its Decomposition publication record, and emit commands only for the ready frontier.
 - **[implement](./implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./wayfinder/SKILL.md)** — Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on the issue tracker, resolved one at a time until the way to the destination is clear.

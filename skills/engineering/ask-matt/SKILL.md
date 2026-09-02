@@ -11,9 +11,9 @@ Route the user's situation; do not perform the routed work.
 ## Build flow
 
 1. Use `/grill-with-docs` to settle a codebase-backed idea and record durable vocabulary or ADRs. Without a codebase, use `/grill-me`.
-2. Use `/to-spec` to synthesize the settled context and create or reuse its Planning Seal. `to-spec` is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue.
+2. Use `/to-spec` to synthesize the settled context, create or reuse its Planning Seal, settle its retry-safe Workflow plan checkpoint, publish the Spec, and append its immutable handoff. `to-spec` is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue.
 3. Follow the published command:
-   - Single-Issue Tracker Spec → `/execute-issue <Spec-ID>`.
+   - Single-Issue Tracker Spec → `/run-issue-workflow <Spec-ID>`.
    - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>` to reconcile one Issue decomposition and publish its Decomposition publication record, then `/execute-issue <Issue-ID>` for each dependency-ready child.
    `to-spec` and `to-tickets` settle each required Workflow plan checkpoint by invoking model-invoked `/attest-target-contribution` with the exact active producer packet. The helper needs no second confirmation for that checkpoint and returns only the reused or appended immutable record identity so the producer can continue its own publication or handoff.
 4. After the exact Issue is published, `execute-issue` automatically invokes `pre-execute-issue` in the same authorized lane when one exact declared or unchanged-scope late prerequisite lacks a matching attestation. It creates or reuses the Issue worktree, invokes `prepare-prerequisite-artifact` when needed, presents the committed Operator SQL for human execution, and returns the content-bound v2 identity to the original lane after fresh checks. Direct `/pre-execute-issue <Issue-ID>` remains available but stops after attestation read-back and never resumes implementation by itself.
@@ -25,7 +25,7 @@ This manual leaf route remains the default public flow. A separately installed a
 
 `prepare-prerequisite-artifact` is model-invoked and not a public route. It accepts only an active prerequisite-preparation handoff that already binds one exact Issue artifact and repository adapter, builds a fail-closed Operator SQL candidate, and returns content identity without external execution or attestation.
 
-A Tracker Spec, including a local-file tracker record, uses `/execute-issue`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
+A Single-Issue Tracker Spec uses `/run-issue-workflow`; a Multi-Issue Tracker Spec uses `/to-tickets`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. `/execute-issue` remains the exact Issue leaf used by a direct human invocation or a valid coordinator Grant, not the next command published by `to-spec`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
 
 Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration even when review was not explicitly requested.
 

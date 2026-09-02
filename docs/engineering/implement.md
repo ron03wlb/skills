@@ -14,13 +14,13 @@ npx skills update implement
 
 `implement` builds an approved Standalone Spec or explicit direct task on the current branch, using test-driven slices, required verification, and review before a scoped commit.
 
-It does not execute Tracker Specs. Tracker-backed work, including local tracker files, follows the published route through [execute-issue](https://aihero.dev/skills-execute-issue).
+It does not execute Tracker Specs. Tracker-backed work, including local tracker files, follows the published [to-spec](https://aihero.dev/skills-to-spec) route.
 
 ## When to reach for it
 
 You invoke this by typing `/implement` — the agent won't reach for it on its own.
 
-Reach for it when you intentionally want direct current-branch work and no tracker integration lifecycle. Use [to-spec](https://aihero.dev/skills-to-spec) when the scope still needs publication or [execute-issue](https://aihero.dev/skills-execute-issue) for a Tracker Spec.
+Reach for it when you intentionally want direct current-branch work and no tracker integration lifecycle. Use [to-spec](https://aihero.dev/skills-to-spec) when the scope needs a Tracker Spec or its published route.
 
 ## Pre-agreed seams
 
@@ -30,4 +30,4 @@ It creates no Issue worktree, integration receipt, tracker closure, push, or dep
 
 ## Where it fits
 
-`implement` is the direct-branch executor for Standalone Specs. Tracker Specs instead use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue). See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.
+`implement` is the direct-branch executor for Standalone Specs. Tracker Specs instead follow the command published by [to-spec](https://aihero.dev/skills-to-spec); their exact Issue leaves still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue). See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.

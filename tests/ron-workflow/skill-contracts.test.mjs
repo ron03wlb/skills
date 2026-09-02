@@ -259,7 +259,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(successorAdr, /^status: superseded by ADR-0038$/mu, "ADR-0023 must defer to the current delivery workflow");
 
   const specSeal = spec.indexOf("Planning Seal");
-  const specPublish = spec.indexOf("Publish the Spec", specSeal);
+  const specPublish = spec.indexOf("Publish and complete the handoff", specSeal);
   assert.equal(specSeal !== -1 && specPublish > specSeal, true, "to-spec must seal planning artifacts before publish");
   const specRetryRecovery = spec.indexOf("Before classifying the current delta on a retry");
   const specNoDeltaSelection = spec.indexOf("If there is no relevant planning-artifact delta");
@@ -276,7 +276,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   const singleTemplate = read("skills/engineering/to-spec/references/single-issue-template.md");
   const multiTemplate = read("skills/engineering/to-spec/references/multi-issue-template.md");
   assert.match(singleTemplate, /Planning baseline.*Mode: <primary or revision>.*Commit:.*Seal:/su, "Single-Issue template omits revision lineage");
-  assert.match(singleTemplate, /Shape: Single-Issue.*User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*`\/execute-issue <Spec-ID>`/su);
+  assert.match(singleTemplate, /Shape: Single-Issue.*User Outcomes.*Acceptance Criteria.*Implementation Plan.*Verification.*`\/run-issue-workflow <Spec-ID>`/su);
   assert.match(multiTemplate, /Shape: Multi-Issue.*Overall Outcome.*Cross-Issue Constraints.*Decomposition Rationale.*`\/to-tickets <Spec-ID>`/su);
   assert.doesNotMatch(multiTemplate, /## Acceptance Criteria|## Implementation Plan|## Verification/u);
   assert.doesNotMatch(singleTemplate + multiTemplate, /extremely extensive|## User Stories|## Implementation Decisions/iu);
@@ -284,7 +284,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(spec, /repository evidence.*automatic.*one blocking question.*recommendation/isu);
   assert.match(spec, /User Outcomes.*at most three/isu);
   assert.match(spec, /every Acceptance Criterion.*Implementation Plan step.*Verification.*every Implementation Plan step.*Acceptance Criterion/isu);
-  assert.match(spec, /Single-Issue.*`\/execute-issue <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
+  assert.match(spec, /Single-Issue.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*`\/to-tickets <Spec-ID>`/isu);
   for (const [name, skill] of [["to-spec", spec], ["to-tickets", tickets]]) {
     assert.match(skill, /otherwise stop.*tell the human to invoke `\/setup-matt-pocock-skills`/isu, `${name} must not invoke a user-invoked setup skill`);
   }
@@ -328,7 +328,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   const prerequisites = specDocs.match(/## Prerequisites\s+(.*?)\n## /su)?.[1] ?? "";
   assert.match(prerequisites, /setup-matt-pocock-skills/u, "to-spec docs have an empty Prerequisites section");
   assert.match(implement, /Standalone Spec.*explicit.*direct.*current branch/isu);
-  assert.match(implement, /Tracker Spec.*`\/execute-issue`/isu);
+  assert.match(implement, /Tracker Spec.*published `\/to-spec` route/isu);
   assert.match(successorAdr, /supersedes:.*0022/iu);
   assert.match(successorAdr, /integration candidate.*push_ready/isu);
   for (const [path, content] of [
@@ -336,7 +336,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
     ["docs/engineering/ask-matt.md", mattDocs],
   ]) {
     assert.match(content, /to-spec.*sole.*Single-Issue.*Multi-Issue/isu, path + " duplicates or hides delivery classification");
-    assert.match(content, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu, path + " routes execution incorrectly");
+    assert.match(content, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`.*Standalone Spec.*`\/implement`/isu, path + " routes execution incorrectly");
   }
 
   for (const [path, page] of [["to-spec", specDocs], ["to-tickets", ticketsDocs], ["ask-matt", mattDocs]]) {
@@ -362,6 +362,58 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
     "CONTEXT.md",
     "docs/adr/0022-use-issue-native-execution-and-closeout.md",
   ]) assert.match(read(path), /Planning Seal/u, `${path} omits the Planning Seal contract`);
+});
+
+test("to-spec owns checkpointed producer publication and Single-Issue Run handoff", () => {
+  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const metadata = read("skills/engineering/to-spec/agents/openai.yaml");
+  const docs = read("docs/engineering/to-spec.md");
+  const template = read("skills/engineering/to-spec/references/single-issue-template.md");
+  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const mattDocs = read("docs/engineering/ask-matt.md");
+  const implement = read("skills/engineering/implement/SKILL.md");
+  const implementDocs = read("docs/engineering/implement.md");
+
+  const handoffEntry = spec.indexOf("Validate the Planning handoff");
+  const seal = spec.indexOf("Select the Planning Seal", handoffEntry);
+  const checkpoint = spec.indexOf("Start or resume the Workflow checkpoint transaction", seal);
+  const publication = spec.indexOf("Publish and complete the handoff", checkpoint);
+  assert.equal(
+    handoffEntry !== -1 && seal > handoffEntry && checkpoint > seal && publication > checkpoint,
+    true,
+    "to-spec must validate handoff, seal, checkpoint, and publish in order",
+  );
+
+  assert.match(spec, /visible Planning handoff.*target.*baseline.*accepted glossary.*ADR.*path or hunk.*content identity.*revalidat/isu);
+  assert.match(spec, /new Workflow checkpoint.*exact target.*clean.*unrelated staged.*unstaged.*untracked.*modified.*mixed.*provenance-ambiguous.*preserv.*stop.*before.*transaction.*plan.*Git.*tracker mutation/isu);
+  assert.match(spec, /only one exact matching.*transaction.*resume.*first unsatisfied stage.*mismatch.*stop.*without regenerating.*overwriting.*duplicating.*attributing unrelated work/isu);
+
+  assert.match(spec, /generate.*durable operational plan.*in memory.*bind.*content identity.*before.*write/isu);
+  assert.match(spec, /create.*Workflow checkpoint transaction.*before writing.*plan/isu);
+  assert.match(spec, /shared Target mutation writer.*commit only.*exact.*plan.*post-commit Git.*read-back.*before releasing/isu);
+  assert.match(spec, /automatically invoke.*model-invoked `attest-target-contribution`.*exact prospective packet.*immutable.*record identity.*no second confirmation/isu);
+  assert.match(spec, /retry.*never regenerate.*duplicate.*commit.*evidence.*switch.*Planning Seal.*another confirmation/isu);
+
+  assert.match(spec, /primary mode.*create or reuse.*one tracker Spec identity.*bind.*transaction.*evidence read-back.*before.*canonical body.*label/isu);
+  assert.match(spec, /revision mode.*evidence read-back.*before updating.*existing Spec/isu);
+  assert.match(spec, /read back.*body.*classification.*Planning Seal.*target.*template.*label.*tracker identity/isu);
+  assert.match(spec, /partial failure.*transaction identity.*checkpoint SHA.*evidence identity.*first unsatisfied stage/isu);
+
+  assert.match(spec, /append.*one immutable `handoff\.completed`.*producer.*Spec.*target.*Planning Seal.*checkpoint commit.*record identity.*publication identity.*classification.*approved-scope identity/isu);
+  assert.match(spec, /Single-Issue.*only.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*only.*`\/to-tickets <Spec-ID>`/isu);
+  assert.doesNotMatch(spec + docs + template, /\/execute-issue <Spec-ID>/u);
+  assert.doesNotMatch(matt + mattDocs, /Single-Issue Tracker Spec (?:→|uses) (?:\[execute-issue|`\/execute-issue)/iu);
+
+  assert.match(spec, /missing or conflicting.*Planning handoff.*Seal.*transaction.*writer.*commit.*attestation.*publication.*handoff.*target.*classification.*retry evidence.*stop.*without repair.*rollback.*duplicate.*Run start.*implementation.*push.*deploy/isu);
+  assert.match(metadata, /short_description:.*checkpoint.*Run handoff/iu);
+  assert.match(docs, /retry-safe Workflow checkpoint.*`handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
+  assert.match(matt, /Single-Issue Tracker Spec.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue Tracker Spec.*`\/to-tickets <Spec-ID>`/isu);
+  assert.match(mattDocs, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`/isu);
+  assert.match(implement, /Tracker Spec.*published `\/to-spec` route/isu);
+  assert.match(implementDocs, /Tracker Spec.*published.*to-spec.*route/isu);
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /to-spec.*checkpoint.*Run handoff/iu, `${path} omits the checkpointed to-spec route`);
+  }
 });
 
 test("to-tickets reconciles one Issue decomposition before tracker mutation", () => {
@@ -2548,7 +2600,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /`\/push-target/iu);
   assert.match(matt, /`\/grilling`/u);
   assert.match(matt, /`\/explain-decision`/u);
-  assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
+  assert.match(matt, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
   assert.match(matt, /planning producers and closeout share one target mutation writer per target/iu);

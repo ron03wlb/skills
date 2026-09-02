@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Implement
 
-Use this only for an approved **Standalone Spec** or explicitly requested direct current-branch work. A **Tracker Spec**, including a local-file tracker record, follows its `/to-spec` route through `/execute-issue`; do not implement it here.
+Use this only for an approved **Standalone Spec** or explicitly requested direct current-branch work. A **Tracker Spec**, including a local-file tracker record, follows its published `/to-spec` route; do not implement it here.
 
 Treat the selected plan and Acceptance Criteria as scope. Use `/tdd` at pre-agreed seams where behavior can be captured, run focused checks regularly and the full required suite at the end, then invoke `/code-review` against the fixed baseline. Repair confirmed findings before committing only the intended current-branch changes.
 

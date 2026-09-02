@@ -12,9 +12,9 @@ npx skills update to-spec
 
 ## What it does
 
-`to-spec` synthesizes settled conversation and repository evidence into an execution-ready Tracker Spec, seals approved planning artifacts, and publishes the exact next command.
+`to-spec` synthesizes settled conversation and repository evidence into an execution-ready Tracker Spec, seals approved planning artifacts, and publishes it through a retry-safe Workflow checkpoint with one immutable downstream handoff.
 
-It does not restart the interview. It is also the sole delivery-shape authority: downstream skills never independently decide whether the Spec is Single-Issue or Multi-Issue.
+It does not restart the interview or leave an operational plan as unexplained target dirt. It is also the sole delivery-shape authority: downstream skills consume its Single-Issue or Multi-Issue classification instead of deciding again.
 
 ## When to reach for it
 
@@ -24,22 +24,22 @@ Reach for it after behavior and domain language are settled. Use [grill-with-doc
 
 ## Prerequisites
 
-[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker and triage labels. The repository must also expose the target branch and any approved glossary or ADR delta that belongs in the Planning Seal.
+[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker and triage labels. The repository must expose the target branch, the visible Planning handoff for accepted glossary or ADR work, and its configured Workflow checkpoint transaction and shared Target mutation writer seams.
 
-## One executable contract
+## One checkpointed contract
 
-A Single-Issue Spec carries at most three non-authoritative User Outcomes, stable `AC-n` Acceptance Criteria, non-exhaustive expected touchpoints, a mapped Implementation Plan, verification, exclusions, and `/execute-issue <Spec-ID>`. Every criterion is covered by a step and verification item; every step covers a criterion.
+A Single-Issue Spec carries at most three non-authoritative User Outcomes, stable `AC-n` Acceptance Criteria, non-exhaustive expected touchpoints, a mapped Implementation Plan, verification, exclusions, and `/run-issue-workflow <Spec-ID>`. A Multi-Issue parent keeps only the aggregate constraints and `/to-tickets <Spec-ID>` handoff. Classification follows executable outcomes and blocking edges, not file count or apparent size.
 
-A Multi-Issue parent keeps only the overall outcome, cross-Issue constraints, decomposition rationale, exclusions, and `/to-tickets <Spec-ID>` handoff. It does not duplicate child Acceptance Criteria, plans, touchpoints, or verification; `to-tickets` creates those executable authorities. Classification follows executable outcomes and blocking edges, not file count or apparent size. Only material routing ambiguity permits one blocking question with a recommendation.
+After validating the visible Planning handoff, `to-spec` creates or reuses the Planning Seal, then starts a clean-target Workflow checkpoint transaction before writing the durable operational plan. The producer commits only that plan under the shared target writer, obtains the exact `direct_target_contribution:v1` identity through model-invoked [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution), publishes the body and label in the required order, and finishes with an immutable `handoff.completed`. An exact retry resumes the first unproved stage without regenerating a plan, commit, evidence record, tracker identity, or confirmation.
 
-The Planning Seal commits only owned planning artifacts or reuses the current target when no relevant delta exists. Existing Specs are revised in place. Publication or read-back failure reports the full SHA. A retry verifies the prior partial-state report; missing or conflicting evidence stops instead of selecting a new seal.
+Primary publication obtains one tracker identity before prospective evidence and completes its canonical body and label only afterward. Revision mode obtains the new evidence before updating the existing Spec. Any identity conflict, dirty target, partial read-back, or writer failure preserves exact state, reports the full SHA, and stops instead of repairing or duplicating it. On retry, the prior partial-state report is read first; missing or conflicting evidence stops.
 
 ## It's working if
 
-- A Single-Issue Spec contains mapped Acceptance Criteria; a Multi-Issue parent contains only cross-Issue decomposition authority. Both end in one copy-ready next command.
-- Expected paths guide discovery without becoming an allowlist.
-- The published mode, classification, Planning Seal, label, and command all survive read-back.
+- The Planning Seal, checkpoint transaction, plan commit, attestation, publication, and `handoff.completed` form one exact ordered chain.
+- A Single-Issue Spec ends in `/run-issue-workflow <Spec-ID>`; a Multi-Issue parent ends in `/to-tickets <Spec-ID>`.
+- A retry reports and resumes one first unsatisfied stage while unrelated work remains untouched.
 
 ## Where it fits
 
-`to-spec` follows [grill-with-docs](https://aihero.dev/skills-grill-with-docs) and routes either directly to [execute-issue](https://aihero.dev/skills-execute-issue) or through [to-tickets](https://aihero.dev/skills-to-tickets). Approved Standalone Specs use [implement](https://aihero.dev/skills-implement). See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+`to-spec` follows [grill-with-docs](https://aihero.dev/skills-grill-with-docs). It routes a Single-Issue Tracker Spec to the repository's Run coordinator and a Multi-Issue Tracker Spec to [to-tickets](https://aihero.dev/skills-to-tickets); approved Standalone Specs use [implement](https://aihero.dev/skills-implement). See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

@@ -1,5 +1,5 @@
 interface:
   display_name: "To Spec"
-  short_description: "Classify, seal, and publish an executable spec"
+  short_description: "Publish a checkpointed Spec and exact Run handoff"
 policy:
   allow_implicit_invocation: false

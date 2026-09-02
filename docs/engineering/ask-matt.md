@@ -24,13 +24,13 @@ Reach for it when you do not know where to enter or resume a flow. If you alread
 
 ## The delivery route
 
-Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs) to [to-spec](https://aihero.dev/skills-to-spec), which commits or reuses the Planning Seal and publishes one route:
+Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs) to [to-spec](https://aihero.dev/skills-to-spec), which commits or reuses the Planning Seal, settles its retry-safe Workflow checkpoint, and publishes one immutable handoff route:
 
-- Single-Issue Tracker Spec → [execute-issue](https://aihero.dev/skills-execute-issue).
+- Single-Issue Tracker Spec → `/run-issue-workflow <Spec-ID>`.
 - Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets) to reconcile one Issue decomposition and publish its Decomposition publication record, then `execute-issue` for each ready child.
 - Standalone Spec or explicit direct current-branch work → [implement](https://aihero.dev/skills-implement).
 
-A Tracker Spec uses `/execute-issue`; a Standalone Spec uses `/implement`.
+A Single-Issue Tracker Spec uses `/run-issue-workflow`; a Multi-Issue Tracker Spec uses `/to-tickets`; a Standalone Spec uses `/implement`. `execute-issue` remains the exact Issue leaf for a direct human invocation or an authorized coordinator, not the command published by `to-spec`.
 
 `to-spec` and `to-tickets` settle each required workflow plan checkpoint by invoking model-invoked [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution) with the exact active producer packet. The helper needs no second confirmation for that checkpoint and returns only the reused or appended immutable record identity so the producer can continue its own publication or handoff.
 

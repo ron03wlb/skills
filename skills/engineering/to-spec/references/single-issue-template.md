@@ -47,4 +47,4 @@ Expected touchpoints are non-exhaustive:
 
 ## Next command
 
-`/execute-issue <Spec-ID>`
+`/run-issue-workflow <Spec-ID>`
