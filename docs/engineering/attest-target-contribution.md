@@ -30,7 +30,7 @@ The repository needs a configured Issue tracker. For recovery, an active [verify
 
 The leading idea is **attestation**, not verification. Confirmation-gated recovery remains limited to explicit human-directed, non-product workflow or governance maintenance outside an Executable Issue by design. The prospective route accepts only the exact generated Workflow plan checkpoint owned by the matching active producer transaction. Active behavior, source, tests, configuration, dependencies, migrations, security, data, public APIs, mixed commits, unrelated paths, partial paths, and ambiguous ownership remain ineligible.
 
-The helper reads the owner's complete ordered history, reuses one exact record, and permits later records only for immutable disjoint commit sets. Duplicate membership, partial overlap, conflicting purpose, mixed recovery/prospective grouping, edited history, multiple plausible records, or persistence ambiguity stops. An appended record is read back once and its immutable tracker identity returns to the active caller.
+The helper reads the owner's complete ordered history, reuses one exact record, and permits later records only for immutable disjoint checkpoint commit sets. Duplicate membership, partial overlap, conflicting purpose, mixed recovery/prospective grouping, edited history, multiple plausible records, or persistence ambiguity stops. An appended record is read back once and its immutable tracker identity returns to the active caller.
 
 ## It's working if
 
