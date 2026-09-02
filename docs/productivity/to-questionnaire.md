@@ -58,7 +58,7 @@ The document tells them to say so. "I don't know" and partial answers are asked 
 No. It writes a Markdown file in the current directory and tells you the path. Delivery is yours: paste it into a [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket), drop it in a Slack thread, attach it to an email, or open it on a shared screen and work through it live. People have wired up all four by hand.
 
 **Isn't this just `/grill-me` in batch mode?**
-No, and the distinction is worth holding. `grill-me` already asks in **rounds**: the whole frontier at once, then recomputed from your answers, so the "give me all the questions at once" need is met there. `to-questionnaire` is about a different axis: not how the questions are delivered, but whose head the answers are in. Answering them yourself faster is `grill-me`; getting them out of someone else is this.
+No, and the distinction is worth holding. `grill-me` asks you one question at a time and adapts after every answer. `to-questionnaire` is about a different axis: not delivery speed, but whose head the answers are in. Answering the questions yourself is `grill-me`; getting them out of someone else is this.
 
 **Couldn't I just ask the agent for this without a skill?**
 Yes, and plenty of people did before it existed: `OPEN_QUESTIONS.md` files, spreadsheets sent to clients, a "needs more info" ticket per unanswered question. The skill buys you two things: the interview never drifts onto the subject, and the document comes out in a shape a non-technical recipient can actually fill in. If you already have a house format that works, the honest answer is that you don't need this.
@@ -69,10 +69,10 @@ Yes, and plenty of people did before it existed: `OPEN_QUESTIONS.md` files, spre
 - Every item you named as "what I need back" is traceable to a question in the file.
 - The questions read as aimed at what the *recipient* knows, not as your own open questions copied down verbatim.
 - You could hand the file to someone who wasn't in the conversation and they would know why they got it and by when to reply.
-- The answers that come back are usable input for a new grilling round, rather than a fresh set of questions.
+- The answers that come back are usable input for a continued grilling session, rather than a fresh set of questions.
 
 ## Where it fits
 
 `to-questionnaire` is a reach-for-it-anytime standalone. It sits at the boundary of your own knowledge, where the next move is another person rather than another skill, most often mid-flow, when planning has stalled on something that isn't yours to decide.
 
-Its neighbour is [grill-me](https://aihero.dev/skills-grill-me), and the two split on where the answers live: grilling mines you, a questionnaire mines someone else. What comes back is raw material: feed it into another grilling round, or into [grill-with-docs](https://aihero.dev/skills-grill-with-docs) or [to-spec](https://aihero.dev/skills-to-spec) if the work is heading for a build. When you're unsure which skill fits the moment, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.
+Its neighbour is [grill-me](https://aihero.dev/skills-grill-me), and the two split on where the answers live: grilling mines you, a questionnaire mines someone else. What comes back is raw material: feed it back into the grilling session, or into [grill-with-docs](https://aihero.dev/skills-grill-with-docs) or [to-spec](https://aihero.dev/skills-to-spec) if the work is heading for a build. When you're unsure which skill fits the moment, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.

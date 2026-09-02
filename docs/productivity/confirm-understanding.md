@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=confirm-understanding
-```
-
-```bash
-npx skills update confirm-understanding
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/productivity/confirm-understanding)
-
 ## What it does
 
 `confirm-understanding` calibrates your mental model against an explicit Evidence Set using a short multiple-choice assessment, then records whether the two align.

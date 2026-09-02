@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=explain-decision
-```
-
-```bash
-npx skills update explain-decision
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/productivity/explain-decision)
-
 ## What it does
 
 `explain-decision` explains one live choice through a fresh read-only sidecar and returns a bounded Decision Card.
@@ -25,6 +13,12 @@ Type `/explain-decision`, or the agent reaches for it automatically when you exp
 The sidecar receives only the exact question, two or three options, confirmed constraints, the current recommendation, and necessary pointers. It returns about 300 words covering trade-offs, consequences, reversibility, recommendation, and uncertainty.
 
 This keeps explanatory exploration from consuming the main decision context.
+
+## It's working if
+
+- The response compares only the live options and names the current recommendation and remaining uncertainty.
+- The main workflow resumes at the same unresolved question after the explanation.
+- No spec, Issue, Wiki, glossary, ADR, code, or authorization state changes.
 
 ## Where it fits
 

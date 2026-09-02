@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=close-issue
-```
-
-```bash
-npx skills update close-issue
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/close-issue)
-
 ## What it does
 
 `close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. A direct human request or one valid read-back DAG Run Grant may authorize entry without separate per-Issue approval; the skill never creates the Grant or widens what closeout may do.
@@ -35,6 +23,12 @@ Closeout also re-reads every content-bound manual attestation by immutable track
 ## Parent closure
 
 A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Decomposition publication record, proves every exact child is closed and every child candidate reaches the same target, then closes only the parent. It does not claim aggregate `push_ready`.
+
+## It's working if
+
+- The reviewed candidate reaches the recorded target before the Issue is closed.
+- Only the registered clean Issue worktree is removed, and tracker closure is read back last.
+- A dirty target, merge conflict, or incomplete child set stops with the remaining action stated and no product-code repair.
 
 ## Where it fits
 

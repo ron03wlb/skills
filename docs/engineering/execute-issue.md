@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=execute-issue
-```
-
-```bash
-npx skills update execute-issue
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/execute-issue)
-
 ## What it does
 
 `execute-issue` implements one dependency-ready Tracker Spec or child Issue in a dedicated worktree, verifies it, and runs [code-review](https://aihero.dev/skills-code-review) independently for Standards and Spec until both are clean. A direct human request or one valid read-back DAG Run Grant may authorize entry; the skill never creates the Grant or asks an authorized coordinator for separate per-Issue approval.
@@ -39,6 +27,12 @@ If closeout stops because the target is dirty or close progress is partial, invo
 After a close conflict, the human may explicitly start one successor attempt in the same branch and worktree from the latest target when the original Acceptance Criteria and ownership are unchanged. The new completion becomes current; a scope change returns to planning.
 
 Any number of Issue worktrees may complete concurrently against the same recorded target. Their completion notes remain valid while `close-issue` serially advances that target.
+
+## It's working if
+
+- Implementation stays in the exact Issue worktree and preserves the recorded target and Acceptance Criteria.
+- Focused checks, the required full suite, and both review axes pass for one clean candidate SHA.
+- The completion note binds that candidate and its required evidence without merging, closing, pushing, or deploying it.
 
 ## Where it fits
 

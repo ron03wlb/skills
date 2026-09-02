@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=to-spec
-```
-
-```bash
-npx skills update to-spec
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-spec)
-
 ## What it does
 
 `to-spec` synthesizes settled conversation and repository evidence into an execution-ready Tracker Spec, seals approved planning artifacts, and publishes it through a retry-safe Workflow checkpoint with one immutable downstream handoff.

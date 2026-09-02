@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=attest-target-contribution
-```
-
-```bash
-npx skills update attest-target-contribution
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/attest-target-contribution)
-
 ## What it does
 
 `attest-target-contribution` appends or reuses one exact tracker record through two caller routes: confirmation-gated recovery and a producer-owned prospective checkpoint. The latter is limited to the exact Workflow plan checkpoint created by the active `to-spec` or `to-tickets` operation and needs no second human confirmation.

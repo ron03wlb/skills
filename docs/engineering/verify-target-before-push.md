@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=verify-target-before-push
-```
-
-```bash
-npx skills update verify-target-before-push
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/verify-target-before-push)
-
 ## What it does
 
 `verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. It has three narrow confirmation-gated recoveries: eligible direct target contribution coverage, one eligible closed Issue historical failed-command case, and one eligible historical command placeholder.

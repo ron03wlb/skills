@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=push-target
-```
-
-```bash
-npx skills update push-target
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/push-target)
-
 ## What it does
 
 `push-target` consumes one current local-ahead `push_ready` receipt, fetches the target's unique configured upstream, performs one ordinary non-force push of the exact verified ref, and requires exact remote read-back before success.

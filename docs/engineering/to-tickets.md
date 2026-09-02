@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=to-tickets
-```
-
-```bash
-npx skills update to-tickets
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/to-tickets)
-
 ## What it does
 
 `to-tickets` consumes the completed `to-spec` handoff for an approved Multi-Issue Spec, settles its own retry-safe Workflow checkpoint, and reconciles every child through an immutable Decomposition key. Each child keeps its Acceptance Criteria, mapped Implementation Plan, verification, blockers, target, and Planning baseline.

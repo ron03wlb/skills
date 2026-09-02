@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=grilling
-```
-
-```bash
-npx skills update grilling
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/productivity/grilling)
-
 ## What it does
 
 `grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks down the decision tree branch by branch, resolving the dependencies between decisions one at a time until you and the agent share the same understanding.
@@ -31,6 +19,13 @@ The mental model is a **decision tree**: every plan branches into decisions, and
 `grilling` is the **single source of truth** for the interview technique, split out as a model-invoked **primitive** so every skill that needs an interview can reach it instead of reinventing one. [grill-me](https://aihero.dev/skills-grill-me) and [grill-with-docs](https://aihero.dev/skills-grill-with-docs) are its two user-invoked front doors, but [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) and [triage](https://aihero.dev/skills-triage) also lean on it to pressure-test their own decisions.
 
 Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or ticket-shaping that its wrappers add on top.
+
+## It's working if
+
+- Each turn asks one material question and includes a recommended answer.
+- Later questions follow the dependencies created by answers already settled.
+- Facts available from the environment are looked up, while decisions still come back to you.
+- No implementation starts until you confirm the shared understanding.
 
 ## Where it fits
 

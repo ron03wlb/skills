@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=implement
-```
-
-```bash
-npx skills update implement
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/implement)
-
 ## What it does
 
 `implement` builds an approved Standalone Spec or explicit direct task on the current branch, using test-driven slices, required verification, and review before a scoped commit.
@@ -27,6 +15,12 @@ Reach for it when you intentionally want direct current-branch work and no track
 `implement` uses [tdd](https://aihero.dev/skills-tdd) at the already selected public seams, runs focused checks throughout and the required full suite at the end, then invokes [code-review](https://aihero.dev/skills-code-review) against its fixed baseline.
 
 It creates no Issue worktree, integration receipt, tracker closure, push, or deployment state.
+
+## It's working if
+
+- The approved direct task is implemented on the current branch through test-driven slices.
+- Focused checks, the required full suite, and review pass before one scoped commit is created.
+- No Issue worktree, tracker mutation, push, or deployment appears in the result.
 
 ## Where it fits
 

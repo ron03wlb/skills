@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=remove-ron
-```
-
-```bash
-npx skills update remove-ron
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/remove-ron)
-
 ## What it does
 
 `remove-ron` removes only the retired repository-local Ron setup footprint: `docs/agents/ron-workflow.md`, clearly bounded Ron-only instruction text, and proven-inactive `.git/ron-workflow/` metadata. It checks open lifecycle authorization, drafts, execution/ownership markers, and referenced worktrees before cleanup.
@@ -25,6 +13,12 @@ Run [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skill
 ## What it preserves
 
 The skill preserves the Wiki, tracker Issues/comments, branches, worktrees, installed skills, product files, and shared tracker/domain configuration. It stages only exact cleanup paths and creates one local commit only when tracked files changed.
+
+## It's working if
+
+- Only proven retired Ron setup files and bounded Ron-only instruction text are removed.
+- Active or ambiguous lifecycle state stops cleanup before anything is deleted.
+- Shared configuration, product files, branches, worktrees, tracker history, and the Wiki remain untouched.
 
 ## Where it fits
 

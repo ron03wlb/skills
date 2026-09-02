@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=pre-execute-issue
-```
-
-```bash
-npx skills update pre-execute-issue
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/pre-execute-issue)
-
 ## What it does
 
 `pre-execute-issue` resolves one exact declared prerequisite, creates or reuses its Issue worktree, and produces or reuses a clean content-bound Prerequisite candidate. It presents the committed Operator SQL for human execution and records only the emitted `APPLIED` or `NO_OP` outcome.

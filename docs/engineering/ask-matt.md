@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=ask-matt
-```
-
-```bash
-npx skills update ask-matt
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/ask-matt)
-
 ## What it does
 
 `ask-matt` is the concise router over this skill set. It tells you which flow and next command fit; it does no planning, implementation, integration, or push itself.
@@ -45,6 +33,12 @@ Published Tracker Specs route through the separately installed authorized coordi
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 
 The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [confirm-understanding](https://aihero.dev/skills-confirm-understanding) to calibrate a mental model against named evidence, [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison, and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs. Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing knowledge, [wait-what](https://aihero.dev/skills-wait-what) when the last message did not land, and [writing-for-agents](https://aihero.dev/skills-writing-for-agents) when editing skills or other documents consumed by agents.
+
+## It's working if
+
+- You get one route for the exact work in front of you, with the reason its authority and lifecycle fit.
+- Tracker work stays on the published Spec and Issue path, while standalone work stays on the direct `implement` path.
+- Helpers and closeout steps appear only where their prerequisites and authority are already established.
 
 ## Where it fits
 

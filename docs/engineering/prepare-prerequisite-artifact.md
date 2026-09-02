@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=prepare-prerequisite-artifact
-```
-
-```bash
-npx skills update prepare-prerequisite-artifact
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/prepare-prerequisite-artifact)
-
 ## What it does
 
 `prepare-prerequisite-artifact` builds one fail-closed Operator SQL candidate for an exact declared Issue prerequisite. It consumes an already-installed repository adapter, validates and independently reviews the artifact, and returns its candidate commit, Git blob, and path.

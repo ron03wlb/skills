@@ -1,15 +1,3 @@
-Quickstart:
-
-```bash
-npx skills add mattpocock/skills --skill=record-closed-issue-reconciliation
-```
-
-```bash
-npx skills update record-closed-issue-reconciliation
-```
-
-[Source](https://github.com/mattpocock/skills/tree/main/skills/engineering/record-closed-issue-reconciliation)
-
 ## What it does
 
 `record-closed-issue-reconciliation` appends or reuses one immutable tracker record for either a historical failed-command diagnostic with one exact remedy Issue or a historical command representation with one exact descendant proof.
