@@ -7,7 +7,7 @@ import test from "node:test";
 
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
-import { createWorkflowRuntime } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
+import { createWorkflowRuntime as createWorkflowRuntimeSource } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-runtime-"));
@@ -38,6 +38,8 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:05",
 };
 
+const selectedPlanningSeal = "c".repeat(40);
+
 const readyHandoffFor = (runIdentity) => {
   const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const recordIdentities = runIdentity.classification === "SINGLE"
@@ -48,7 +50,7 @@ const readyHandoffFor = (runIdentity) => {
     authority: {
       specId: runIdentity.specId,
       target: runIdentity.target,
-      planningSeal: "c".repeat(40),
+      planningSeal: selectedPlanningSeal,
       classification: runIdentity.classification,
       approvedScopeHash: runIdentity.approvedScopeHash,
       decompositionIdentity: runIdentity.decompositionIdentity,
@@ -60,6 +62,13 @@ const readyHandoffFor = (runIdentity) => {
       transactionIdentity: `sha256:${"3".repeat(64)}`,
       specId: runIdentity.specId,
       target: runIdentity.target,
+      planningSeal: selectedPlanningSeal,
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      baseline: "a".repeat(40),
+      initialTargetState: "CLEAN",
+      planPath: `superpowers/docs/plans/spec-${runIdentity.specId}.md`,
+      generatedContentIdentity: `sha256:${"4".repeat(64)}`,
       firstUnsatisfiedStage: null,
       handoffIdentity: `${producerCommand}:handoff:${runIdentity.specId}`,
     },
@@ -68,7 +77,7 @@ const readyHandoffFor = (runIdentity) => {
       producerCommand,
       specId: runIdentity.specId,
       target: runIdentity.target,
-      planningSeal: "c".repeat(40),
+      planningSeal: selectedPlanningSeal,
       classification: runIdentity.classification,
       approvedScopeHash: runIdentity.approvedScopeHash,
       recordIdentities,
@@ -76,9 +85,18 @@ const readyHandoffFor = (runIdentity) => {
     },
     trackerRecordIdentities: recordIdentities,
     decompositionIdentity: runIdentity.decompositionIdentity,
+    targetOwnership: "NONE",
     evidence: [],
   };
 };
+
+const defaultRunReadyHandoffAdapter = {
+  async read({ current }) { return current.runReadyHandoff; },
+};
+const createWorkflowRuntime = (options) => createWorkflowRuntimeSource({
+  handoff: defaultRunReadyHandoffAdapter,
+  ...options,
+});
 
 const singleRunCurrent = ({
   journal = [],
@@ -89,6 +107,7 @@ const singleRunCurrent = ({
 }) => ({
   runIdentity: identity,
   grant: { runIdentity: identity, maxParallel: 3 },
+  planningSeal: selectedPlanningSeal,
   runReadyHandoff,
   taskRefs: Object.fromEntries(journal
     .filter(({ type }) => type === "dispatch.recorded")
@@ -231,6 +250,7 @@ test("end-to-end Run-ready handoff stop performs only read-only cleanup preview"
   let taskCalls = 0;
   let browserCalls = 0;
   let cleanupReads = 0;
+  let handoffReads = 0;
   const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"].map((name) => [
     name,
     async () => { taskCalls += 1; throw new Error(`unexpected task call ${name}`); },
@@ -240,6 +260,13 @@ test("end-to-end Run-ready handoff stop performs only read-only cleanup preview"
       store,
       tracker: { async read() { return {}; } },
       tasks,
+      handoff: {
+        async read({ tracker: trackerSnapshot, current }) {
+          handoffReads += 1;
+          assert.deepEqual(trackerSnapshot, {});
+          return current.runReadyHandoff;
+        },
+      },
       reconcile: async ({ journal }) => singleRunCurrent({
         journal,
         runReadyHandoff,
@@ -264,6 +291,7 @@ test("end-to-end Run-ready handoff stop performs only read-only cleanup preview"
     assert.equal(cleanupReads, 1);
     assert.equal(taskCalls, 0);
     assert.equal(browserCalls, 0);
+    assert.equal(handoffReads, 1);
     assert.deepEqual(store.readEvents(identity.runId), []);
     assert.equal(store.readWriterLock(identity.runId), null);
   } finally {
@@ -523,6 +551,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
   const reconcile = async ({ journal }) => ({
     runIdentity: multiIdentity,
     grant: { runIdentity: multiIdentity, maxParallel: 2 },
+    planningSeal: selectedPlanningSeal,
     runReadyHandoff: readyHandoffFor(multiIdentity),
     taskRefs: Object.fromEntries(journal
       .filter(({ type }) => type === "dispatch.recorded")

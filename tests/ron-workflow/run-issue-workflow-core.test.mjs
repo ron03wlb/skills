@@ -166,12 +166,20 @@ const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
     schema: RUN_READY_FACT_SCHEMA,
     authority,
     targetState: "CLEAN",
+    targetOwnership: "NONE",
     checkpoint: {
       state: "COMPLETED",
       producerCommand,
       transactionIdentity: `sha256:${"3".repeat(64)}`,
       specId: authority.specId,
       target: authority.target,
+      planningSeal: authority.planningSeal,
+      classification: authority.classification,
+      approvedScopeHash: authority.approvedScopeHash,
+      baseline: "a".repeat(40),
+      initialTargetState: "CLEAN",
+      planPath: "superpowers/docs/plans/spec-31.md",
+      generatedContentIdentity: `sha256:${"4".repeat(64)}`,
       firstUnsatisfiedStage: null,
       handoffIdentity: `${producerCommand}:handoff:31`,
     },
@@ -235,6 +243,7 @@ test("Run-ready handoff returns actionable INCOMPLETE for one exact producer tra
       input.handoff = null;
       input.trackerRecordIdentities = [];
       input.decompositionIdentity = null;
+      input.targetOwnership = input.targetState === "CLEAN" ? "NONE" : "EXACT_PRODUCER";
 
       const result = reduceRunReadyHandoff(input);
 
@@ -257,6 +266,7 @@ test("Run-ready handoff returns actionable INCOMPLETE for one exact producer tra
 test("Run-ready handoff returns stable UNKNOWN diagnoses for unowned or contradictory evidence", () => {
   const dirty = runReadyFacts();
   dirty.targetState = "DIRTY";
+  dirty.targetOwnership = "UNOWNED";
 
   const wrongProducer = runReadyFacts({ classification: "MULTI" });
   wrongProducer.handoff.producerCommand = "to-spec";
@@ -296,6 +306,31 @@ test("Run-ready handoff returns stable UNKNOWN diagnoses for unowned or contradi
     assert.ok(result.evidence.length > 0);
     assert.ok(result.recoveryPredicates.length > 0);
   }
+
+  const wrongProducerResult = reduceRunReadyHandoff(wrongProducer);
+  assert.equal(wrongProducerResult.observed.handoffProducerCommand, "to-spec");
+  assert.equal(wrongProducerResult.observed.handoffTarget, "features/ron");
+  assert.equal(wrongProducerResult.observed.handoffPlanningSeal, "c".repeat(40));
+  assert.equal(wrongProducerResult.observed.handoffClassification, "MULTI");
+  assert.equal(wrongProducerResult.observed.handoffApprovedScopeHash, `sha256:${"2".repeat(64)}`);
+});
+
+test("Run-ready handoff requires exact producer ownership for dirty incomplete state", () => {
+  const input = runReadyFacts();
+  input.checkpoint = {
+    ...input.checkpoint,
+    state: "INCOMPLETE",
+    firstUnsatisfiedStage: "checkpoint.committed",
+    handoffIdentity: null,
+  };
+  input.handoff = null;
+  input.trackerRecordIdentities = [];
+  input.targetState = "DIRTY";
+  input.targetOwnership = "UNOWNED";
+
+  assert.equal(reduceRunReadyHandoff(input).state, "UNKNOWN");
+  input.targetOwnership = "EXACT_PRODUCER";
+  assert.equal(reduceRunReadyHandoff(input).state, "INCOMPLETE");
 });
 
 test("workflow checkpoint transaction creation is exact and retryable", () => {

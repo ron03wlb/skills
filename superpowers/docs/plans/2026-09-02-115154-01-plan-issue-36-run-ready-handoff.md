@@ -10,7 +10,7 @@
 - Verify: `rtk node --test --test-name-pattern="Run-ready handoff|READY|INCOMPLETE|UNKNOWN|producer handoff|checkpoint transaction" tests/ron-workflow/run-issue-workflow-core.test.mjs`
 
 ### Outcome 2: Fence runtime composition and coordinator mutation behind READY
-- Work: Extend the owning-source reconciliation contract to supply the compact fact once from existing tracker, target, transaction, and decomposition reads. Consume and reduce it in `run-coordinator.mjs` before cleanup, engine or target writer acquisition, Grant append, panel open, task or leaf action, and retain the existing reconciliation lifecycle only after `READY`.
+- Work: Add one owning-source handoff adapter to `run-workflow.mjs`; invoke it once with the already-read tracker and reconciliation snapshots so it reuses their Spec, target, Planning Seal, record, and decomposition facts while performing one checkpoint classification read. Consume and reduce that compact fact in `run-coordinator.mjs` before cleanup, engine or target writer acquisition, Grant append, panel open, task or leaf action, and retain the existing reconciliation lifecycle only after `READY`.
 - Risks/open questions: Non-READY paths must remain read-only even on explicit and no-argument entry, and existing outage, control, retry, adoption, closeout, and coordinator-loss behavior must remain unchanged after READY.
 - Verify: `rtk node --test --test-name-pattern="Run-ready handoff|READY|INCOMPLETE|UNKNOWN|producer handoff|checkpoint transaction" tests/ron-workflow/run-issue-workflow-coordinator.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs`
 

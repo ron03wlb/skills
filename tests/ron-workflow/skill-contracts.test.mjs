@@ -2714,6 +2714,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
 
   const skill = read(skillPath);
   const metadata = read(metadataPath);
+  const runtime = read(runtimePath);
   const core = read(corePath);
   const coordinator = read(coordinatorPath);
   const operator = read(operatorPath);
@@ -2724,15 +2725,19 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skill, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
   assert.match(skill, /DAG Run Grant.*`max_parallel`.*default three/isu);
-  assert.match(skill, /`run-ready-handoff-facts:v1`.*derived once.*selected Spec.*target cleanliness.*Git-common-dir.*tracker record identities.*Decomposition publication/isu);
+  assert.match(skill, /owning-source `handoff\.read` adapter.*Invoke it once.*already-read tracker snapshot.*reconciliation snapshot.*Spec.*target.*Planning Seal.*approved-scope.*tracker record.*Decomposition.*one Git-common-dir.*checkpoint.*`run-ready-handoff-facts:v1`/isu);
   assert.match(skill, /Single-Issue.*only.*`to-spec`.*`handoff\.completed`.*one immutable v1 record identity.*Multi-Issue.*only.*`to-tickets`.*consumed `to-spec`.*`to-tickets`.*immutable v1 record identities.*`decomposition:v1`/isu);
   assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker record identities.*clean target.*decomposition identity/isu);
-  assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*transaction identity.*first unsatisfied stage.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
-  assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*observed facts.*no-automatic-transition.*recovery predicates/isu);
+  assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*Planning Seal.*classification.*approved-scope identity.*baseline.*initially-clean state.*plan path.*generated-content identity.*transaction identity.*first unsatisfied stage.*dirty target.*exact producer owns.*ordinary or unknown dirt.*`UNKNOWN`.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
+  assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*exact observed checkpoint and handoff producer.*Spec.*target.*Planning Seal.*classification.*scope.*record.*decomposition.*no-automatic-transition.*recovery predicates/isu);
   assert.match(skill, /does not revalidate.*generated-content hashes.*whole-commit.*v1 record semantics.*producer review.*tests.*aggregate coverage.*retry correctness/isu);
   assert.match(skill, /before `onSelected`.*non-`READY`.*read-only cleanup preview.*cannot apply cleanup.*engine or target writer.*Grant.*panel.*task.*leaf.*tracker or Git/isu);
   assert.match(core, /RUN_READY_FACT_SCHEMA.*run-ready-handoff-facts:v1.*RUN_READY_RESULT_SCHEMA.*run-ready-handoff:v1.*reduceRunReadyHandoff/isu);
-  assert.match(coordinator, /reduceRunReadyHandoff\(current\.runReadyHandoff\).*state !== "READY".*runReadyStop.*onSelected/isu);
+  assert.match(runtime, /requireMethod\(handoff, "read"\).*createCoordinator.*handoff/isu);
+  assert.match(coordinator, /handoff\.read\(\{.*tracker: trackerResult\.snapshot.*current.*reduceRunReadyHandoff\(runReadyFacts\).*planningSeal.*state !== "READY".*runReadyStop.*onSelected/isu);
+  assert.match(core, /targetOwnership.*EXACT_PRODUCER/isu);
+  assert.match(core, /checkpoint\.planningSeal.*checkpoint\.baseline.*checkpoint\.planPath.*checkpoint\.generatedContentIdentity/isu);
+  assert.match(core, /handoffPlanningSeal.*handoffApprovedScopeHash/isu);
   assert.match(skill, /saved project.*`local` environment/isu);
   assert.match(skill, /Every executable Issue maps to one sidebar-visible child Codex task/iu);
   assert.match(skill, /Never create a duplicate live lane/iu);

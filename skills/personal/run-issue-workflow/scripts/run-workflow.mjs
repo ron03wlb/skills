@@ -16,6 +16,7 @@ export function createWorkflowRuntime({
   tasks,
   selector,
   reconcile,
+  handoff,
   leaf,
   environment,
   browser,
@@ -28,6 +29,7 @@ export function createWorkflowRuntime({
   }
   requireMethod(browser, "open");
   requireMethod(cleanup, "listRuns");
+  requireMethod(handoff, "read");
 
   let active = false;
   return {
@@ -93,6 +95,7 @@ export function createWorkflowRuntime({
         tasks,
         selector,
         reconcile,
+        handoff,
         leaf,
         environment,
         panel,

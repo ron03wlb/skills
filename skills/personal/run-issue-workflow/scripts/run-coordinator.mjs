@@ -18,6 +18,7 @@ const RUN_READY_AUTHORITY_KEYS = Object.freeze([
   "target",
   "classification",
   "decompositionIdentity",
+  "planningSeal",
 ]);
 const RECLAIM_CONTENTION = Object.freeze([
   "RECLAIM_GATE_LOCKED",
@@ -311,6 +312,7 @@ export function createCoordinator({
   tasks,
   selector,
   reconcile,
+  handoff,
   leaf,
   environment,
   panel,
@@ -335,6 +337,7 @@ export function createCoordinator({
     throw new TypeError("Coordinator onSelected must be a function");
   }
   if (typeof reconcile !== "function") throw new TypeError("Coordinator requires reconcile()");
+  requireMethod(handoff, "read");
   if (typeof now !== "function") throw new TypeError("Coordinator requires now()");
   if (typeof sleep !== "function") throw new TypeError("Coordinator requires sleep()");
 
@@ -676,10 +679,17 @@ export function createCoordinator({
             });
           }
           if (!runIdentity) {
-            let runReadyHandoff = reduceRunReadyHandoff(current.runReadyHandoff);
+            const runReadyFacts = await handoff.read({
+              request: selectedRequest,
+              tracker: trackerResult.snapshot,
+              current,
+            });
+            let runReadyHandoff = reduceRunReadyHandoff(runReadyFacts);
             if (runReadyHandoff.state === "READY") {
               const mismatch = RUN_READY_AUTHORITY_KEYS.find((key) => (
-                current.runReadyHandoff.authority[key] !== current.runIdentity[key]
+                runReadyFacts.authority[key] !== (key === "planningSeal"
+                  ? current.planningSeal
+                  : current.runIdentity[key])
               ));
               if (mismatch) {
                 runReadyHandoff = {

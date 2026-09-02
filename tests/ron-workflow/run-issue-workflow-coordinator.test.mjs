@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
-  createCoordinator,
+  createCoordinator as createCoordinatorRuntime,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
@@ -41,6 +41,8 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:01-05",
 };
 
+const selectedPlanningSeal = "c".repeat(40);
+
 const readyHandoffFor = (runIdentity) => {
   const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const recordIdentities = runIdentity.classification === "SINGLE"
@@ -51,7 +53,7 @@ const readyHandoffFor = (runIdentity) => {
     authority: {
       specId: runIdentity.specId,
       target: runIdentity.target,
-      planningSeal: "c".repeat(40),
+      planningSeal: selectedPlanningSeal,
       classification: runIdentity.classification,
       approvedScopeHash: runIdentity.approvedScopeHash,
       decompositionIdentity: runIdentity.decompositionIdentity,
@@ -63,6 +65,13 @@ const readyHandoffFor = (runIdentity) => {
       transactionIdentity: `sha256:${"3".repeat(64)}`,
       specId: runIdentity.specId,
       target: runIdentity.target,
+      planningSeal: selectedPlanningSeal,
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      baseline: "a".repeat(40),
+      initialTargetState: "CLEAN",
+      planPath: `superpowers/docs/plans/spec-${runIdentity.specId}.md`,
+      generatedContentIdentity: `sha256:${"4".repeat(64)}`,
       firstUnsatisfiedStage: null,
       handoffIdentity: `${producerCommand}:handoff:${runIdentity.specId}`,
     },
@@ -71,7 +80,7 @@ const readyHandoffFor = (runIdentity) => {
       producerCommand,
       specId: runIdentity.specId,
       target: runIdentity.target,
-      planningSeal: "c".repeat(40),
+      planningSeal: selectedPlanningSeal,
       classification: runIdentity.classification,
       approvedScopeHash: runIdentity.approvedScopeHash,
       recordIdentities,
@@ -79,9 +88,18 @@ const readyHandoffFor = (runIdentity) => {
     },
     trackerRecordIdentities: recordIdentities,
     decompositionIdentity: runIdentity.decompositionIdentity,
+    targetOwnership: "NONE",
     evidence: [],
   };
 };
+
+const defaultRunReadyHandoffAdapter = {
+  async read({ current }) { return current.runReadyHandoff; },
+};
+const createCoordinator = (options) => createCoordinatorRuntime({
+  handoff: defaultRunReadyHandoffAdapter,
+  ...options,
+});
 
 const reconciliation = ({
   runIdentity = identity,
@@ -94,6 +112,7 @@ const reconciliation = ({
 }) => ({
   runIdentity,
   grant: { runIdentity, maxParallel },
+  planningSeal: selectedPlanningSeal,
   runReadyHandoff,
   taskRefs,
   facts: {
@@ -118,6 +137,7 @@ test("Run-ready handoff INCOMPLETE and UNKNOWN stop before cleanup, writer, Gran
     const { root, store } = createStoreFixture();
     let selected = 0;
     let taskCalls = 0;
+    let handoffReads = 0;
     const runReadyHandoff = readyHandoffFor(identity);
     if (entryState === "INCOMPLETE") {
       runReadyHandoff.checkpoint = {
@@ -140,6 +160,12 @@ test("Run-ready handoff INCOMPLETE and UNKNOWN stop before cleanup, writer, Gran
         store,
         tracker: { async read() { return {}; } },
         tasks,
+        handoff: {
+          async read({ current }) {
+            handoffReads += 1;
+            return current.runReadyHandoff;
+          },
+        },
         reconcile: async () => reconciliation({
           runReadyHandoff,
           nodes: [{
@@ -164,11 +190,54 @@ test("Run-ready handoff INCOMPLETE and UNKNOWN stop before cleanup, writer, Gran
       assert.equal(status.legalActions.length, 0);
       assert.equal(selected, 0);
       assert.equal(taskCalls, 0);
+      assert.equal(handoffReads, 1);
       assert.deepEqual(store.readEvents(identity.runId), []);
       assert.equal(store.readWriterLock(identity.runId), null);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("Run-ready handoff rejects a stale Planning Seal before Run mutation", async () => {
+  const { root, store } = createStoreFixture();
+  try {
+    const current = reconciliation({
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      }],
+    });
+    current.planningSeal = "d".repeat(40);
+    const forbidden = async () => { throw new Error("stale Planning Seal permits no task action"); };
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks: {
+        findIssueLane: forbidden,
+        create: forbidden,
+        read: forbidden,
+        message: forbidden,
+        wait: forbidden,
+      },
+      reconcile: async () => current,
+      now: () => "2026-09-02T00:00:00.000Z",
+      sleep: async () => {},
+    });
+
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.runReadyHandoff.state, "UNKNOWN");
+    assert.equal(status.runReadyHandoff.reasonCode, "selected_authority_conflict");
+    assert.match(status.runReadyHandoff.evidence[0], /planningSeal/u);
+    assert.deepEqual(store.readEvents(identity.runId), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

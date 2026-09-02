@@ -57,6 +57,8 @@ const compareIds = (left, right) => String(left).localeCompare(String(right), "e
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const gitObjectPattern = /^[a-f0-9]{40,64}$/u;
+const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
+const normalizedPathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))(?!.*\\).+/u;
 
 const observedRunReadyFacts = (input) => ({
   targetState: isText(input?.targetState) ? input.targetState : null,
@@ -69,9 +71,34 @@ const observedRunReadyFacts = (input) => ({
     : null,
   handoffIdentity: isText(input?.handoff?.identity) ? input.handoff.identity : null,
   trackerRecordIdentities: Array.isArray(input?.trackerRecordIdentities)
-    ? [...input.trackerRecordIdentities]
+    ? input.trackerRecordIdentities.filter(isText)
     : [],
   decompositionIdentity: isText(input?.decompositionIdentity) ? input.decompositionIdentity : null,
+  targetOwnership: isText(input?.targetOwnership) ? input.targetOwnership : null,
+  checkpointPlanningSeal: isText(input?.checkpoint?.planningSeal) ? input.checkpoint.planningSeal : null,
+  checkpointClassification: isText(input?.checkpoint?.classification) ? input.checkpoint.classification : null,
+  checkpointApprovedScopeHash: isText(input?.checkpoint?.approvedScopeHash)
+    ? input.checkpoint.approvedScopeHash
+    : null,
+  checkpointBaseline: isText(input?.checkpoint?.baseline) ? input.checkpoint.baseline : null,
+  checkpointPlanPath: isText(input?.checkpoint?.planPath) ? input.checkpoint.planPath : null,
+  checkpointGeneratedContentIdentity: isText(input?.checkpoint?.generatedContentIdentity)
+    ? input.checkpoint.generatedContentIdentity
+    : null,
+  handoffProducerCommand: isText(input?.handoff?.producerCommand) ? input.handoff.producerCommand : null,
+  handoffSpecId: isText(input?.handoff?.specId) ? input.handoff.specId : null,
+  handoffTarget: isText(input?.handoff?.target) ? input.handoff.target : null,
+  handoffPlanningSeal: isText(input?.handoff?.planningSeal) ? input.handoff.planningSeal : null,
+  handoffClassification: isText(input?.handoff?.classification) ? input.handoff.classification : null,
+  handoffApprovedScopeHash: isText(input?.handoff?.approvedScopeHash)
+    ? input.handoff.approvedScopeHash
+    : null,
+  handoffRecordIdentities: Array.isArray(input?.handoff?.recordIdentities)
+    ? input.handoff.recordIdentities.filter(isText)
+    : [],
+  handoffDecompositionIdentity: isText(input?.handoff?.decompositionIdentity)
+    ? input.handoff.decompositionIdentity
+    : null,
 });
 
 const runReadyResult = (input, {
@@ -129,7 +156,8 @@ export function reduceRunReadyHandoff(input) {
   if (input?.schema !== RUN_READY_FACT_SCHEMA || !validAuthority || !isRecord(checkpoint)
     || !isText(checkpoint.state) || !Array.isArray(input.trackerRecordIdentities)
     || !input.trackerRecordIdentities.every(isText) || !Array.isArray(input.evidence)
-    || !input.evidence.every(isText)) {
+    || !input.evidence.every(isText)
+    || !["NONE", "EXACT_PRODUCER", "UNOWNED", "UNKNOWN"].includes(input.targetOwnership)) {
     return unknownRunReady(
       input,
       "invalid_run_ready_facts",
@@ -142,7 +170,14 @@ export function reduceRunReadyHandoff(input) {
   const checkpointOwnsScope = checkpoint.producerCommand === expectedProducer
     && checkpoint.specId === authority.specId
     && checkpoint.target === authority.target
-    && isText(checkpoint.transactionIdentity);
+    && checkpoint.planningSeal === authority.planningSeal
+    && checkpoint.classification === authority.classification
+    && checkpoint.approvedScopeHash === authority.approvedScopeHash
+    && isText(checkpoint.transactionIdentity)
+    && gitObjectPattern.test(checkpoint.baseline)
+    && checkpoint.initialTargetState === "CLEAN"
+    && normalizedPathPattern.test(checkpoint.planPath)
+    && sha256Pattern.test(checkpoint.generatedContentIdentity);
   if (input.evidence.length > 0 || ["UNKNOWN", "MULTIPLE"].includes(checkpoint.state)) {
     return unknownRunReady(
       input,
@@ -166,6 +201,16 @@ export function reduceRunReadyHandoff(input) {
         "checkpoint_owner_ambiguous",
         ["The active or incomplete transaction does not prove one exact immediate-upstream producer and stage."],
         ["one_exact_producer_transaction_is_identified"],
+      );
+    }
+    const dirtyOwned = input.targetState === "DIRTY" && input.targetOwnership === "EXACT_PRODUCER";
+    const cleanTarget = input.targetState === "CLEAN" && input.targetOwnership === "NONE";
+    if (!dirtyOwned && !cleanTarget) {
+      return unknownRunReady(
+        input,
+        input.targetState === "DIRTY" ? "target_dirty_without_owner" : "target_state_uncertain",
+        [`Target ${authority.target} does not have exact producer-owned incomplete state.`],
+        ["target_is_clean_or_exact_incomplete_owner_is_proven"],
       );
     }
     return runReadyResult(input, {
@@ -216,6 +261,14 @@ export function reduceRunReadyHandoff(input) {
       "target_state_uncertain",
       [`Target ${authority.target} cleanliness is ${String(input.targetState ?? "unknown")}.`],
       ["target_state_is_known"],
+    );
+  }
+  if (input.targetOwnership !== "NONE") {
+    return unknownRunReady(
+      input,
+      "target_ownership_conflict",
+      [`Clean target ${authority.target} has contradictory ownership state ${input.targetOwnership}.`],
+      ["clean_target_has_no_dirty_owner"],
     );
   }
   if (!checkpointOwnsScope || checkpoint.firstUnsatisfiedStage !== null
