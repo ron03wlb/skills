@@ -588,11 +588,6 @@ export function createWorkflowControlStore({ gitCommonDir }) {
   };
 
   const advanceLegacyCheckpoint = ({ identity, stage, result }) => {
-    if (identity.producerCommand !== "to-spec") {
-      throw fail("WORKFLOW_CHECKPOINT_LEGACY_RESUME_UNSUPPORTED", [
-        "Only exact valid incomplete to-spec v1 transactions may resume.",
-      ]);
-    }
     if (!WORKFLOW_CHECKPOINT_STAGES.includes(stage)) throw new TypeError(`Unknown workflow checkpoint stage ${stage}`);
     validateLegacyStageResult(stage, result, identity);
     const scopeKey = legacyScopeKeyFor(identity);

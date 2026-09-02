@@ -784,6 +784,38 @@ test("workflow checkpoint legacy receipts stay v1 and exact incomplete to-spec r
   }
 });
 
+test("workflow checkpoint legacy resume retains frozen producer-neutral v1 validation", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-legacy-producer-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentity({
+      producerCommand: "legacy-producer",
+      specOperationId: "37:primary",
+    });
+    writeLegacyCheckpoint({
+      gitCommonDir,
+      identity,
+      progress: [{
+        stage: "plan.written",
+        result: {
+          path: identity.planPath,
+          contentIdentity: identity.generatedContentIdentity,
+        },
+      }],
+    });
+
+    const advanced = store.advanceCheckpoint({
+      identity,
+      stage: "checkpoint.committed",
+      result: { commit: "a".repeat(40) },
+    });
+    assert.equal(advanced.schema, LEGACY_WORKFLOW_CHECKPOINT_SCHEMA);
+    assert.equal(advanced.nextStage, "attestation.read_back");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("target mutation writer serializes generic producers with legacy closeout on one target", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("target-mutation-writer-");
   try {
