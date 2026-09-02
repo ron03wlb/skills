@@ -30,8 +30,10 @@ import {
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import {
   createWorkflowControlStore,
+  LEGACY_WORKFLOW_CHECKPOINT_SCHEMA,
+  WORKFLOW_CHECKPOINT_PROFILES,
+  WORKFLOW_CHECKPOINT_SCHEMA,
   WORKFLOW_CHECKPOINT_STAGES,
-  WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 
 const node = (issueId, blockers = []) => ({
@@ -134,18 +136,42 @@ const checkpointIdentity = (overrides = {}) => ({
   ...overrides,
 });
 
-const checkpointWriterOwner = (identity, operation) => {
+const checkpointIdentityV2 = (overrides = {}) => ({
+  repositoryId: "github:ron03wlb/skills",
+  specId: "31",
+  producerCommand: "to-spec",
+  operationId: "primary",
+  profileVersion: "v1",
+  target: "features/ron",
+  baseline: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+  bindings: {
+    planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+    plan: {
+      path: "superpowers/docs/plans/spec-31.md",
+      contentIdentity: `sha256:${"1".repeat(64)}`,
+    },
+  },
+  ...overrides,
+});
+
+const writeLegacyCheckpoint = ({ gitCommonDir, identity, progress = [] }) => {
   const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
-  return {
-    schema: WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
-    operation,
-    scopeKey: `sha256:${digest({
-      repositoryId: identity.repositoryId,
-      specOperationId: identity.specOperationId,
-    })}`,
+  const scopeKey = `sha256:${digest({
+    repositoryId: identity.repositoryId,
+    specOperationId: identity.specOperationId,
+  })}`;
+  const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
+  const path = join(transactionsRoot, `${scopeKey.slice("sha256:".length)}.json`);
+  const transaction = {
+    schema: LEGACY_WORKFLOW_CHECKPOINT_SCHEMA,
+    scopeKey,
     transactionId: `sha256:${digest(identity)}`,
     identity,
+    progress,
   };
+  mkdirSync(transactionsRoot, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
+  return path;
 };
 
 const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
@@ -333,41 +359,293 @@ test("Run-ready handoff requires exact producer ownership for dirty incomplete s
   assert.equal(reduceRunReadyHandoff(input).state, "INCOMPLETE");
 });
 
-test("workflow checkpoint transaction creation is exact and retryable", () => {
-  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-create-");
+test("workflow checkpoint producer profiles create only supported v2 transactions", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-profiles-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const identity = checkpointIdentity();
-    const created = store.createCheckpoint(identity);
+    const toSpec = checkpointIdentityV2();
+    const toTickets = checkpointIdentityV2({
+      producerCommand: "to-tickets",
+      operationId: `decomposition:sha256:${"2".repeat(64)}`,
+      bindings: {
+        approvedScopeIdentity: `sha256:${"2".repeat(64)}`,
+        planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+      },
+    });
+
+    assert.equal(WORKFLOW_CHECKPOINT_SCHEMA, "workflow-checkpoint-transaction:v2");
+    assert.deepEqual(WORKFLOW_CHECKPOINT_PROFILES["to-spec@v1"], [
+      "plan.written",
+      "checkpoint.committed",
+      "attestation.read_back",
+      "publication.read_back",
+      "handoff.completed",
+    ]);
+    assert.deepEqual(WORKFLOW_CHECKPOINT_PROFILES["to-tickets@v1"], [
+      "plan.written",
+      "checkpoint.committed",
+      "attestation.read_back",
+      "decomposition.read_back",
+      "ready_state.read_back",
+      "handoff.completed",
+    ]);
+
+    const specCheckpoint = store.createCheckpoint(toSpec);
+    const ticketsCheckpoint = store.createCheckpoint(toTickets);
+    assert.equal(specCheckpoint.schema, WORKFLOW_CHECKPOINT_SCHEMA);
+    assert.equal(specCheckpoint.nextStage, "plan.written");
+    assert.deepEqual(Object.keys(specCheckpoint.identity.bindings), ["plan", "planningSeal"]);
+    assert.equal(ticketsCheckpoint.schema, WORKFLOW_CHECKPOINT_SCHEMA);
+    assert.equal(ticketsCheckpoint.nextStage, "plan.written");
+    assert.notEqual(specCheckpoint.scopeKey, ticketsCheckpoint.scopeKey);
+    assert.equal(Object.hasOwn(store, "classifyCheckpoints"), false);
+
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({ producerCommand: "caller-defined" })),
+      /Unsupported workflow checkpoint profile/u,
+    );
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({ profileVersion: "v2" })),
+      /Unsupported workflow checkpoint profile/u,
+    );
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({ stages: ["caller.stage"] })),
+      /unknown field stages/u,
+    );
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({ bindings: {} })),
+      /non-empty object/u,
+    );
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({ bindings: { apiToken: "do-not-store" } })),
+      /secret field apiToken/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint operations are exact, retryable, and isolated on one target", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operations-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const first = checkpointIdentityV2();
+    const created = store.createCheckpoint(first);
 
     assert.equal(created.state, "INCOMPLETE");
     assert.equal(created.nextStage, "plan.written");
-    assert.deepEqual(store.createCheckpoint(identity), created);
-    assert.deepEqual(store.readCheckpoint(identity), created);
+    assert.deepEqual(store.createCheckpoint(first), created);
+    assert.deepEqual(store.readCheckpoint(first), created);
+    assert.deepEqual(store.createCheckpoint(checkpointIdentityV2({
+      bindings: {
+        plan: {
+          contentIdentity: `sha256:${"1".repeat(64)}`,
+          path: "superpowers/docs/plans/spec-31.md",
+        },
+        planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+      },
+    })), created);
     for (const drift of [
-      { producerCommand: "to-tickets" },
       { target: "features/changed" },
       { baseline: "b".repeat(40) },
-      { planPath: "superpowers/docs/plans/changed.md" },
-      { generatedContentIdentity: `sha256:${"2".repeat(64)}` },
+      { bindings: { planningSeal: "b".repeat(40) } },
     ]) {
       assert.throws(
-        () => store.createCheckpoint(checkpointIdentity(drift)),
+        () => store.createCheckpoint(checkpointIdentityV2(drift)),
         (error) => error.code === "WORKFLOW_CHECKPOINT_IDENTITY_MISMATCH",
       );
     }
-    assert.throws(
-      () => store.createCheckpoint(checkpointIdentity({ specOperationId: "31:revision:2" })),
-      (error) => error.code === "WORKFLOW_CHECKPOINT_CONFLICT",
-    );
-    assert.deepEqual(store.classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    }), {
-      state: "INCOMPLETE",
-      transactions: [created],
-      evidence: [],
+    const revision = checkpointIdentityV2({
+      operationId: "revision:2",
+      baseline: "b".repeat(40),
+      bindings: { planningSeal: "b".repeat(40) },
     });
+    const decomposition = checkpointIdentityV2({
+      producerCommand: "to-tickets",
+      operationId: "decomposition:approved-scope",
+      bindings: { approvedScopeIdentity: "approved-scope" },
+    });
+    assert.equal(store.createCheckpoint(revision).state, "INCOMPLETE");
+    assert.equal(store.createCheckpoint(decomposition).state, "INCOMPLETE");
+    assert.equal(
+      readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"))
+        .filter((name) => name.endsWith(".json")).length,
+      3,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint writer locks only one exact operation", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operation-lock-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const first = checkpointIdentityV2();
+    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const firstCheckpoint = store.createCheckpoint(first);
+    const secondCheckpoint = store.createCheckpoint(second);
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    mkdirSync(writersRoot, { recursive: true });
+    const firstLock = join(writersRoot, `${firstCheckpoint.scopeKey.slice("sha256:".length)}.lock`);
+    mkdirSync(firstLock);
+
+    assert.throws(
+      () => store.readCheckpoint(first),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
+    assert.deepEqual(store.readCheckpoint(second), secondCheckpoint);
+
+    rmSync(firstLock, { recursive: true, force: false });
+    assert.deepEqual(store.readCheckpoint(first), firstCheckpoint);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint ignores a legacy writer owned by another producer", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-legacy-writer-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const legacyIdentity = checkpointIdentity({ specOperationId: "36:primary" });
+    const legacyPath = writeLegacyCheckpoint({ gitCommonDir, identity: legacyIdentity });
+    const legacy = JSON.parse(readFileSync(legacyPath, "utf8"));
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    const legacyLock = join(writersRoot, `${legacy.scopeKey.slice("sha256:".length)}.lock`);
+    mkdirSync(legacyLock, { recursive: true });
+    writeFileSync(join(legacyLock, "owner.json"), `${JSON.stringify({
+      schema: "workflow-checkpoint-writer:v1",
+      operation: "advance",
+      scopeKey: legacy.scopeKey,
+      transactionId: legacy.transactionId,
+      identity: legacyIdentity,
+    }, null, 2)}\n`, "utf8");
+
+    const current = checkpointIdentityV2({
+      specId: "36",
+      producerCommand: "to-tickets",
+      bindings: { approvedScopeIdentity: "approved-scope" },
+    });
+    assert.equal(store.createCheckpoint(current).schema, WORKFLOW_CHECKPOINT_SCHEMA);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint partial persistence blocks only its exact operation", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operation-transient-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const first = checkpointIdentityV2();
+    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const firstCheckpoint = store.createCheckpoint(first);
+    const secondCheckpoint = store.createCheckpoint(second);
+
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    const scopeHash = firstCheckpoint.scopeKey.slice("sha256:".length);
+    const partial = join(writersRoot, `${scopeHash}.tmp-interrupted`);
+    writeFileSync(partial, "partial", "utf8");
+
+    assert.throws(
+      () => store.readCheckpoint(first),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
+    assert.deepEqual(store.readCheckpoint(second), secondCheckpoint);
+    rmSync(partial);
+    assert.deepEqual(store.readCheckpoint(first), firstCheckpoint);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint stage receipts are opaque, canonical, and profile ordered", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-receipts-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentityV2({
+      producerCommand: "to-tickets",
+      operationId: "decomposition:approved-scope",
+      bindings: {
+        planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+        approvedScopeIdentity: "approved-scope",
+      },
+    });
+    store.createCheckpoint(identity);
+
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "checkpoint.committed",
+        receipt: { arbitrary: "receipt" },
+      }),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STAGE_OUT_OF_ORDER",
+    );
+
+    const receipts = [
+      { nested: { z: 1, a: 2 }, arbitrary: "plan" },
+      { arbitrary: "commit" },
+      { arbitrary: "attestation" },
+      { arbitrary: "decomposition" },
+      { arbitrary: "ready" },
+      { arbitrary: "handoff" },
+    ];
+    let current;
+    WORKFLOW_CHECKPOINT_PROFILES["to-tickets@v1"].forEach((stage, index) => {
+      current = store.advanceCheckpoint({ identity, stage, receipt: receipts[index] });
+      assert.deepEqual(
+        store.advanceCheckpoint({ identity, stage, receipt: receipts[index] }),
+        current,
+      );
+    });
+
+    assert.equal(current.state, "COMPLETED");
+    assert.equal(current.nextStage, null);
+    assert.deepEqual(current.progress[0].receipt, {
+      arbitrary: "plan",
+      nested: { a: 2, z: 1 },
+    });
+    assert.deepEqual(Object.keys(current.progress[0]), ["stage", "receipt"]);
+    assert.deepEqual(
+      store.advanceCheckpoint({
+        identity,
+        stage: "plan.written",
+        receipt: { arbitrary: "plan", nested: { a: 2, z: 1 } },
+      }),
+      current,
+    );
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "handoff.completed",
+        receipt: { arbitrary: "changed" },
+      }),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_RESULT_MISMATCH",
+    );
+    assert.throws(
+      () => store.advanceCheckpoint({ identity, stage: "unknown.stage", receipt: { value: 1 } }),
+      /Unknown workflow checkpoint stage/u,
+    );
+    assert.throws(
+      () => store.advanceCheckpoint({ identity, stage: "handoff.completed", receipt: {} }),
+      /non-empty object/u,
+    );
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "handoff.completed",
+        receipt: { apiToken: "must-not-persist" },
+      }),
+      /secret field apiToken/u,
+    );
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "handoff.completed",
+        result: { arbitrary: "legacy envelope" },
+      }),
+      /requires receipt/u,
+    );
+    assert.deepEqual(store.readCheckpoint(identity), current);
     assert.equal(
       readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"))
         .some((name) => name.includes(".tmp-")),
@@ -378,248 +656,129 @@ test("workflow checkpoint transaction creation is exact and retryable", () => {
   }
 });
 
-test("workflow checkpoint creation is atomically gated per target without blocking another target", () => {
-  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-target-gate-");
-  try {
-    const store = createWorkflowControlStore({ gitCommonDir });
-    const identity = checkpointIdentity();
-    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
-    const targetKey = createHash("sha256").update(JSON.stringify({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    })).digest("hex");
-    const targetGate = join(writersRoot, `target-${targetKey}.lock`);
-    mkdirSync(writersRoot, { recursive: true });
-    mkdirSync(targetGate);
-    writeFileSync(
-      join(targetGate, "owner.json"),
-      `${JSON.stringify(checkpointWriterOwner(identity, "create"), null, 2)}\n`,
-      "utf8",
-    );
-
-    const active = store.classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    });
-    assert.equal(active.state, "ACTIVE");
-    assert.equal(active.activeTransaction.operation, "create");
-    assert.deepEqual(active.activeTransaction.identity, identity);
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: "features/another",
-    }).state, "ABSENT");
-    assert.throws(
-      () => store.createCheckpoint(identity),
-      (error) => error.code === "WORKFLOW_CHECKPOINT_WRITER_LOCKED",
-    );
-
-    rmSync(targetGate, { recursive: true, force: false });
-    assert.equal(store.createCheckpoint(identity).state, "INCOMPLETE");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("workflow checkpoint transient state blocks only its owning target", () => {
-  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-target-transient-");
-  try {
-    const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentity();
-    const second = checkpointIdentity({
-      specOperationId: "32:primary",
-      target: "features/another",
-      planPath: "superpowers/docs/plans/spec-32.md",
-      generatedContentIdentity: `sha256:${"3".repeat(64)}`,
-    });
-    store.createCheckpoint(first);
-    store.createCheckpoint(second);
-
-    const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
-    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
-    const firstFile = readdirSync(transactionsRoot)
-      .filter((name) => name.endsWith(".json"))
-      .find((name) => JSON.parse(readFileSync(join(transactionsRoot, name), "utf8"))
-        .identity.specOperationId === first.specOperationId);
-    const scopeHash = firstFile.slice(0, -".json".length);
-    const targetKey = createHash("sha256").update(JSON.stringify({
-      repositoryId: first.repositoryId,
-      target: first.target,
-    })).digest("hex");
-    mkdirSync(writersRoot, { recursive: true });
-    const writerLock = join(writersRoot, `${scopeHash}.lock`);
-    mkdirSync(writerLock);
-    writeFileSync(
-      join(writerLock, "owner.json"),
-      `${JSON.stringify(checkpointWriterOwner(first, "advance"), null, 2)}\n`,
-      "utf8",
-    );
-    writeFileSync(join(writersRoot, `${scopeHash}.target-${targetKey}.tmp-interrupted`), "partial", "utf8");
-
-    const active = store.classifyCheckpoints({
-      repositoryId: first.repositoryId,
-      target: first.target,
-    });
-    assert.equal(active.state, "ACTIVE");
-    assert.equal(active.activeTransaction.operation, "advance");
-    assert.deepEqual(active.activeTransaction.identity, first);
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: second.repositoryId,
-      target: second.target,
-    }).state, "INCOMPLETE");
-
-    rmSync(join(writerLock, "owner.json"));
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: first.repositoryId,
-      target: first.target,
-    }).state, "UNKNOWN");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("workflow checkpoint transaction advances in order and keeps completed receipts immutable", () => {
-  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-order-");
-  try {
-    const store = createWorkflowControlStore({ gitCommonDir });
-    const identity = checkpointIdentity();
-    store.createCheckpoint(identity);
-
-    assert.throws(
-      () => store.advanceCheckpoint({
-        identity,
-        stage: "checkpoint.committed",
-        result: { commit: "a".repeat(40) },
-      }),
-      (error) => error.code === "WORKFLOW_CHECKPOINT_STAGE_OUT_OF_ORDER",
-    );
-
-    const results = [
-      { path: identity.planPath, contentIdentity: identity.generatedContentIdentity },
-      { commit: "a".repeat(40) },
-      { recordIdentity: "IC_attestation" },
-      { publicationIdentity: "issue:31:revision:2" },
-      { handoffIdentity: "handoff:31:to-spec" },
-    ];
-    let current;
-    WORKFLOW_CHECKPOINT_STAGES.forEach((stage, index) => {
-      current = store.advanceCheckpoint({ identity, stage, result: results[index] });
-      assert.deepEqual(
-        store.advanceCheckpoint({ identity, stage, result: results[index] }),
-        current,
-      );
-    });
-
-    assert.equal(current.state, "COMPLETED");
-    assert.equal(current.nextStage, null);
-    assert.throws(
-      () => store.advanceCheckpoint({
-        identity,
-        stage: "handoff.completed",
-        result: { handoffIdentity: "handoff:changed" },
-      }),
-      (error) => error.code === "WORKFLOW_CHECKPOINT_RESULT_MISMATCH",
-    );
-    assert.deepEqual(store.readCheckpoint(identity), current);
-    assert.equal(
-      readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"))
-        .some((name) => name.includes(".tmp-") || name.endsWith(".writer.lock")),
-      false,
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("workflow checkpoint failure injection reports malformed and partial persisted state", () => {
+test("workflow checkpoint malformed state fails closed without scanning unrelated receipts", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-malformed-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const identity = checkpointIdentity();
-    store.createCheckpoint(identity);
+    const first = checkpointIdentityV2();
+    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const firstCheckpoint = store.createCheckpoint(first);
+    const secondCheckpoint = store.createCheckpoint(second);
     const transactionsRoot = join(
       gitCommonDir,
       "matt-workflow-control",
       "workflow-checkpoints",
     );
-    const [transactionFile] = readdirSync(transactionsRoot).filter((name) => name.endsWith(".json"));
-    const transactionPath = join(transactionsRoot, transactionFile);
-    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
-    const scopeHash = transactionFile.slice(0, -".json".length);
-    const targetKey = createHash("sha256").update(JSON.stringify({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    })).digest("hex");
-    const writerLock = join(writersRoot, `${scopeHash}.lock`);
-    mkdirSync(writerLock);
-    assert.throws(
-      () => store.readCheckpoint(identity),
-      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    const unrelatedMalformed = join(transactionsRoot, `${"f".repeat(64)}.json`);
+    writeFileSync(unrelatedMalformed, "{partial", "utf8");
+    assert.deepEqual(store.readCheckpoint(second), secondCheckpoint);
+
+    const firstPath = join(
+      transactionsRoot,
+      `${firstCheckpoint.scopeKey.slice("sha256:".length)}.json`,
     );
-    rmSync(writerLock, { recursive: true, force: false });
-    const partialTemporary = join(writersRoot, `${scopeHash}.target-${targetKey}.tmp-interrupted`);
-    writeFileSync(partialTemporary, "partial", "utf8");
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    }).state, "UNKNOWN");
-    rmSync(partialTemporary);
-    writeFileSync(transactionPath, "{partial", "utf8");
+    writeFileSync(firstPath, "{partial", "utf8");
 
     assert.throws(
-      () => store.readCheckpoint(identity),
+      () => store.readCheckpoint(first),
       (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
     );
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: identity.repositoryId,
-      target: identity.target,
-    }).state, "UNKNOWN");
+    assert.deepEqual(store.readCheckpoint(second), secondCheckpoint);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("completed workflow checkpoint receipts allow a new operation but duplicate incomplete state is unknown", () => {
-  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-receipts-");
+test("workflow checkpoint legacy receipts stay v1 and exact incomplete to-spec resumes", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-legacy-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentity();
-    const firstResults = [
-      { path: first.planPath, contentIdentity: first.generatedContentIdentity },
+    const completedIdentity = checkpointIdentity();
+    const completedResults = [
+      { path: completedIdentity.planPath, contentIdentity: completedIdentity.generatedContentIdentity },
       { commit: "a".repeat(40) },
       { recordIdentity: "IC_first" },
       { publicationIdentity: "issue:31:primary" },
       { handoffIdentity: "handoff:31:primary" },
     ];
-    store.createCheckpoint(first);
-    WORKFLOW_CHECKPOINT_STAGES.forEach((stage, index) => {
-      store.advanceCheckpoint({ identity: first, stage, result: firstResults[index] });
+    const completedPath = writeLegacyCheckpoint({
+      gitCommonDir,
+      identity: completedIdentity,
+      progress: WORKFLOW_CHECKPOINT_STAGES.map((stage, index) => ({
+        stage,
+        result: completedResults[index],
+      })),
     });
+    const completedBytes = readFileSync(completedPath, "utf8");
+    assert.equal(store.readCheckpoint(completedIdentity).state, "COMPLETED");
+    assert.equal(store.createCheckpoint(completedIdentity).state, "COMPLETED");
+    assert.equal(readFileSync(completedPath, "utf8"), completedBytes);
 
-    const second = checkpointIdentity({
-      specOperationId: "31:revision:2",
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentity({ specOperationId: "32:primary" })),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_LEGACY_CREATE_UNSUPPORTED",
+    );
+
+    const incompleteIdentity = checkpointIdentity({
+      specOperationId: "33:primary",
       baseline: "b".repeat(40),
-      planPath: "superpowers/docs/plans/spec-31-revision-2.md",
+      planPath: "superpowers/docs/plans/spec-33.md",
       generatedContentIdentity: `sha256:${"2".repeat(64)}`,
     });
-    store.createCheckpoint(second);
-    assert.equal(store.classifyCheckpoints({
-      repositoryId: first.repositoryId,
-      target: first.target,
-    }).state, "INCOMPLETE");
-
-    const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
-    const firstPath = readdirSync(transactionsRoot)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => join(transactionsRoot, name))
-      .find((path) => JSON.parse(readFileSync(path, "utf8")).identity.specOperationId === first.specOperationId);
-    const firstRecord = JSON.parse(readFileSync(firstPath, "utf8"));
-    writeFileSync(firstPath, `${JSON.stringify({ ...firstRecord, progress: [] }, null, 2)}\n`, "utf8");
-    const ambiguous = store.classifyCheckpoints({
-      repositoryId: first.repositoryId,
-      target: first.target,
+    const incompletePath = writeLegacyCheckpoint({
+      gitCommonDir,
+      identity: incompleteIdentity,
+      progress: [{
+        stage: "plan.written",
+        result: {
+          path: incompleteIdentity.planPath,
+          contentIdentity: incompleteIdentity.generatedContentIdentity,
+        },
+      }],
     });
-    assert.equal(ambiguous.state, "UNKNOWN");
-    assert.match(ambiguous.evidence.join(" "), /Multiple incomplete/u);
+    const advancedLegacy = store.advanceCheckpoint({
+      identity: incompleteIdentity,
+      stage: "checkpoint.committed",
+      result: { commit: "b".repeat(40) },
+    });
+    assert.equal(advancedLegacy.schema, LEGACY_WORKFLOW_CHECKPOINT_SCHEMA);
+    assert.equal(advancedLegacy.nextStage, "attestation.read_back");
+    assert.equal(JSON.parse(readFileSync(incompletePath, "utf8")).schema, LEGACY_WORKFLOW_CHECKPOINT_SCHEMA);
+
+    const legacyResume = checkpointIdentityV2({
+      specId: "33",
+      baseline: incompleteIdentity.baseline,
+      bindings: { legacyReceipt: incompleteIdentity.transactionId ?? "v1" },
+    });
+    const receiptCountBeforeResume = readdirSync(
+      join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"),
+    ).length;
+    assert.equal(store.createCheckpoint(legacyResume).schema, LEGACY_WORKFLOW_CHECKPOINT_SCHEMA);
+    assert.equal(
+      readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints")).length,
+      receiptCountBeforeResume,
+    );
+
+    const currentIdentity = checkpointIdentityV2({ specId: "34" });
+    store.createCheckpoint(currentIdentity);
+    writeLegacyCheckpoint({
+      gitCommonDir,
+      identity: checkpointIdentity({ specOperationId: "34:primary" }),
+    });
+    assert.throws(
+      () => store.readCheckpoint(currentIdentity),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
+
+    const malformedIdentity = checkpointIdentity({ specOperationId: "35:primary" });
+    const malformedPath = writeLegacyCheckpoint({ gitCommonDir, identity: malformedIdentity });
+    const malformed = JSON.parse(readFileSync(malformedPath, "utf8"));
+    delete malformed.identity.planPath;
+    writeFileSync(malformedPath, `${JSON.stringify(malformed, null, 2)}\n`, "utf8");
+    assert.throws(
+      () => store.readCheckpoint(malformedIdentity),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
