@@ -685,18 +685,29 @@ export function createCoordinator({
               current,
             });
             let runReadyHandoff = reduceRunReadyHandoff(runReadyFacts);
-            if (runReadyHandoff.state === "READY") {
+            if (["READY", "INCOMPLETE"].includes(runReadyHandoff.state)) {
               const mismatch = RUN_READY_AUTHORITY_KEYS.find((key) => (
                 runReadyFacts.authority[key] !== (key === "planningSeal"
                   ? current.planningSeal
                   : current.runIdentity[key])
               ));
               if (mismatch) {
+                const observed = runReadyFacts.authority[mismatch] ?? null;
+                const expected = (mismatch === "planningSeal"
+                  ? current.planningSeal
+                  : current.runIdentity[mismatch]) ?? null;
                 runReadyHandoff = {
                   ...runReadyHandoff,
                   state: "UNKNOWN",
                   reasonCode: "selected_authority_conflict",
-                  evidence: [`Run-ready handoff authority differs from reconciliation at ${mismatch}.`],
+                  retryCommand: null,
+                  evidence: [
+                    `Run-ready handoff authority ${mismatch} observed ${JSON.stringify(observed)}; reconciliation expected ${JSON.stringify(expected)}.`,
+                  ],
+                  observed: {
+                    ...runReadyHandoff.observed,
+                    selectedAuthorityConflict: { field: mismatch, observed, expected },
+                  },
                   nextOwner: "human",
                   noAutomaticTransition: "Observed Run Entry evidence does not authorize an automatic transition.",
                   recoveryPredicates: ["selected_and_handoff_authority_match"],

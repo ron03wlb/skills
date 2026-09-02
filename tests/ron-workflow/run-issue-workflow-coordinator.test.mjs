@@ -235,6 +235,69 @@ test("Run-ready handoff rejects a stale Planning Seal before Run mutation", asyn
     assert.equal(status.runReadyHandoff.state, "UNKNOWN");
     assert.equal(status.runReadyHandoff.reasonCode, "selected_authority_conflict");
     assert.match(status.runReadyHandoff.evidence[0], /planningSeal/u);
+    assert.deepEqual(status.runReadyHandoff.observed.selectedAuthorityConflict, {
+      field: "planningSeal",
+      observed: selectedPlanningSeal,
+      expected: "d".repeat(40),
+    });
+    assert.deepEqual(store.readEvents(identity.runId), []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Run-ready handoff rejects stale INCOMPLETE authority before Run mutation", async () => {
+  const { root, store } = createStoreFixture();
+  try {
+    const staleFacts = readyHandoffFor(identity);
+    staleFacts.authority.specId = "99";
+    staleFacts.checkpoint = {
+      ...staleFacts.checkpoint,
+      state: "ACTIVE",
+      specId: "99",
+      firstUnsatisfiedStage: "publication",
+      handoffIdentity: null,
+    };
+    staleFacts.handoff = null;
+    staleFacts.trackerRecordIdentities = [];
+    const current = reconciliation({
+      runReadyHandoff: staleFacts,
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "ABSENT",
+      }],
+    });
+    const forbidden = async () => { throw new Error("stale incomplete authority permits no task action"); };
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks: {
+        findIssueLane: forbidden,
+        create: forbidden,
+        read: forbidden,
+        message: forbidden,
+        wait: forbidden,
+      },
+      reconcile: async () => current,
+      now: () => "2026-09-02T00:00:00.000Z",
+      sleep: async () => {},
+    });
+
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.runReadyHandoff.state, "UNKNOWN");
+    assert.equal(status.runReadyHandoff.reasonCode, "selected_authority_conflict");
+    assert.equal(status.runReadyHandoff.retryCommand, null);
+    assert.deepEqual(status.runReadyHandoff.observed.selectedAuthorityConflict, {
+      field: "specId",
+      observed: "99",
+      expected: "15",
+    });
     assert.deepEqual(store.readEvents(identity.runId), []);
   } finally {
     rmSync(root, { recursive: true, force: true });

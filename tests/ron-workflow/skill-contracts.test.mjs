@@ -2730,11 +2730,13 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker record identities.*clean target.*decomposition identity/isu);
   assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*Planning Seal.*classification.*approved-scope identity.*baseline.*initially-clean state.*plan path.*generated-content identity.*transaction identity.*first unsatisfied stage.*dirty target.*exact producer owns.*ordinary or unknown dirt.*`UNKNOWN`.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
   assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*exact observed checkpoint and handoff producer.*Spec.*target.*Planning Seal.*classification.*scope.*record.*decomposition.*no-automatic-transition.*recovery predicates/isu);
+  assert.match(skill, /both `READY` and actionable `INCOMPLETE`.*live selected reconciliation.*mismatch.*`UNKNOWN`.*conflicting field.*observed handoff value.*expected selected value.*never return a retry command for stale producer authority/isu);
   assert.match(skill, /does not revalidate.*generated-content hashes.*whole-commit.*v1 record semantics.*producer review.*tests.*aggregate coverage.*retry correctness/isu);
   assert.match(skill, /before `onSelected`.*non-`READY`.*read-only cleanup preview.*cannot apply cleanup.*engine or target writer.*Grant.*panel.*task.*leaf.*tracker or Git/isu);
   assert.match(core, /RUN_READY_FACT_SCHEMA.*run-ready-handoff-facts:v1.*RUN_READY_RESULT_SCHEMA.*run-ready-handoff:v1.*reduceRunReadyHandoff/isu);
   assert.match(runtime, /requireMethod\(handoff, "read"\).*createCoordinator.*handoff/isu);
   assert.match(coordinator, /handoff\.read\(\{.*tracker: trackerResult\.snapshot.*current.*reduceRunReadyHandoff\(runReadyFacts\).*planningSeal.*state !== "READY".*runReadyStop.*onSelected/isu);
+  assert.match(coordinator, /\["READY", "INCOMPLETE"\]\.includes.*selected_authority_conflict.*retryCommand: null.*selectedAuthorityConflict.*field: mismatch.*observed.*expected/isu);
   assert.match(core, /targetOwnership.*EXACT_PRODUCER/isu);
   assert.match(core, /checkpoint\.planningSeal.*checkpoint\.baseline.*checkpoint\.planPath.*checkpoint\.generatedContentIdentity/isu);
   assert.match(core, /handoffPlanningSeal.*handoffApprovedScopeHash/isu);
