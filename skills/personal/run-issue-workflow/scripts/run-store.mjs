@@ -144,7 +144,8 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   const runsRoot = join(controlRoot, "runs");
   const cleanupPath = join(controlRoot, "cleanup.jsonl");
   const cleanupLock = join(controlRoot, "cleanup.lock");
-  const closeWritersRoot = join(controlRoot, "close-writers");
+  // Keep the legacy directory so existing close-writer leases remain visible to every generic caller.
+  const targetMutationWritersRoot = join(controlRoot, "close-writers");
 
   const writeLockOwner = (ownerPath, owner) => {
     const descriptor = openSync(ownerPath, "wx");
@@ -337,14 +338,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     };
   };
 
-  const closePathsFor = (target) => {
+  const targetMutationPathsFor = (target) => {
     requireText(target, "close writer target");
     const targetKey = createHash("sha256").update(target).digest("hex");
-    const lock = join(closeWritersRoot, `${targetKey}.lock`);
+    const lock = join(targetMutationWritersRoot, `${targetKey}.lock`);
     return {
       lock,
       owner: join(lock, "owner.json"),
-      reclaimLock: join(closeWritersRoot, `${targetKey}.reclaim.lock`),
+      reclaimLock: join(targetMutationWritersRoot, `${targetKey}.reclaim.lock`),
       operationRoot: lock,
       operationPrefix: "operation",
     };
@@ -845,7 +846,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const acquireCloseWriter = ({ target, runId }) => {
     assertSafeRunId(runId);
-    const paths = closePathsFor(target);
+    const paths = targetMutationPathsFor(target);
     const generation = randomUUID();
     installLease({
       paths,
@@ -886,7 +887,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   };
 
   const readCloseWriterLock = (target) => {
-    const paths = closePathsFor(target);
+    const paths = targetMutationPathsFor(target);
     if (!existsSync(paths.lock)) return null;
     try {
       const owner = readLockOwner(paths.owner, "close");
@@ -904,6 +905,33 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const owner = readCloseWriterLock(target);
     if (owner === null) return null;
     return owner.runId ?? "UNKNOWN";
+  };
+
+  const asTargetMutationHandle = (writer) => ({
+    target: writer.target,
+    operationId: writer.runId,
+    assertCurrent: () => writer.assertCurrent(),
+    release: () => writer.release(),
+  });
+
+  const acquireTargetMutationWriter = ({ target, operationId }) => asTargetMutationHandle(
+    acquireCloseWriter({ target, runId: operationId }),
+  );
+
+  const readTargetMutationWriterLock = (target) => {
+    const owner = readCloseWriterLock(target);
+    if (owner === null) return null;
+    return {
+      ...owner,
+      kind: owner.kind === "close" ? "target-mutation" : owner.kind,
+      operationId: owner.runId ?? "UNKNOWN",
+    };
+  };
+
+  const readTargetMutationWriter = (target) => {
+    const owner = readTargetMutationWriterLock(target);
+    if (owner === null) return null;
+    return owner.operationId;
   };
 
   const readGate = (lockPath, kind, fallback) => {
@@ -940,7 +968,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   };
 
   const readCloseWriterReclaimLock = (target) => {
-    const paths = closePathsFor(target);
+    const paths = targetMutationPathsFor(target);
     return readGate(paths.reclaimLock, "close-reclaim", { target });
   };
 
@@ -948,7 +976,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const reclaimCloseWriter = ({ target, runId, staleProof, gateStaleProof, gateClaimStaleProof }) => {
     assertSafeRunId(runId);
-    const paths = closePathsFor(target);
+    const paths = targetMutationPathsFor(target);
     const generation = reclaimLease({
       paths,
       kind: "close",
@@ -963,11 +991,32 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return closeWriterHandle(target, runId, paths, generation);
   };
 
+  const reclaimTargetMutationWriter = ({
+    target,
+    operationId,
+    staleProof,
+    gateStaleProof,
+    gateClaimStaleProof,
+  }) => asTargetMutationHandle(reclaimCloseWriter({
+    target,
+    runId: operationId,
+    staleProof,
+    gateStaleProof,
+    gateClaimStaleProof,
+  }));
+
+  const readTargetMutationWriterReclaimLock = (target) => readCloseWriterReclaimLock(target);
+
   return {
     acquireWriter,
     reclaimWriter,
     readWriterLock,
     readWriterReclaimLock,
+    acquireTargetMutationWriter,
+    reclaimTargetMutationWriter,
+    readTargetMutationWriter,
+    readTargetMutationWriterLock,
+    readTargetMutationWriterReclaimLock,
     acquireCloseWriter,
     reclaimCloseWriter,
     readCloseWriter,

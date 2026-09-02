@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -24,6 +25,11 @@ import {
   RUN_STATES,
 } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import {
+  createWorkflowControlStore,
+  WORKFLOW_CHECKPOINT_STAGES,
+  WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
+} from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 
 const node = (issueId, blockers = []) => ({
   issueId,
@@ -112,6 +118,355 @@ const createGitCommonDirFixture = (prefix) => {
   }).trim();
   return { root, gitCommonDir: resolve(root, relativeCommonDir) };
 };
+
+const checkpointIdentity = (overrides = {}) => ({
+  repositoryId: "github:ron03wlb/skills",
+  producerCommand: "to-spec",
+  specOperationId: "31:primary",
+  target: "features/ron",
+  baseline: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+  initialTargetState: "CLEAN",
+  planPath: "superpowers/docs/plans/spec-31.md",
+  generatedContentIdentity: `sha256:${"1".repeat(64)}`,
+  ...overrides,
+});
+
+const checkpointWriterOwner = (identity, operation) => {
+  const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return {
+    schema: WORKFLOW_CHECKPOINT_WRITER_SCHEMA,
+    operation,
+    scopeKey: `sha256:${digest({
+      repositoryId: identity.repositoryId,
+      specOperationId: identity.specOperationId,
+    })}`,
+    transactionId: `sha256:${digest(identity)}`,
+    identity,
+  };
+};
+
+test("workflow checkpoint transaction creation is exact and retryable", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-create-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentity();
+    const created = store.createCheckpoint(identity);
+
+    assert.equal(created.state, "INCOMPLETE");
+    assert.equal(created.nextStage, "plan.written");
+    assert.deepEqual(store.createCheckpoint(identity), created);
+    assert.deepEqual(store.readCheckpoint(identity), created);
+    for (const drift of [
+      { producerCommand: "to-tickets" },
+      { target: "features/changed" },
+      { baseline: "b".repeat(40) },
+      { planPath: "superpowers/docs/plans/changed.md" },
+      { generatedContentIdentity: `sha256:${"2".repeat(64)}` },
+    ]) {
+      assert.throws(
+        () => store.createCheckpoint(checkpointIdentity(drift)),
+        (error) => error.code === "WORKFLOW_CHECKPOINT_IDENTITY_MISMATCH",
+      );
+    }
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentity({ specOperationId: "31:revision:2" })),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_CONFLICT",
+    );
+    assert.deepEqual(store.classifyCheckpoints({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    }), {
+      state: "INCOMPLETE",
+      transactions: [created],
+      evidence: [],
+    });
+    assert.equal(
+      readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"))
+        .some((name) => name.includes(".tmp-")),
+      false,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint creation is atomically gated per target without blocking another target", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-target-gate-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentity();
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    const targetKey = createHash("sha256").update(JSON.stringify({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    })).digest("hex");
+    const targetGate = join(writersRoot, `target-${targetKey}.lock`);
+    mkdirSync(writersRoot, { recursive: true });
+    mkdirSync(targetGate);
+    writeFileSync(
+      join(targetGate, "owner.json"),
+      `${JSON.stringify(checkpointWriterOwner(identity, "create"), null, 2)}\n`,
+      "utf8",
+    );
+
+    const active = store.classifyCheckpoints({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    });
+    assert.equal(active.state, "ACTIVE");
+    assert.equal(active.activeTransaction.operation, "create");
+    assert.deepEqual(active.activeTransaction.identity, identity);
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: identity.repositoryId,
+      target: "features/another",
+    }).state, "ABSENT");
+    assert.throws(
+      () => store.createCheckpoint(identity),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_WRITER_LOCKED",
+    );
+
+    rmSync(targetGate, { recursive: true, force: false });
+    assert.equal(store.createCheckpoint(identity).state, "INCOMPLETE");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint transient state blocks only its owning target", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-target-transient-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const first = checkpointIdentity();
+    const second = checkpointIdentity({
+      specOperationId: "32:primary",
+      target: "features/another",
+      planPath: "superpowers/docs/plans/spec-32.md",
+      generatedContentIdentity: `sha256:${"3".repeat(64)}`,
+    });
+    store.createCheckpoint(first);
+    store.createCheckpoint(second);
+
+    const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    const firstFile = readdirSync(transactionsRoot)
+      .filter((name) => name.endsWith(".json"))
+      .find((name) => JSON.parse(readFileSync(join(transactionsRoot, name), "utf8"))
+        .identity.specOperationId === first.specOperationId);
+    const scopeHash = firstFile.slice(0, -".json".length);
+    const targetKey = createHash("sha256").update(JSON.stringify({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    })).digest("hex");
+    mkdirSync(writersRoot, { recursive: true });
+    const writerLock = join(writersRoot, `${scopeHash}.lock`);
+    mkdirSync(writerLock);
+    writeFileSync(
+      join(writerLock, "owner.json"),
+      `${JSON.stringify(checkpointWriterOwner(first, "advance"), null, 2)}\n`,
+      "utf8",
+    );
+    writeFileSync(join(writersRoot, `${scopeHash}.target-${targetKey}.tmp-interrupted`), "partial", "utf8");
+
+    const active = store.classifyCheckpoints({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    });
+    assert.equal(active.state, "ACTIVE");
+    assert.equal(active.activeTransaction.operation, "advance");
+    assert.deepEqual(active.activeTransaction.identity, first);
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: second.repositoryId,
+      target: second.target,
+    }).state, "INCOMPLETE");
+
+    rmSync(join(writerLock, "owner.json"));
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    }).state, "UNKNOWN");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint transaction advances in order and keeps completed receipts immutable", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-order-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentity();
+    store.createCheckpoint(identity);
+
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "checkpoint.committed",
+        result: { commit: "a".repeat(40) },
+      }),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STAGE_OUT_OF_ORDER",
+    );
+
+    const results = [
+      { path: identity.planPath, contentIdentity: identity.generatedContentIdentity },
+      { commit: "a".repeat(40) },
+      { recordIdentity: "IC_attestation" },
+      { publicationIdentity: "issue:31:revision:2" },
+      { handoffIdentity: "handoff:31:to-spec" },
+    ];
+    let current;
+    WORKFLOW_CHECKPOINT_STAGES.forEach((stage, index) => {
+      current = store.advanceCheckpoint({ identity, stage, result: results[index] });
+      assert.deepEqual(
+        store.advanceCheckpoint({ identity, stage, result: results[index] }),
+        current,
+      );
+    });
+
+    assert.equal(current.state, "COMPLETED");
+    assert.equal(current.nextStage, null);
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity,
+        stage: "handoff.completed",
+        result: { handoffIdentity: "handoff:changed" },
+      }),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_RESULT_MISMATCH",
+    );
+    assert.deepEqual(store.readCheckpoint(identity), current);
+    assert.equal(
+      readdirSync(join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints"))
+        .some((name) => name.includes(".tmp-") || name.endsWith(".writer.lock")),
+      false,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("workflow checkpoint failure injection reports malformed and partial persisted state", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-malformed-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = checkpointIdentity();
+    store.createCheckpoint(identity);
+    const transactionsRoot = join(
+      gitCommonDir,
+      "matt-workflow-control",
+      "workflow-checkpoints",
+    );
+    const [transactionFile] = readdirSync(transactionsRoot).filter((name) => name.endsWith(".json"));
+    const transactionPath = join(transactionsRoot, transactionFile);
+    const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
+    const scopeHash = transactionFile.slice(0, -".json".length);
+    const targetKey = createHash("sha256").update(JSON.stringify({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    })).digest("hex");
+    const writerLock = join(writersRoot, `${scopeHash}.lock`);
+    mkdirSync(writerLock);
+    assert.throws(
+      () => store.readCheckpoint(identity),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
+    rmSync(writerLock, { recursive: true, force: false });
+    const partialTemporary = join(writersRoot, `${scopeHash}.target-${targetKey}.tmp-interrupted`);
+    writeFileSync(partialTemporary, "partial", "utf8");
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    }).state, "UNKNOWN");
+    rmSync(partialTemporary);
+    writeFileSync(transactionPath, "{partial", "utf8");
+
+    assert.throws(
+      () => store.readCheckpoint(identity),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_STATE_UNKNOWN",
+    );
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: identity.repositoryId,
+      target: identity.target,
+    }).state, "UNKNOWN");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("completed workflow checkpoint receipts allow a new operation but duplicate incomplete state is unknown", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-receipts-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const first = checkpointIdentity();
+    const firstResults = [
+      { path: first.planPath, contentIdentity: first.generatedContentIdentity },
+      { commit: "a".repeat(40) },
+      { recordIdentity: "IC_first" },
+      { publicationIdentity: "issue:31:primary" },
+      { handoffIdentity: "handoff:31:primary" },
+    ];
+    store.createCheckpoint(first);
+    WORKFLOW_CHECKPOINT_STAGES.forEach((stage, index) => {
+      store.advanceCheckpoint({ identity: first, stage, result: firstResults[index] });
+    });
+
+    const second = checkpointIdentity({
+      specOperationId: "31:revision:2",
+      baseline: "b".repeat(40),
+      planPath: "superpowers/docs/plans/spec-31-revision-2.md",
+      generatedContentIdentity: `sha256:${"2".repeat(64)}`,
+    });
+    store.createCheckpoint(second);
+    assert.equal(store.classifyCheckpoints({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    }).state, "INCOMPLETE");
+
+    const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
+    const firstPath = readdirSync(transactionsRoot)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => join(transactionsRoot, name))
+      .find((path) => JSON.parse(readFileSync(path, "utf8")).identity.specOperationId === first.specOperationId);
+    const firstRecord = JSON.parse(readFileSync(firstPath, "utf8"));
+    writeFileSync(firstPath, `${JSON.stringify({ ...firstRecord, progress: [] }, null, 2)}\n`, "utf8");
+    const ambiguous = store.classifyCheckpoints({
+      repositoryId: first.repositoryId,
+      target: first.target,
+    });
+    assert.equal(ambiguous.state, "UNKNOWN");
+    assert.match(ambiguous.evidence.join(" "), /Multiple incomplete/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("target mutation writer serializes generic producers with legacy closeout on one target", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("target-mutation-writer-");
+  try {
+    const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-current" });
+    const producerWriter = store.acquireTargetMutationWriter({
+      target: "features/ron",
+      operationId: "to-spec-31",
+    });
+
+    assert.equal(store.readTargetMutationWriter("features/ron"), "to-spec-31");
+    assert.equal(store.readCloseWriter("features/ron"), "to-spec-31");
+    assert.equal(store.readTargetMutationWriterLock("features/ron").operationId, "to-spec-31");
+    assert.throws(
+      () => store.acquireCloseWriter({ target: "features/ron", runId: "run-31" }),
+      /TARGET_CLOSE_WRITER_LOCKED/u,
+    );
+    store.acquireTargetMutationWriter({
+      target: "features/another",
+      operationId: "to-spec-32",
+    }).release();
+
+    producerWriter.release();
+    const closeWriter = store.acquireCloseWriter({ target: "features/ron", runId: "run-31" });
+    assert.equal(store.readTargetMutationWriter("features/ron"), "run-31");
+    closeWriter.release();
+    assert.equal(store.readTargetMutationWriter("features/ron"), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("the versioned runtime interface publishes the accepted state machines", () => {
   assert.deepEqual(RUN_STATES, [
@@ -1593,15 +1948,21 @@ test("explicit stale-owner proof can reclaim same-Run engine and close locks", (
       () => newStore.acquireCloseWriter({ target: "features/ron", runId: "reclaim-run" }),
       /TARGET_CLOSE_WRITER_LOCKED/u,
     );
-    const adoptedCloseWriter = newStore.reclaimCloseWriter({
+    const adoptedCloseWriter = newStore.reclaimTargetMutationWriter({
       target: "features/ron",
-      runId: "reclaim-run",
+      operationId: "reclaim-run",
       staleProof: closeStaleProof,
     });
-    assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
+    assert.equal(
+      newStore.readTargetMutationWriterLock("features/ron").coordinatorInstanceId,
+      "coordinator-new",
+    );
     assert.throws(() => oldCloseWriter.assertCurrent(), /LOCK_LEASE_FENCED/u);
     assert.throws(() => oldCloseWriter.release(), /LOCK_LEASE_FENCED/u);
-    assert.equal(newStore.readCloseWriterLock("features/ron").coordinatorInstanceId, "coordinator-new");
+    assert.equal(
+      newStore.readTargetMutationWriterLock("features/ron").coordinatorInstanceId,
+      "coordinator-new",
+    );
     adoptedCloseWriter.release();
   } finally {
     rmSync(root, { recursive: true, force: true });

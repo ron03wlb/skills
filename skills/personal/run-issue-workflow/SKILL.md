@@ -36,7 +36,7 @@ On every entry and after every material task or leaf transition, reacquire:
 - candidate reachability, target cleanliness, and registered worktree evidence from Git;
 - latest valid `implementation_complete`, `implementation_blocked`, and partial close evidence;
 - current Codex task lifecycle for every journaled task reference;
-- the append-only run journal, engine writer, and target close-writer state.
+- the append-only run journal, engine writer, and shared target mutation-writer state.
 
 Normalize those owning-source facts for `run-core.mjs`; use `run-store.mjs` to rebuild the disposable status projection. Only `reduceRun` legal actions authorize progress. Never let a task summary, cached tracker response, panel state, or coordinator memory override current evidence. Any contradiction fails closed with the reducer's structured diagnosis.
 
@@ -60,7 +60,7 @@ For the first dispatch:
 
 Use bounded `wait_threads` calls with the journaled host/thread reference to observe progress. Use `read_thread` only when a settled, attention, or failure result needs exact evidence. Use `send_message_to_thread` for a same-task retry or serialized `close-issue` follow-up. Keep the latest wait cursor process-local; the journal stores task identity and attempts, not disposable polling state.
 
-Dispatch no more than `max_parallel` execution or remediation actions at once. Closeout does not consume an execution slot, but only one close writer may act on an Issue target branch. Never create a duplicate live lane for an Issue.
+Dispatch no more than `max_parallel` execution or remediation actions at once. Closeout does not consume an execution slot, but it shares the one target mutation writer used by planning producers for that Issue target branch. Never create a duplicate live lane for an Issue.
 
 ## Execute reducer actions
 
@@ -71,9 +71,9 @@ Treat `status.run.controlRevision` as the authority revision for that exact acti
 - `reconcile_run`: reacquire every owning source and rebuild status. It is read-only until a valid Grant exists.
 - `dispatch_issue`: create or continue the Issue's one Codex task, then let that task invoke `execute-issue`. Journal the exact attempt and task reference.
 - `remediate_environment`: apply only the exact recognized adapter once for that Issue attempt and fingerprint, journal it, rerun the exact failed command in the same lane, and preserve its real result.
-- `close_issue`: require a valid `implementation_complete`, acquire the target close writer, send the same Issue lane a `close-issue` follow-up under the unchanged Grant, wait for it to settle, reacquire tracker/Git/worktree evidence, then release the writer. A timeout or coordinator loss retains durable close-writer ownership; only exact reconciled stale-owner evidence may reclaim it, and release still waits for task settlement.
-- `close_parent`: after every exact child has node success, use the same target close-writer acquire-or-exact-reclaim seam and invoke parent-only `close-issue` in the coordinator task. Release only after the parent leaf settles, and re-read parent state before declaring delivery success.
-- `settle_pause` or `settle_stop`: append only the reducer-authorized transition after active workers and the close writer have settled. These actions create no worker cancellation or cleanup authority.
+- `close_issue`: require a valid `implementation_complete`, acquire the shared target mutation writer, send the same Issue lane a `close-issue` follow-up under the unchanged Grant, wait for it to settle, reacquire tracker/Git/worktree evidence, then release the writer. A timeout or coordinator loss retains durable writer ownership; only exact reconciled stale-owner evidence may reclaim it, and release still waits for task settlement.
+- `close_parent`: after every exact child has node success, use the same target mutation-writer acquire-or-exact-reclaim seam and invoke parent-only `close-issue` in the coordinator task. Release only after the parent leaf settles, and re-read parent state before declaring delivery success.
+- `settle_pause` or `settle_stop`: append only the reducer-authorized transition after active workers and the target mutation writer have settled. These actions create no worker cancellation or cleanup authority.
 
 Valid `implementation_complete` triggers serialized `close-issue`; it is not node success. Only candidate reachability from the target, absence of the exact Issue worktree, and closed Issue state release dependants. All-child node success triggers the existing parent-only close path. The Run succeeds only after the parent is read back closed for Multi-Issue, or the sole Spec node has node success for Single-Issue.
 

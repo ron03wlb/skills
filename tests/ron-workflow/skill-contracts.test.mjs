@@ -1338,7 +1338,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(read("docs/engineering/close-issue.md"), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
-  assert.match(close, /one `close-issue` writer per Issue target branch.*human.*authorized coordinator/isu);
+  assert.match(close, /shared target mutation writer.*one planning or delivery writer.*Issue target branch/isu);
+  assert.match(close, /same target mutation writer.*direct human.*authorized coordinator.*planning producers.*other.*targets.*concurrently/isu);
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
   assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
@@ -2550,7 +2551,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /Tracker Spec.*`\/execute-issue`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
-  assert.match(matt, /serializes close writers per target/iu);
+  assert.match(matt, /planning producers and closeout share one target mutation writer per target/iu);
   assert.match(matt, /manual leaf route.*authorized coordinator route.*DAG Run Grant/isu);
   assert.match(matt, /coordinator.*does not create.*broaden.*leaf.*authority/isu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
@@ -2560,7 +2561,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
   const mattDocs = read("docs/engineering/ask-matt.md");
-  assert.match(mattDocs, /one writer per recorded target.*three idempotent close actions/isu);
+  assert.match(mattDocs, /planning producers and closeout share one target mutation writer per recorded target/isu);
   assert.match(mattDocs, /manual leaf route.*authorized coordinator.*DAG Run Grant/isu);
   assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(mattDocs, /verify-target-before-push.*local-ahead.*completion-note.*already-pushed.*explicit.*range.*aggregate/isu);
@@ -2572,7 +2573,8 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   }
 
   const context = read("CONTEXT.md");
-  assert.match(context, /Target integration serialization.*one `close-issue` writer.*same .*Issue target branch.*human.*authorized .*DAG Run.*other targets.*concurrently/isu);
+  assert.match(context, /Target mutation serialization.*only one planning or delivery operation.*one target branch.*other targets remain concurrent/isu);
+  assert.match(context, /Target integration serialization.*close-issue.*one integration writer.*Issue target branch.*human.*authorized .*DAG Run/isu);
   assert.doesNotMatch(context, /checks once|parallel target writers/iu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
@@ -2627,7 +2629,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
   assert.match(skill, /node success.*release dependants/iu);
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
-  assert.match(skill, /close_parent.*same target close-writer acquire-or-exact-reclaim seam.*Release only after the parent leaf settles/isu);
+  assert.match(skill, /close_parent.*same target mutation-writer acquire-or-exact-reclaim seam.*Release only after the parent leaf settles/isu);
   assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
   assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
   assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);
@@ -2638,7 +2640,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /stale engine writer.*exact reconciled `INACTIVE` owner evidence.*active operation.*fenced and stop/isu);
   assert.match(skill, /accepted `close-issue` follow-up.*task history.*already in flight.*never send the same close request again/isu);
   assert.match(skill, /manual `implementation_complete`.*no journaled task reference.*adopt one uniquely matching.*Zero or multiple.*structured diagnosis.*never creates or guesses/isu);
-  assert.match(skill, /coordinator loss retains durable close-writer ownership.*stale-owner evidence.*release still waits for task settlement/isu);
+  assert.match(skill, /coordinator loss retains durable writer ownership.*stale-owner evidence.*release still waits for task settlement/isu);
   for (const evidence of [
     /tracker evidence/iu,
     /registered worktree evidence from Git/iu,
