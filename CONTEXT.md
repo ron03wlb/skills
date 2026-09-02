@@ -94,6 +94,26 @@ _Avoid_: Second confirmation, generic auto-commit, verification recovery
 The Git-common-dir provenance that binds one producing workflow, Spec, target baseline, initially clean state, exact plan path and generated content before a **Workflow plan checkpoint** is written. Reinvoking the same producer command may automatically resume an exact matching transaction from its first unsatisfied commit, attestation, publication, or handoff stage without regenerating the plan, duplicating a commit, or requiring a second confirmation; any mismatch stops and preserves the evidence. It is never the durable plan or contribution authority itself. An active or incomplete transaction blocks a conflicting producer or Run; after `handoff.completed` it remains as a small immutable receipt that downstream consumers may read idempotently, without automatic cleanup or a separate consumed state.
 _Avoid_: Final plan storage, mutable checkpoint, path-only recovery, automatic receipt cleanup
 
+**Producer checkpoint profile**:
+The store-owned, versioned ordered stage contract for one planning producer. A transaction names exactly one profile; callers may advance that profile but cannot define or alter its stages.
+_Avoid_: Caller-defined stage list, global checkpoint sequence, unversioned producer branch
+
+**Legacy checkpoint resume**:
+The continuation of one exact valid incomplete v1 transaction under its frozen original profile without rewriting it into a successor schema. Exact-operation discovery reuses one matching legacy or current receipt; both schemas for the same operation, malformed state, or identity ambiguity stop.
+_Avoid_: Automatic receipt migration, duplicate successor receipt, synthesized successor identity, in-place schema upgrade
+
+**Producer operation identity**:
+The minimal identity of one planning operation: repository, Tracker Spec, producer, and an opaque operation or revision identity. Workflow gates read only this exact scope for retry and conflict; target-wide listings are diagnostic and cannot block unrelated operations.
+_Avoid_: Target-wide checkpoint gate, parsed operation name, tracker body snapshot, workflow rule engine
+
+**Producer checkpoint bindings**:
+The immutable producer-owned identities attached to one checkpoint transaction for exact retry. The store canonicalizes and compares them without interpreting their Tracker Spec, Issue, Planning Seal, or handoff meaning.
+_Avoid_: Store-owned authority model, caller-supplied binding digest, mutable tracker snapshot
+
+**Checkpoint stage receipt**:
+A non-empty, secret-free opaque record persisted after a producer adapter completes one stage and its authoritative read-back. The store orders and canonically compares receipts without interpreting their workflow meaning.
+_Avoid_: Store-owned result schema, common receipt envelope, persisted receipt digest
+
 **Closed Issue evidence reconciliation**:
 The append-only, human-authorized correction that may admit one already-closed **Issue contribution** to a **Target verification set** without declaring its historical candidate implementation-complete. Its original **Execution completion note** remains immutable and invalid when that note records non-passing final verification.
 _Avoid_: Retroactive completion, verification waiver, Direct target contribution recovery
