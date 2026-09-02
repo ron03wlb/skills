@@ -1,6 +1,6 @@
 interface:
   display_name: "Run Issue Workflow"
-  short_description: "Deliver one Tracker Spec with an automatic control panel"
-  default_prompt: "Use $run-issue-workflow to reconcile and run this exact Tracker Spec through Codex-native Issue lanes, opening the automatic panel with Pause, Resume, and Stop controls."
+  short_description: "Reduce one ready Spec, then run its Issue DAG"
+  default_prompt: "Use $run-issue-workflow to reduce this exact Tracker Spec's immediate-upstream handoff to READY, INCOMPLETE, or UNKNOWN before any mutation, then run a READY Spec through Codex-native Issue lanes with the automatic Pause, Resume, and Stop panel."
 policy:
   allow_implicit_invocation: false

@@ -21,7 +21,10 @@ import {
   NODE_STATES,
   planControl,
   REASON_CODES,
+  reduceRunReadyHandoff,
   reduceRun,
+  RUN_READY_FACT_SCHEMA,
+  RUN_READY_RESULT_SCHEMA,
   RUN_STATES,
 } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -144,6 +147,156 @@ const checkpointWriterOwner = (identity, operation) => {
     identity,
   };
 };
+
+const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
+  const producerCommand = classification === "SINGLE" ? "to-spec" : "to-tickets";
+  const recordIdentities = classification === "SINGLE"
+    ? ["IC_to_spec"]
+    : ["IC_to_spec", "IC_to_tickets"];
+  const decompositionIdentity = classification === "SINGLE" ? null : "IC_decomposition";
+  const authority = {
+    specId: "31",
+    target: "features/ron",
+    planningSeal: "c".repeat(40),
+    classification,
+    approvedScopeHash: `sha256:${"2".repeat(64)}`,
+    decompositionIdentity,
+  };
+  return {
+    schema: RUN_READY_FACT_SCHEMA,
+    authority,
+    targetState: "CLEAN",
+    checkpoint: {
+      state: "COMPLETED",
+      producerCommand,
+      transactionIdentity: `sha256:${"3".repeat(64)}`,
+      specId: authority.specId,
+      target: authority.target,
+      firstUnsatisfiedStage: null,
+      handoffIdentity: `${producerCommand}:handoff:31`,
+    },
+    handoff: {
+      identity: `${producerCommand}:handoff:31`,
+      producerCommand,
+      specId: authority.specId,
+      target: authority.target,
+      planningSeal: authority.planningSeal,
+      classification,
+      approvedScopeHash: authority.approvedScopeHash,
+      recordIdentities,
+      decompositionIdentity,
+    },
+    trackerRecordIdentities: recordIdentities,
+    decompositionIdentity,
+    evidence: [],
+  };
+};
+
+test("Run-ready handoff reduces exact Single and Multi producer evidence to READY", () => {
+  for (const classification of ["SINGLE", "MULTI"]) {
+    const result = reduceRunReadyHandoff(runReadyFacts({ classification }));
+
+    assert.equal(result.schema, RUN_READY_RESULT_SCHEMA);
+    assert.equal(result.state, "READY");
+    assert.equal(result.reasonCode, null);
+    assert.equal(result.nextOwner, "run-issue-workflow");
+    assert.equal(result.affectedScope.specId, "31");
+    assert.equal(result.observed.producerCommand, classification === "SINGLE" ? "to-spec" : "to-tickets");
+  }
+});
+
+test("Run-ready handoff returns actionable INCOMPLETE for one exact producer transaction", () => {
+  const stagesByClassification = {
+    SINGLE: [
+      "plan.written",
+      "checkpoint.committed",
+      "attestation.read_back",
+      "publication.read_back",
+      "handoff.completed",
+    ],
+    MULTI: [
+      "plan.written",
+      "checkpoint.committed",
+      "attestation.read_back",
+      "decomposition.read_back",
+      "ready_state.read_back",
+      "handoff.completed",
+    ],
+  };
+  for (const [classification, stages] of Object.entries(stagesByClassification)) {
+    for (const [index, firstUnsatisfiedStage] of stages.entries()) {
+      const input = runReadyFacts({ classification });
+      input.checkpoint = {
+        ...input.checkpoint,
+        state: index === 0 ? "ACTIVE" : "INCOMPLETE",
+        firstUnsatisfiedStage,
+        handoffIdentity: null,
+      };
+      input.handoff = null;
+      input.trackerRecordIdentities = [];
+      input.decompositionIdentity = null;
+
+      const result = reduceRunReadyHandoff(input);
+
+      assert.equal(result.state, "INCOMPLETE");
+      assert.equal(result.reasonCode, "producer_incomplete");
+      assert.equal(result.transactionIdentity, input.checkpoint.transactionIdentity);
+      assert.equal(result.firstUnsatisfiedStage, firstUnsatisfiedStage);
+      assert.equal(result.retryCommand, `/${input.checkpoint.producerCommand} 31`);
+      assert.equal(result.nextOwner, input.checkpoint.producerCommand);
+      assert.match(result.noAutomaticTransition, /Run does not resume or repair/u);
+      assert.deepEqual(result.recoveryPredicates, [
+        "transaction_is_inactive",
+        "exact_retry_identity_matches",
+        "producer_completes_handoff",
+      ]);
+    }
+  }
+});
+
+test("Run-ready handoff returns stable UNKNOWN diagnoses for unowned or contradictory evidence", () => {
+  const dirty = runReadyFacts();
+  dirty.targetState = "DIRTY";
+
+  const wrongProducer = runReadyFacts({ classification: "MULTI" });
+  wrongProducer.handoff.producerCommand = "to-spec";
+
+  const missingHandoff = runReadyFacts();
+  missingHandoff.checkpoint.state = "ABSENT";
+  missingHandoff.handoff = null;
+
+  const legacyPlan = runReadyFacts();
+  legacyPlan.checkpoint.state = "LEGACY_PLAN_ONLY";
+  legacyPlan.handoff = null;
+
+  const trackerConflict = runReadyFacts({ classification: "MULTI" });
+  trackerConflict.trackerRecordIdentities = ["IC_to_spec", "IC_changed"];
+
+  const decompositionConflict = runReadyFacts({ classification: "MULTI" });
+  decompositionConflict.decompositionIdentity = "IC_changed";
+
+  const ambiguous = runReadyFacts();
+  ambiguous.checkpoint.state = "MULTIPLE";
+
+  for (const [input, reasonCode] of [
+    [dirty, "target_dirty_without_owner"],
+    [wrongProducer, "producer_handoff_identity_conflict"],
+    [missingHandoff, "producer_handoff_missing"],
+    [legacyPlan, "legacy_plan_only"],
+    [trackerConflict, "tracker_record_identity_conflict"],
+    [decompositionConflict, "decomposition_identity_conflict"],
+    [ambiguous, "producer_evidence_ambiguous"],
+    [{}, "invalid_run_ready_facts"],
+  ]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, reasonCode);
+    assert.equal(result.nextOwner, "human");
+    assert.match(result.noAutomaticTransition, /does not authorize/u);
+    assert.ok(result.evidence.length > 0);
+    assert.ok(result.recoveryPredicates.length > 0);
+  }
+});
 
 test("workflow checkpoint transaction creation is exact and retryable", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-create-");

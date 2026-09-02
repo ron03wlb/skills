@@ -1,0 +1,20 @@
+# Issue #36 Run-ready handoff reduction
+
+**Goal:** Make Run Entry consume one immediate-upstream producer handoff and reduce it deterministically to `READY`, `INCOMPLETE`, or `UNKNOWN` before any Run mutation.
+**Why planning is required:** This change gates DAG Run Grant, cleanup, panel, task, and tracker mutation authority, so the repository High-risk workflow requires a durable plan and explicit completion evidence.
+**Acceptance:** The read-back Issue #36 scope remains bound to Spec #31, `features/ron`, Planning Seal `c63fcc11604fb0e1758bb55a8f6d0b42857bfd5a`, and execution baseline `09cebabe05a4434bfd5543bc344de5fd01c5a970`; Single-Issue Entry consumes only the completed `to-spec` handoff, Multi-Issue Entry consumes only the completed `to-tickets` handoff, and only `READY` may reach cleanup, writer, Grant, panel, task, leaf, or tracker mutation. `INCOMPLETE` returns the exact producer retry owner and stage; every missing, malformed, contradictory, stale, dirty-without-owner, or ambiguous fact returns structured `UNKNOWN`. The implementation does not repeat upstream content, whole-commit, attestation, review, test, or aggregate validation, and stops without mutation on any unproved state.
+
+### Outcome 1: Add the compact Run-ready fact and reducer contract
+- Work: Add one versioned pure reducer at the existing `run-core.mjs` seam. Validate the selected Spec, target, Planning Seal, classification, approved-scope identity, immediate-upstream producer and handoff, required immutable tracker records, transaction classification, target cleanliness, and Multi-Issue decomposition identity. Return stable `READY`, actionable `INCOMPLETE`, or structured `UNKNOWN` output without performing source reads or mutation.
+- Risks/open questions: The reducer must distinguish ordinary dirty target state from exact producer-owned incomplete work, keep completed immutable receipts non-blocking, and reject all identity ambiguity without revalidating upstream semantics.
+- Verify: `rtk node --test --test-name-pattern="Run-ready handoff|READY|INCOMPLETE|UNKNOWN|producer handoff|checkpoint transaction" tests/ron-workflow/run-issue-workflow-core.test.mjs`
+
+### Outcome 2: Fence runtime composition and coordinator mutation behind READY
+- Work: Extend the owning-source reconciliation contract to supply the compact fact once from existing tracker, target, transaction, and decomposition reads. Consume and reduce it in `run-coordinator.mjs` before cleanup, engine or target writer acquisition, Grant append, panel open, task or leaf action, and retain the existing reconciliation lifecycle only after `READY`.
+- Risks/open questions: Non-READY paths must remain read-only even on explicit and no-argument entry, and existing outage, control, retry, adoption, closeout, and coordinator-loss behavior must remain unchanged after READY.
+- Verify: `rtk node --test --test-name-pattern="Run-ready handoff|READY|INCOMPLETE|UNKNOWN|producer handoff|checkpoint transaction" tests/ron-workflow/run-issue-workflow-coordinator.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs`
+
+### Outcome 3: Synchronize personal operator surfaces and prove the unchanged boundaries
+- Work: Synchronize the personal skill, metadata, operator guide, personal README, examples only if their visible status contract changes, and executable contract tests. Keep the package outside promoted docs and plugin manifests. Run both-axis review and repair every confirmed in-scope Standards or Spec finding.
+- Risks/open questions: Documentation must describe source ownership and recovery without granting Run producer-repair, push, deploy, external-prerequisite, or aggregate-verification authority.
+- Verify: `rtk node --test tests/ron-workflow/run-issue-workflow-core.test.mjs tests/ron-workflow/run-issue-workflow-coordinator.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs && rtk node --test tests/ron-workflow/skill-contracts.test.mjs && rtk node --test tests/ron-workflow/*.test.mjs && rtk git diff --check`

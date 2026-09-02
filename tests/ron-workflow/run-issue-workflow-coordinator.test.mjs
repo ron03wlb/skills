@@ -9,6 +9,7 @@ import {
   createCoordinator,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
+import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
 const createStoreFixture = () => {
@@ -40,6 +41,48 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:01-05",
 };
 
+const readyHandoffFor = (runIdentity) => {
+  const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
+  const recordIdentities = runIdentity.classification === "SINGLE"
+    ? ["IC_to_spec"]
+    : ["IC_to_spec", "IC_to_tickets"];
+  return {
+    schema: RUN_READY_FACT_SCHEMA,
+    authority: {
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      planningSeal: "c".repeat(40),
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      decompositionIdentity: runIdentity.decompositionIdentity,
+    },
+    targetState: "CLEAN",
+    checkpoint: {
+      state: "COMPLETED",
+      producerCommand,
+      transactionIdentity: `sha256:${"3".repeat(64)}`,
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      firstUnsatisfiedStage: null,
+      handoffIdentity: `${producerCommand}:handoff:${runIdentity.specId}`,
+    },
+    handoff: {
+      identity: `${producerCommand}:handoff:${runIdentity.specId}`,
+      producerCommand,
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      planningSeal: "c".repeat(40),
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      recordIdentities,
+      decompositionIdentity: runIdentity.decompositionIdentity,
+    },
+    trackerRecordIdentities: recordIdentities,
+    decompositionIdentity: runIdentity.decompositionIdentity,
+    evidence: [],
+  };
+};
+
 const reconciliation = ({
   runIdentity = identity,
   maxParallel = 3,
@@ -47,9 +90,11 @@ const reconciliation = ({
   run = {},
   nodes,
   contradictions = [],
+  runReadyHandoff = readyHandoffFor(runIdentity),
 }) => ({
   runIdentity,
   grant: { runIdentity, maxParallel },
+  runReadyHandoff,
   taskRefs,
   facts: {
     schema: "dag-run-facts:v1",
@@ -66,6 +111,65 @@ const reconciliation = ({
     nodes,
     contradictions,
   },
+});
+
+test("Run-ready handoff INCOMPLETE and UNKNOWN stop before cleanup, writer, Grant, panel, or task mutation", async () => {
+  for (const entryState of ["INCOMPLETE", "UNKNOWN"]) {
+    const { root, store } = createStoreFixture();
+    let selected = 0;
+    let taskCalls = 0;
+    const runReadyHandoff = readyHandoffFor(identity);
+    if (entryState === "INCOMPLETE") {
+      runReadyHandoff.checkpoint = {
+        ...runReadyHandoff.checkpoint,
+        state: "INCOMPLETE",
+        firstUnsatisfiedStage: "publication.read_back",
+        handoffIdentity: null,
+      };
+      runReadyHandoff.handoff = null;
+      runReadyHandoff.trackerRecordIdentities = [];
+    } else {
+      runReadyHandoff.targetState = "DIRTY";
+    }
+    const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"].map((name) => [
+      name,
+      async () => { taskCalls += 1; throw new Error(`unexpected task call ${name}`); },
+    ]));
+    try {
+      const coordinator = createCoordinator({
+        store,
+        tracker: { async read() { return {}; } },
+        tasks,
+        reconcile: async () => reconciliation({
+          runReadyHandoff,
+          nodes: [{
+            issueId: "15",
+            blockers: [],
+            trackerState: "OPEN",
+            taskState: "NONE",
+            completionState: "NONE",
+            candidateReachable: false,
+            worktreeState: "ABSENT",
+          }],
+        }),
+        onSelected: async () => { selected += 1; },
+        now: () => "2026-09-02T00:00:00.000Z",
+        sleep: async () => {},
+      });
+
+      const status = await coordinator.run({ specId: "15" });
+
+      assert.equal(status.run.state, "BLOCKED");
+      assert.equal(status.runReadyHandoff.state, entryState);
+      assert.equal(status.legalActions.length, 0);
+      assert.equal(selected, 0);
+      assert.equal(taskCalls, 0);
+      assert.deepEqual(store.readEvents(identity.runId), []);
+      assert.equal(store.readWriterLock(identity.runId), null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
 });
 
 test("a Single-Issue Run creates one lane and closes only after implementation completion", async () => {

@@ -2,6 +2,8 @@ import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
 
 export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
+export const RUN_READY_FACT_SCHEMA = "run-ready-handoff-facts:v1";
+export const RUN_READY_RESULT_SCHEMA = "run-ready-handoff:v1";
 export const RUN_STATES = Object.freeze([
   "RECONCILING",
   "RUNNING",
@@ -54,6 +56,239 @@ export const REASON_CODES = Object.freeze({
 const compareIds = (left, right) => String(left).localeCompare(String(right), "en");
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const gitObjectPattern = /^[a-f0-9]{40,64}$/u;
+
+const observedRunReadyFacts = (input) => ({
+  targetState: isText(input?.targetState) ? input.targetState : null,
+  checkpointState: isText(input?.checkpoint?.state) ? input.checkpoint.state : null,
+  producerCommand: isText(input?.checkpoint?.producerCommand)
+    ? input.checkpoint.producerCommand
+    : isText(input?.handoff?.producerCommand) ? input.handoff.producerCommand : null,
+  transactionIdentity: isText(input?.checkpoint?.transactionIdentity)
+    ? input.checkpoint.transactionIdentity
+    : null,
+  handoffIdentity: isText(input?.handoff?.identity) ? input.handoff.identity : null,
+  trackerRecordIdentities: Array.isArray(input?.trackerRecordIdentities)
+    ? [...input.trackerRecordIdentities]
+    : [],
+  decompositionIdentity: isText(input?.decompositionIdentity) ? input.decompositionIdentity : null,
+});
+
+const runReadyResult = (input, {
+  state,
+  reasonCode,
+  evidence,
+  nextOwner,
+  noAutomaticTransition,
+  recoveryPredicates,
+  transactionIdentity = null,
+  firstUnsatisfiedStage = null,
+  retryCommand = null,
+}) => ({
+  schema: RUN_READY_RESULT_SCHEMA,
+  state,
+  reasonCode,
+  affectedScope: {
+    specId: isText(input?.authority?.specId) ? input.authority.specId : null,
+    target: isText(input?.authority?.target) ? input.authority.target : null,
+  },
+  observed: observedRunReadyFacts(input),
+  evidence,
+  nextOwner,
+  noAutomaticTransition,
+  recoveryPredicates,
+  transactionIdentity,
+  firstUnsatisfiedStage,
+  retryCommand,
+});
+
+const unknownRunReady = (input, reasonCode, evidence, recoveryPredicates) => runReadyResult(input, {
+  state: "UNKNOWN",
+  reasonCode,
+  evidence,
+  nextOwner: "human",
+  noAutomaticTransition: "Observed Run Entry evidence does not authorize an automatic transition.",
+  recoveryPredicates,
+});
+
+const sameList = (left, right) => left.length === right.length
+  && left.every((value, index) => value === right[index]);
+
+export function reduceRunReadyHandoff(input) {
+  const authority = input?.authority;
+  const checkpoint = input?.checkpoint;
+  const validAuthority = isRecord(authority)
+    && isText(authority.specId)
+    && isText(authority.target)
+    && gitObjectPattern.test(authority.planningSeal)
+    && ["SINGLE", "MULTI"].includes(authority.classification)
+    && isText(authority.approvedScopeHash)
+    && (authority.classification === "SINGLE"
+      ? authority.decompositionIdentity === null
+      : isText(authority.decompositionIdentity));
+  if (input?.schema !== RUN_READY_FACT_SCHEMA || !validAuthority || !isRecord(checkpoint)
+    || !isText(checkpoint.state) || !Array.isArray(input.trackerRecordIdentities)
+    || !input.trackerRecordIdentities.every(isText) || !Array.isArray(input.evidence)
+    || !input.evidence.every(isText)) {
+    return unknownRunReady(
+      input,
+      "invalid_run_ready_facts",
+      ["Expected one versioned Run-ready handoff fact set with exact authority and owning-source evidence."],
+      ["supply_valid_run_ready_facts"],
+    );
+  }
+
+  const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
+  const checkpointOwnsScope = checkpoint.producerCommand === expectedProducer
+    && checkpoint.specId === authority.specId
+    && checkpoint.target === authority.target
+    && isText(checkpoint.transactionIdentity);
+  if (input.evidence.length > 0 || ["UNKNOWN", "MULTIPLE"].includes(checkpoint.state)) {
+    return unknownRunReady(
+      input,
+      "producer_evidence_ambiguous",
+      input.evidence.length > 0 ? [...input.evidence] : [`Checkpoint state is ${checkpoint.state}.`],
+      ["one_exact_readable_producer_state"],
+    );
+  }
+  if (checkpoint.state === "LEGACY_PLAN_ONLY") {
+    return unknownRunReady(
+      input,
+      "legacy_plan_only",
+      ["A durable plan without one completed producer handoff is not Run authority."],
+      ["producer_publishes_one_exact_completed_handoff"],
+    );
+  }
+  if (["ACTIVE", "INCOMPLETE"].includes(checkpoint.state)) {
+    if (!checkpointOwnsScope || !isText(checkpoint.firstUnsatisfiedStage)) {
+      return unknownRunReady(
+        input,
+        "checkpoint_owner_ambiguous",
+        ["The active or incomplete transaction does not prove one exact immediate-upstream producer and stage."],
+        ["one_exact_producer_transaction_is_identified"],
+      );
+    }
+    return runReadyResult(input, {
+      state: "INCOMPLETE",
+      reasonCode: "producer_incomplete",
+      evidence: [
+        `${checkpoint.producerCommand} transaction ${checkpoint.transactionIdentity} is incomplete at ${checkpoint.firstUnsatisfiedStage}.`,
+      ],
+      nextOwner: checkpoint.producerCommand,
+      noAutomaticTransition: "Run does not resume or repair an upstream producer transaction.",
+      recoveryPredicates: [
+        "transaction_is_inactive",
+        "exact_retry_identity_matches",
+        "producer_completes_handoff",
+      ],
+      transactionIdentity: checkpoint.transactionIdentity,
+      firstUnsatisfiedStage: checkpoint.firstUnsatisfiedStage,
+      retryCommand: `/${checkpoint.producerCommand} ${authority.specId}`,
+    });
+  }
+  if (checkpoint.state === "ABSENT") {
+    return unknownRunReady(
+      input,
+      "producer_handoff_missing",
+      ["No completed immediate-upstream producer transaction is readable."],
+      ["producer_handoff_is_readable"],
+    );
+  }
+  if (checkpoint.state !== "COMPLETED") {
+    return unknownRunReady(
+      input,
+      "invalid_run_ready_facts",
+      [`Unsupported checkpoint state ${checkpoint.state}.`],
+      ["supply_valid_run_ready_facts"],
+    );
+  }
+  if (input.targetState === "DIRTY") {
+    return unknownRunReady(
+      input,
+      "target_dirty_without_owner",
+      [`Target ${authority.target} is dirty without one exact incomplete producer owner.`],
+      ["target_is_clean_or_exact_incomplete_owner_is_proven"],
+    );
+  }
+  if (input.targetState !== "CLEAN") {
+    return unknownRunReady(
+      input,
+      "target_state_uncertain",
+      [`Target ${authority.target} cleanliness is ${String(input.targetState ?? "unknown")}.`],
+      ["target_state_is_known"],
+    );
+  }
+  if (!checkpointOwnsScope || checkpoint.firstUnsatisfiedStage !== null
+    || !isText(checkpoint.handoffIdentity)) {
+    return unknownRunReady(
+      input,
+      "producer_handoff_identity_conflict",
+      ["The completed checkpoint does not bind the selected Spec, target, producer, or handoff identity."],
+      ["completed_checkpoint_matches_selected_authority"],
+    );
+  }
+
+  const handoff = input.handoff;
+  if (!isRecord(handoff)) {
+    return unknownRunReady(
+      input,
+      "producer_handoff_missing",
+      ["The immediate-upstream handoff is missing."],
+      ["producer_handoff_is_readable"],
+    );
+  }
+  const handoffMatches = handoff.identity === checkpoint.handoffIdentity
+    && handoff.producerCommand === expectedProducer
+    && handoff.specId === authority.specId
+    && handoff.target === authority.target
+    && handoff.planningSeal === authority.planningSeal
+    && handoff.classification === authority.classification
+    && handoff.approvedScopeHash === authority.approvedScopeHash
+    && Array.isArray(handoff.recordIdentities)
+    && handoff.recordIdentities.every(isText)
+    && handoff.decompositionIdentity === authority.decompositionIdentity;
+  if (!handoffMatches) {
+    return unknownRunReady(
+      input,
+      "producer_handoff_identity_conflict",
+      ["The immediate-upstream handoff conflicts with selected Run authority or its completed checkpoint."],
+      ["handoff_and_selected_authority_match"],
+    );
+  }
+
+  const requiredRecordCount = authority.classification === "SINGLE" ? 1 : 2;
+  const uniqueRecords = new Set(handoff.recordIdentities);
+  if (handoff.recordIdentities.length !== requiredRecordCount
+    || uniqueRecords.size !== requiredRecordCount
+    || !sameList(handoff.recordIdentities, input.trackerRecordIdentities)) {
+    return unknownRunReady(
+      input,
+      "tracker_record_identity_conflict",
+      ["The handoff's immutable record identities do not match exact tracker read-back."],
+      ["required_tracker_record_identities_match"],
+    );
+  }
+  if (input.decompositionIdentity !== authority.decompositionIdentity) {
+    return unknownRunReady(
+      input,
+      "decomposition_identity_conflict",
+      ["The decomposition publication identity does not match selected Multi-Issue authority."],
+      ["decomposition_identity_matches"],
+    );
+  }
+
+  return runReadyResult(input, {
+    state: "READY",
+    reasonCode: null,
+    evidence: [
+      `${expectedProducer} handoff ${handoff.identity} matches Spec ${authority.specId}.`,
+      `Target ${authority.target} is clean and its producer checkpoint is complete.`,
+    ],
+    nextOwner: "run-issue-workflow",
+    noAutomaticTransition: null,
+    recoveryPredicates: [],
+  });
+}
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
   if (node.completionState === "BLOCKED") return "BLOCKED";

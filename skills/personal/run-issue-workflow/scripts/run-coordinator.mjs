@@ -1,10 +1,18 @@
 import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
+import { reduceRunReadyHandoff } from "./run-core.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
   "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
 const RUN_IDENTITY_KEYS = Object.freeze([
   "runId",
+  "specId",
+  "approvedScopeHash",
+  "target",
+  "classification",
+  "decompositionIdentity",
+]);
+const RUN_READY_AUTHORITY_KEYS = Object.freeze([
   "specId",
   "approvedScopeHash",
   "target",
@@ -106,6 +114,7 @@ const preflightConflict = (current, {
   evidence,
   noAutomaticTransition = "Selection and reconciled Run authority must match exactly.",
   resumePredicates,
+  nextOwner = "human",
 }) => {
   const runIdentity = current?.runIdentity ?? {};
   const allNodes = Array.isArray(current?.facts?.nodes)
@@ -135,11 +144,23 @@ const preflightConflict = (current, {
       noAutomaticTransition,
       affectedNodes: allNodes,
       unaffectedNodes: [],
-      nextOwner: "human",
+      nextOwner,
       resumePredicates,
     }],
   };
 };
+
+const runReadyStop = (current, runReadyHandoff) => ({
+  ...preflightConflict(current, {
+    reasonCode: runReadyHandoff.reasonCode,
+    limitationClass: runReadyHandoff.state === "INCOMPLETE" ? "instance-blocker" : "unresolved-evidence",
+    evidence: runReadyHandoff.evidence,
+    noAutomaticTransition: runReadyHandoff.noAutomaticTransition,
+    resumePredicates: runReadyHandoff.recoveryPredicates,
+    nextOwner: runReadyHandoff.nextOwner,
+  }),
+  runReadyHandoff,
+});
 
 const diagnosedStop = (status, {
   reasonCode,
@@ -655,6 +676,24 @@ export function createCoordinator({
             });
           }
           if (!runIdentity) {
+            let runReadyHandoff = reduceRunReadyHandoff(current.runReadyHandoff);
+            if (runReadyHandoff.state === "READY") {
+              const mismatch = RUN_READY_AUTHORITY_KEYS.find((key) => (
+                current.runReadyHandoff.authority[key] !== current.runIdentity[key]
+              ));
+              if (mismatch) {
+                runReadyHandoff = {
+                  ...runReadyHandoff,
+                  state: "UNKNOWN",
+                  reasonCode: "selected_authority_conflict",
+                  evidence: [`Run-ready handoff authority differs from reconciliation at ${mismatch}.`],
+                  nextOwner: "human",
+                  noAutomaticTransition: "Observed Run Entry evidence does not authorize an automatic transition.",
+                  recoveryPredicates: ["selected_and_handoff_authority_match"],
+                };
+              }
+            }
+            if (runReadyHandoff.state !== "READY") return runReadyStop(current, runReadyHandoff);
             runIdentity = current.runIdentity;
             const selectedMismatch = selectedRequest.runIdentity
               ? identityMismatch(selectedRequest.runIdentity, runIdentity)

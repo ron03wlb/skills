@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createWorkflowRuntime } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
 
@@ -37,14 +38,58 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:05",
 };
 
+const readyHandoffFor = (runIdentity) => {
+  const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
+  const recordIdentities = runIdentity.classification === "SINGLE"
+    ? ["IC_to_spec"]
+    : ["IC_to_spec", "IC_to_tickets"];
+  return {
+    schema: RUN_READY_FACT_SCHEMA,
+    authority: {
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      planningSeal: "c".repeat(40),
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      decompositionIdentity: runIdentity.decompositionIdentity,
+    },
+    targetState: "CLEAN",
+    checkpoint: {
+      state: "COMPLETED",
+      producerCommand,
+      transactionIdentity: `sha256:${"3".repeat(64)}`,
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      firstUnsatisfiedStage: null,
+      handoffIdentity: `${producerCommand}:handoff:${runIdentity.specId}`,
+    },
+    handoff: {
+      identity: `${producerCommand}:handoff:${runIdentity.specId}`,
+      producerCommand,
+      specId: runIdentity.specId,
+      target: runIdentity.target,
+      planningSeal: "c".repeat(40),
+      classification: runIdentity.classification,
+      approvedScopeHash: runIdentity.approvedScopeHash,
+      recordIdentities,
+      decompositionIdentity: runIdentity.decompositionIdentity,
+    },
+    trackerRecordIdentities: recordIdentities,
+    decompositionIdentity: runIdentity.decompositionIdentity,
+    evidence: [],
+  };
+};
+
 const singleRunCurrent = ({
   journal = [],
   model,
   targetState = "CLEAN",
   contradictions = [],
+  runReadyHandoff = readyHandoffFor(identity),
 }) => ({
   runIdentity: identity,
   grant: { runIdentity: identity, maxParallel: 3 },
+  runReadyHandoff,
   taskRefs: Object.fromEntries(journal
     .filter(({ type }) => type === "dispatch.recorded")
     .map(({ issueId, taskRef }) => [issueId, taskRef])),
@@ -167,6 +212,60 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
     assert.deepEqual(result.cleanupResult.removed, []);
     await assert.rejects(fetch(`${openedOrigin}/api/status`));
     assert.equal(store.readStatus(identity.runId).run.state, "SUCCEEDED");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end Run-ready handoff stop performs only read-only cleanup preview", async () => {
+  const { root, store } = createStoreFixture();
+  const runReadyHandoff = readyHandoffFor(identity);
+  runReadyHandoff.checkpoint = {
+    ...runReadyHandoff.checkpoint,
+    state: "INCOMPLETE",
+    firstUnsatisfiedStage: "publication.read_back",
+    handoffIdentity: null,
+  };
+  runReadyHandoff.handoff = null;
+  runReadyHandoff.trackerRecordIdentities = [];
+  let taskCalls = 0;
+  let browserCalls = 0;
+  let cleanupReads = 0;
+  const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"].map((name) => [
+    name,
+    async () => { taskCalls += 1; throw new Error(`unexpected task call ${name}`); },
+  ]));
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile: async ({ journal }) => singleRunCurrent({
+        journal,
+        runReadyHandoff,
+        model: {
+          trackerState: "OPEN",
+          taskState: "NONE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: "ABSENT",
+        },
+      }),
+      browser: { async open() { browserCalls += 1; } },
+      cleanup: { async listRuns() { cleanupReads += 1; return []; } },
+      now: () => "2026-09-02T00:00:00.000Z",
+      sleep: async () => {},
+    });
+
+    const result = await runtime.run({ specId: "17" });
+
+    assert.equal(result.status.runReadyHandoff.state, "INCOMPLETE");
+    assert.equal(result.cleanupResult, null);
+    assert.equal(cleanupReads, 1);
+    assert.equal(taskCalls, 0);
+    assert.equal(browserCalls, 0);
+    assert.deepEqual(store.readEvents(identity.runId), []);
+    assert.equal(store.readWriterLock(identity.runId), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -424,6 +523,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
   const reconcile = async ({ journal }) => ({
     runIdentity: multiIdentity,
     grant: { runIdentity: multiIdentity, maxParallel: 2 },
+    runReadyHandoff: readyHandoffFor(multiIdentity),
     taskRefs: Object.fromEntries(journal
       .filter(({ type }) => type === "dispatch.recorded")
       .map(({ issueId, taskRef }) => [issueId, taskRef])),

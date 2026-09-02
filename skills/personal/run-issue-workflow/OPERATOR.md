@@ -12,9 +12,11 @@ A Single-Issue Spec runs as one node. A Multi-Issue Spec uses only the exact rea
 
 Invoke `/run-issue-workflow <Spec-ID>` once. Successful reconciliation creates or renews the exact Run Grant, opens the loopback panel, and starts work immediately. There is no second Start control.
 
+Before that authority or any mutation, Entry reduces one immediate-upstream producer handoff. A Single-Issue Spec consumes only `to-spec`'s completed handoff; a Multi-Issue Spec consumes only `to-tickets`' completed composite handoff with both immutable v1 record identities and the exact Decomposition publication identity. `READY` continues. `INCOMPLETE` returns the exact `/to-spec <Spec-ID>` or `/to-tickets <Spec-ID>` retry command, transaction identity, first unsatisfied stage, and producer-owned retry predicates. `UNKNOWN` returns a stable diagnosis and recovery predicates for missing, dirty, malformed, contradictory, stale, legacy, or ambiguous evidence. Neither state applies cleanup, acquires a writer, records a Grant, opens the panel, acts on a task or leaf, or repairs a producer; the returned cleanup preview remains read-only.
+
 After one exact Run is selected and its identity is reconciled, invocation previews and applies the bounded terminal-Run retention sweep before writer acquisition. The selected Run is protected even if cleanup evidence contradicts reconciliation. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
 
-The runtime adapters must provide current Tracker, Git/worktree/completion-note, Codex task, shared leaf, browser, and cleanup evidence. They normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
+The runtime adapters must provide current Tracker, Git/worktree/completion-note, Workflow checkpoint, Codex task, shared leaf, browser, and cleanup evidence. Reconciliation derives one versioned Run-ready fact from those existing reads, without repeating producer content, whole-commit, attestation, review, test, or aggregate validation. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
 
 ## Read the panel
 
