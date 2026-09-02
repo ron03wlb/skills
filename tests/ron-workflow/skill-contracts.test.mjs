@@ -2648,7 +2648,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
   assert.match(matt, /planning producers and closeout share one target mutation writer per target/iu);
-  assert.match(matt, /Tracker Spec publication routes.*authorized coordinator.*direct human invocation.*individual.*leaves.*DAG Run Grant/isu);
+  assert.match(matt, /Published Tracker Specs route.*authorized coordinator.*direct human invocation.*individual.*leaves.*DAG Run Grant/isu);
   assert.match(matt, /coordinator.*does not create.*broaden.*leaf.*authority/isu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(matt, /Before push.*verify-target-before-push.*local-ahead.*completion notes.*already-pushed.*explicit.*range.*aggregate review.*verification once/isu);
@@ -2658,7 +2658,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
 
   const mattDocs = read("docs/engineering/ask-matt.md");
   assert.match(mattDocs, /planning producers and closeout share one target mutation writer per recorded target/isu);
-  assert.match(mattDocs, /Tracker Spec publication routes.*authorized coordinator.*individual.*leaves.*direct human invocation.*DAG Run Grant/isu);
+  assert.match(mattDocs, /Published Tracker Specs route.*authorized coordinator.*individual.*leaves.*direct human invocation.*DAG Run Grant/isu);
   assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(mattDocs, /verify-target-before-push.*local-ahead.*completion-note.*already-pushed.*explicit.*range.*aggregate/isu);
 
