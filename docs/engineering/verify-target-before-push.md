@@ -1,12 +1,12 @@
 ## What it does
 
-`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-Spec, focused, and full-suite gate without pushing. It has three narrow confirmation-gated recoveries: eligible direct target contribution coverage, one eligible closed Issue historical failed-command case, and one eligible historical command placeholder.
+`verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-[Spec](https://www.aihero.dev/ai-coding-dictionary/spec), focused, and full-suite gate without pushing. It has three narrow confirmation-gated recoveries: eligible direct target contribution coverage, one eligible closed Issue historical failed-command case, and one eligible historical command placeholder.
 
 It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison.
 
 ## When to reach for it
 
-You invoke this by typing `/verify-target-before-push <target-or-explicit-range>` — the agent won't reach for it on its own.
+You invoke this by typing `/verify-target-before-push <target-or-explicit-range>` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it after Issue closeout when you need aggregate evidence for a local push or an explicit range that has already been pushed. It does not replace [close-issue](https://aihero.dev/skills-close-issue) and never changes Issue state.
 
@@ -44,7 +44,7 @@ Command representation recovery is separate from a genuinely failed command. It 
 
 The verifier proves one later descendant Issue whose candidate descends from the affected candidate and whose valid completion records the exact literal full-suite command passing. It also reruns that same command on the frozen target before showing one complete record draft for exact human confirmation. A current pass alone, non-descendant evidence, another command, or ambiguity never qualifies.
 
-The same model-invoked [record-closed-issue-reconciliation](https://aihero.dev/skills-record-closed-issue-reconciliation) helper appends or reuses the affected-Issue command representation record. The original completion remains invalid; read-back grants only selected-range membership eligibility. The verifier then discards the stopped gate, starts from fresh Entry, includes the mapped literal in the aggregate command set, and runs the full suite exactly once in either evidence mode.
+The same [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked [record-closed-issue-reconciliation](https://aihero.dev/skills-record-closed-issue-reconciliation) helper appends or reuses the affected-Issue command representation record. The original completion remains invalid; read-back grants only selected-range membership eligibility. The verifier then discards the stopped gate, starts from fresh Entry, includes the mapped literal in the aggregate command set, and runs the full suite exactly once in either evidence mode.
 
 ## Review findings and repair ownership
 

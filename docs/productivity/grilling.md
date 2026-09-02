@@ -1,6 +1,6 @@
 ## What it does
 
-`grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks down the decision tree branch by branch, resolving the dependencies between decisions one at a time until you and the agent share the same understanding.
+`grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks down the decision tree branch by branch, resolving the dependencies between decisions one at a time until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share the same understanding.
 
 It asks **one question at a time** and waits for your answer before the next — never a bulk list, which is bewildering. Each question comes with the agent's own recommended answer, and any question the codebase can settle it explores instead of asking you. It won't start enacting the plan until you confirm the shared understanding has been reached.
 
@@ -8,7 +8,7 @@ It asks **one question at a time** and waits for your answer before the next —
 
 Type `/grilling`, or the agent reaches for it automatically when a task fits — this is the underlying primitive, not a user-only entry point.
 
-Reach for it when a plan or design still has soft spots and you want them surfaced before code is written. In practice you usually invoke it through one of its two wrappers rather than by name: for a plain grilling session use [grill-me](https://aihero.dev/skills-grill-me); to have the session also write ADRs and a glossary as it goes, use [grill-with-docs](https://aihero.dev/skills-grill-with-docs).
+Reach for it when a plan or design still has soft spots and you want them surfaced before code is written. In practice you usually invoke it through one of its two wrappers rather than by name: for a plain grilling [session](https://www.aihero.dev/ai-coding-dictionary/session) use [grill-me](https://aihero.dev/skills-grill-me); to have the session also write ADRs and a glossary as it goes, use [grill-with-docs](https://aihero.dev/skills-grill-with-docs).
 
 ## The decision tree
 
@@ -16,17 +16,17 @@ The mental model is a **decision tree**: every plan branches into decisions, and
 
 ## Pulled out on purpose
 
-`grilling` is the **single source of truth** for the interview technique, split out as a model-invoked **primitive** so every skill that needs an interview can reach it instead of reinventing one. [grill-me](https://aihero.dev/skills-grill-me) and [grill-with-docs](https://aihero.dev/skills-grill-with-docs) are its two user-invoked front doors, but [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) and [triage](https://aihero.dev/skills-triage) also lean on it to pressure-test their own decisions.
+`grilling` is the **single source of truth** for the interview technique, split out as a [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked **primitive** so every skill that needs an interview can reach it instead of reinventing one. [grill-me](https://aihero.dev/skills-grill-me) and [grill-with-docs](https://aihero.dev/skills-grill-with-docs) are its two user-invoked front doors, but [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) and [triage](https://aihero.dev/skills-triage) also lean on it to pressure-test their own decisions.
 
-Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or ticket-shaping that its wrappers add on top.
+Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket)-shaping that its wrappers add on top.
 
 ## It's working if
 
-- Each turn asks one material question and includes a recommended answer.
+- Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) asks one material question and includes a recommended answer.
 - Later questions follow the dependencies created by answers already settled.
-- Facts available from the environment are looked up, while decisions still come back to you.
+- Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) are looked up, while decisions still come back to you.
 - No implementation starts until you confirm the shared understanding.
 
 ## Where it fits
 
-`grilling` is the interview **primitive** under the main build chain: [grill-with-docs](https://aihero.dev/skills-grill-with-docs) runs it to sharpen context before [to-spec](https://aihero.dev/skills-to-spec) writes the spec. When you're unsure which entry point fits, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.
+`grilling` is the interview **primitive** under the main build chain: [grill-with-docs](https://aihero.dev/skills-grill-with-docs) runs it to sharpen [context](https://www.aihero.dev/ai-coding-dictionary/context) before [to-spec](https://aihero.dev/skills-to-spec) writes the [spec](https://www.aihero.dev/ai-coding-dictionary/spec). When you're unsure which entry point fits, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.

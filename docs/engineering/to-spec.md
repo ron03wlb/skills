@@ -1,12 +1,12 @@
 ## What it does
 
-`to-spec` synthesizes settled conversation and repository evidence into an execution-ready Tracker Spec, seals approved planning artifacts, and publishes it through a retry-safe Workflow checkpoint with one immutable downstream handoff.
+`to-spec` synthesizes settled conversation and repository evidence into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), seals approved planning artifacts, and publishes it through a retry-safe Workflow checkpoint with one immutable downstream handoff.
 
 It does not restart the interview or leave an operational plan as unexplained target dirt. It is also the sole delivery-shape authority: downstream skills consume its Single-Issue or Multi-Issue classification instead of deciding again.
 
 ## When to reach for it
 
-You invoke this by typing `/to-spec` — the agent won't reach for it on its own.
+You invoke this by typing `/to-spec` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it after behavior and domain language are settled. Use [grill-with-docs](https://aihero.dev/skills-grill-with-docs) first when material decisions remain; use [to-tickets](https://aihero.dev/skills-to-tickets) only when the published Spec says Multi-Issue.
 

@@ -12,13 +12,13 @@ Reach for it when a published Issue declares one exact artifact that must be pre
 
 ## Prerequisites
 
-The Issue or linked Spec must declare the exact repository-relative artifact and recorded target, or an active `execute-issue` lane must bind one exact unchanged-scope late-discovery handoff to that target. Artifact preparation also requires the repository-owned adapter consumed by [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact); the runtime flow never installs or repairs that adapter.
+The Issue or linked [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) must declare the exact repository-relative artifact and recorded target, or an active `execute-issue` lane must bind one exact unchanged-scope late-discovery handoff to that target. Artifact preparation also requires the repository-owned adapter consumed by [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact); the runtime flow never installs or repairs that adapter.
 
 ## One content-bound handoff
 
 The skill reconciles the unique Issue topic branch and worktree. It reuses an exact clean Prerequisite candidate when candidate, Git blob, path, deterministic validation, and clean review evidence all match; otherwise it invokes `prepare-prerequisite-artifact` for that one declared file.
 
-You execute the committed Operator SQL and report only `APPLIED` or `NO_OP`. The resulting `manual_prerequisite_complete:v2` note binds the Issue, candidate, blob, path, and outcome without claiming that the agent verified the external target. Legacy path-only v1 notes remain readable but cannot authorize newly generated content.
+You execute the committed Operator SQL and report only `APPLIED` or `NO_OP`. The resulting `manual_prerequisite_complete:v2` note binds the Issue, candidate, blob, path, and outcome without claiming that the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) verified the external target. Legacy path-only v1 notes remain readable but cannot authorize newly generated content.
 
 ## Direct stop or active return
 

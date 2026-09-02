@@ -6,7 +6,7 @@ It never touches the database or executes the SQL. Missing adapter evidence, uns
 
 ## When to reach for it
 
-Type `/prepare-prerequisite-artifact`, or the agent reaches for it automatically when an active prerequisite-preparation handoff fits. Without that exact handoff it stops; this model-invoked helper is not a public starting route for prerequisite work.
+Type `/prepare-prerequisite-artifact`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when an active prerequisite-preparation handoff fits. Without that exact handoff it stops; this [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked helper is not a public starting route for prerequisite work.
 
 Reach for this helper when that handoff already binds one exact Issue, worktree, approved scope, artifact path, and repository-owned adapter. A human starts and finishes the surrounding prerequisite flow through [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue).
 
@@ -18,7 +18,7 @@ The repository must already provide and document an adapter with read-only `disc
 
 The artifact has three ordered sections: fail-closed preflight, persistent exact backup with inert recovery, then the authorized mutation and postconditions. Every uncertain or partial state aborts. Only a fully validated `APPLIED` or proven `NO_OP` path counts as a successful script outcome when a human later runs it. A later authorized operation may reuse the same logical backup name only after human cleanup and fresh pre-mutation proof.
 
-Deterministic validation and independent Standards and Spec review share ten material repair waves. Advisories stay visible without blocking; a confirmed violation or validation failure must be repaired before the candidate is ready.
+Deterministic validation and independent Standards and [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) review share ten material repair waves. Advisories stay visible without blocking; a confirmed violation or validation failure must be repaired before the candidate is ready.
 
 ## It's working if
 

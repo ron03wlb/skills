@@ -9,6 +9,8 @@
 
 ### Verification
 - `node --test tests/ron-workflow/*.test.mjs`: 125 passed, 0 failed.
+- The final Standards repair replaced three operative slash-style helper calls with explicit Skill tool calls, added 47 first-use AI Coding Dictionary links across 18 docs, removed six author attributions, and updated contract assertions to validate linked visible text.
+- Final independent reviews: Standards and Spec each reported 0 Confirmed findings and 0 Advisories.
 - `npm run check-plugin-version`: package and plugin versions are both `1.2.3`; `bash -n skills/in-progress/wizard/template.sh` passed and its template matches local `main`.
 - Scoped Codex packaging review: no actionable findings; merge-parent ancestry, clean target delivery, and final diff checks are verified at handoff.
 

@@ -56,7 +56,7 @@ No. GitHub, GitLab and local markdown under `.scratch/` all ship as ready-made t
 
 **Do I need to re-run it after updating the skills?**
 
-Asked directly after v1.1, Matt said yes. The skill's own closing message is softer: it tells you re-running is only needed to switch trackers or start over. Both are defensible and the reason for the gap is real: the seed templates change between versions, so a `docs/agents/issue-tracker.md` written by an older release can go stale against the skills now reading it. If a downstream skill starts doing something the docs describe differently, re-running is the cheap fix.
+Direct guidance after v1.1 was to re-run it. The skill's own closing message is softer: it tells you re-running is only needed to switch trackers or start over. Both are defensible and the reason for the gap is real: the seed templates change between versions, so a `docs/agents/issue-tracker.md` written by an older release can go stale against the skills now reading it. If a downstream skill starts doing something the docs describe differently, re-running is the cheap fix.
 
 **It wrote to `CLAUDE.md`, but I'm on Codex.**
 

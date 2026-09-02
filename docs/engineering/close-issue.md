@@ -2,11 +2,11 @@
 
 `close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. A direct human request or one valid read-back DAG Run Grant may authorize entry without separate per-Issue approval; the skill never creates the Grant or widens what closeout may do.
 
-The defining constraint is idempotent close progress. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. Coordinator membership is exact: a Single-Issue target is the bound Spec, a Multi-Issue child is an exact mapping member, and a parent-only target is the bound Spec itself. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
+The defining constraint is idempotent close progress. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. Coordinator membership is exact: a Single-Issue target is the bound [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), a Multi-Issue child is an exact mapping member, and a parent-only target is the bound Spec itself. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
 
 ## When to reach for it
 
-Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete`, or an authorized coordinator reaches for it when its valid DAG Run Grant binds that exact Issue or completed parent. Without either authority, the agent stops before mutation.
+Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete`, or an authorized coordinator reaches for it when its valid DAG Run Grant binds that exact Issue or completed parent. Without either authority, the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) stops before mutation.
 
 Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue; its bounded closeout shares one target mutation writer with planning producers, so only one planning or delivery writer acts on a target branch at a time while other targets remain concurrent. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 

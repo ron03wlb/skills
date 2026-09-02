@@ -4,7 +4,7 @@
 
 ## When to reach for it
 
-You invoke this by typing `/remove-ron` — the agent won't reach for it on its own. Use it when a consumer repository should stop carrying the old Ron setup; active execution, dirty overlap, or ambiguous instruction ownership stops cleanup.
+You invoke this by typing `/remove-ron` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own. Use it when a consumer repository should stop carrying the old Ron setup; active execution, dirty overlap, or ambiguous instruction ownership stops cleanup.
 
 ## Prerequisites
 

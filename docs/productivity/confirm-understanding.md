@@ -6,9 +6,9 @@ It declares `ALIGNED` only when every Core Proposition in the named scope is dem
 
 ## When to reach for it
 
-You invoke this by typing `/confirm-understanding` — the agent won't reach for it on its own.
+You invoke this by typing `/confirm-understanding` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
-Reach for it after a spec discussion, [grill-with-docs](https://aihero.dev/skills-grill-with-docs), [grill-me](https://aihero.dev/skills-grill-me), a lesson, or a meeting when you want to verify that your understanding matches the source rather than merely receive another summary.
+Reach for it after a [spec](https://www.aihero.dev/ai-coding-dictionary/spec) discussion, [grill-with-docs](https://aihero.dev/skills-grill-with-docs), [grill-me](https://aihero.dev/skills-grill-me), a lesson, or a meeting when you want to verify that your understanding matches the source rather than merely receive another summary.
 
 ## Calibration, not a quiz
 

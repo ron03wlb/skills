@@ -72,7 +72,7 @@ Into [codebase-design](https://aihero.dev/skills-codebase-design) in v1.0, gener
 
 **Does it know about my other tickets?**
 
-No. Run against one ticket, it will happily propose work that belongs to a sibling ticket, because it has no view of the rest of the issue graph ([issue #129](https://github.com/mattpocock/skills/issues/129)). Matt's position is that this is not `tdd`'s job. Passing the spec alongside the ticket helps; right-sizing the tickets in the first place helps more.
+No. Run against one ticket, it will happily propose work that belongs to a sibling ticket, because it has no view of the rest of the issue graph ([issue #129](https://github.com/mattpocock/skills/issues/129)). This is outside `tdd`'s scope. Passing the spec alongside the ticket helps; right-sizing the tickets in the first place helps more.
 
 ## It's working if
 

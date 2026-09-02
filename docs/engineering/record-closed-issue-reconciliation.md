@@ -6,7 +6,7 @@ It records narrow human authority for fresh exact-target verification. It never 
 
 ## When to reach for it
 
-The agent reaches for it automatically only from an active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) recovery after showing the complete draft and receiving one exact human confirmation. Do not invoke it manually; a standalone invocation stops without writing.
+The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically only from an active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) recovery after showing the complete draft and receiving one exact human confirmation. Do not invoke it manually; a standalone invocation stops without writing.
 
 Reach for [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) when a frozen target range contains either eligible historical case. Ordinary product fixes still use [execute-issue](https://aihero.dev/skills-execute-issue).
 
@@ -20,7 +20,7 @@ The leading idea is **reconciliation**, not retroactive completion. The helper r
 
 Malformed, duplicate, edited, conflicting, drifting, unavailable, partial, ambiguous, multiple-failure, multiple-fingerprint, or multiple-remedy evidence stops without repair. The record never contains aggregate range refs, current verification output, worktree paths, logs, hashes, or readiness.
 
-The same model-invoked helper also owns command representation reconciliation. It revalidates the sole unambiguous placeholder, unique repository full-suite command, descendant candidate ancestry, descendant passing completion, frozen-target pass, and exact confirmation before appending or reusing `closed_issue_command_representation_reconciliation:v1`. That record grants only selected-range membership eligibility; the original completion stays invalid and fresh aggregate verification remains the verifier's job.
+The same [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked helper also owns command representation reconciliation. It revalidates the sole unambiguous placeholder, unique repository full-suite command, descendant candidate ancestry, descendant passing completion, frozen-target pass, and exact confirmation before appending or reusing `closed_issue_command_representation_reconciliation:v1`. That record grants only selected-range membership eligibility; the original completion stays invalid and fresh aggregate verification remains the verifier's job.
 
 ## It's working if
 

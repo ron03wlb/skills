@@ -4,7 +4,7 @@
 
 ## When to reach for it
 
-You invoke this by typing `/wiki` — the agent won't reach for it on its own. Add `status` for a read-only report; invoke it without `status` when you want a Wiki-only local edit and commit.
+You invoke this by typing `/wiki` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own. Add `status` for a read-only report; invoke it without `status` when you want a Wiki-only local edit and commit.
 
 ## Safety boundary
 

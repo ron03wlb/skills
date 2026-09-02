@@ -1,12 +1,12 @@
 ## What it does
 
-`implement` builds an approved Standalone Spec or explicit direct task on the current branch, using test-driven slices, required verification, and review before a scoped commit.
+`implement` builds an approved Standalone [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) or explicit direct task on the current branch, using test-driven slices, required verification, and review before a scoped commit.
 
 It does not execute Tracker Specs. Tracker-backed work, including local tracker files, follows the published [to-spec](https://aihero.dev/skills-to-spec) route.
 
 ## When to reach for it
 
-You invoke this by typing `/implement` — the agent won't reach for it on its own.
+You invoke this by typing `/implement` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it when you intentionally want direct current-branch work and no tracker integration lifecycle. Use [to-spec](https://aihero.dev/skills-to-spec) when the scope needs a Tracker Spec or its published route.
 

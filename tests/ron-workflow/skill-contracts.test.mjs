@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 
 const read = (path) => readFileSync(path, "utf8").replace(/\r\n?/gu, "\n");
+const plainMarkdown = (content) => content.replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1");
 
 const createGitFixture = (prefix) => {
   const repo = mkdtempSync(join(tmpdir(), prefix));
@@ -613,7 +614,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   assert.match(executeMetadata, /exact.*prerequisite.*same authorized lane.*content-bound.*completion/isu);
   assert.match(executeDocs, /automatically.*pre-execute-issue.*same.*lane.*content-bound.*candidate.*blob.*outcome/isu);
   assert.match(preExecuteDocs, /execute-issue.*automatically.*one exact unresolved Manual prerequisite/isu);
-  assert.match(preExecuteDocs, /Issue or linked Spec.*exact.*artifact.*unchanged-scope late-discovery handoff/isu);
+  assert.match(plainMarkdown(preExecuteDocs), /Issue or linked Spec.*exact.*artifact.*unchanged-scope late-discovery handoff/isu);
   assert.match(router, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
   assert.match(routerDocs, /execute-issue.*automatically.*pre-execute-issue.*one exact.*attestation/isu);
   assert.match(closeDocs, /content-bound.*manual attestation.*candidate.*blob.*outcome.*ancestry/isu);
@@ -636,7 +637,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   assert.doesNotMatch(metadata, /^policy:/mu);
   assert.match(skill, /^description:.*Use when.*prerequisite-preparation handoff/mu);
   assert.match(metadata, /model-invoked.*exact prerequisite.*Operator SQL/isu);
-  assert.match(docs, /Type `\/prepare-prerequisite-artifact`, or the agent reaches for it automatically.*active prerequisite-preparation handoff/isu);
+  assert.match(plainMarkdown(docs), /Type `\/prepare-prerequisite-artifact`, or the agent reaches for it automatically.*active prerequisite-preparation handoff/isu);
 
   assert.match(skill, /active prerequisite-preparation handoff.*exact Issue.*Issue target branch.*Issue worktree.*approved scope.*repository-relative artifact/isu);
   assert.match(skill, /unchanged.*Issue.*target.*worktree.*scope.*artifact.*before every material edit.*before (?:the )?candidate commit/isu);
@@ -673,7 +674,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   const plugin = JSON.parse(read(".claude-plugin/plugin.json"));
   assert.equal(plugin.skills.includes("./skills/engineering/prepare-prerequisite-artifact"), true);
   assert.match(router, /prepare-prerequisite-artifact.*model-invoked.*not a public route.*active prerequisite-preparation handoff/isu);
-  assert.match(routerDocs, /prepare-prerequisite-artifact.*model-invoked.*not a public starting route.*Operator SQL/isu);
+  assert.match(plainMarkdown(routerDocs), /prepare-prerequisite-artifact.*model-invoked.*not a public starting route.*Operator SQL/isu);
   assert.doesNotMatch(docs, /\]\((?:\.\/|\.\.\/)/u);
   assert.match(docs, /## What it does/u);
   assert.match(docs, /## When to reach for it/u);
@@ -693,7 +694,7 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
   assert.match(skill, /^description:.*Use when \/verify-target-before-push/mu);
   assert.match(skill, /active `\/verify-target-before-push` recovery/iu);
   assert.match(metadata, /handed off by \/verify-target-before-push/iu);
-  assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(plainMarkdown(docs), /agent reaches for it automatically/iu);
   assert.match(docs, /## Prerequisites.*configured Issue tracker.*active.*verify-target-before-push.*exact packet.*complete draft.*human.*confirmed/isu);
   assert.match(skill, /exact confirmed recovery packet.*owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
   assert.match(skill, /before mutation.*owner.*target.*commit.*diff.*eligibility.*ref drift.*stops without writing/isu);
@@ -760,7 +761,7 @@ test("record-closed-issue-reconciliation is exact, immutable, and model-invoked"
   assert.match(skill, /^description:.*Use when \/verify-target-before-push/mu);
   assert.match(skill, /active `\/verify-target-before-push` recovery.*exact human-confirmed packet/isu);
   assert.match(metadata, /handed off by \/verify-target-before-push.*exact human confirmation/isu);
-  assert.match(docs, /agent reaches for it automatically/iu);
+  assert.match(plainMarkdown(docs), /agent reaches for it automatically/iu);
   assert.match(docs, /## Prerequisites.*configured Issue tracker.*active.*verify-target-before-push.*complete.*draft.*human.*confirmed/isu);
 
   assert.match(skill, /confirmed packet.*affected Issue.*completion-note identity.*Issue target branch.*execution baseline.*candidate.*diagnostic fingerprint.*remedy Issue.*completion-note identity.*candidate.*complete tracker comment draft/isu);
@@ -806,7 +807,7 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
   assert.match(verify, /original.*completion notes.*Issue states.*immutable/isu);
   assert.match(verify, /`closed_issue_evidence_reconciliation:v1`.*reuse one exact matching.*without.*duplicate/isu);
   assert.match(verify, /present.*complete reconciliation packet.*complete tracker comment draft.*human confirms that exact packet once/isu);
-  assert.match(verify, /invoke.*`\/record-closed-issue-reconciliation`.*without.*manual slash command/isu);
+  assert.match(verify, /call the Skill tool with `record-closed-issue-reconciliation`.*without.*manual slash command/isu);
   assert.match(verify, /exact.*read-back.*discard.*stopped gate.*fresh.*Entry.*re-freeze/isu);
   assert.match(verify, /reconciliation record.*affected.*remedy.*candidates.*reachable.*exact diagnostic.*current target/isu);
   assert.match(verify, /collect.*every exact command.*deduplicate.*repository-required full suite.*duplicate.*run.*once/isu);
@@ -955,7 +956,7 @@ test("historical command placeholder reconciliation is exact and fresh-entry onl
   assert.match(verifyMetadata, /historical command placeholder.*exact human confirmation.*fresh.*Entry/isu);
   assert.match(helperMetadata, /failed-command.*command representation.*exact human confirmation/isu);
   assert.match(verifyDocs, /command representation.*one unambiguous placeholder.*descendant.*exact literal.*frozen target.*fresh.*Entry/isu);
-  assert.match(helperDocs, /failed-command diagnostic.*command representation.*same model-invoked helper/isu);
+  assert.match(plainMarkdown(helperDocs), /failed-command diagnostic.*command representation.*same model-invoked helper/isu);
   assert.match(matt, /historical command placeholder.*descendant.*exact full-suite command.*freshly frozen target pass.*current-only pass.*does not qualify.*human confirmation.*record-closed-issue-reconciliation.*fresh.*Entry/isu);
   assert.match(mattDocs, /historical command placeholder.*descendant.*exact full-suite command.*confirmation.*fresh.*Entry/isu);
   for (const path of ["README.md", "skills/engineering/README.md"]) {
@@ -1079,8 +1080,8 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   assert.match(verify, /exact matching.*direct_target_contribution:v1.*reuse.*without invoking.*attest-target-contribution/isu);
   assert.match(verify, /present.*exact owner.*target.*classification.*full commit SHAs.*per-commit purposes.*complete tracker comment draft/isu);
   assert.match(verify, /No write.*until.*human confirms.*exact draft once/isu);
-  assert.match(verify, /invoke.*attest-target-contribution.*without.*manual slash command/isu);
-  assert.match(verify, /invoke.*`\/attest-target-contribution` skill/isu);
+  assert.match(verify, /call the Skill tool with `attest-target-contribution`.*without.*manual slash command/isu);
+  assert.doesNotMatch(verify, /invoke.*`\/attest-target-contribution` skill/isu);
   assert.match(verify, /owner.*target.*commit.*diff.*eligibility.*ref drift.*before mutation.*stops without writing/isu);
   assert.match(verify, /malformed.*duplicate.*conflicting.*mismatched.*unavailable.*partially written.*stops/isu);
   assert.match(verify, /exact record read-back.*discard.*failed gate.*automatically.*fresh.*Entry/isu);
@@ -1403,7 +1404,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /coordinator.*read-back.*DAG Run Grant.*exact.*linked Spec.*Issue target branch.*classification.*scope.*Decomposition publication record/isu);
   assert.match(execute, /Single-Issue.*coordinator target.*exact bound Spec.*outsider.*stops? before.*worktree.*mutation/isu);
   assert.match(execute, /missing.*stale.*mismatch.*Grant.*stops? before.*worktree.*mutation/isu);
-  assert.match(read("docs/engineering/execute-issue.md"), /Single-Issue.*exact bound Spec.*Multi-Issue.*exact mapping member/isu);
+  assert.match(plainMarkdown(read("docs/engineering/execute-issue.md")), /Single-Issue.*exact bound Spec.*Multi-Issue.*exact mapping member/isu);
   assert.match(execute, /never creates.*DAG Run Grant/iu);
   assert.match(execute, /dedicated Git worktree/iu);
   assert.match(execute, /linked Spec/iu);
@@ -1431,7 +1432,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /never creates.*DAG Run Grant/iu);
   assert.match(close, /coordinator.*Single-Issue.*target.*bound Spec.*Multi-Issue.*Executable Issue.*exact Issue.*mapping.*parent-only.*target.*bound Spec/isu);
   assert.match(close, /absent from.*mapping.*stop before mutation/isu);
-  assert.match(read("docs/engineering/close-issue.md"), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
+  assert.match(plainMarkdown(read("docs/engineering/close-issue.md")), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
   assert.match(close, /shared target mutation writer.*one planning or delivery writer.*Issue target branch/isu);
@@ -1535,8 +1536,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
     assert.match(skill, /^disable-model-invocation:\s*true$/mu);
     assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
     assert.doesNotMatch(skill, /^description:\s*Use when\b/mu);
-    assert.match(page, /agent won't reach for it on its own/iu);
-    assert.doesNotMatch(page, /agent reaches for it automatically/iu);
+    assert.match(plainMarkdown(page), /agent won't reach for it on its own/iu);
+    assert.doesNotMatch(plainMarkdown(page), /agent reaches for it automatically/iu);
     assert.doesNotMatch(skill, /Canonical Wiki|\/wiki|wiki_|setup-ron|ron-workflow\.md|workflow-[a-z-]+:v\d|lifecycle authorization|payload hash/iu);
     assert.doesNotMatch(skill, /GitHub Issue|GitHub comment/u);
   }
@@ -2215,7 +2216,7 @@ test("push-target consumes one current receipt for one exact non-force push", ()
   assert.match(skill, /rejection.*transport failure.*remote mismatch.*post-push ambiguity.*unresolved delivery.*never.*retry/isu);
   assert.match(skill, /never.*pull.*merge.*rebase.*force-push.*receipt rewrite.*automatic reverification.*deploy/isu);
   assert.match(skill, /never changes product files.*commits.*branches.*worktrees.*Issues.*labels.*completion notes.*verification evidence/isu);
-  assert.match(docs, /agent won't reach for it on its own/iu);
+  assert.match(plainMarkdown(docs), /agent won't reach for it on its own/iu);
   assert.match(docs, /push_ready.*fetch.*ordinary non-force push.*remote read-back/isu);
   assert.match(docs, /## What it does.*## When to reach for it.*## Where it fits/isu);
 

@@ -6,7 +6,7 @@ The receipt is the boundary: the skill cannot create readiness, repair stale evi
 
 ## When to reach for it
 
-You invoke this by typing `/push-target <target>` — the agent won't reach for it on its own.
+You invoke this by typing `/push-target <target>` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it only after [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) returns a current local-ahead `push_ready` receipt. If the target, upstream, or receipt has drifted, run verification again explicitly instead of asking this skill to reconcile the state.
 

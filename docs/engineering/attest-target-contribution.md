@@ -6,7 +6,7 @@ Both routes write the unchanged `direct_target_contribution:v1` schema. The reco
 
 ## When to reach for it
 
-Type `/attest-target-contribution`, or the agent reaches for it automatically when a task fits. In the recovery flow, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) invokes it after showing you the complete draft and receiving one exact confirmation. An active `to-spec` or `to-tickets` operation may instead invoke it for its own transaction-bound Workflow plan checkpoint without another confirmation.
+Type `/attest-target-contribution`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task fits. In the recovery flow, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) invokes it after showing you the complete draft and receiving one exact confirmation. An active `to-spec` or `to-tickets` operation may instead invoke it for its own transaction-bound Workflow plan checkpoint without another confirmation.
 
 A standalone invocation without one of those active caller packets stops without writing.
 
@@ -28,4 +28,4 @@ The helper reads the owner's complete ordered history, reuses one exact record, 
 
 ## Where it fits
 
-This is a model-invoked authority helper inside the recovery path of [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) and the Workflow plan checkpoint path owned by `to-spec` and `to-tickets`. Normal product or active workflow changes still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue); see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+This is a [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked authority helper inside the recovery path of [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) and the Workflow plan checkpoint path owned by `to-spec` and `to-tickets`. Normal product or active workflow changes still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue); see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

@@ -1,12 +1,12 @@
 ## What it does
 
-`to-tickets` consumes the completed `to-spec` handoff for an approved Multi-Issue Spec, settles its own retry-safe Workflow checkpoint, and reconciles every child through an immutable Decomposition key. Each child keeps its Acceptance Criteria, mapped Implementation Plan, verification, blockers, target, and Planning baseline.
+`to-tickets` consumes the completed `to-spec` handoff for an approved Multi-Issue [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), settles its own retry-safe Workflow checkpoint, and reconciles every child through an immutable Decomposition key. Each child keeps its Acceptance Criteria, mapped Implementation Plan, verification, blockers, target, and Planning baseline.
 
 Its defining idea is the **tracer bullet**: each child is a narrow, verifiable vertical outcome. After the checkpoint evidence, every child, blocker, Decomposition publication record, and ready state pass read-back, the skill appends one composite `handoff.completed` and ends at `/run-issue-workflow <Spec-ID>`; it never reclassifies the parent or emits child execution commands.
 
 ## When to reach for it
 
-You invoke this by typing `/to-tickets <Spec-ID>` — the agent won't reach for it on its own.
+You invoke this by typing `/to-tickets <Spec-ID>` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it only when [to-spec](https://aihero.dev/skills-to-spec) published a Multi-Issue next command and completed handoff. A Single-Issue Spec goes directly to the published `/run-issue-workflow <Spec-ID>` route.
 
