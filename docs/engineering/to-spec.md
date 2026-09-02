@@ -30,15 +30,13 @@ Reach for it after behavior and domain language are settled. Use [grill-with-doc
 
 A Single-Issue Spec carries at most three non-authoritative User Outcomes, stable `AC-n` Acceptance Criteria, non-exhaustive expected touchpoints, a mapped Implementation Plan, verification, exclusions, and `/run-issue-workflow <Spec-ID>`. A Multi-Issue parent keeps only the aggregate constraints and `/to-tickets <Spec-ID>` handoff. Classification follows executable outcomes and blocking edges, not file count or apparent size.
 
-After validating the visible Planning handoff, `to-spec` creates or reuses the Planning Seal, then starts a clean-target Workflow checkpoint transaction before writing the durable operational plan. The producer commits only that plan under the shared target writer, obtains the exact `direct_target_contribution:v1` identity through model-invoked [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution), publishes the body and label in the required order, and finishes with an immutable `handoff.completed`. An exact retry resumes the first unproved stage without regenerating a plan, commit, evidence record, tracker identity, or confirmation.
-
-Primary publication obtains one tracker identity before prospective evidence and completes its canonical body and label only afterward. Revision mode obtains the new evidence before updating the existing Spec. Any identity conflict, dirty target, partial read-back, or writer failure preserves exact state, reports the full SHA, and stops instead of repairing or duplicating it. On retry, the prior partial-state report is read first; missing or conflicting evidence stops.
+A retry-safe Workflow checkpoint gives the operational plan one durable owner before publication, so a retry cannot silently duplicate or reattribute producer work. Its immutable `handoff.completed` records the exact published route without granting Run, implementation, push, or deployment authority.
 
 ## It's working if
 
-- The Planning Seal, checkpoint transaction, plan commit, attestation, publication, and `handoff.completed` form one exact ordered chain.
+- The published Planning Seal, checkpoint evidence, and immutable handoff agree.
 - A Single-Issue Spec ends in `/run-issue-workflow <Spec-ID>`; a Multi-Issue parent ends in `/to-tickets <Spec-ID>`.
-- A retry reports and resumes one first unsatisfied stage while unrelated work remains untouched.
+- A failure reports the full SHA and exact partial state. A retry reads the prior partial-state report; missing or conflicting evidence stops while unrelated work remains untouched.
 
 ## Where it fits
 

@@ -23,9 +23,5 @@
 
 - Work: Route Single-Issue Specs only to `/run-issue-workflow <Spec-ID>` and Multi-Issue Specs only to `/to-tickets <Spec-ID>`; synchronize the Single-Issue template, invocation metadata, human docs, `ask-matt`, affected README summaries, and contract tests without implementing the `to-tickets` producer or Run reducer children.
 - Verify: `rtk node --test tests/ron-workflow/skill-contracts.test.mjs`
-
-### Outcome 5: Candidate is reviewable and regression-safe
-
-- Work: Inspect the baseline-to-candidate diff, keep the required plan declared as the only workflow artifact, commit coherent slices, run both review axes with evidence-backed repair only, and stop on any scope change or unresolved authority mismatch.
 - Verify: `rtk node --test tests/ron-workflow/*.test.mjs`
 - Verify: `rtk git diff --check`
