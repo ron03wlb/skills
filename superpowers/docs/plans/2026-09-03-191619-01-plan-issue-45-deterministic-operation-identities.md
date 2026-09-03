@@ -42,6 +42,12 @@ rtk git diff --check
 rtk git status --porcelain
 ```
 
+## Workflow artifact declaration
+
+- `path`: `superpowers/docs/plans/2026-09-03-191619-01-plan-issue-45-deterministic-operation-identities.md`
+- `requirementSource`: `AGENTS.md High-risk tier + writing-plans skill`
+- `purpose`: `record Issue 45 identity ownership, compatibility stops, and verification plan`
+
 ## Recovery boundaries
 
 - A missing, duplicate, mismatched, out-of-order, or ambiguous receipt stops before mutation. Do not migrate, overwrite, delete, or attribute it to another operation.

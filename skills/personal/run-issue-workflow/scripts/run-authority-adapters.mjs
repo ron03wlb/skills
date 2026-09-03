@@ -139,7 +139,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         checkpoint,
         handoff: handoffReadBack,
       };
-      if (checkpoint.profileVersion === "v2" && reduceRunReadyHandoff(facts).state === "READY") {
+      if (reduceRunReadyHandoff(facts).state === "READY") {
         try {
           facts = {
             ...facts,

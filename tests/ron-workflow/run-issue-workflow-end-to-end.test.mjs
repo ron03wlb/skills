@@ -218,7 +218,12 @@ const singleRunCurrent = ({
   },
 });
 
-const runExplicitSelection = async ({ store, candidates, currentRun }) => {
+const runExplicitSelection = async ({
+  store,
+  candidates,
+  currentRun,
+  runReadyHandoff = currentReadyHandoffFor(currentRun),
+}) => {
   const model = {
     trackerState: "OPEN",
     taskState: "NONE",
@@ -227,7 +232,6 @@ const runExplicitSelection = async ({ store, candidates, currentRun }) => {
     worktreeState: "ABSENT",
   };
   let creates = 0;
-  const runReadyHandoff = currentReadyHandoffFor(currentRun);
   const reconcile = async ({ request, journal }) => {
     const selectedRun = request.runIdentity ?? currentRun;
     const current = singleRunCurrent({ journal, model, runReadyHandoff });
@@ -621,6 +625,35 @@ test("deterministic and opaque same-authority Runs stop as duplicate compatibili
     assert.equal(result.status.run.runId, null);
     assert.equal(result.status.diagnoses[0].reasonCode, "run_selection_required");
     assert.equal(creates, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("fresh Run from a frozen profile-v1 handoff still uses the deterministic identity", async () => {
+  const { root, store } = createStoreFixture();
+  const expected = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  });
+  const legacyHandoff = readyHandoffFor(identity);
+  legacyHandoff.checkpoint.profileVersion = "v1";
+
+  try {
+    const { result, creates } = await runExplicitSelection({
+      store,
+      candidates: [],
+      currentRun: identity,
+      runReadyHandoff: legacyHandoff,
+    });
+
+    assert.equal(result.status.run.runId, expected.key);
+    assert.equal(creates, 1);
+    assert.equal(result.journal.filter(({ type }) => type === "grant.recorded").length, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
