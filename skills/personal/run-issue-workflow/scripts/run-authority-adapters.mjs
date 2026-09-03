@@ -1,6 +1,6 @@
-import { RUN_READY_FACT_SCHEMA } from "./run-core.mjs";
+import { reduceRunReadyHandoff, RUN_READY_FACT_SCHEMA } from "./run-core.mjs";
 import { isExactStaleOwnerProof } from "./run-stale-proof.mjs";
-import { deriveWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
+import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -130,25 +130,36 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         authority: base.authority,
         checkpoint,
       });
-      const operationIdentity = checkpoint.profileVersion === "v2"
-        ? deriveWorkflowOperationIdentity({
-          repositoryId,
-          specId: base.authority.specId,
-          approvedPublicationIdentity: base.authority.approvedScopeHash,
-          producer: "run-issue-workflow",
-          stage: "run",
-          issueId: null,
-        })
-        : null;
-      return {
+      let facts = {
         ...base,
         schema: RUN_READY_FACT_SCHEMA,
-        operationIdentity,
+        operationIdentity: null,
         targetState: current.authorityReadBack.target.state,
         targetOwnership: current.authorityReadBack.target.ownership ?? base.targetOwnership,
         checkpoint,
         handoff: handoffReadBack,
       };
+      if (checkpoint.profileVersion === "v2" && reduceRunReadyHandoff(facts).state === "READY") {
+        try {
+          facts = {
+            ...facts,
+            operationIdentity: deriveRunOperationIdentity({
+              repositoryId,
+              specId: base.authority.specId,
+              approvedPublicationIdentity: base.authority.approvedScopeHash,
+            }),
+          };
+        } catch (error) {
+          facts = {
+            ...facts,
+            evidence: [
+              ...(Array.isArray(facts.evidence) ? facts.evidence : []),
+              `Run operation identity evidence is invalid: ${error.message}`,
+            ],
+          };
+        }
+      }
+      return facts;
     },
   };
 

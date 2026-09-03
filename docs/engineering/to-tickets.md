@@ -2,7 +2,7 @@
 
 `to-tickets` consumes the completed `to-spec` handoff for an approved Multi-Issue [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), opens one minimal operation-scoped transaction, and reconciles every child through an immutable Decomposition key. Each child keeps its Acceptance Criteria, mapped Implementation Plan, verification, blockers, target, and Planning baseline.
 
-Its defining idea is the **tracer bullet**: each child is a narrow, verifiable vertical outcome. After every child, blocker, Decomposition publication record, and ready state passes read-back, the skill appends one composite `handoff.completed` and ends at `/run-issue-workflow <Spec-ID>`; it never reclassifies the parent or emits child execution commands. Fresh decomposition binds a deterministic versioned operation identity derived from immutable repository, Spec, approved-publication, producer, and stage inputs; duplicate invocation resumes that exact transaction.
+Its defining idea is the **tracer bullet**: each child is a narrow, verifiable vertical outcome. After every child, blocker, Decomposition publication record, and ready state passes read-back, the skill appends one composite `handoff.completed` and ends at `/run-issue-workflow <Spec-ID>`; it never reclassifies the parent or emits child execution commands. Its concrete producer adapter binds a deterministic versioned operation identity derived from immutable repository, Spec, approved-publication, producer, and stage inputs; duplicate invocation resumes that exact transaction while the generic checkpoint store keeps the identity opaque.
 
 ## When to reach for it
 

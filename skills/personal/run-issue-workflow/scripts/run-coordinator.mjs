@@ -854,6 +854,7 @@ export function createCoordinator({
   return {
     async run(request = {}) {
       let selectedRequest = request;
+      let candidateRuns = null;
       if (!isText(request.specId)) {
         requireMethod(selector, "listNonTerminalRuns");
         const candidates = await selector.listNonTerminalRuns({ store, tasks, specId: null });
@@ -877,19 +878,9 @@ export function createCoordinator({
       } else if (typeof selector?.listNonTerminalRuns === "function") {
         const candidates = await selector.listNonTerminalRuns({ store, tasks, specId: request.specId });
         if (!Array.isArray(candidates)) return runSelectionRequired(0);
-        const matching = candidates.filter((candidate) => (
+        candidateRuns = candidates.filter((candidate) => (
           (candidate.runIdentity ?? candidate)?.specId === request.specId
         ));
-        if (matching.length > 1) return runSelectionRequired(matching.length);
-        if (matching.length === 1) {
-          const selectedCandidate = matching[0];
-          selectedRequest = {
-            ...request,
-            runIdentity: selectedCandidate.runIdentity ?? selectedCandidate,
-            issueIds: selectedCandidate.issueIds,
-            maxParallel: selectedCandidate.maxParallel,
-          };
-        }
       }
       let runIdentity;
       let runOperationIdentity;
@@ -925,7 +916,21 @@ export function createCoordinator({
       try {
         while (true) {
           const trackerResult = await readTracker(selectedRequest);
-          if (!trackerResult.available) return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
+          if (!trackerResult.available) {
+            if (!selectedRequest.runIdentity && candidateRuns?.length > 1) {
+              return runSelectionRequired(candidateRuns.length);
+            }
+            const outageCandidate = !selectedRequest.runIdentity && candidateRuns?.length === 1
+              ? candidateRuns[0]
+              : null;
+            const outageRequest = outageCandidate ? {
+              ...selectedRequest,
+              runIdentity: outageCandidate.runIdentity ?? outageCandidate,
+              issueIds: outageCandidate.issueIds,
+              maxParallel: outageCandidate.maxParallel,
+            } : selectedRequest;
+            return trackerUnavailable(outageRequest, trackerResult.attempts, lastStatus);
+          }
           const journal = runIdentity ? store.readEvents(runIdentity.runId) : [];
           let current = await reconcile({
             request: selectedRequest,
@@ -980,9 +985,31 @@ export function createCoordinator({
               }
             }
             if (runReadyHandoff.state !== "READY") return runReadyStop(current, runReadyHandoff);
-            const selectedGrant = selectedRequest.runIdentity?.runId
-              ? store.readEvents(selectedRequest.runIdentity.runId)
-                .findLast(({ type }) => type === "grant.recorded")
+            if (candidateRuns && !selectedRequest.runIdentity) {
+              const matching = runReadyFacts.operationIdentity
+                ? candidateRuns.filter((candidate) => (
+                  (candidate.runIdentity ?? candidate)?.runId === runReadyFacts.operationIdentity.key
+                ))
+                : candidateRuns;
+              if (matching.length > 1) return runSelectionRequired(matching.length);
+              if (matching.length === 1) {
+                const selectedCandidate = matching[0];
+                selectedRequest = {
+                  ...selectedRequest,
+                  runIdentity: selectedCandidate.runIdentity ?? selectedCandidate,
+                  issueIds: selectedCandidate.issueIds,
+                  maxParallel: selectedCandidate.maxParallel,
+                };
+                continue;
+              }
+            }
+            const selectedRunId = selectedRequest.runIdentity?.runId ?? current.runIdentity?.runId;
+            const observedGrant = isText(selectedRunId)
+              ? store.readEvents(selectedRunId).findLast(({ type }) => type === "grant.recorded")
+              : null;
+            const selectedGrant = observedGrant
+              && identityMismatch(current.runIdentity, observedGrant.runIdentity) === null
+              ? observedGrant
               : null;
             if (runReadyFacts.operationIdentity && !selectedGrant) {
               runOperationIdentity = runReadyFacts.operationIdentity;

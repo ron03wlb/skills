@@ -10,7 +10,7 @@ Identical immutable inputs resume the same three-action close path. Different re
 
 ## Immediate receipt
 
-An Executable Issue consumes one exact read-back `implementation_complete` receipt. Validate its identity, body hash, freshness, unchanged candidate, and current tracker, target, ancestry, lease, and worktree preconditions. `close-issue` does not rerun implementation, execution verification, or Standards and Spec review. A Multi-Issue parent consumes the published decomposition receipt and current closed-child preconditions instead.
+An Executable Issue consumes one exact read-back `implementation_complete` receipt. For a current receipt, validate its full `operationIdentity` against the canonical repository, Spec, approved publication identity, and Issue, then validate body hash, freshness, unchanged candidate, and current tracker, target, ancestry, lease, and worktree preconditions. A legacy completion that predates the identity contract retains its exact recorded identity and body without migration. `close-issue` does not rerun implementation, execution verification, or Standards and Spec review. A Multi-Issue parent consumes the published decomposition receipt and current closed-child preconditions instead.
 
 Git ancestry, worktree registration, and tracker state remain the progress source. Closeout emits no replacement success receipt; its owner-produced results are the target ancestry, removed registered worktree, and closed tracker read-back.
 

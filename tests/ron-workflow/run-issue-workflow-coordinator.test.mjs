@@ -1006,14 +1006,11 @@ test("operation identity remains owner-derived while an unknown environment fing
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let clockMinute = 0;
   const now = () => `2026-08-30T09:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
-  const seed = store.acquireWriter(identity.runId);
-  seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
-  seed.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef });
-  seed.release();
+  let taskState = "NONE";
   let remediationCalls = 0;
   const tasks = {
-    async findIssueLane() { throw new Error("no dispatch is legal"); },
-    async create() { throw new Error("no dispatch is legal"); },
+    async findIssueLane() { return []; },
+    async create() { taskState = "ENVIRONMENT_FAILURE"; return taskRef; },
     async read() { throw new Error("no retry is legal"); },
     async message() { throw new Error("no retry is legal"); },
     async wait() { throw new Error("no wait is legal"); },
@@ -1036,7 +1033,7 @@ test("operation identity remains owner-derived while an unknown environment fing
         issueId: "15",
         blockers: [],
         trackerState: "OPEN",
-        taskState: "ENVIRONMENT_FAILURE",
+        taskState,
         completionState: "NONE",
         candidateReachable: false,
         worktreeState: "PRESENT",
@@ -1491,11 +1488,11 @@ const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
   controlRevision: 0,
 });
 
-test("real close-issue lease boundary excludes a second target and uses one order for direct and DAG authority", () => {
+test("closeout operation identity excludes a second target and uses one order for direct and DAG authority", () => {
   const { root, store } = createStoreFixture();
   const observedOrders = [];
 
-  const acquireObservedLeaf = ({ authority, operationId, target }) => {
+  const acquireObservedLeaf = ({ authority, issueId, approvedPublicationIdentity, target }) => {
     const order = [];
     const observedStore = {
       acquireRepositoryCloseLease(request) {
@@ -1524,26 +1521,50 @@ test("real close-issue lease boundary excludes a second target and uses one orde
 
     const unrelatedPlanning = store.acquireTargetMutationWriter({
       target: `${target}-planning`,
-      operationId: `${operationId}-planning`,
+      operationId: `${issueId}-planning`,
     });
     unrelatedPlanning.release();
 
-    const leases = acquireCloseIssueLeases({ store: observedStore, target, operationId });
+    const leases = acquireCloseIssueLeases({
+      store: observedStore,
+      target,
+      repositoryId: "github:ron03wlb/skills",
+      specId: "43",
+      approvedPublicationIdentity,
+      issueId,
+    });
+    assert.match(leases.operationId, /^workflow-op-v1-[a-f0-9]{64}$/u);
     assert.equal(leases.assertCurrent(), true, `${authority} lost closeout ownership`);
     return { leases, order };
   };
 
   try {
+    assert.throws(
+      () => acquireCloseIssueLeases({
+        store,
+        target: "features/ron",
+        repositoryId: "github:ron03wlb/skills",
+        specId: "43",
+        approvedPublicationIdentity: "sha256:approved-revision-1",
+        issueId: "44",
+        operationId: "caller-defined-close-key",
+      }),
+      /unknown field operationId/u,
+    );
     const direct = acquireObservedLeaf({
       authority: "direct",
-      operationId: "direct-close-44",
+      issueId: "44",
+      approvedPublicationIdentity: "sha256:approved-revision-1",
       target: "features/ron",
     });
     assert.throws(
       () => acquireCloseIssueLeases({
         store,
         target: "release/next",
-        operationId: "dag-close-46",
+        repositoryId: "github:ron03wlb/skills",
+        specId: "43",
+        approvedPublicationIdentity: "sha256:approved-revision-2",
+        issueId: "46",
       }),
       /REPOSITORY_CLOSE_LEASE_LOCKED/u,
     );
@@ -1552,7 +1573,8 @@ test("real close-issue lease boundary excludes a second target and uses one orde
 
     const dag = acquireObservedLeaf({
       authority: "DAG",
-      operationId: "dag-close-46",
+      issueId: "46",
+      approvedPublicationIdentity: "sha256:approved-revision-2",
       target: "release/next",
     });
     dag.leases.release();
@@ -1561,6 +1583,59 @@ test("real close-issue lease boundary excludes a second target and uses one orde
       ["repository:acquired", "target:acquired", "target:released", "repository:released"],
       ["repository:acquired", "target:acquired", "target:released", "repository:released"],
     ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("operation identity preserves an exact reconciled Run Grant without an optional selector", async () => {
+  const { root, store } = createStoreFixture();
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T00:00:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  seed.release();
+  const ownerDerived = { key: `workflow-op-v1-${"a".repeat(64)}` };
+  const runReadyHandoff = { ...readyHandoffFor(identity), operationIdentity: ownerDerived };
+  const tracker = { async read() { return {}; } };
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is unnecessary for a completed recorded Run`);
+    }]),
+  );
+  const reconcile = async () => reconciliation({
+    runReadyHandoff,
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "CLOSED",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: true,
+      worktreeState: "ABSENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      now: () => "2026-09-03T00:01:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: identity.specId });
+
+    assert.equal(status.run.runId, identity.runId);
+    assert.ok(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length >= 1);
+    assert.ok(store.readEvents(identity.runId)
+      .filter(({ type }) => type === "grant.recorded")
+      .every(({ runIdentity }) => runIdentity.runId === identity.runId));
+    assert.deepEqual(store.readEvents(ownerDerived.key), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

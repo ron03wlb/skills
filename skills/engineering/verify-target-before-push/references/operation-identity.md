@@ -10,7 +10,7 @@ Repeating the same frozen repository, range, member receipts, and Spec identitie
 
 ## Immediate receipts
 
-Consume each member's exact read-back completion receipt and the Planning Seal, adoption, manual-attestation, reconciliation, or direct-contribution records that its owner-local aggregate interface requires. Validate receipt identity, content hash, freshness, candidate reachability, range membership, coverage, and current ref/worktree preconditions. The aggregate owner does not rerun Issue implementation, execution review, closeout, or producer semantic validation.
+Consume each member's exact read-back completion receipt and the Planning Seal, adoption, manual-attestation, reconciliation, or direct-contribution records that its owner-local aggregate interface requires. For a current completion, validate its `operationIdentity` against the canonical repository, Spec, approved publication identity, and Issue; retain a legacy completion that predates the identity contract under its exact recorded body. Validate receipt identity, content hash, freshness, candidate reachability, range membership, coverage, and current ref/worktree preconditions. The aggregate owner does not rerun Issue implementation, execution review, closeout, or producer semantic validation.
 
 Only this owner runs aggregate Standards, multi-Spec review, focused verification, and the full suite. A passing local-ahead gate may emit `push_ready`; already-pushed mode emits only the Range verification result.
 

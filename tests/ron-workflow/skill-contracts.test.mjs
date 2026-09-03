@@ -63,6 +63,7 @@ const createPushReadyReceipt = ({
 
 test("deterministic operation identity and receipt ownership stay synchronized across workflow seams", () => {
   const operationModule = read("skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs");
+  const checkpointStore = read("skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs");
   const specInterfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
   const ticketInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
   const executionInterfaces = read("skills/engineering/execute-issue/references/operation-identity.md");
@@ -75,6 +76,16 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   const runOperator = read("skills/personal/run-issue-workflow/OPERATOR.md");
 
   assert.match(operationModule, /workflow-operation-identity:v1.*repositoryId.*specId.*approvedPublicationIdentity.*producer.*stage.*issueId.*workflow-op-v1/isu);
+  for (const adapter of [
+    "bindProducerCheckpointOperationIdentity",
+    "createProducerOperationCheckpoint",
+    "deriveRunOperationIdentity",
+    "deriveExecuteIssueOperationIdentity",
+    "deriveCloseIssueOperationIdentity",
+    "deriveAggregateVerificationOperationIdentity",
+  ]) assert.match(operationModule, new RegExp(`export function ${adapter}`, "u"));
+  assert.doesNotMatch(checkpointStore, /workflow-operation-identity|assertWorkflowOperationIdentity/iu);
+  assert.match(checkpointStore, /profileVersion.*v1.*WORKFLOW_CHECKPOINT_PROFILE_CREATE_UNSUPPORTED/isu);
   assert.match(specInterfaces, /primary reservation.*proposed-Spec identity.*reserved tracker identity.*Spec-bound.*versioned operation identity/isu);
   assert.match(specInterfaces, /fresh.*`to-spec@v2`.*operation identity receipt.*repository.*Spec.*approved publication.*`to-spec`.*`publication`/isu);
   assert.match(ticketInterfaces, /fresh.*`to-tickets@v2`.*operation identity receipt.*repository.*Spec.*approved publication.*`to-tickets`.*`decomposition`/isu);
@@ -87,9 +98,14 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   assert.match(verify, /references\/operation-identity\.md.*deterministic operation identity.*aggregate receipt owner/isu);
   assert.match(executionInterfaces, /`execute-issue`.*`implementation`.*stable Issue/isu);
   assert.match(executionInterfaces, /does not rerun Run.*semantic.*implementation_complete.*downstream closeout does not rerun implementation.*review/isu);
+  assert.match(executionInterfaces, /implementation_complete.*operationIdentity.*approved publication.*reviewed candidate/isu);
   assert.match(closeInterfaces, /`close-issue`.*`closeout`.*stable Issue.*implementation_complete.*does not rerun implementation.*review/isu);
+  assert.match(closeInterfaces, /implementation_complete.*operationIdentity.*approved publication.*legacy/isu);
   assert.match(aggregateInterfaces, /`verify-target-before-push`.*selected Spec.*`aggregate-verification`/isu);
   assert.match(aggregateInterfaces, /completion receipt.*does not rerun Issue implementation.*review/isu);
+  assert.match(execute, /completion note.*operationIdentity.*canonical repository.*approved publication.*stable Issue/isu);
+  assert.match(close, /implementation_complete.*current receipt.*operationIdentity.*approved publication/isu);
+  assert.match(verify, /current completion.*operationIdentity.*approved publication/isu);
 
   for (const path of [
     "docs/engineering/to-spec.md",

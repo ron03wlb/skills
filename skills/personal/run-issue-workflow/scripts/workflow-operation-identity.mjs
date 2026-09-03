@@ -80,6 +80,48 @@ export function deriveWorkflowOperationIdentity(input) {
   return receiptFor(normalizeOperationInput(input));
 }
 
+const deriveSpecScopedOperation = (input, producer, stage) => deriveWorkflowOperationIdentity({
+  repositoryId: input.repositoryId,
+  specId: input.specId,
+  approvedPublicationIdentity: input.approvedPublicationIdentity,
+  producer,
+  stage,
+  issueId: null,
+});
+
+const deriveIssueScopedOperation = (input, producer, stage) => deriveWorkflowOperationIdentity({
+  repositoryId: input.repositoryId,
+  specId: input.specId,
+  approvedPublicationIdentity: input.approvedPublicationIdentity,
+  producer,
+  stage,
+  issueId: input.issueId,
+});
+
+export function deriveToSpecPublicationOperationIdentity(input) {
+  return deriveSpecScopedOperation(input, "to-spec", "publication");
+}
+
+export function deriveToTicketsOperationIdentity(input) {
+  return deriveSpecScopedOperation(input, "to-tickets", "decomposition");
+}
+
+export function deriveRunOperationIdentity(input) {
+  return deriveSpecScopedOperation(input, "run-issue-workflow", "run");
+}
+
+export function deriveExecuteIssueOperationIdentity(input) {
+  return deriveIssueScopedOperation(input, "execute-issue", "implementation");
+}
+
+export function deriveCloseIssueOperationIdentity(input) {
+  return deriveIssueScopedOperation(input, "close-issue", "closeout");
+}
+
+export function deriveAggregateVerificationOperationIdentity(input) {
+  return deriveSpecScopedOperation(input, "verify-target-before-push", "aggregate-verification");
+}
+
 export function deriveSpecReservationOperationIdentity(input) {
   assertExactFields(input, reservationInputFields, "Spec reservation operation identity input");
   assertRepositoryId(input.repositoryId);
@@ -94,6 +136,39 @@ export function deriveSpecReservationOperationIdentity(input) {
     stage: "reservation",
     issueId: null,
   });
+}
+
+export function bindProducerCheckpointOperationIdentity(identity) {
+  if (!isRecord(identity)) throw new TypeError("Producer checkpoint identity must be an object");
+  if (identity.profileVersion !== "v2") {
+    throw new TypeError("Only a current-profile producer checkpoint can bind a new operation identity");
+  }
+  if (!isRecord(identity.bindings)) throw new TypeError("Producer checkpoint bindings must be an object");
+  const input = {
+    repositoryId: identity.repositoryId,
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.bindings.approvedScopeIdentity,
+  };
+  const operationIdentity = identity.producerCommand === "to-spec"
+    ? deriveToSpecPublicationOperationIdentity(input)
+    : identity.producerCommand === "to-tickets"
+      ? deriveToTicketsOperationIdentity(input)
+      : (() => { throw new TypeError("Unsupported producer checkpoint operation"); })();
+  return {
+    ...identity,
+    operationId: operationIdentity.key,
+    bindings: { ...identity.bindings, operationIdentity },
+  };
+}
+
+export function createProducerOperationCheckpoint({ store, identity }) {
+  if (typeof store?.readCheckpoint !== "function" || typeof store?.createCheckpoint !== "function") {
+    throw new TypeError("Producer checkpoint adapter requires readCheckpoint() and createCheckpoint()");
+  }
+  const existing = store.readCheckpoint(identity);
+  if (existing) return store.createCheckpoint(identity);
+  if (identity?.profileVersion !== "v2") return store.createCheckpoint(identity);
+  return store.createCheckpoint(bindProducerCheckpointOperationIdentity(identity));
 }
 
 export function assertWorkflowOperationIdentity(receipt, expected = {}) {

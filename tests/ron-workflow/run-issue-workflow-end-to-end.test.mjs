@@ -5,12 +5,19 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
-import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
+import {
+  reduceRunReadyHandoff,
+  RUN_READY_FACT_SCHEMA,
+} from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunAuthorityAdapters } from "../../skills/personal/run-issue-workflow/scripts/run-authority-adapters.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createWorkflowRuntime as createWorkflowRuntimeSource } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
-import { deriveWorkflowOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
+import {
+  bindProducerCheckpointOperationIdentity,
+  createProducerOperationCheckpoint,
+  deriveWorkflowOperationIdentity,
+} from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-runtime-"));
@@ -90,6 +97,48 @@ const readyHandoffFor = (runIdentity) => {
     decompositionIdentity: runIdentity.decompositionIdentity,
     targetOwnership: "NONE",
     evidence: [],
+  };
+};
+
+const currentReadyHandoffFor = (runIdentity) => {
+  const handoff = readyHandoffFor(runIdentity);
+  const transactionIdentity = handoff.checkpoint.transactionIdentity;
+  const publicationReadBack = {
+    publicationIdentity: handoff.trackerRecordIdentities[0],
+    trackerIdentity: `issue:${runIdentity.specId}`,
+  };
+  return {
+    ...handoff,
+    checkpoint: {
+      ...handoff.checkpoint,
+      profileVersion: "v2",
+      operationId: "caller-correlation",
+      bindings: {
+        approvedScopeIdentity: runIdentity.approvedScopeHash,
+        classification: runIdentity.classification,
+        planningSeal: selectedPlanningSeal,
+        ...(runIdentity.classification === "MULTI" ? {
+          upstream: {
+            handoffIdentity: "IC_to_spec_handoff",
+            publicationIdentity: "IC_to_spec_publication",
+          },
+        } : {}),
+      },
+      ...(runIdentity.classification === "SINGLE" ? {
+        stageReceipts: {
+          planningSealReadBack: { planningSeal: selectedPlanningSeal, state: "reused" },
+          publicationReadBack,
+        },
+      } : {}),
+    },
+    ...(runIdentity.classification === "SINGLE" ? {
+      handoff: {
+        ...handoff.handoff,
+        transactionIdentity,
+        publicationIdentity: publicationReadBack.publicationIdentity,
+        trackerIdentity: publicationReadBack.trackerIdentity,
+      },
+    } : {}),
   };
 };
 
@@ -269,6 +318,7 @@ test("Run receipt owner derives one operation identity from the immediate produc
       candidateReachable: false,
       worktreeState: "ABSENT",
     },
+    runReadyHandoff: currentReadyHandoffFor(identity),
   });
   const expected = deriveWorkflowOperationIdentity({
     repositoryId: "github:ron03wlb/skills",
@@ -284,7 +334,7 @@ test("Run receipt owner derives one operation identity from the immediate produc
     reconciliation: { async read() { return current; } },
     target: { async read() { return { state: "CLEAN", ownership: "NONE" }; } },
     checkpoint: {
-      async read() { return { ...current.runReadyHandoff.checkpoint, profileVersion: "v2" }; },
+      async read() { return current.runReadyHandoff.checkpoint; },
     },
     handoff: { async read() { return current.runReadyHandoff.handoff; } },
     writer: { async readHealth() { throw new Error("writer is absent"); } },
@@ -297,6 +347,130 @@ test("Run receipt owner derives one operation identity from the immediate produc
 
     assert.deepEqual(facts.operationIdentity, expected);
     assert.notEqual(facts.operationIdentity.key, identity.runId, "caller correlation must not define Run authority");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("operation identity leaves malformed current authority to the structured UNKNOWN reducer", async () => {
+  const { root, store } = createStoreFixture();
+  const current = singleRunCurrent({
+    journal: [],
+    model: {
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    },
+    runReadyHandoff: currentReadyHandoffFor(identity),
+  });
+  delete current.runReadyHandoff.authority.approvedScopeHash;
+  const sources = {
+    repository: { async readIdentity() { return "github:ron03wlb/skills"; } },
+    tracker: { async read() { return {}; } },
+    reconciliation: { async read() { return current; } },
+    target: { async read() { return { state: "CLEAN", ownership: "NONE" }; } },
+    checkpoint: { async read() { return current.runReadyHandoff.checkpoint; } },
+    handoff: { async read() { return current.runReadyHandoff.handoff; } },
+    writer: { async readHealth() { throw new Error("writer is absent"); } },
+  };
+
+  try {
+    const adapters = createRunAuthorityAdapters({ sources, store, tasks: {} });
+    const reconciled = await adapters.reconcile({ request: { specId: "17" }, tracker: {}, journal: [] });
+    const facts = await adapters.handoff.read({ request: { specId: "17" }, tracker: {}, current: reconciled });
+    const reduced = reduceRunReadyHandoff(facts);
+
+    assert.equal(facts.operationIdentity, null);
+    assert.equal(reduced.state, "UNKNOWN");
+    assert.equal(reduced.reasonCode, "invalid_run_ready_facts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("approved revision operation identity does not resume another revision's Run", async () => {
+  const { root, store } = createStoreFixture();
+  const oldRun = {
+    ...identity,
+    runId: deriveWorkflowOperationIdentity({
+      repositoryId: "github:ron03wlb/skills",
+      specId: identity.specId,
+      approvedPublicationIdentity: "sha256:old-approved-revision",
+      producer: "run-issue-workflow",
+      stage: "run",
+      issueId: null,
+    }).key,
+    approvedScopeHash: "sha256:old-approved-revision",
+  };
+  const currentRun = {
+    ...identity,
+    runId: "caller-correlation-for-new-revision",
+    approvedScopeHash: "sha256:new-approved-revision",
+  };
+  const expected = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: currentRun.specId,
+    approvedPublicationIdentity: currentRun.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  });
+  const seed = store.acquireWriter(oldRun.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T00:00:00.000Z",
+    runIdentity: oldRun,
+    maxParallel: 3,
+  });
+  seed.release();
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  const taskRef = { threadId: "thread-new-revision", hostId: "local" };
+  const selector = { async listNonTerminalRuns() { return [{ runIdentity: oldRun }]; } };
+  const tracker = { async read() { return {}; } };
+  const tasks = {
+    async findIssueLane() { return []; },
+    async create() { model.taskState = "DISPATCHED"; return taskRef; },
+    async read() { return { state: "RUNNING" }; },
+    async message() { throw new Error("retry is unnecessary"); },
+    async wait() { return { coordinatorActive: false, taskSettled: false }; },
+  };
+  const runReadyHandoff = currentReadyHandoffFor(currentRun);
+  const reconcile = async ({ journal }) => {
+    const current = singleRunCurrent({ journal, model, runReadyHandoff });
+    const runIdentity = { ...currentRun };
+    return {
+      ...current,
+      runIdentity,
+      grant: { ...current.grant, runIdentity },
+      facts: { ...current.facts, run: { ...current.facts.run, ...runIdentity } },
+    };
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker,
+      selector,
+      tasks,
+      reconcile,
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-03T00:01:00.000Z",
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: identity.specId });
+
+    assert.equal(result.status.run.runId, expected.key);
+    assert.equal(store.readEvents(oldRun.runId).filter(({ type }) => type === "grant.recorded").length, 1);
+    assert.equal(result.journal.filter(({ type }) => type === "grant.recorded").length, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -604,22 +778,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   let liveTargetHead = proposedBaseline;
   let targetReconfirmed = false;
   let activeToSpecOperation = null;
-  const bindCheckpointOperation = (operation) => {
-    const operationIdentity = deriveWorkflowOperationIdentity({
-      repositoryId: operation.repositoryId,
-      specId: operation.specId,
-      approvedPublicationIdentity: operation.bindings.approvedScopeIdentity,
-      producer: operation.producerCommand,
-      stage: operation.producerCommand === "to-spec" ? "publication" : "decomposition",
-      issueId: null,
-    });
-    return {
-      ...operation,
-      operationId: operationIdentity.key,
-      bindings: { ...operation.bindings, operationIdentity },
-    };
-  };
-  const toSpecOperationFor = (baseline) => bindCheckpointOperation({
+  const toSpecOperationFor = (baseline) => bindProducerCheckpointOperationIdentity({
     repositoryId: "github:ron03wlb/skills",
     specId: identity.specId,
     producerCommand: "to-spec",
@@ -633,7 +792,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
       planningSeal: selectedPlanningSeal,
     },
   });
-  const toTicketsOperation = bindCheckpointOperation({
+  const toTicketsOperation = bindProducerCheckpointOperationIdentity({
     repositoryId: "github:ron03wlb/skills",
     specId: multiIdentity.specId,
     producerCommand: "to-tickets",
@@ -795,7 +954,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
       }
       activeToSpecOperation = toSpecOperationFor(liveTargetHead);
     }
-    let checkpoint = producerStore.createCheckpoint(activeToSpecOperation);
+    let checkpoint = createProducerOperationCheckpoint({ store: producerStore, identity: activeToSpecOperation });
     if (checkpoint.nextStage === "planning_seal.read_back") {
       checkpoint = producerStore.advanceCheckpoint({
         identity: activeToSpecOperation,
@@ -822,7 +981,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   };
   liveTargetHead = "9".repeat(40);
   const targetMovedSpec = runToSpec();
-  const initialDecomposition = producerStore.createCheckpoint(toTicketsOperation);
+  const initialDecomposition = createProducerOperationCheckpoint({ store: producerStore, identity: toTicketsOperation });
   producerStore.advanceCheckpoint({
     identity: toTicketsOperation,
     stage: "decomposition.read_back",

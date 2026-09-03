@@ -21,7 +21,7 @@ Capture mode, target, `B`, and `V` once. Create a clean verification worktree at
 
 ## Derive members and coverage
 
-Execution completion notes are the sole Issue-to-commit mapping authority. Candidate `C` reachable from `V` but not `B` is a member; a baseline-reachable candidate is not. An open unreachable candidate is concurrent work outside this range. A closed unreachable candidate or a reachable open member is contradictory and stops. Freeze the set before review.
+Execution completion notes are the sole Issue-to-commit mapping authority. Require each current completion's `operationIdentity` to match its canonical repository, Spec, approved publication identity or hash, and Issue; preserve a valid legacy completion that predates this contract under its exact recorded identity and body. Candidate `C` reachable from `V` but not `B` is a member; a baseline-reachable candidate is not. An open unreachable candidate is concurrent work outside this range. A closed unreachable candidate or a reachable open member is contradictory and stops. Freeze the set before review.
 
 Require every member completion, attestation, workflow-artifact declaration, candidate, closed tracker state, and contribution to satisfy the owner-local interface. Cover every material `B..V` commit only through member contributions, Planning Seals, necessary merge topology, or valid Direct target contribution records. Missing, ambiguous, invalidating, or unexplained evidence stops.
 

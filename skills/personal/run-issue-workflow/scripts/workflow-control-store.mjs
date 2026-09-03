@@ -14,7 +14,6 @@ import {
   writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 
 export const LEGACY_WORKFLOW_CHECKPOINT_SCHEMA = "workflow-checkpoint-transaction:v1";
 export const WORKFLOW_CHECKPOINT_SCHEMA = "workflow-checkpoint-transaction:v2";
@@ -171,28 +170,6 @@ const profileStagesFor = (identity) => {
   const stages = WORKFLOW_CHECKPOINT_PROFILES[profileKeyFor(identity)];
   if (!stages) throw new TypeError("Unsupported workflow checkpoint profile");
   return stages;
-};
-
-const assertFreshCurrentOperationIdentity = (identity) => {
-  if (identity.profileVersion !== "v2") return;
-  const receipt = identity.bindings.operationIdentity;
-  if (!isRecord(receipt)) {
-    throw fail("WORKFLOW_OPERATION_IDENTITY_REQUIRED", [
-      "A fresh current-profile checkpoint requires one owner-derived operation identity receipt.",
-    ]);
-  }
-  const stage = identity.producerCommand === "to-spec" ? "publication" : "decomposition";
-  const normalized = assertWorkflowOperationIdentity(receipt, {
-    repositoryId: identity.repositoryId,
-    specId: identity.specId,
-    approvedPublicationIdentity: identity.bindings.approvedScopeIdentity,
-    producer: identity.producerCommand,
-    stage,
-    issueId: null,
-  });
-  if (identity.operationId !== normalized.key) {
-    throw new TypeError("Workflow operation identity key mismatch");
-  }
 };
 
 const normalizeIdentity = (identity) => {
@@ -568,14 +545,19 @@ export function createWorkflowControlStore({ gitCommonDir }) {
     }
 
     const identity = normalizeIdentity(inputIdentity);
+    const observed = readCurrentCheckpoint(identity);
+    if (observed) return observed;
+    if (identity.profileVersion === "v1") {
+      throw fail("WORKFLOW_CHECKPOINT_PROFILE_CREATE_UNSUPPORTED", [
+        "Fresh profile-v1 checkpoint creation is frozen; only exact stored operations may resume.",
+      ]);
+    }
     const scopeKey = scopeKeyFor(identity);
     mkdirSync(transactionsRoot, { recursive: true });
-    readCurrentCheckpoint(identity);
     const writer = acquireWriter(identity, "create", scopeKey);
     try {
       const existing = readCurrentCheckpoint(identity, { ignoredLock: writer.lock });
       if (existing) return existing;
-      assertFreshCurrentOperationIdentity(identity);
       const transaction = validateTransaction({
         schema: WORKFLOW_CHECKPOINT_SCHEMA,
         scopeKey,

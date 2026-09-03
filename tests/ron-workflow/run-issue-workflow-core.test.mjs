@@ -37,6 +37,10 @@ import {
   WORKFLOW_CHECKPOINT_STAGES,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 import {
+  createProducerOperationCheckpoint,
+  deriveAggregateVerificationOperationIdentity,
+  deriveCloseIssueOperationIdentity,
+  deriveExecuteIssueOperationIdentity,
   deriveSpecReservationOperationIdentity,
   deriveWorkflowOperationIdentity,
   WORKFLOW_OPERATION_IDENTITY_SCHEMA,
@@ -294,46 +298,55 @@ test("primary reservation operation identity uses only the immutable proposed-Sp
   );
 });
 
-test("checkpoint receipt owner attaches duplicate current operations and rejects caller-defined or mismatched identity", () => {
+test("operation identity owner adapters bind execution, closeout, and aggregate receipts", () => {
+  const common = {
+    repositoryId: "github:ron03wlb/skills",
+    specId: "43",
+    approvedPublicationIdentity: `sha256:${"9".repeat(64)}`,
+  };
+  const execution = deriveExecuteIssueOperationIdentity({ ...common, issueId: "45" });
+  const closeout = deriveCloseIssueOperationIdentity({ ...common, issueId: "45" });
+  const aggregate = deriveAggregateVerificationOperationIdentity(common);
+
+  assert.equal(execution.producer, "execute-issue");
+  assert.equal(execution.stage, "implementation");
+  assert.equal(closeout.producer, "close-issue");
+  assert.equal(closeout.stage, "closeout");
+  assert.equal(aggregate.producer, "verify-target-before-push");
+  assert.equal(aggregate.stage, "aggregate-verification");
+  assert.equal(aggregate.issueId, null);
+  assert.notEqual(execution.key, closeout.key);
+});
+
+test("checkpoint receipt owner derives current operations outside the thin store", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-operation-receipt-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const identity = currentCheckpointIdentity({
+    const proposed = checkpointIdentityV2({
+      profileVersion: "v2",
       bindings: {
         approvedScopeIdentity: `sha256:${"5".repeat(64)}`,
         classification: "SINGLE",
         planningSeal: "c".repeat(40),
       },
     });
-    const created = store.createCheckpoint(identity);
+    const created = createProducerOperationCheckpoint({ store, identity: proposed });
 
-    assert.deepEqual(store.createCheckpoint(identity), created);
-    assert.equal(created.identity.operationId, identity.bindings.operationIdentity.key);
-    assert.throws(
-      () => store.createCheckpoint(checkpointIdentityV2({
-        specId: "99",
-        profileVersion: "v2",
-        bindings: {
-          approvedScopeIdentity: `sha256:${"6".repeat(64)}`,
-          classification: "SINGLE",
-          planningSeal: "d".repeat(40),
-        },
-      })),
-      (error) => error.code === "WORKFLOW_OPERATION_IDENTITY_REQUIRED",
-    );
-    const mismatched = currentCheckpointIdentity({
-      specId: "100",
+    assert.deepEqual(createProducerOperationCheckpoint({ store, identity: proposed }), created);
+    assert.equal(created.identity.operationId, created.identity.bindings.operationIdentity.key);
+    assert.notEqual(created.identity.operationId, proposed.operationId);
+
+    const opaque = checkpointIdentityV2({
+      specId: "99",
+      operationId: "store-owned-opaque-operation",
+      profileVersion: "v2",
       bindings: {
-        approvedScopeIdentity: `sha256:${"7".repeat(64)}`,
+        approvedScopeIdentity: `sha256:${"6".repeat(64)}`,
         classification: "SINGLE",
-        planningSeal: "e".repeat(40),
+        planningSeal: "d".repeat(40),
       },
     });
-    mismatched.bindings.operationIdentity = identity.bindings.operationIdentity;
-    assert.throws(
-      () => store.createCheckpoint(mismatched),
-      /workflow operation identity (?:key|specId|approvedPublicationIdentity) mismatch|does not match/iu,
-    );
+    assert.equal(store.createCheckpoint(opaque).identity.operationId, opaque.operationId);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -363,6 +376,11 @@ test("operation identity enforcement preserves stored current and frozen profile
     }).nextStage, "publication.read_back");
 
     const frozenProfile = checkpointIdentityV2({ specId: "32", operationId: "frozen-profile-v1" });
+    assert.throws(
+      () => store.createCheckpoint(frozenProfile),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_PROFILE_CREATE_UNSUPPORTED",
+    );
+    writeStoredCurrentCheckpoint({ gitCommonDir, identity: frozenProfile });
     assert.equal(store.createCheckpoint(frozenProfile).nextStage, "plan.written");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -797,6 +815,8 @@ test("workflow checkpoint producer profiles create only supported current transa
       "handoff.completed",
     ]);
 
+    writeStoredCurrentCheckpoint({ gitCommonDir, identity: toSpec });
+    writeStoredCurrentCheckpoint({ gitCommonDir, identity: toTickets });
     const specCheckpoint = store.createCheckpoint(toSpec);
     const ticketsCheckpoint = store.createCheckpoint(toTickets);
     const currentSpecCheckpoint = store.createCheckpoint(currentToSpec);
@@ -927,14 +947,15 @@ test("workflow checkpoint operations are exact, retryable, and isolated on one t
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operations-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentityV2();
+    const first = checkpointIdentityV2({ profileVersion: "v2" });
     const created = store.createCheckpoint(first);
 
     assert.equal(created.state, "INCOMPLETE");
-    assert.equal(created.nextStage, "plan.written");
+    assert.equal(created.nextStage, "planning_seal.read_back");
     assert.deepEqual(store.createCheckpoint(first), created);
     assert.deepEqual(store.readCheckpoint(first), created);
     assert.deepEqual(store.createCheckpoint(checkpointIdentityV2({
+      profileVersion: "v2",
       bindings: {
         plan: {
           contentIdentity: `sha256:${"1".repeat(64)}`,
@@ -944,9 +965,9 @@ test("workflow checkpoint operations are exact, retryable, and isolated on one t
       },
     })), created);
     for (const drift of [
-      { target: "features/changed" },
-      { baseline: "b".repeat(40) },
-      { bindings: { planningSeal: "b".repeat(40) } },
+      { profileVersion: "v2", target: "features/changed" },
+      { profileVersion: "v2", baseline: "b".repeat(40) },
+      { profileVersion: "v2", bindings: { planningSeal: "b".repeat(40) } },
     ]) {
       assert.throws(
         () => store.createCheckpoint(checkpointIdentityV2(drift)),
@@ -955,12 +976,14 @@ test("workflow checkpoint operations are exact, retryable, and isolated on one t
     }
     const revision = checkpointIdentityV2({
       operationId: "revision:2",
+      profileVersion: "v2",
       baseline: "b".repeat(40),
       bindings: { planningSeal: "b".repeat(40) },
     });
     const decomposition = checkpointIdentityV2({
       producerCommand: "to-tickets",
       operationId: "decomposition:approved-scope",
+      profileVersion: "v2",
       bindings: { approvedScopeIdentity: "approved-scope" },
     });
     assert.equal(store.createCheckpoint(revision).state, "INCOMPLETE");
@@ -979,8 +1002,8 @@ test("workflow checkpoint writer locks only one exact operation", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operation-lock-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentityV2();
-    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const first = checkpointIdentityV2({ profileVersion: "v2" });
+    const second = checkpointIdentityV2({ operationId: "revision:2", profileVersion: "v2" });
     const firstCheckpoint = store.createCheckpoint(first);
     const secondCheckpoint = store.createCheckpoint(second);
     const writersRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoint-writers");
@@ -1022,6 +1045,7 @@ test("workflow checkpoint ignores a legacy writer owned by another producer", ()
     const current = checkpointIdentityV2({
       specId: "36",
       producerCommand: "to-tickets",
+      profileVersion: "v2",
       bindings: { approvedScopeIdentity: "approved-scope" },
     });
     assert.equal(store.createCheckpoint(current).schema, WORKFLOW_CHECKPOINT_SCHEMA);
@@ -1034,8 +1058,8 @@ test("workflow checkpoint partial persistence blocks only its exact operation", 
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-operation-transient-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentityV2();
-    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const first = checkpointIdentityV2({ profileVersion: "v2" });
+    const second = checkpointIdentityV2({ operationId: "revision:2", profileVersion: "v2" });
     const firstCheckpoint = store.createCheckpoint(first);
     const secondCheckpoint = store.createCheckpoint(second);
 
@@ -1068,6 +1092,7 @@ test("workflow checkpoint stage receipts are opaque, canonical, and profile orde
         approvedScopeIdentity: "approved-scope",
       },
     });
+    writeStoredCurrentCheckpoint({ gitCommonDir, identity });
     store.createCheckpoint(identity);
 
     assert.throws(
@@ -1158,8 +1183,8 @@ test("workflow checkpoint malformed state fails closed without scanning unrelate
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-malformed-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
-    const first = checkpointIdentityV2();
-    const second = checkpointIdentityV2({ operationId: "revision:2" });
+    const first = checkpointIdentityV2({ profileVersion: "v2" });
+    const second = checkpointIdentityV2({ operationId: "revision:2", profileVersion: "v2" });
     const firstCheckpoint = store.createCheckpoint(first);
     const secondCheckpoint = store.createCheckpoint(second);
     const transactionsRoot = join(
@@ -1257,7 +1282,7 @@ test("workflow checkpoint legacy receipts stay v1 and exact incomplete to-spec r
       receiptCountBeforeResume,
     );
 
-    const currentIdentity = checkpointIdentityV2({ specId: "34" });
+    const currentIdentity = checkpointIdentityV2({ specId: "34", profileVersion: "v2" });
     store.createCheckpoint(currentIdentity);
     writeLegacyCheckpoint({
       gitCommonDir,
