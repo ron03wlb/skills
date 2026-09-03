@@ -198,6 +198,7 @@ const createWorkflowRuntime = (options) => {
         async read({ current }) {
           return {
             state: current.facts.run.targetState,
+            head: current.facts.run.targetHead,
             ownership: current.runReadyHandoff?.targetOwnership,
           };
         },
@@ -241,9 +242,11 @@ const singleRunCurrent = ({
       reconciled: true,
       trackerAvailable: true,
       targetState,
+      targetHead: "a".repeat(40),
       closeWriterRunId: null,
       closeWriterState: "ABSENT",
       parentTrackerState: "OPEN",
+      parentTrackerIdentity: null,
       ...run,
     },
     nodes: [withCloseAuthorityEvidence({ issueId: "17", blockers: [], ...model })],
@@ -948,9 +951,11 @@ test("multiple runtime instances keep per-Run max_parallel on one target", async
           reconciled: true,
           trackerAvailable: true,
           targetState: "CLEAN",
+          targetHead: "a".repeat(40),
           closeWriterRunId: null,
           closeWriterState: "ABSENT",
           parentTrackerState: "OPEN",
+          parentTrackerIdentity: "github-issue:12:version:1",
         },
         nodes: issueIds.map((issueId) => ({
           issueId,
@@ -1347,10 +1352,12 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
           reconciled: true,
           trackerAvailable: true,
           targetState: "CLEAN",
+          targetHead: "a".repeat(40),
           closeWriterRunId: "planning-seal-spec-12",
           closeWriterState: "ACTIVE",
           closeWriterHealth: "HEALTHY",
           parentTrackerState: "OPEN",
+          parentTrackerIdentity: "github-issue:12:version:1",
         },
         nodes: executionIssueIds.map((issueId) => ({
           issueId,
@@ -1973,9 +1980,11 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
         reconciled: true,
         trackerAvailable: true,
         targetState: "CLEAN",
+        targetHead: "a".repeat(40),
         closeWriterRunId: null,
         closeWriterState: "ABSENT",
         parentTrackerState,
+        parentTrackerIdentity: "github-issue:12:version:1",
       },
       nodes: [...nodes.values()]
         .map((node) => ({ ...node, blockers: [...node.blockers] }))
@@ -1987,6 +1996,10 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
     async closeParent({ issueId, requestEvidence }) {
       assert.equal(issueId, "12");
       assert.equal(requestEvidence.target, multiIdentity.target);
+      assert.equal(requestEvidence.targetState, "CLEAN");
+      assert.equal(requestEvidence.targetHead, "a".repeat(40));
+      assert.equal(requestEvidence.parentTrackerState, "OPEN");
+      assert.equal(requestEvidence.parentTrackerIdentity, "github-issue:12:version:1");
       assert.equal([...nodes.values()].every((node) => (
         node.trackerState === "CLOSED" && node.candidateReachable && node.worktreeState === "ABSENT"
       )), true);

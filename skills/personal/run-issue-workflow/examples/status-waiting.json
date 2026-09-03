@@ -69,8 +69,10 @@
         },
         "target": {
           "state": "CLEAN",
+          "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "trackerAvailable": true,
-          "parentTrackerState": "OPEN"
+          "parentTrackerState": "OPEN",
+          "parentTrackerIdentity": null
         },
         "controlRevision": 0,
         "issues": [

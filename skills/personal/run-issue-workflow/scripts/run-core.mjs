@@ -75,7 +75,7 @@ export const REASON_CODES = Object.freeze({
 const compareIds = (left, right) => String(left).localeCompare(String(right), "en");
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const gitObjectPattern = /^[a-f0-9]{40,64}$/u;
+const gitObjectPattern = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
 const normalizedPathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))(?!.*\\).+/u;
 
@@ -676,6 +676,10 @@ export function reduceRun(input) {
         node.closeAuthorityEvidence,
         `Issue ${node.issueId} close authority evidence`,
       );
+      if (!gitObjectPattern.test(input.run.targetHead)
+        || node.closeAuthorityEvidence.targetHead !== input.run.targetHead) {
+        throw new TypeError(`Issue ${node.issueId} close authority targetHead must match the current target head`);
+      }
     } catch (error) {
       return blockedResult(input, REASON_CODES.insufficientEvidence, [error.message], [node.issueId]);
     }
@@ -1216,8 +1220,9 @@ export function reduceRun(input) {
       operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (allSucceeded && input.run.classification === "MULTI"
-    && !["OPEN", "CLOSED"].includes(input.run.parentTrackerState)) {
-    const evidence = [`Parent Issue ${input.run.specId} state is uncertain.`];
+    && (!["OPEN", "CLOSED"].includes(input.run.parentTrackerState)
+      || !isText(input.run.parentTrackerIdentity))) {
+    const evidence = [`Parent Issue ${input.run.specId} state or tracker identity is uncertain.`];
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.parentStateUncertain,
       limitationClass: "unresolved-evidence",

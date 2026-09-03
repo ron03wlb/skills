@@ -3072,6 +3072,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /node success.*release dependants/iu);
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
   assert.match(skill, /close_parent.*evidence-bound parent-only `close-issue` leaf.*real leaf owns.*repository-then-target lease order/isu);
+  assert.match(skill, /close_issue.*current target state and exact HEAD.*exact tracker identity.*candidate commit.*completion evidence ID\/body hash.*registered worktree identity/isu);
+  assert.match(skill, /close_parent.*current target state and exact HEAD.*exact parent tracker state and identity.*every child's exact close authority evidence/isu);
   assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
   assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
   assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);

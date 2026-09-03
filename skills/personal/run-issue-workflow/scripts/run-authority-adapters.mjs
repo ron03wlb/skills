@@ -3,6 +3,7 @@ import { isExactStaleOwnerProof } from "./run-stale-proof.mjs";
 import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const gitObjectPattern = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/u;
 
 const requireMethod = (owner, name, label) => {
   if (typeof owner?.[name] !== "function") {
@@ -58,6 +59,10 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
     if (target.ownership !== undefined
       && !["NONE", "EXACT_PRODUCER", "UNOWNED", "UNKNOWN"].includes(target.ownership)) {
       throw new TypeError("Target owning source returned an unsupported ownership state");
+    }
+    const closeoutRelevant = current.facts.nodes?.some(({ completionState }) => completionState === "COMPLETE") ?? false;
+    if (closeoutRelevant && !gitObjectPattern.test(target.head)) {
+      throw new TypeError("Target owning source must return the current Git head for closeout");
     }
 
     const repositoryCloseLeaseObservation = store.observeRepositoryCloseLease();
@@ -116,6 +121,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         run: {
           ...current.facts.run,
           targetState: target.state,
+          targetHead: gitObjectPattern.test(target.head) ? target.head : current.facts.run.targetHead ?? null,
           repositoryCloseLeaseOperationId: repositoryCloseLeaseObservation.state === "ABSENT"
             ? null
             : repositoryCloseLeaseOwner?.operationId ?? "UNKNOWN",

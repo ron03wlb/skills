@@ -150,9 +150,13 @@ const reconciliation = ({
       reconciled: true,
       trackerAvailable: true,
       targetState: "CLEAN",
+      targetHead: "a".repeat(40),
       closeWriterRunId: null,
       closeWriterState: "ABSENT",
       parentTrackerState: "OPEN",
+      parentTrackerIdentity: runIdentity.classification === "MULTI"
+        ? `github-issue:${runIdentity.specId}:version:1`
+        : null,
       ...run,
     },
     nodes: nodes.map(withCloseAuthorityEvidence),
@@ -1486,7 +1490,9 @@ const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
   run: {
     trackerAvailable: true,
     targetState: "CLEAN",
+    targetHead: "a".repeat(40),
     parentTrackerState: "OPEN",
+    parentTrackerIdentity: null,
   },
   nodes: [withCloseAuthorityEvidence({
     issueId: "15",
@@ -1645,6 +1651,8 @@ test("real close leaf owns both leases without coordinator double acquire", asyn
     async message(_taskRef, prompt) {
       assert.match(prompt, /\$close-issue.*15/iu);
       assert.match(prompt, /"target":"features\/ron"/u);
+      assert.match(prompt, /"targetState":"CLEAN"/u);
+      assert.match(prompt, new RegExp(`"targetHead":"${"a".repeat(40)}"`, "u"));
       assert.match(prompt, /"completionState":"COMPLETE"/u);
       assert.match(prompt, /"worktreeState":"PRESENT"/u);
       assert.match(prompt, /"controlRevision":0/u);
@@ -1917,6 +1925,8 @@ test("real close leaf request follows max_parallel dispatch when both leases are
     async read() { return {}; },
     async message(_taskRef, prompt) {
       assert.equal(issue14Dispatched, true, "ready work must start before the available close leaf");
+      assert.match(prompt, /"targetState":"CLEAN"/u);
+      assert.match(prompt, new RegExp(`"targetHead":"${"a".repeat(40)}"`, "u"));
       assert.match(prompt, new RegExp(`"candidateCommit":"${"b".repeat(40)}"`, "u"));
       assert.match(prompt, /"completionBodySha256":"sha256:d{64}"/u);
       order.push("close:13");
@@ -3398,6 +3408,10 @@ test("parent close delegates both leases to the real leaf", async () => {
       assert.equal(issueId, "12");
       assert.equal(requestEvidence.target, multiIdentity.target);
       assert.equal(requestEvidence.maxParallel, 3);
+      assert.equal(requestEvidence.targetState, "CLEAN");
+      assert.equal(requestEvidence.targetHead, "a".repeat(40));
+      assert.equal(requestEvidence.parentTrackerState, "OPEN");
+      assert.equal(requestEvidence.parentTrackerIdentity, "github-issue:12:version:1");
       const leases = acquireCloseIssueLeases({
         store: recoveredStore,
         target: multiIdentity.target,

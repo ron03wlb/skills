@@ -24,6 +24,6 @@
 ## Verification outcome
 
 - Focused ownership, concurrency, fresh-evidence, and same-command cases: 12 passed, 0 failed.
-- Complete Ron workflow suite: 182 passed, 0 failed.
+- Complete Ron workflow suite: 185 passed, 0 failed.
 - Changed runtime syntax checks, waiting-example JSON parse, and `git diff --check`: passed.
 - Generic `quick_validate.py` is not applicable to this existing personal skill frontmatter: it rejects the repository-required `disable-model-invocation` key that is unchanged from the Execution baseline. Repository contract validation passed in the complete suite.

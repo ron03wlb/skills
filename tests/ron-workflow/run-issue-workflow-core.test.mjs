@@ -131,9 +131,11 @@ const facts = (nodes) => ({
     reconciled: true,
     trackerAvailable: true,
     targetState: "CLEAN",
+    targetHead: "a".repeat(40),
     closeWriterRunId: null,
     closeWriterState: "ABSENT",
     parentTrackerState: "OPEN",
+    parentTrackerIdentity: "github-issue:12:version:1",
   },
   nodes: nodes.map(withCloseAuthorityEvidence),
   contradictions: [],
@@ -1785,9 +1787,11 @@ test("node lifecycle follows task, completion, Git, worktree, and tracker eviden
       reconciled: true,
       trackerAvailable: true,
       targetState: "CLEAN",
+      targetHead: "a".repeat(40),
       closeWriterRunId: null,
       closeWriterState: "ABSENT",
       parentTrackerState: "NOT_APPLICABLE",
+      parentTrackerIdentity: null,
     },
     nodes: [withCloseAuthorityEvidence({ ...node("12"), ...nodeFacts })],
     contradictions: [],
@@ -1846,6 +1850,17 @@ test("closeout requires exact tracker, target, candidate, completion, and worktr
   assert.equal(status.diagnoses[0].reasonCode, "insufficient_evidence");
   assert.match(status.diagnoses[0].evidence[0], /Issue 13 close authority evidence must be an object/u);
   assert.deepEqual(status.legalActions, []);
+
+  const partialObjectId = facts([{
+    ...node("13"),
+    completionState: "COMPLETE",
+    worktreeState: "PRESENT",
+  }]);
+  partialObjectId.nodes[0].closeAuthorityEvidence.candidateCommit = "b".repeat(41);
+  const partialStatus = reduceRun(partialObjectId);
+  assert.equal(partialStatus.run.state, "BLOCKED");
+  assert.equal(partialStatus.diagnoses[0].reasonCode, "insufficient_evidence");
+  assert.match(partialStatus.diagnoses[0].evidence[0], /candidateCommit must be a Git object id/u);
 });
 
 test("a failed branch blocks only its descendants while independent work remains legal", () => {
@@ -2297,8 +2312,10 @@ test("a healthy target writer becomes a bounded wait after independent Issue dis
   });
   assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.target, {
     state: "CLEAN",
+    head: "a".repeat(40),
     trackerAvailable: true,
     parentTrackerState: "OPEN",
+    parentTrackerIdentity: "github-issue:12:version:1",
   });
   assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.issues.map(({ issueId }) => issueId), ["13", "14"]);
   assert.equal(afterDispatch.diagnoses.some(({ reasonCode }) => reasonCode === "close_writer_conflict"), false);

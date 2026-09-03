@@ -8,7 +8,13 @@ const runIdentityFields = new Set([
 ]);
 const evidenceFields = new Set(["runIdentity", "grant", "target", "controlRevision", "issues"]);
 const grantFields = new Set(["runIdentity", "maxParallel"]);
-const targetFields = new Set(["state", "trackerAvailable", "parentTrackerState"]);
+const targetFields = new Set([
+  "state",
+  "head",
+  "trackerAvailable",
+  "parentTrackerState",
+  "parentTrackerIdentity",
+]);
 const issueFields = new Set([
   "issueId",
   "trackerState",
@@ -25,7 +31,7 @@ const authorityEvidenceFields = new Set([
   "completionBodySha256",
   "worktreeIdentity",
 ]);
-const gitObjectPattern = /^[a-f0-9]{40,64}$/u;
+const gitObjectPattern = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -108,8 +114,10 @@ export const createCloseWaitEvidence = ({
   },
   target: {
     state: ["CLEAN", "DIRTY", "UNKNOWN"].includes(run.targetState) ? run.targetState : "UNKNOWN",
+    head: gitObjectPattern.test(run.targetHead) ? run.targetHead : null,
     trackerAvailable: typeof run.trackerAvailable === "boolean" ? run.trackerAvailable : null,
     parentTrackerState: isText(run.parentTrackerState) ? run.parentTrackerState : null,
+    parentTrackerIdentity: isText(run.parentTrackerIdentity) ? run.parentTrackerIdentity : null,
   },
   controlRevision,
   issues: [...nodes]
@@ -142,11 +150,22 @@ export const validateCloseWaitEvidence = (evidence) => {
   if (!["CLEAN", "DIRTY", "UNKNOWN"].includes(evidence.target.state)) {
     throw new TypeError("close-wait pre-wait target state is invalid");
   }
+  if (!gitObjectPattern.test(evidence.target.head)) {
+    throw new TypeError("close-wait pre-wait target head must be a Git object id");
+  }
   if (evidence.target.trackerAvailable !== null && typeof evidence.target.trackerAvailable !== "boolean") {
     throw new TypeError("close-wait pre-wait trackerAvailable must be boolean or null");
   }
   if (evidence.target.parentTrackerState !== null && !isText(evidence.target.parentTrackerState)) {
     throw new TypeError("close-wait pre-wait parentTrackerState must be text or null");
+  }
+  if (evidence.runIdentity.classification === "MULTI"
+    && !isText(evidence.target.parentTrackerIdentity)) {
+    throw new TypeError("close-wait pre-wait parentTrackerIdentity is required for MULTI");
+  }
+  if (evidence.runIdentity.classification === "SINGLE"
+    && evidence.target.parentTrackerIdentity !== null) {
+    throw new TypeError("close-wait pre-wait parentTrackerIdentity must be null for SINGLE");
   }
   if (!Number.isInteger(evidence.controlRevision) || evidence.controlRevision < 0) {
     throw new TypeError("close-wait pre-wait controlRevision must be a non-negative integer");
