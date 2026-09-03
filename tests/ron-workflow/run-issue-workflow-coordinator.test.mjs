@@ -9,6 +9,7 @@ import {
   createCoordinator as createCoordinatorRuntime,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
+import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
@@ -1478,14 +1479,36 @@ const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
   controlRevision: 0,
 });
 
-test("close leaf lease ownership uses repository-then-target order for direct and DAG authority", () => {
+test("real close-issue lease boundary excludes a second target and uses one order for direct and DAG authority", () => {
   const { root, store } = createStoreFixture();
   const observedOrders = [];
 
-  const runCloseLeaf = ({ authority, operationId, target }) => {
+  const acquireObservedLeaf = ({ authority, operationId, target }) => {
     const order = [];
-    const repositoryLease = store.acquireRepositoryCloseLease({ operationId });
-    order.push("repository:acquired");
+    const observedStore = {
+      acquireRepositoryCloseLease(request) {
+        const lease = store.acquireRepositoryCloseLease(request);
+        order.push("repository:acquired");
+        return {
+          ...lease,
+          release() {
+            lease.release();
+            order.push("repository:released");
+          },
+        };
+      },
+      acquireTargetMutationWriter(request) {
+        const writer = store.acquireTargetMutationWriter(request);
+        order.push("target:acquired");
+        return {
+          ...writer,
+          release() {
+            writer.release();
+            order.push("target:released");
+          },
+        };
+      },
+    };
 
     const unrelatedPlanning = store.acquireTargetMutationWriter({
       target: `${target}-planning`,
@@ -1493,22 +1516,35 @@ test("close leaf lease ownership uses repository-then-target order for direct an
     });
     unrelatedPlanning.release();
 
-    const targetWriter = store.acquireTargetMutationWriter({ target, operationId });
-    order.push("target:acquired");
-    assert.equal(repositoryLease.assertCurrent(), true, `${authority} lost repository ownership`);
-    assert.equal(targetWriter.assertCurrent(), true, `${authority} lost target ownership`);
-
-    targetWriter.release();
-    order.push("target:released");
-    assert.equal(repositoryLease.assertCurrent(), true, `${authority} released repository first`);
-    repositoryLease.release();
-    order.push("repository:released");
-    observedOrders.push(order);
+    const leases = acquireCloseIssueLeases({ store: observedStore, target, operationId });
+    assert.equal(leases.assertCurrent(), true, `${authority} lost closeout ownership`);
+    return { leases, order };
   };
 
   try {
-    runCloseLeaf({ authority: "direct", operationId: "direct-close-44", target: "features/ron" });
-    runCloseLeaf({ authority: "DAG", operationId: "dag-close-44", target: "features/ron" });
+    const direct = acquireObservedLeaf({
+      authority: "direct",
+      operationId: "direct-close-44",
+      target: "features/ron",
+    });
+    assert.throws(
+      () => acquireCloseIssueLeases({
+        store,
+        target: "release/next",
+        operationId: "dag-close-46",
+      }),
+      /REPOSITORY_CLOSE_LEASE_LOCKED/u,
+    );
+    direct.leases.release();
+    observedOrders.push(direct.order);
+
+    const dag = acquireObservedLeaf({
+      authority: "DAG",
+      operationId: "dag-close-46",
+      target: "release/next",
+    });
+    dag.leases.release();
+    observedOrders.push(dag.order);
     assert.deepEqual(observedOrders, [
       ["repository:acquired", "target:acquired", "target:released", "repository:released"],
       ["repository:acquired", "target:acquired", "target:released", "repository:released"],

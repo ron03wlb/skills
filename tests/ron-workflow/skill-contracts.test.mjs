@@ -1444,6 +1444,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
 
   const close = read("skills/engineering/close-issue/SKILL.md");
+  const closeLease = read("skills/engineering/close-issue/scripts/close-lease.mjs");
   const closeMetadata = read("skills/engineering/close-issue/agents/openai.yaml");
   assert.doesNotMatch(close, /^disable-model-invocation:\s*true$/mu);
   assert.doesNotMatch(closeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
@@ -1455,6 +1456,17 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
   assert.match(close, /sole owner.*repository close lease.*before.*target mutation writer.*direct human.*DAG/isu);
+  assert.match(close, /scripts\/close-lease\.mjs/iu);
+  assert.ok(
+    closeLease.indexOf("store.acquireRepositoryCloseLease")
+      < closeLease.indexOf("store.acquireTargetMutationWriter"),
+    "close-issue lease boundary must acquire repository authority before target authority",
+  );
+  assert.ok(
+    closeLease.lastIndexOf("targetWriter.release()")
+      < closeLease.lastIndexOf("repositoryLease.release()"),
+    "close-issue lease boundary must release target authority before repository authority",
+  );
   assert.match(close, /callers.*cannot pre-acquire.*delegate.*either lease/isu);
   assert.match(close, /release.*target.*before.*repository.*required read-back/isu);
   assert.match(close, /same Git common dir.*different targets.*one.*different repositories.*concurrent/isu);
