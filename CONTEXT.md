@@ -79,8 +79,16 @@ The explicit transfer of accepted glossary and ADR changes from `grill-with-docs
 _Avoid_: Dirty-doc inference, Direct target contribution, generic planning handoff
 
 **Planning handoff packet**:
-The compact user-visible terminal output from `grill-with-docs` that binds its target and baseline to the accepted terms, ADR decisions, exact paths or hunks, and expected content identities for one later explicit `to-spec` invocation. It is scope provenance rather than commit authority; a missing or mismatched packet in a fresh task requires reconfirmation instead of inference.
+The compact user-visible terminal output from `grill-with-docs` that binds its **Spec workflow lane**, target, baseline, accepted terms, ADR decisions, exact paths or hunks, and expected content identities for one later explicit `to-spec` invocation. It is scope provenance rather than commit authority; a fresh task requires the packet or renewed human scope confirmation, while target movement requires **Planning baseline revalidation** rather than inference from dirty state.
 _Avoid_: Hidden planning journal, automatic `to-spec`, Planning Seal
+
+**Spec workflow lane**:
+The independent ownership and concurrency unit for exactly one proposed **Tracker Spec** and target, consisting of one Codex task, one isolated planning worktree, and the Spec's later **DAG Run**. Multiple lanes may grill, plan, publish, and execute concurrently against one target; a lane never owns another Spec, and only bounded Planning Seal or integration writes enter **Target mutation serialization**.
+_Avoid_: Global multi-Spec coordinator, shared planning checkout, multi-Spec Run
+
+**Planning baseline revalidation**:
+The bounded freshness check performed before a lane publishes or seals accepted planning changes after its target has moved. Unchanged relevant glossary, ADR, and source facts permit the lane's handoff to bind the latest baseline; relevant semantic or content drift stops only that lane for renewed human confirmation without freezing the target or invalidating unrelated lanes.
+_Avoid_: Global target freeze, silent semantic merge, restart every lane
 
 **Workflow plan checkpoint**:
 An exact target-branch commit produced by one workflow operation that contains only the durable plan required and created by that operation, with no pre-existing or unrelated work. It gives the plan a Git-durable identity before control passes to another operation.
@@ -161,6 +169,10 @@ _Avoid_: Global execution lock, per-workflow target locks, concurrent target wri
 **Target integration serialization**:
 The `close-issue` specialization of **Target mutation serialization**, preserving one integration writer for an **Issue target branch** whether started directly by a human or by an authorized **DAG Run**. Target movement alone does not invalidate successful execution state.
 _Avoid_: Separate close-writer namespace, concurrent integration writers, execution lock
+
+**Target writer wait**:
+The bounded non-failure state entered when a healthy competing operation owns the exact target writer. The waiting **Spec workflow lane** continues independent Issue execution, then reacquires current target and owning-source evidence before retrying integration after release; unknown ownership, timeout, or coordinator loss becomes a **Recoverable blocker** rather than lease-stealing or guessed progress.
+_Avoid_: Writer contention failure, durable global queue, lease stealing
 
 **DAG Run**:
 A bounded orchestration attempt for one **Tracker Spec** and exact **Issue target branch**. A Single-Issue Spec forms one node bound directly to the Spec; a Multi-Issue Spec uses one read-back **Decomposition publication record**, dispatches its dependency-ready frontier in parallel, serializes closeout per target, and recomputes readiness after every **DAG node success**.
@@ -293,6 +305,14 @@ _Avoid_: Automatic active-run deletion, repository cleanup, tracker-history rete
 **Workflow interface**:
 The user-visible skills and explicit handoffs that represent distinct human-owned authority transitions in the development flow. A user invokes `close-issue` with an Issue ID; `close-issue` resolves the tracker state and local identities before calling its internal module. Interface size is judged by the decisions the human must own, not by skill count or Markdown length.
 _Avoid_: Workflow implementation, internal helper layout, shortest command chain
+
+**Workflow check disposition**:
+The required classification of every check owned by one workflow interface as a **Hard gate**, **Recoverable blocker**, or non-blocking advisory. A Hard gate is limited to evidence whose absence or contradiction could authorize the wrong target, duplicate or misattribute a mutation, corrupt durable state, or push an unverified ref. A Recoverable blocker reports the owning source, smallest human action, preserved progress, and exact retry command. An advisory remains visible but cannot withhold otherwise valid progress. Downstream skills consume exact upstream read-back instead of repeating the upstream producer's checks.
+_Avoid_: Unclassified validation, defensive revalidation cascade, advisory-as-failure
+
+**Same-command recovery**:
+The recovery interface in which a human repairs the blocker at its owning source and reinvokes the same public command with the same identity. The owning skill re-reads current evidence and resumes from its first unsatisfied idempotent stage; no generic resume command, central repair workflow, or force-bypass flag may modify another skill's state.
+_Avoid_: Global resume command, generic workflow repair, validation bypass
 
 **Ron repository footprint**:
 The repository-local Ron configuration, Ron-only instruction text, and inactive or completed `.git/ron-workflow/` metadata left by the retired setup or prior runs. It excludes a current recoverable draft, the Canonical Wiki, tracker history, branches, worktrees, and installed skills.
@@ -579,6 +599,11 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A completed **Workflow checkpoint transaction** remains an immutable Git-common-dir receipt; only active or incomplete state blocks, and downstream reads neither mutate nor delete the receipt
 - Reinvoking the same `to-spec` or `to-tickets` command automatically resumes an exact matching incomplete checkpoint transaction at its first unsatisfied stage; mismatch preserves state and stops, while Run never performs producer recovery
 - `to-spec`, `to-tickets`, and `close-issue` acquire the same target-scoped **Target mutation serialization** writer before their first target mutation and release it after their bounded target write and required authority read-back; Issue execution never consumes this writer
+- Every proposed **Tracker Spec** owns one **Spec workflow lane** with one Codex task, isolated planning worktree, and later **DAG Run**; lanes sharing a target remain concurrent and never require a global multi-Spec coordinator
+- Target movement during grilling does not invalidate the lane; **Planning baseline revalidation** may bind a semantically compatible handoff to the latest baseline, while relevant drift stops only that lane for renewed human confirmation
+- Healthy target-writer contention enters bounded **Target writer wait** and leaves unrelated Issue execution eligible; unknown ownership, timeout, or coordinator loss returns a blocker without stealing the lease
+- Every skill applies **Workflow check disposition** only to checks owned by its interface; downstream consumers trust exact upstream read-back, advisories never block, and only evidence protecting mutation identity, uniqueness, durable state, or push safety is a Hard gate
+- After a human repairs a **Recoverable blocker** at its owning source, **Same-command recovery** resumes the first unsatisfied idempotent stage; no generic resume command, central repair workflow, or force-bypass flag is introduced
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/run-issue-workflow <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`, whose successful publication then routes the same parent to `/run-issue-workflow <Spec-ID>`
 - A Single-Issue Run consumes only `to-spec`'s completed handoff; for Multi-Issue, `to-tickets` consumes `to-spec`'s handoff and emits one final **Run-ready handoff** binding both checkpoint record identities and the decomposition, so Run never coordinates two producer transactions
 - After a Tracker Spec or child Issue is written, the human may invoke `/pre-execute-issue <Issue-ID>` directly; `execute-issue` automatically invokes it in the same authorized lane only when one exact declared or unchanged-scope late prerequisite lacks a matching **Manual execution attestation**
