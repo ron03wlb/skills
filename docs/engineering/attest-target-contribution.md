@@ -6,13 +6,22 @@ Both routes write the unchanged `direct_target_contribution:v1` schema. The reco
 
 ## When to reach for it
 
-Type `/attest-target-contribution`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task fits. In the recovery flow, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) invokes it after showing you the complete draft and receiving one exact confirmation. An active `to-tickets` operation or a frozen legacy/profile-v1 `to-spec` resume may instead invoke it for its own transaction-bound Workflow plan checkpoint without another confirmation. Fresh `to-spec@v2` publication has no such stage.
+Type `/attest-target-contribution`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task fits. The caller route determines its authority:
+
+- **Recovery:** [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) invokes it after showing you the complete draft and receiving one exact confirmation.
+- **Prospective checkpoint:** An active `to-tickets` operation or a frozen legacy/profile-v1 `to-spec` resume invokes it for its own transaction-bound Workflow plan checkpoint without another confirmation.
+- **Fresh `to-spec@v2`:** It has no prospective checkpoint stage and does not invoke this helper.
 
 A standalone invocation without one of those active caller packets stops without writing.
 
 ## Prerequisites
 
-The repository needs a configured Issue tracker. For recovery, an active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) flow supplies the exact packet with the complete draft the human confirmed. Alternatively, a currently active, explicitly invoked `to-tickets` operation or frozen legacy/profile-v1 `to-spec` resume supplies its exact prospective packet, including the matching Workflow checkpoint transaction, checkpoint commit, baseline, purpose, and expected read-back. This helper writes only the matching tracker comment.
+The repository needs a configured Issue tracker. The active caller supplies one exact packet:
+
+- **Recovery:** An active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) flow supplies the exact packet with the complete draft the human confirmed.
+- **Prospective checkpoint:** A currently active, explicitly invoked `to-tickets` operation or frozen legacy/profile-v1 `to-spec` resume supplies the matching Workflow checkpoint transaction, checkpoint commit, baseline, purpose, and expected read-back.
+
+This helper writes only the matching tracker comment.
 
 ## One bounded attestation
 

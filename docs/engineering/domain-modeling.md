@@ -21,7 +21,7 @@ Reach for it when the *words* are the problem:
 
 ## Prerequisites
 
-None up front. The skill writes into two places and creates both lazily. When a caller supplies an active Spec workflow lane, both paths live inside that lane's isolated planning worktree:
+None up front. The skill writes into two places and creates both lazily. When a caller supplies an active [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) workflow lane, both paths live inside that lane's isolated planning worktree:
 
 - **`CONTEXT.md`** at the repo root, created by the first resolved term. In a repo with a `CONTEXT-MAP.md` at the root, terms go into the per-context `CONTEXT.md` the map points at instead.
 - **`docs/adr/`**, created by the first ADR that clears the bar.
@@ -37,7 +37,7 @@ The glossary and the ADR are held to different standards, and conflating them is
 | Holds | Terms. What a thing **is**, in one or two sentences, with rejected synonyms under `_Avoid_` | One decision, in one to three sentences: context, choice, reason |
 | Bar to write | A vague term became canonical | **All three**: hard to reverse, surprising without context, the result of a real trade-off |
 | Written | Inline, the moment the term is settled, inside the active lane when one exists | Offered, not assumed, inside the same lane |
-| Never holds | Implementation details, a [spec](https://www.aihero.dev/ai-coding-dictionary/spec), a scratch pad, general programming concepts | A diary of every choice made this session |
+| Never holds | Implementation details, a spec, a scratch pad, general programming concepts | A diary of every choice made this session |
 
 Miss any one of the ADR's three tests and there is no ADR. An easily-reversed decision will just get reversed; an unsurprising one is nobody's question; one with no real alternative records that you did the obvious thing.
 
