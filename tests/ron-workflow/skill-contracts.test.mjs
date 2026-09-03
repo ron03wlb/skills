@@ -593,7 +593,10 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   const executeDocs = read("docs/engineering/execute-issue.md");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
-  const close = read("skills/engineering/close-issue/SKILL.md");
+  const close = [
+    read("skills/engineering/close-issue/SKILL.md"),
+    read("skills/engineering/close-issue/references/completion-evidence.md"),
+  ].join("\n");
   const closeDocs = read("docs/engineering/close-issue.md");
   const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
@@ -1130,7 +1133,10 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const review = read("skills/engineering/code-review/SKILL.md");
-  const close = read("skills/engineering/close-issue/SKILL.md");
+  const close = [
+    read("skills/engineering/close-issue/SKILL.md"),
+    read("skills/engineering/close-issue/references/completion-evidence.md"),
+  ].join("\n");
   const verify = readVerifyTargetContract();
   const matt = read("skills/engineering/ask-matt/SKILL.md");
 
@@ -1448,8 +1454,14 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(plainMarkdown(read("docs/engineering/close-issue.md")), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
-  assert.match(close, /shared target mutation writer.*one planning or delivery writer.*Issue target branch/isu);
-  assert.match(close, /same target mutation writer.*direct human.*authorized coordinator.*planning producers.*other.*targets.*concurrently/isu);
+  assert.match(close, /sole owner.*repository close lease.*before.*target mutation writer.*direct human.*DAG/isu);
+  assert.match(close, /callers.*cannot pre-acquire.*delegate.*either lease/isu);
+  assert.match(close, /release.*target.*before.*repository.*required read-back/isu);
+  assert.match(close, /same Git common dir.*different targets.*one.*different repositories.*concurrent/isu);
+  assert.match(close, /target mutation writer.*planning producers.*exact target.*Issue execution.*planning.*unrelated targets.*never.*repository close lease/isu);
+  assert.match(close, /healthy contention.*observe.*owner.*bounded.*retry.*without.*steal/isu);
+  assert.match(close, /timeout.*unknown ownership.*stale-proof mismatch.*acquisition race.*stop before.*mutation/isu);
+  assert.doesNotMatch(close, /durable FIFO queue|waiter registry|queue-specific reclaim/iu);
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
   assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
@@ -1475,6 +1487,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(executeDocs, /target is dirty.*partial.*only checks.*identities.*evidence.*does not rerun.*baseline.*focused.*final.*full suite.*review.*commits.*tracker writes.*`\/close-issue <Issue-ID>`/isu);
   assert.match(closeDocs, /three.*merge.*remove.*close/isu);
   assert.match(closeDocs, /dirty target.*make.*target.*clean.*retr(?:y|ies).*`\/close-issue <Issue-ID>`.*does not rerun.*execution.*full suite/isu);
+  assert.match(closeDocs, /repository close lease.*same Git common dir.*repository.*target.*order.*reverse/isu);
+  assert.match(closeMetadata, /repository close lease.*target mutation writer.*order/isu);
   assert.doesNotMatch(closeDocs, /preservation|closeout receipt|integration receipt/iu);
   assert.match(close, /If the worktree is already absent, this action is satisfied/iu);
   const alreadyClosed = close.match(/If it is already closed,[^\n]+/u)?.[0] ?? "";

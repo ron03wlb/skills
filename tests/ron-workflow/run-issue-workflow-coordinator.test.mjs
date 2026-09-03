@@ -1478,6 +1478,46 @@ const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
   controlRevision: 0,
 });
 
+test("close leaf lease ownership uses repository-then-target order for direct and DAG authority", () => {
+  const { root, store } = createStoreFixture();
+  const observedOrders = [];
+
+  const runCloseLeaf = ({ authority, operationId, target }) => {
+    const order = [];
+    const repositoryLease = store.acquireRepositoryCloseLease({ operationId });
+    order.push("repository:acquired");
+
+    const unrelatedPlanning = store.acquireTargetMutationWriter({
+      target: `${target}-planning`,
+      operationId: `${operationId}-planning`,
+    });
+    unrelatedPlanning.release();
+
+    const targetWriter = store.acquireTargetMutationWriter({ target, operationId });
+    order.push("target:acquired");
+    assert.equal(repositoryLease.assertCurrent(), true, `${authority} lost repository ownership`);
+    assert.equal(targetWriter.assertCurrent(), true, `${authority} lost target ownership`);
+
+    targetWriter.release();
+    order.push("target:released");
+    assert.equal(repositoryLease.assertCurrent(), true, `${authority} released repository first`);
+    repositoryLease.release();
+    order.push("repository:released");
+    observedOrders.push(order);
+  };
+
+  try {
+    runCloseLeaf({ authority: "direct", operationId: "direct-close-44", target: "features/ron" });
+    runCloseLeaf({ authority: "DAG", operationId: "dag-close-44", target: "features/ron" });
+    assert.deepEqual(observedOrders, [
+      ["repository:acquired", "target:acquired", "target:released", "repository:released"],
+      ["repository:acquired", "target:acquired", "target:released", "repository:released"],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a healthy competing writer waits for release and reacquires authority before closeout", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
