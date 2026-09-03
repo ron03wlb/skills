@@ -20,7 +20,7 @@ Before cleanup, writer acquisition, Grant creation or renewal, panel open, task 
 
 ## Reduce the immediate-upstream handoff
 
-The composition requires one owning-source `handoff.read` adapter. Invoke it once with the already-read tracker snapshot and current reconciliation snapshot; it reuses their selected Spec, target, Planning Seal, classification, approved-scope, tracker publication, and Decomposition facts and performs the one Git-common-dir Workflow checkpoint classification read needed to return `run-ready-handoff-facts:v1`. It is a compact fact set, not another tracker, target, or history fetch or a validation workflow. A fresh Single-Issue Run reads only the current `to-spec` publication and completed handoff. A fresh Multi-Issue Run reads only the current `to-tickets` handoff, which binds the upstream publication, upstream handoff, exact operation receipt, and the valid `decomposition:v1` identity, digest, mapping, and blocker edges. Frozen legacy/profile-v1 handoffs retain their historical immutable record identities. Run never coordinates two producer transactions or trusts titles, labels alone, plan filenames, cached status, or inferred history.
+The runtime composition uses repository-owned `run-authority-adapters.mjs` to turn owning sources for checkpoint and handoff read-back, tracker and Decomposition state, target state, and shared writer liveness into the coordinator's internal adapters; callers never supply or invent `handoff.read`. The internal handoff adapter runs once with the already-read tracker snapshot and current reconciliation snapshot, reuses their selected Spec, target, Planning Seal, classification, approved-scope, tracker publication, and Decomposition facts, and performs the one Git-common-dir Workflow checkpoint classification read needed to return `run-ready-handoff-facts:v1`. It is a compact fact set, not another tracker, target, or history fetch or a validation workflow. A fresh Single-Issue Run reads only the current `to-spec` publication and completed handoff. A fresh Multi-Issue Run reads only the current `to-tickets` handoff, which binds the upstream publication, upstream handoff, exact operation receipt, and the valid `decomposition:v1` identity, digest, mapping, and blocker edges. Frozen legacy/profile-v1 handoffs retain their historical immutable record identities. Run never coordinates two producer transactions or trusts titles, labels alone, plan filenames, cached status, or inferred history.
 
 Reduce that fact with the pure `run-core.mjs` Run-ready reducer:
 
@@ -34,7 +34,7 @@ This Entry boundary does not revalidate producer generation, generated-content h
 
 ## Run the composed lifecycle
 
-`run-workflow.mjs` is the single composition interface for the active Run. Supply the owning-source Tracker, Git/worktree/completion-note, Workflow checkpoint handoff, Codex task, browser, shared leaf, and cleanup-evidence adapters. Keep ordinary normalization in `reconcile`, create the one Run-ready fact set through `handoff.read`, and keep every transition decision in the reducers and coordinator. After `READY` and the first valid reconciled status projection, the runtime opens the authenticated loopback panel and immediately continues execution without a second Start.
+`run-workflow.mjs` is the single composition interface for the active Run. Supply `authoritySources` containing the owning-source Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, handoff receipt, target, and writer-liveness readers, plus Codex task, browser, shared leaf, and cleanup evidence. The runtime rejects direct Tracker, `reconcile`, or `handoff.read` injection and builds those internal adapters itself. Each created runtime owns only its own active guard; each Run journal owns its own `max_parallel`, so separate runtime instances and Spec Runs share no process-global guard, queue, coordinator, or execution-slot pool. After `READY` and the first valid reconciled status projection, the runtime opens the authenticated loopback panel and immediately continues execution without a second Start.
 
 The panel reads only the disposable status projection. Pause, Resume, and Stop append revisioned controls through the same active engine writer used by the coordinator; Refresh is read-only. A paused coordinator keeps the same bridge active so Resume or Stop remains available in the same panel. A closed browser panel changes no Run state. When the active coordinator returns, the bridge closes before the writer is released, while the returned final status, journal, cleanup preview, and cleanup result remain inspectable. A panel-open failure stops before task action with `panel_unavailable`. Never persist or return the bridge control token.
 
@@ -50,7 +50,7 @@ On every entry and after every material task or leaf transition, reacquire:
 - candidate reachability, target cleanliness, and registered worktree evidence from Git;
 - latest valid `implementation_complete`, `implementation_blocked`, and partial close evidence;
 - current Codex task lifecycle for every journaled task reference;
-- the append-only run journal, engine writer, and shared target mutation-writer state.
+- the append-only run journal, engine writer, and exact shared target mutation-writer owner and liveness state.
 
 Normalize those owning-source facts for `run-core.mjs`; use `run-store.mjs` to rebuild the disposable status projection. Only `reduceRun` legal actions authorize progress. Never let a task summary, cached tracker response, panel state, or coordinator memory override current evidence. Any contradiction fails closed with the reducer's structured diagnosis.
 
@@ -74,7 +74,9 @@ For the first dispatch:
 
 Use bounded `wait_threads` calls with the journaled host/thread reference to observe progress. Use `read_thread` only when a settled, attention, or failure result needs exact evidence. Use `send_message_to_thread` for a same-task retry or serialized `close-issue` follow-up. Keep the latest wait cursor process-local; the journal stores task identity and attempts, not disposable polling state.
 
-Dispatch no more than `max_parallel` execution or remediation actions at once. Closeout does not consume an execution slot, but it shares the one target mutation writer used by planning producers for that Issue target branch. Never create a duplicate live lane for an Issue.
+Dispatch no more than `max_parallel` execution or remediation actions at once. Closeout and target-writer waiting do not consume an execution slot, but closeout shares the one target mutation writer used by planning producers for that Issue target branch. Never create a duplicate live lane for an Issue.
+
+Healthy foreign target writer contention enters a bounded `WAITING_FOR_TARGET_WRITER` coordinator state after every currently legal Issue dispatch. Append exact `target-writer-wait.started` and `target-writer-wait.settled` journal events; the wait consumes no Issue execution slot and never releases, reclaims, or replaces the other owner. After release, return to the outer loop and reacquire tracker, target, candidate, completion, worktree, control revision, and Grant evidence before acquiring the writer or invoking closeout.
 
 ## Execute reducer actions
 
@@ -85,6 +87,7 @@ Treat `status.run.controlRevision` as the authority revision for that exact acti
 - `reconcile_run`: reacquire every owning source and rebuild status. It is read-only until a valid Grant exists.
 - `dispatch_issue`: create or continue the Issue's one Codex task, then let that task invoke `execute-issue`. Journal the exact attempt and task reference.
 - `remediate_environment`: apply only the exact recognized adapter once for that Issue attempt and fingerprint, journal it, rerun the exact failed command in the same lane, and preserve its real result.
+- `wait_target_writer`: observe the exact healthy owner for at most the reducer-provided bound. Writer absence settles `RELEASED` and forces full reconciliation; owner change, timeout, coordinator loss, or an orphaned prior wait settles its exact exceptional outcome without target mutation. A control-revision change settles `CONTROL_CHANGED` and abandons the stale action batch.
 - `close_issue`: require a valid `implementation_complete`, acquire the shared target mutation writer, send the same Issue lane a `close-issue` follow-up under the unchanged Grant, wait for it to settle, reacquire tracker/Git/worktree evidence, then release the writer. A timeout or coordinator loss retains durable writer ownership; only exact reconciled stale-owner evidence may reclaim it, and release still waits for task settlement.
 - `close_parent`: after every exact child has node success, use the same target mutation-writer acquire-or-exact-reclaim seam and invoke parent-only `close-issue` in the coordinator task. Release only after the parent leaf settles, and re-read parent state before declaring delivery success.
 - `settle_pause` or `settle_stop`: append only the reducer-authorized transition after active workers and the target mutation writer have settled. These actions create no worker cancellation or cleanup authority.
@@ -100,6 +103,8 @@ A transient worker or task failure permits at most three dispatch attempts for t
 Before sending a same-task retry, reacquire that lane's task history. An exact accepted retry follow-up for the same Run, Issue, and next attempt is already in flight; journal the recovered retry relationship without sending the prompt again.
 
 Cached tracker data never authorizes dispatch, completion, or closeout. After an initial tracker read failure, wait and make 5, 15, and 30 second tracker probes. Those probes do not consume the Issue retry budget. Already-running workers may settle locally, but stop at the next tracker-dependent boundary. On recovery, discard the outage snapshot and perform full reconciliation. After all three probes fail, return `tracker_unavailable` with the attempted probe schedule, affected nodes, next owner, and Resume predicates.
+
+Unknown writer ownership, writer-wait timeout, coordinator loss, or changed evidence after the wait is a Recoverable blocker. Report its owning source, exact evidence, smallest human action, preserved Run and Issue stages, and the same `/run-issue-workflow` retry. Elapsed time never supplies reclaim authority, and exceptional recovery never mutates the target from the pre-wait snapshot.
 
 On restart, resolve any exact selector-known Run identity and node set from local authority before the first Tracker read. If that read and all probes fail, preserve the known Run and affected nodes in the diagnosis instead of returning an anonymous outage.
 

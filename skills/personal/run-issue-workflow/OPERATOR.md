@@ -16,7 +16,7 @@ Before that authority or any mutation, Entry invokes the owning-source handoff a
 
 After one exact Run is selected and its identity is reconciled, invocation previews and applies the bounded terminal-Run retention sweep before writer acquisition. The selected Run is protected even if cleanup evidence contradicts reconciliation. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
 
-The runtime adapters must provide current Tracker, Git/worktree/completion-note, Workflow checkpoint handoff, Codex task, shared leaf, browser, and cleanup evidence. `handoff.read` derives one versioned Run-ready fact from the existing snapshots plus one checkpoint classification read, without repeating producer content, whole-commit, attestation, review, test, or aggregate validation. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
+Provide repository owning sources for current Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, producer handoff, target, writer liveness, Codex task, shared leaf, browser, and cleanup evidence. `run-workflow.mjs` passes those sources through repository-owned `run-authority-adapters.mjs`; callers do not implement `handoff.read` or duplicate upstream validation. The internal adapter derives one versioned Run-ready fact from existing snapshots plus one checkpoint classification read. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
 
 ## Read the panel
 
@@ -28,6 +28,12 @@ The panel shows the current Run identity and state, published DAG edges, ready a
 - **Refresh** reads the newest projection and appends no journal event.
 
 Closing the browser panel has no effect. The bridge closes automatically when the active coordinator returns at a terminal or diagnosed stop. Reopen the workflow explicitly after return; do not treat a stale browser snapshot as evidence.
+
+## Observe target-writer waits
+
+Healthy target writer contention projects `WAITING_FOR_TARGET_WRITER` and one bounded, paired journal wait. Ready Issue execution continues within that Run's own `max_parallel`; the wait consumes no Issue execution slot and never releases another Run's writer. When the writer releases, the coordinator reacquires tracker, target, candidate, completion, worktree, control-revision, and Grant evidence before closeout.
+
+Unknown owner evidence, timeout, coordinator loss, or changed evidence returns a Recoverable blocker naming the owning source, exact evidence, smallest human action, preserved stages, and the same `/run-issue-workflow` command to retry. Do not steal a lease, close from the pre-wait snapshot, or use elapsed time as reclaim proof.
 
 ## Diagnose before intervening
 
@@ -57,6 +63,7 @@ Renderable examples:
 
 - [`examples/status-succeeded.json`](./examples/status-succeeded.json)
 - [`examples/status-diagnosed.json`](./examples/status-diagnosed.json)
+- [`examples/status-waiting.json`](./examples/status-waiting.json)
 
 ## v1 boundaries
 

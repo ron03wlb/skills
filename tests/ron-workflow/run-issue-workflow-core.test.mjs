@@ -1152,6 +1152,44 @@ test("target mutation writer serializes generic producers with legacy closeout o
   }
 });
 
+test("target mutation writer observation distinguishes absence, match, change, and uncertainty", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("target-writer-observation-");
+  const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "writer-observer" });
+  const writer = store.acquireTargetMutationWriter({
+    target: "features/ron",
+    operationId: "run-other-spec",
+  });
+  const lock = store.readTargetMutationWriterLock("features/ron");
+  const expectedOwner = {
+    operationId: lock.operationId,
+    coordinatorInstanceId: lock.coordinatorInstanceId,
+    generation: lock.generation,
+  };
+
+  try {
+    assert.deepEqual(store.observeTargetMutationWriter({
+      target: "features/ron",
+      expectedOwner,
+    }), { state: "MATCH", owner: expectedOwner });
+    assert.deepEqual(store.observeTargetMutationWriter({
+      target: "features/ron",
+      expectedOwner: { ...expectedOwner, generation: "different-generation" },
+    }), { state: "CHANGED", owner: expectedOwner });
+    assert.deepEqual(store.observeTargetMutationWriter({ target: "features/ron" }), {
+      state: "PRESENT",
+      owner: expectedOwner,
+    });
+    writer.release();
+    assert.deepEqual(store.observeTargetMutationWriter({
+      target: "features/ron",
+      expectedOwner,
+    }), { state: "ABSENT", owner: null });
+  } finally {
+    if (store.readTargetMutationWriterLock("features/ron") !== null) writer.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("two planning lanes isolate work, revalidate target movement, and serialize Planning Seal writes", () => {
   const parent = mkdtempSync(join(tmpdir(), "planning-lanes-"));
   const targetCheckout = join(parent, "target");
@@ -1259,7 +1297,7 @@ test("two planning lanes isolate work, revalidate target movement, and serialize
 
 test("the versioned runtime interface publishes the accepted state machines", () => {
   assert.deepEqual(RUN_STATES, [
-    "RECONCILING", "RUNNING", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
+    "RECONCILING", "RUNNING", "WAITING_FOR_TARGET_WRITER", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
   ]);
   assert.deepEqual(NODE_STATES, [
     "PENDING", "READY", "DISPATCHED", "EXECUTING", "RETRYING",
@@ -1813,6 +1851,81 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
   assert.deepEqual(unrelatedExecution.legalActions, [{ type: "dispatch_issue", issueId: "13", attempt: 1 }]);
 });
 
+test("a healthy target writer becomes a bounded wait after independent Issue dispatch", () => {
+  const healthyOwner = {
+    operationId: "run-other-spec",
+    coordinatorInstanceId: "coordinator-other-spec",
+    generation: "generation-other-spec",
+  };
+  const status = reduceRun({
+    ...facts([
+      { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+      node("14"),
+    ]),
+    run: {
+      ...facts([]).run,
+      closeWriterRunId: healthyOwner.operationId,
+      closeWriterState: "ACTIVE",
+      closeWriterHealth: "HEALTHY",
+      closeWriterOwner: healthyOwner,
+    },
+  });
+
+  assert.equal(status.run.state, "RUNNING");
+  assert.deepEqual(status.legalActions, [
+    { type: "dispatch_issue", issueId: "14", attempt: 1 },
+    {
+      type: "wait_target_writer",
+      issueId: "13",
+      owner: healthyOwner,
+      timeoutMs: 30_000,
+    },
+  ]);
+  assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "close_writer_conflict"), false);
+});
+
+test("an unsettled target-writer event projects the bounded coordinator wait state", () => {
+  const owner = {
+    operationId: "run-other-spec",
+    coordinatorInstanceId: "coordinator-other-spec",
+    generation: "generation-other-spec",
+  };
+  const input = facts([
+    { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+    node("14"),
+  ]);
+  input.run = {
+    ...input.run,
+    closeWriterRunId: owner.operationId,
+    closeWriterState: "ACTIVE",
+    closeWriterHealth: "HEALTHY",
+    closeWriterOwner: owner,
+  };
+  input.journal = [...input.journal, {
+    schema: "dag-run-event:v1",
+    sequence: 2,
+    type: "target-writer-wait.started",
+    at: "2026-08-30T00:01:00.000Z",
+    issueId: "13",
+    target: "features/ron",
+    owner,
+    timeoutMs: 30_000,
+  }];
+
+  const status = reduceRun(input);
+
+  assert.equal(status.run.state, "WAITING_FOR_TARGET_WRITER");
+  assert.deepEqual(status.legalActions, [{
+    type: "wait_target_writer",
+    issueId: "13",
+    owner,
+    timeoutMs: 30_000,
+  }]);
+  assert.deepEqual(status.frontier.ready, ["14"]);
+  assert.equal(planControl(status, "PAUSE", "2026-08-30T00:01:01.000Z").accepted, true);
+  assert.equal(planControl(status, "STOP", "2026-08-30T00:01:01.000Z").accepted, true);
+});
+
 test("Pause, Resume, and Stop are revisioned and idempotent with no Start control", () => {
   const running = reduceRun(facts([node("13")]));
   const pause = planControl(running, "PAUSE", "2026-08-30T00:01:00.000Z");
@@ -2352,6 +2465,59 @@ test("the single writer appends ordered control events and atomically rebuilds d
     rmdirSync(cleanupLock);
     store.acquireWriter("run-12").release();
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the Run journal pairs one bounded target-writer wait with its exact outcome", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("dag-writer-wait-");
+  const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "writer-wait-test" });
+  const writer = store.acquireWriter("run-12");
+  const owner = {
+    operationId: "run-other-spec",
+    coordinatorInstanceId: "coordinator-other-spec",
+    generation: "generation-other-spec",
+  };
+
+  try {
+    writer.append({
+      type: "grant.recorded",
+      at: "2026-08-30T00:00:00.000Z",
+      runIdentity: grant.runIdentity,
+      maxParallel: 3,
+    });
+    const started = writer.append({
+      type: "target-writer-wait.started",
+      at: "2026-08-30T00:01:00.000Z",
+      issueId: "13",
+      target: "features/ron",
+      owner,
+      timeoutMs: 30_000,
+    });
+    assert.equal(started.sequence, 2);
+    assert.throws(() => writer.append({
+      type: "target-writer-wait.started",
+      at: "2026-08-30T00:01:01.000Z",
+      issueId: "13",
+      target: "features/ron",
+      owner,
+      timeoutMs: 30_000,
+    }), /already active/u);
+
+    const settled = writer.append({
+      type: "target-writer-wait.settled",
+      at: "2026-08-30T00:01:20.000Z",
+      waitSequence: started.sequence,
+      issueId: "13",
+      target: "features/ron",
+      owner,
+      outcome: "RELEASED",
+      evidence: ["The exact competing target writer is absent."],
+    });
+    assert.equal(settled.sequence, 3);
+    assert.equal(store.readEvents("run-12").at(-1).outcome, "RELEASED");
+  } finally {
+    writer.release();
     rmSync(root, { recursive: true, force: true });
   }
 });

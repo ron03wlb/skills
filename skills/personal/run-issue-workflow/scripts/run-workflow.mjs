@@ -1,4 +1,5 @@
 import { createCoordinator } from "./run-coordinator.mjs";
+import { createRunAuthorityAdapters } from "./run-authority-adapters.mjs";
 import {
   createRunPanelControl,
   startRunPanelBridge,
@@ -12,24 +13,25 @@ const requireMethod = (owner, name) => {
 
 export function createWorkflowRuntime({
   store,
-  tracker,
   tasks,
-  selector,
-  reconcile,
-  handoff,
   leaf,
   environment,
   browser,
   cleanup,
   now,
   sleep,
+  authoritySources,
 }) {
   for (const method of ["readEvents", "readStatus", "previewCleanup", "applyCleanup"]) {
     requireMethod(store, method);
   }
   requireMethod(browser, "open");
   requireMethod(cleanup, "listRuns");
-  requireMethod(handoff, "read");
+  if (authoritySources === undefined) {
+    throw new TypeError("Workflow runtime requires repository-owned authoritySources");
+  }
+  const authorityAdapters = createRunAuthorityAdapters({ sources: authoritySources, store, tasks });
+  requireMethod(authorityAdapters.handoff, "read");
 
   let active = false;
   return {
@@ -91,11 +93,11 @@ export function createWorkflowRuntime({
       };
       const coordinator = createCoordinator({
         store,
-        tracker,
+        tracker: authorityAdapters.tracker,
         tasks,
-        selector,
-        reconcile,
-        handoff,
+        selector: authorityAdapters.selector,
+        reconcile: authorityAdapters.reconcile,
+        handoff: authorityAdapters.handoff,
         leaf,
         environment,
         panel,

@@ -4,9 +4,11 @@ export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
 export const RUN_READY_FACT_SCHEMA = "run-ready-handoff-facts:v1";
 export const RUN_READY_RESULT_SCHEMA = "run-ready-handoff:v1";
+export const TARGET_WRITER_WAIT_TIMEOUT_MS = 30_000;
 export const RUN_STATES = Object.freeze([
   "RECONCILING",
   "RUNNING",
+  "WAITING_FOR_TARGET_WRITER",
   "PAUSING",
   "PAUSED",
   "BLOCKED",
@@ -45,6 +47,10 @@ export const REASON_CODES = Object.freeze({
   dispatchAttemptsExhausted: "dispatch_attempts_exhausted",
   environmentUnresolved: "environment_unresolved",
   closeWriterConflict: "close_writer_conflict",
+  targetWriterOwnerChanged: "target_writer_owner_changed",
+  targetWriterWaitTimeout: "target_writer_wait_timeout",
+  targetWriterWaitCoordinatorLost: "target_writer_wait_coordinator_lost",
+  targetWriterWaitInterrupted: "target_writer_wait_interrupted",
   trackerUnavailable: "tracker_unavailable",
   targetDirty: "target_dirty",
   targetStateUncertain: "target_state_uncertain",
@@ -658,7 +664,13 @@ export function reduceRun(input) {
     return blockedResult(input, REASON_CODES.dependencyCycle, [`Issue ${dependencyCycle} participates in a blocker cycle.`], [dependencyCycle]);
   }
   const outOfScopeJournalEvent = input.journal.find((event) => (
-    ["dispatch.recorded", "retry.recorded", "remediation.recorded"].includes(event.type)
+    [
+      "dispatch.recorded",
+      "retry.recorded",
+      "remediation.recorded",
+      "target-writer-wait.started",
+      "target-writer-wait.settled",
+    ].includes(event.type)
       && !seen.has(event.issueId)
   ));
   if (outOfScopeJournalEvent) {
@@ -922,9 +934,18 @@ export function reduceRun(input) {
   );
   const slots = Math.max(0, maxParallel - active.length);
   const normalActions = [];
-  const targetCloseWriterConflict = input.run.closeWriterState !== "ABSENT"
+  const targetCloseWriterForeign = input.run.closeWriterState !== "ABSENT"
     && input.run.closeWriterRunId !== input.run.runId;
-  const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN";
+  const closeWriterOwner = input.run.closeWriterOwner;
+  const targetCloseWriterHealthy = targetCloseWriterForeign
+    && input.run.closeWriterState === "ACTIVE"
+    && input.run.closeWriterHealth === "HEALTHY"
+    && isRecord(closeWriterOwner)
+    && closeWriterOwner.operationId === input.run.closeWriterRunId
+    && isText(closeWriterOwner.coordinatorInstanceId)
+    && isText(closeWriterOwner.generation);
+  const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
+    || (targetCloseWriterForeign && !targetCloseWriterHealthy);
   const targetCloseWriterOwned = input.run.closeWriterState === "ACTIVE"
     && input.run.closeWriterRunId === input.run.runId;
   const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
@@ -960,7 +981,34 @@ export function reduceRun(input) {
   if (needsParentClose && targetCloseWriterAvailable) {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
   }
-  const closeWriterDiagnoses = (targetCloseWriterConflict || targetCloseWriterUncertain)
+  const activeTargetWriterWait = input.journal.findLast((event) => (
+    event.type === "target-writer-wait.started"
+    && !input.journal.some((candidate) => (
+      candidate.type === "target-writer-wait.settled" && candidate.waitSequence === event.sequence
+    ))
+  ));
+  const waitingIssueId = closeable[0] ?? (needsParentClose ? input.run.specId : null);
+  if (targetCloseWriterHealthy && waitingIssueId !== null) {
+    normalActions.push({
+      type: "wait_target_writer",
+      issueId: waitingIssueId,
+      owner: {
+        operationId: closeWriterOwner.operationId,
+        coordinatorInstanceId: closeWriterOwner.coordinatorInstanceId,
+        generation: closeWriterOwner.generation,
+      },
+      timeoutMs: TARGET_WRITER_WAIT_TIMEOUT_MS,
+    });
+  }
+  if (activeTargetWriterWait) {
+    normalActions.splice(0, normalActions.length, {
+      type: "wait_target_writer",
+      issueId: activeTargetWriterWait.issueId,
+      owner: { ...activeTargetWriterWait.owner },
+      timeoutMs: activeTargetWriterWait.timeoutMs,
+    });
+  }
+  const closeWriterDiagnoses = targetCloseWriterUncertain
     && (closeable.length > 0 || needsParentClose)
     ? [diagnosis({
       reasonCode: REASON_CODES.closeWriterConflict,
@@ -1018,7 +1066,7 @@ export function reduceRun(input) {
   }
   const hasContradiction = contradictionDiagnoses.length > 0
     || globalGateDiagnoses.length > 0;
-  const hasActiveWork = active.length > 0 || targetCloseWriterOwned;
+  const hasActiveWork = active.length > 0 || targetCloseWriterOwned || activeTargetWriterWait !== undefined;
   const noProgress = !deliverySucceeded && !hasContradiction && normalActions.length === 0 && !hasActiveWork;
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
@@ -1034,15 +1082,19 @@ export function reduceRun(input) {
       ? "BLOCKED"
       : input.run.reconciled === false
         ? "RECONCILING"
-        : "RUNNING";
+        : activeTargetWriterWait
+          ? "WAITING_FOR_TARGET_WRITER"
+          : "RUNNING";
   let legalActions = state === "RECONCILING" ? [{ type: "reconcile_run" }] : normalActions;
   const controlDiagnoses = [];
   if (!deliverySucceeded && latestControl?.command === "PAUSE") {
     const pauseSettled = hasPauseTransition && !hasActiveWork;
     state = pauseSettled ? "PAUSED" : "PAUSING";
-    legalActions = !hasPauseTransition && !hasActiveWork
-      ? [{ type: "settle_pause", revision: controlRevision }]
-      : [];
+    legalActions = activeTargetWriterWait
+      ? normalActions
+      : !hasPauseTransition && !hasActiveWork
+        ? [{ type: "settle_pause", revision: controlRevision }]
+        : [];
     if (pauseSettled) {
       controlDiagnoses.push(diagnosis({
         reasonCode: REASON_CODES.pausedByUser,
@@ -1057,9 +1109,11 @@ export function reduceRun(input) {
   if (!deliverySucceeded && latestControl?.command === "STOP") {
     const stopSettled = hasStopTransition && !hasActiveWork;
     state = stopSettled ? "STOPPED" : "STOPPING";
-    legalActions = !hasStopTransition && !hasActiveWork
-      ? [{ type: "settle_stop", revision: controlRevision }]
-      : [];
+    legalActions = activeTargetWriterWait
+      ? normalActions
+      : !hasStopTransition && !hasActiveWork
+        ? [{ type: "settle_stop", revision: controlRevision }]
+        : [];
     if (stopSettled) {
       controlDiagnoses.push(diagnosis({
         reasonCode: REASON_CODES.stoppedByUser,
@@ -1082,6 +1136,7 @@ export function reduceRun(input) {
     PAUSING: ["STOP", "REFRESH"],
     PAUSED: ["RESUME", "STOP", "REFRESH"],
     BLOCKED: ["RESUME", "STOP", "REFRESH"],
+    WAITING_FOR_TARGET_WRITER: ["PAUSE", "STOP", "REFRESH"],
   };
 
   return {
@@ -1143,9 +1198,16 @@ export function planControl(status, command, at) {
     };
   }
   const legal = {
-    PAUSE: new Set(["RECONCILING", "RUNNING"]),
+    PAUSE: new Set(["RECONCILING", "RUNNING", "WAITING_FOR_TARGET_WRITER"]),
     RESUME: new Set(["PAUSED", "BLOCKED"]),
-    STOP: new Set(["RECONCILING", "RUNNING", "PAUSING", "PAUSED", "BLOCKED"]),
+    STOP: new Set([
+      "RECONCILING",
+      "RUNNING",
+      "WAITING_FOR_TARGET_WRITER",
+      "PAUSING",
+      "PAUSED",
+      "BLOCKED",
+    ]),
   };
   if (!legal[command].has(status.run.state)) {
     return {

@@ -7,6 +7,8 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "dispatch.recorded",
   "retry.recorded",
   "remediation.recorded",
+  "target-writer-wait.started",
+  "target-writer-wait.settled",
   "pause.transitioned",
   "stop.transitioned",
 ]);
@@ -28,6 +30,12 @@ const eventFields = new Map([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
   ])],
   ["remediation.recorded", new Set(["type", "at", "issueId", "attempt", "fingerprint", "cycle", "adapter"])],
+  ["target-writer-wait.started", new Set([
+    "type", "at", "issueId", "target", "owner", "timeoutMs",
+  ])],
+  ["target-writer-wait.settled", new Set([
+    "type", "at", "waitSequence", "issueId", "target", "owner", "outcome", "evidence",
+  ])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
 ]);
@@ -65,6 +73,19 @@ const validateTaskRef = (taskRef, label) => {
   requireText(taskRef.threadId, `${label}.threadId`);
   requireText(taskRef.hostId, `${label}.hostId`);
 };
+
+const validateTargetWriterOwner = (owner, label) => {
+  assertExactFields(owner, new Set(["operationId", "coordinatorInstanceId", "generation"]), label);
+  requireText(owner.operationId, `${label}.operationId`);
+  requireText(owner.coordinatorInstanceId, `${label}.coordinatorInstanceId`);
+  requireText(owner.generation, `${label}.generation`);
+};
+
+const sameTargetWriterOwner = (left, right) => (
+  left.operationId === right.operationId
+  && left.coordinatorInstanceId === right.coordinatorInstanceId
+  && left.generation === right.generation
+);
 
 const sameTaskRef = (left, right) => left.threadId === right.threadId && left.hostId === right.hostId;
 const taskRefKey = ({ hostId, threadId }) => JSON.stringify([hostId, threadId]);
@@ -143,6 +164,26 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requireText(event.fingerprint, "remediation fingerprint");
       requirePositiveInteger(event.cycle, "remediation cycle", 1);
       requireText(event.adapter, "remediation adapter");
+      break;
+    case "target-writer-wait.started":
+      requireText(event.issueId, "target-writer wait issueId");
+      requireText(event.target, "target-writer wait target");
+      validateTargetWriterOwner(event.owner, "target-writer wait owner");
+      requirePositiveInteger(event.timeoutMs, "target-writer wait timeoutMs", 300_000);
+      break;
+    case "target-writer-wait.settled":
+      requirePositiveInteger(event.waitSequence, "target-writer wait sequence");
+      requireText(event.issueId, "target-writer wait issueId");
+      requireText(event.target, "target-writer wait target");
+      validateTargetWriterOwner(event.owner, "target-writer wait owner");
+      if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE"].includes(event.outcome)) {
+        throw new TypeError("Unsupported target-writer wait outcome");
+      }
+      if (!Array.isArray(event.evidence) || event.evidence.length === 0 || !event.evidence.every((item) => (
+        typeof item === "string" && item.length > 0
+      ))) {
+        throw new TypeError("Target-writer wait settlement requires exact evidence");
+      }
       break;
     case "pause.transitioned":
     case "stop.transitioned":
@@ -258,6 +299,38 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     });
     if (duplicate) {
       throw new TypeError(`Only one remediation cycle is allowed per exact fingerprint in dispatch attempt ${attempt}`);
+    }
+  }
+  if (event.type === "target-writer-wait.started") {
+    const activeWait = events.findLast((item) => item.type === "target-writer-wait.started"
+      && !events.some((candidate) => (
+        candidate.type === "target-writer-wait.settled" && candidate.waitSequence === item.sequence
+      )));
+    if (activeWait) throw new TypeError(`Target-writer wait ${activeWait.sequence} is already active`);
+    const grant = events.findLast(({ type }) => type === "grant.recorded");
+    if (grant?.runIdentity?.target !== event.target) {
+      throw new TypeError("Target-writer wait target must match the Run Grant");
+    }
+  }
+  if (event.type === "target-writer-wait.settled") {
+    const started = events.find((item) => (
+      item.type === "target-writer-wait.started" && item.sequence === event.waitSequence
+    ));
+    const duplicate = events.some((item) => (
+      item.type === "target-writer-wait.settled" && item.waitSequence === event.waitSequence
+    ));
+    if (!started || duplicate) throw new TypeError("Target-writer wait settlement requires one active start");
+    if (started.issueId !== event.issueId || started.target !== event.target
+      || !sameTargetWriterOwner(started.owner, event.owner)) {
+      throw new TypeError("Target-writer wait settlement must match its exact start");
+    }
+    if (requireIsoInstant(event.at, "target-writer wait settlement timestamp")
+      < requireIsoInstant(started.at, "target-writer wait start timestamp")) {
+      throw new TypeError("Target-writer wait cannot settle before it starts");
+    }
+    if (event.outcome === "TIMED_OUT"
+      && Date.parse(event.at) - Date.parse(started.at) < started.timeoutMs) {
+      throw new TypeError("Target-writer wait cannot time out before its bound");
     }
   }
   if (["pause.transitioned", "stop.transitioned"].includes(event.type)) {

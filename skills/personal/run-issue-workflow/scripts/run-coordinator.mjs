@@ -48,6 +48,7 @@ const MUTATING_ACTION_TYPES = new Set([
   "remediate_environment",
   "close_issue",
   "close_parent",
+  "wait_target_writer",
   "settle_pause",
   "settle_stop",
 ]);
@@ -326,6 +327,7 @@ export function createCoordinator({
     "readWriterLock",
     "acquireTargetMutationWriter",
     "readTargetMutationWriterLock",
+    "observeTargetMutationWriter",
   ]) requireMethod(store, method);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
@@ -588,6 +590,137 @@ export function createCoordinator({
     }
   };
 
+  const waitForTargetWriter = async ({ action, current, status, writer }) => {
+    const events = store.readEvents(current.runIdentity.runId);
+    const unsettled = events.findLast((event) => event.type === "target-writer-wait.started"
+      && !events.some((candidate) => (
+        candidate.type === "target-writer-wait.settled" && candidate.waitSequence === event.sequence
+      )));
+    const stop = (reasonCode, evidence, resumePredicates) => ({ stopped: diagnosedStop(status, {
+      reasonCode,
+      limitationClass: "instance-blocker",
+      evidence,
+      noAutomaticTransition: "Target closeout cannot continue from stale or exceptional writer-wait evidence.",
+      affectedNodes: [action.issueId],
+      resumePredicates,
+    }) });
+    const appendSettlement = ({ started, outcome, evidence, at = now() }) => writer.append({
+      type: "target-writer-wait.settled",
+      at,
+      waitSequence: started.sequence,
+      issueId: started.issueId,
+      target: started.target,
+      owner: started.owner,
+      outcome,
+      evidence,
+    });
+
+    if (unsettled) {
+      appendSettlement({
+        started: unsettled,
+        outcome: "COORDINATOR_INACTIVE",
+        evidence: [`Writer wait ${unsettled.sequence} was left unsettled by a prior coordinator.`],
+      });
+      return stop(
+        "target_writer_wait_interrupted",
+        [
+          `Run ${current.runIdentity.runId} recovered unsettled writer wait ${unsettled.sequence}.`,
+          "The Run, Issue completion, and target writer state remain preserved.",
+        ],
+        ["invoke_same_run_issue_workflow_after_writer_wait_reconciliation"],
+      );
+    }
+
+    const started = writer.append({
+      type: "target-writer-wait.started",
+      at: now(),
+      issueId: action.issueId,
+      target: current.runIdentity.target,
+      owner: action.owner,
+      timeoutMs: action.timeoutMs,
+    });
+    const settleObservedOwner = (observation) => {
+      if (observation.state === "MATCH") return null;
+      if (observation.state === "ABSENT") {
+        appendSettlement({
+          started,
+          outcome: "RELEASED",
+          evidence: ["The exact competing target writer is absent."],
+        });
+        return { released: true };
+      }
+      appendSettlement({
+        started,
+        outcome: "OWNER_CHANGED",
+        evidence: [`Target writer changed from ${JSON.stringify(action.owner)} to ${JSON.stringify(observation.owner)} (${observation.state}).`],
+      });
+      return stop(
+        "target_writer_owner_changed",
+        [
+          `Target ${current.runIdentity.target} writer ownership changed during wait.`,
+          `Observed owning source ${JSON.stringify(observation)}.`,
+        ],
+        ["target_writer_ownership_is_reconciled", "retry_same_run_issue_workflow"],
+      );
+    };
+    const observeOwner = () => store.observeTargetMutationWriter({
+      target: current.runIdentity.target,
+      expectedOwner: action.owner,
+    });
+    writer.rebuildStatus(current.facts);
+    let elapsedMs = 0;
+    const pollMs = Math.min(1_000, action.timeoutMs);
+    while (elapsedMs < action.timeoutMs) {
+      const observedOutcome = settleObservedOwner(observeOwner());
+      if (observedOutcome) return observedOutcome;
+
+      const delayMs = Math.min(pollMs, action.timeoutMs - elapsedMs);
+      const waitResult = await sleep(delayMs);
+      elapsedMs += delayMs;
+      if (waitResult?.coordinatorActive === false) {
+        appendSettlement({
+          started,
+          outcome: "COORDINATOR_INACTIVE",
+          evidence: ["The active coordinator was lost while the target writer remained owned."],
+        });
+        return stop(
+          "target_writer_wait_coordinator_lost",
+          ["Coordinator liveness became inactive during target-writer wait."],
+          ["coordinator_is_active", "retry_same_run_issue_workflow"],
+        );
+      }
+      const latestControl = store.readEvents(current.runIdentity.runId)
+        .findLast(({ type }) => type === "control.revised");
+      if ((latestControl?.revision ?? 0) !== status.run.controlRevision) {
+        appendSettlement({
+          started,
+          outcome: "CONTROL_CHANGED",
+          evidence: [`Control revision changed from ${status.run.controlRevision} to ${latestControl.revision}.`],
+        });
+        return { controlRevisionChanged: true };
+      }
+    }
+
+    const deadlineOutcome = settleObservedOwner(observeOwner());
+    if (deadlineOutcome) return deadlineOutcome;
+    const minimumTimeoutAt = new Date(Date.parse(started.at) + action.timeoutMs).toISOString();
+    const observedAt = now();
+    appendSettlement({
+      started,
+      outcome: "TIMED_OUT",
+      at: Date.parse(observedAt) >= Date.parse(minimumTimeoutAt) ? observedAt : minimumTimeoutAt,
+      evidence: [`The exact competing writer remained present for ${action.timeoutMs} milliseconds.`],
+    });
+    return stop(
+      "target_writer_wait_timeout",
+      [
+        `Target ${current.runIdentity.target} writer ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds.`,
+        "The Run, Issue completion, and target state remain preserved.",
+      ],
+      ["target_writer_is_absent_or_healthy", "retry_same_run_issue_workflow"],
+    );
+  };
+
   return {
     async run(request = {}) {
       let selectedRequest = request;
@@ -817,6 +950,13 @@ export function createCoordinator({
               const outcome = await closeParent({ action, current, status: lastStatus });
               if (outcome.stopped) return outcome.stopped;
               if (!outcome.settled) return lastStatus;
+            } else if (action.type === "wait_target_writer") {
+              const outcome = await waitForTargetWriter({ action, current, status: lastStatus, writer });
+              if (outcome.stopped) return outcome.stopped;
+              if (outcome.controlRevisionChanged) {
+                controlRevisionChanged = true;
+                break;
+              }
             } else if (action.type === "reconcile_run") {
               // The next loop reacquires tracker and task-owned evidence before rebuilding status.
             } else if (["settle_pause", "settle_stop"].includes(action.type)) {

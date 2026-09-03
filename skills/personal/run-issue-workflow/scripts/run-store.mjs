@@ -934,6 +934,30 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return owner.operationId;
   };
 
+  const observeTargetMutationWriter = ({ target, expectedOwner } = {}) => {
+    requireText(target, "target mutation writer observation target");
+    const normalizeOwner = (lock) => {
+      const operationId = lock?.operationId ?? lock?.runId;
+      return isText(operationId) && operationId !== "UNKNOWN"
+        && isText(lock?.coordinatorInstanceId) && isText(lock?.generation)
+        ? { operationId, coordinatorInstanceId: lock.coordinatorInstanceId, generation: lock.generation }
+        : null;
+    };
+    if (expectedOwner !== undefined) {
+      const normalizedExpected = normalizeOwner(expectedOwner);
+      if (normalizedExpected === null) throw new TypeError("Expected target mutation writer owner is malformed");
+    }
+    const lock = readTargetMutationWriterLock(target);
+    if (lock === null) return { state: "ABSENT", owner: null };
+    const owner = normalizeOwner(lock);
+    if (owner === null) return { state: "UNKNOWN", owner: null };
+    if (expectedOwner === undefined) return { state: "PRESENT", owner };
+    const same = owner.operationId === expectedOwner.operationId
+      && owner.coordinatorInstanceId === expectedOwner.coordinatorInstanceId
+      && owner.generation === expectedOwner.generation;
+    return { state: same ? "MATCH" : "CHANGED", owner };
+  };
+
   const readGate = (lockPath, kind, fallback) => {
     const takeoverPath = gateTakeoverPath(lockPath);
     const stalePath = gateTakeoverStalePath(lockPath);
@@ -1016,6 +1040,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     reclaimTargetMutationWriter,
     readTargetMutationWriter,
     readTargetMutationWriterLock,
+    observeTargetMutationWriter,
     readTargetMutationWriterReclaimLock,
     acquireCloseWriter,
     reclaimCloseWriter,

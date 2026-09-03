@@ -93,10 +93,45 @@ const readyHandoffFor = (runIdentity) => {
 const defaultRunReadyHandoffAdapter = {
   async read({ current }) { return current.runReadyHandoff; },
 };
-const createWorkflowRuntime = (options) => createWorkflowRuntimeSource({
-  handoff: defaultRunReadyHandoffAdapter,
-  ...options,
-});
+const createWorkflowRuntime = (options) => {
+  const {
+    tracker,
+    selector,
+    reconcile,
+    handoff = defaultRunReadyHandoffAdapter,
+    ...runtimeOptions
+  } = options;
+  const handoffFacts = new WeakMap();
+  const readHandoffFacts = async (input) => {
+    if (!handoffFacts.has(input.current)) handoffFacts.set(input.current, await handoff.read(input));
+    return handoffFacts.get(input.current);
+  };
+  return createWorkflowRuntimeSource({
+    ...runtimeOptions,
+    authoritySources: {
+      tracker,
+      selector,
+      reconciliation: { read: reconcile },
+      target: {
+        async read({ current }) {
+          return {
+            state: current.facts.run.targetState,
+            ownership: current.runReadyHandoff?.targetOwnership,
+          };
+        },
+      },
+      checkpoint: {
+        async read(input) { return (await readHandoffFacts(input)).checkpoint; },
+      },
+      handoff: {
+        async read(input) { return (await readHandoffFacts(input)).handoff; },
+      },
+      writer: {
+        async readHealth({ current }) { return current.facts.run.closeWriterHealth ?? "UNKNOWN"; },
+      },
+    },
+  });
+};
 
 const singleRunCurrent = ({
   journal = [],
@@ -104,6 +139,7 @@ const singleRunCurrent = ({
   targetState = "CLEAN",
   contradictions = [],
   runReadyHandoff = readyHandoffFor(identity),
+  run = {},
 }) => ({
   runIdentity: identity,
   grant: { runIdentity: identity, maxParallel: 3 },
@@ -122,10 +158,314 @@ const singleRunCurrent = ({
       closeWriterRunId: null,
       closeWriterState: "ABSENT",
       parentTrackerState: "OPEN",
+      ...run,
     },
     nodes: [{ issueId: "17", blockers: [], ...model }],
     contradictions,
   },
+});
+
+test("runtime composition builds the owning-source handoff adapter", async () => {
+  const { root, store } = createStoreFixture();
+  const reads = [];
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  const current = singleRunCurrent({ journal: [], model });
+  const authoritySources = {
+    tracker: {
+      async read() {
+        reads.push("tracker");
+        return { issueId: "17", state: "OPEN" };
+      },
+    },
+    reconciliation: {
+      async read() {
+        reads.push("reconciliation");
+        return current;
+      },
+    },
+    target: {
+      async read() {
+        reads.push("target");
+        return { state: "DIRTY" };
+      },
+    },
+    checkpoint: {
+      async read() {
+        reads.push("checkpoint");
+        return current.runReadyHandoff.checkpoint;
+      },
+    },
+    handoff: {
+      async read() {
+        reads.push("handoff");
+        return current.runReadyHandoff.handoff;
+      },
+    },
+    writer: {
+      async readHealth() {
+        throw new Error("writer health is unnecessary when no writer exists");
+      },
+    },
+  };
+  const forbiddenTasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden for a DIRTY owning-source target`);
+    }]),
+  );
+  let panelOpens = 0;
+
+  try {
+    const runtime = createWorkflowRuntimeSource({
+      store,
+      authoritySources,
+      tasks: forbiddenTasks,
+      browser: { async open() { panelOpens += 1; } },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-08-30T07:30:00.000Z",
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: "17", cleanupPreview: true });
+
+    assert.equal(result.status.run.state, "BLOCKED");
+    assert.equal(result.status.diagnoses[0].reasonCode, "target_dirty");
+    assert.deepEqual(reads.slice(0, 5), ["tracker", "reconciliation", "target", "checkpoint", "handoff"]);
+    assert.equal(reads.filter((name) => name === "checkpoint").length, 1);
+    assert.equal(reads.filter((name) => name === "handoff").length, 1);
+    assert.equal(panelOpens, 1);
+    assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("runtime interface rejects a caller-invented handoff adapter", () => {
+  const { root, store } = createStoreFixture();
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {}]),
+  );
+
+  try {
+    assert.throws(() => createWorkflowRuntimeSource({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile: async () => ({}),
+      handoff: { async read() { return {}; } },
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-08-30T07:45:00.000Z",
+      sleep: async () => {},
+    }), /authoritySources/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("multiple runtime instances keep per-Run max_parallel on one target", async () => {
+  const { root, gitCommonDir } = createStoreFixture();
+  const runA = {
+    ...multiIdentity,
+    runId: "run-71-multi",
+    specId: "71",
+    approvedScopeHash: "sha256:spec-71",
+    decompositionIdentity: "decomposition:71",
+  };
+  const runB = {
+    ...multiIdentity,
+    runId: "run-72-multi",
+    specId: "72",
+    approvedScopeHash: "sha256:spec-72",
+    decompositionIdentity: "decomposition:72",
+  };
+  const stores = [
+    createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-71" }),
+    createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-72" }),
+  ];
+  const definitions = [
+    { runIdentity: runA, maxParallel: 1, issueIds: ["711", "712", "713"] },
+    { runIdentity: runB, maxParallel: 2, issueIds: ["721", "722", "723"] },
+  ];
+  const created = [[], []];
+  let waitingRuntimes = 0;
+  let releaseWaiters;
+  const bothWaiting = new Promise((resolve) => { releaseWaiters = resolve; });
+
+  const runtimeFor = (index) => {
+    const { runIdentity, maxParallel, issueIds } = definitions[index];
+    const model = new Map(issueIds.map((issueId) => [issueId, "NONE"]));
+    const tasks = {
+      async findIssueLane() { return []; },
+      async create({ issueId }) {
+        created[index].push(issueId);
+        model.set(issueId, "DISPATCHED");
+        return { threadId: `thread-${issueId}`, hostId: "local" };
+      },
+      async read() { throw new Error("task read is unnecessary before the first wait"); },
+      async message() { throw new Error("task message is unnecessary before the first wait"); },
+      async wait() {
+        waitingRuntimes += 1;
+        if (waitingRuntimes === 2) releaseWaiters();
+        await bothWaiting;
+        return { coordinatorActive: false };
+      },
+    };
+    const reconcile = async ({ journal }) => ({
+      runIdentity,
+      grant: { runIdentity, maxParallel },
+      planningSeal: selectedPlanningSeal,
+      runReadyHandoff: readyHandoffFor(runIdentity),
+      taskRefs: Object.fromEntries(journal
+        .filter(({ type }) => type === "dispatch.recorded")
+        .map(({ issueId, taskRef }) => [issueId, taskRef])),
+      facts: {
+        schema: "dag-run-facts:v1",
+        run: {
+          ...runIdentity,
+          reconciled: true,
+          trackerAvailable: true,
+          targetState: "CLEAN",
+          closeWriterRunId: null,
+          closeWriterState: "ABSENT",
+          parentTrackerState: "OPEN",
+        },
+        nodes: issueIds.map((issueId) => ({
+          issueId,
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: model.get(issueId),
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: "ABSENT",
+        })),
+        contradictions: [],
+      },
+    });
+    return createWorkflowRuntime({
+      store: stores[index],
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now: () => `2026-08-30T07:5${index}:00.000Z`,
+      sleep: async () => {},
+    });
+  };
+
+  try {
+    const [resultA, resultB] = await Promise.all(definitions.map(({ runIdentity }, index) => (
+      runtimeFor(index).run({ specId: runIdentity.specId, cleanupPreview: true })
+    )));
+
+    assert.equal(resultA.status.run.state, "RUNNING");
+    assert.equal(resultB.status.run.state, "RUNNING");
+    assert.equal(resultA.status.run.maxParallel, 1);
+    assert.equal(resultB.status.run.maxParallel, 2);
+    assert.deepEqual(created, [["711"], ["721", "722"]]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("end-to-end closeout contention waits, reacquires, and then closes", async () => {
+  const { root, store } = createStoreFixture();
+  const competitor = store.acquireTargetMutationWriter({
+    target: identity.target,
+    operationId: "run-other-spec",
+  });
+  const taskRef = { threadId: "thread-17", hostId: "local" };
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "COMPLETE",
+    candidateReachable: false,
+    worktreeState: "PRESENT",
+    closeAccepted: false,
+  };
+  let competitorReleased = false;
+  let trackerReads = 0;
+  let closeMessageTrackerReads = null;
+  let second = 0;
+  const now = () => `2026-08-30T07:58:${String(second++).padStart(2, "0")}.000Z`;
+  const tracker = {
+    async read() {
+      trackerReads += 1;
+      return { issueId: "17", state: model.trackerState };
+    },
+  };
+  const tasks = {
+    async findIssueLane() { return [taskRef]; },
+    async create() { throw new Error("manual completion must reuse its Issue lane"); },
+    async read() {
+      return {
+        state: "SETTLED",
+        closeRequest: model.closeAccepted
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          : null,
+      };
+    },
+    async message() {
+      closeMessageTrackerReads = trackerReads;
+      model.closeAccepted = true;
+    },
+    async wait() {
+      model.trackerState = "CLOSED";
+      model.candidateReachable = true;
+      model.worktreeState = "ABSENT";
+      return { coordinatorActive: true, taskSettled: true };
+    },
+  };
+  const reconcile = async ({ journal }) => {
+    const lock = store.readTargetMutationWriterLock(identity.target);
+    return singleRunCurrent({
+      journal,
+      model,
+      run: lock === null ? {} : {
+        closeWriterRunId: lock.operationId,
+        closeWriterState: "ACTIVE",
+        closeWriterHealth: "HEALTHY",
+        closeWriterOwner: {
+          operationId: lock.operationId,
+          coordinatorInstanceId: lock.coordinatorInstanceId,
+          generation: lock.generation,
+        },
+      },
+    });
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker,
+      tasks,
+      reconcile,
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now,
+      sleep: async () => {
+        if (!competitorReleased) {
+          competitor.release();
+          competitorReleased = true;
+        }
+      },
+    });
+    const result = await runtime.run({ specId: "17", cleanupPreview: true });
+    const waitEvents = result.journal.filter(({ type }) => type.startsWith("target-writer-wait."));
+
+    assert.equal(result.status.run.state, "SUCCEEDED");
+    assert.deepEqual(waitEvents.map(({ outcome }) => outcome ?? null), [null, "RELEASED"]);
+    assert.ok(closeMessageTrackerReads >= 3);
+    assert.equal(store.readTargetMutationWriterLock(identity.target), null);
+  } finally {
+    if (!competitorReleased) competitor.release();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("end-to-end Single-Issue runtime opens the panel and retains terminal inspection", async () => {
