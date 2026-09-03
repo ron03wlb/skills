@@ -359,7 +359,7 @@ test("Run-ready handoff requires exact producer ownership for dirty incomplete s
   assert.equal(reduceRunReadyHandoff(input).state, "INCOMPLETE");
 });
 
-test("workflow checkpoint producer profiles create only supported v2 transactions", () => {
+test("to-spec workflow checkpoint producer profiles create only supported v2 transactions", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-profiles-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
@@ -370,6 +370,16 @@ test("workflow checkpoint producer profiles create only supported v2 transaction
       bindings: {
         approvedScopeIdentity: `sha256:${"2".repeat(64)}`,
         planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
+      },
+    });
+    const currentToSpec = checkpointIdentityV2({
+      operationId: "revision:2",
+      profileVersion: "v2",
+      baseline: "d".repeat(40),
+      bindings: {
+        approvedScopeIdentity: `sha256:${"3".repeat(64)}`,
+        classification: "SINGLE",
+        planningSeal: "d".repeat(40),
       },
     });
 
@@ -389,15 +399,70 @@ test("workflow checkpoint producer profiles create only supported v2 transaction
       "ready_state.read_back",
       "handoff.completed",
     ]);
+    assert.deepEqual(WORKFLOW_CHECKPOINT_PROFILES["to-spec@v2"], [
+      "planning_seal.read_back",
+      "publication.read_back",
+      "handoff.completed",
+    ]);
 
     const specCheckpoint = store.createCheckpoint(toSpec);
     const ticketsCheckpoint = store.createCheckpoint(toTickets);
+    const currentSpecCheckpoint = store.createCheckpoint(currentToSpec);
     assert.equal(specCheckpoint.schema, WORKFLOW_CHECKPOINT_SCHEMA);
     assert.equal(specCheckpoint.nextStage, "plan.written");
     assert.deepEqual(Object.keys(specCheckpoint.identity.bindings), ["plan", "planningSeal"]);
     assert.equal(ticketsCheckpoint.schema, WORKFLOW_CHECKPOINT_SCHEMA);
     assert.equal(ticketsCheckpoint.nextStage, "plan.written");
+    assert.equal(currentSpecCheckpoint.nextStage, "planning_seal.read_back");
+    assert.deepEqual(Object.keys(currentSpecCheckpoint.identity.bindings), [
+      "approvedScopeIdentity",
+      "classification",
+      "planningSeal",
+    ]);
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity: currentToSpec,
+        stage: "plan.written",
+        receipt: { path: "superpowers/docs/plans/forbidden.md" },
+      }),
+      /Unknown workflow checkpoint stage plan\.written/u,
+    );
+    const sealed = store.advanceCheckpoint({
+      identity: currentToSpec,
+      stage: "planning_seal.read_back",
+      receipt: { planningSeal: "d".repeat(40), state: "reused" },
+    });
+    assert.equal(sealed.nextStage, "publication.read_back");
+    assert.deepEqual(store.createCheckpoint(currentToSpec), sealed);
+    const publicationReceipt = { publicationIdentity: "tracker-version:2", trackerIdentity: "issue:31" };
+    const published = store.advanceCheckpoint({
+      identity: currentToSpec,
+      stage: "publication.read_back",
+      receipt: publicationReceipt,
+    });
+    assert.equal(published.nextStage, "handoff.completed");
+    assert.deepEqual(store.advanceCheckpoint({
+      identity: currentToSpec,
+      stage: "publication.read_back",
+      receipt: publicationReceipt,
+    }), published);
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity: currentToSpec,
+        stage: "publication.read_back",
+        receipt: { ...publicationReceipt, publicationIdentity: "tracker-version:drifted" },
+      }),
+      (error) => error.code === "WORKFLOW_CHECKPOINT_RESULT_MISMATCH",
+    );
+    const completed = store.advanceCheckpoint({
+      identity: currentToSpec,
+      stage: "handoff.completed",
+      receipt: { handoffIdentity: "handoff:31:revision:2" },
+    });
+    assert.equal(completed.state, "COMPLETED");
+    assert.equal(completed.nextStage, null);
     assert.notEqual(specCheckpoint.scopeKey, ticketsCheckpoint.scopeKey);
+    assert.notEqual(specCheckpoint.scopeKey, currentSpecCheckpoint.scopeKey);
     assert.equal(Object.hasOwn(store, "classifyCheckpoints"), false);
 
     assert.throws(
@@ -405,7 +470,7 @@ test("workflow checkpoint producer profiles create only supported v2 transaction
       /Unsupported workflow checkpoint profile/u,
     );
     assert.throws(
-      () => store.createCheckpoint(checkpointIdentityV2({ profileVersion: "v2" })),
+      () => store.createCheckpoint(checkpointIdentityV2({ profileVersion: "v3" })),
       /Unsupported workflow checkpoint profile/u,
     );
     assert.throws(

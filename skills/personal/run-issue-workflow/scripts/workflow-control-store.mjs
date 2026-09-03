@@ -25,6 +25,11 @@ export const WORKFLOW_CHECKPOINT_STAGES = Object.freeze([
   "publication.read_back",
   "handoff.completed",
 ]);
+const TO_SPEC_PUBLICATION_STAGES = Object.freeze([
+  "planning_seal.read_back",
+  "publication.read_back",
+  "handoff.completed",
+]);
 const TO_TICKETS_CHECKPOINT_STAGES = Object.freeze([
   "plan.written",
   "checkpoint.committed",
@@ -35,6 +40,7 @@ const TO_TICKETS_CHECKPOINT_STAGES = Object.freeze([
 ]);
 export const WORKFLOW_CHECKPOINT_PROFILES = Object.freeze({
   "to-spec@v1": WORKFLOW_CHECKPOINT_STAGES,
+  "to-spec@v2": TO_SPEC_PUBLICATION_STAGES,
   "to-tickets@v1": TO_TICKETS_CHECKPOINT_STAGES,
 });
 

@@ -242,7 +242,7 @@ test("Wiki is one independent user-invoked documentation control", () => {
     assert.equal(skill.includes(staleTerm), false, `Wiki skill still depends on ${staleTerm}`);
   }
 });
-test("planning artifacts are sealed before tracker work becomes executable", () => {
+test("planning lanes revalidate relevant facts before tracker work becomes executable", () => {
   const spec = read("skills/engineering/to-spec/SKILL.md");
   const tickets = read("skills/engineering/to-tickets/SKILL.md");
   const implement = read("skills/engineering/implement/SKILL.md");
@@ -259,20 +259,35 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   assert.match(deliveryAdr, /^status: superseded by ADR-0038$/mu, "ADR-0022 must defer to the current delivery workflow");
   assert.match(successorAdr, /^status: superseded by ADR-0038$/mu, "ADR-0023 must defer to the current delivery workflow");
 
-  const specSeal = spec.indexOf("Planning Seal");
+  const grill = read("skills/engineering/grill-with-docs/SKILL.md");
+  const domain = read("skills/engineering/domain-modeling/SKILL.md");
+  const grillDocs = read("docs/engineering/grill-with-docs.md");
+  const domainDocs = read("docs/engineering/domain-modeling.md");
+  const interfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
+
+  assert.match(grill, /Spec workflow lane.*one Codex task.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
+  assert.match(grill, /same target.*without.*shared planning checkout.*global workflow lock.*cross-lane.*mutation/isu);
+  assert.match(grill, /hand.*to-spec.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
+  assert.match(domain, /active Spec workflow lane.*accepted.*CONTEXT\.md.*ADR.*only.*planning worktree/isu);
+  assert.match(domain, /lane identity.*mismatch.*stop.*target checkout.*other lane/isu);
+  assert.match(grillDocs + domainDocs, /one proposed (?:Tracker )?Spec.*target.*isolated planning worktree/isu);
+
+  const specSeal = spec.indexOf("Revalidate the Planning baseline and select the Planning Seal");
   const specPublish = spec.indexOf("Publish and complete the handoff", specSeal);
   assert.equal(specSeal !== -1 && specPublish > specSeal, true, "to-spec must seal planning artifacts before publish");
-  const specRetryRecovery = spec.indexOf("Before classifying the current delta on a retry");
-  const specNoDeltaSelection = spec.indexOf("If there is no relevant planning-artifact delta");
-  assert.equal(specRetryRecovery !== -1 && specRetryRecovery < specNoDeltaSelection, true, "to-spec must recover a partial-publication seal before no-delta selection");
-  assert.match(spec, /partial-publication state.*verified Planning Seal.*reuse it.*never replace.*current target `HEAD`/isu);
-  assert.match(spec, /no relevant planning-artifact delta.*do not create an empty commit/isu);
-  assert.match(spec, /exact approved paths or hunks.*preserv(?:e|ing) unrelated/isu);
-  assert.match(spec, /cannot be isolated from unrelated work.*stop/isu);
-  assert.doesNotMatch(spec, /delta contains unrelated work.*stop/isu);
+  assert.match(spec, /planning lane.*Codex task.*proposed Tracker Spec.*target.*baseline.*planning worktree.*accepted glossary.*ADR.*path or hunk.*content identity/isu);
+  assert.match(spec, /re-read only.*relevant glossary.*ADR.*source facts.*latest target/isu);
+  assert.match(spec, /compatible.*target movement.*bind.*latest baseline/isu);
+  assert.match(spec, /relevant semantic drift.*Recoverable blocker.*owning source.*observed evidence.*smallest human action.*preserved stages.*same `\/to-spec` retry/isu);
+  assert.match(spec, /accepted glossary or ADR.*shared Target mutation writer.*one scoped Planning Seal/isu);
+  assert.match(spec, /no accepted.*delta.*reuse.*latest baseline.*no empty commit/isu);
+  assert.doesNotMatch(spec, /operational plan.*commit only.*exact plan/isu);
   assert.match(spec, /existing Spec.*revision.*update the same tracker Spec.*do not create a duplicate/isu);
-  assert.match(spec, /create or update.*label.*read-back.*full SHA.*partial state.*do not amend, reset, or roll back/isu);
-  assert.match(specDocs, /failure.*full SHA.*retry.*prior partial-state report.*missing or conflicting evidence stops/isu);
+  assert.match(specDocs, /compatible target movement.*latest baseline.*semantic drift.*same `\/to-spec`/isu);
+  assert.match(interfaces, /checkpoint adapter.*to-spec@v2.*planning_seal\.read_back.*publication\.read_back.*handoff\.completed/isu);
+  assert.match(interfaces, /tracker adapter.*reserve.*read.*publish/isu);
+  assert.match(interfaces, /handoff adapter.*append.*read/isu);
+  assert.match(interfaces, /Hard gate.*Recoverable blocker.*advisory/isu);
   assert.match(spec, /read only the matching template.*references\/single-issue-template\.md.*references\/multi-issue-template\.md.*Do not load the unused/isu);
   const singleTemplate = read("skills/engineering/to-spec/references/single-issue-template.md");
   const multiTemplate = read("skills/engineering/to-spec/references/multi-issue-template.md");
@@ -366,7 +381,7 @@ test("planning artifacts are sealed before tracker work becomes executable", () 
   ]) assert.match(read(path), /Planning Seal/u, `${path} omits the Planning Seal contract`);
 });
 
-test("to-spec owns checkpointed producer publication and Single-Issue Run handoff", () => {
+test("to-spec owns minimal operation-scoped publication and Single-Issue Run handoff", () => {
   const spec = read("skills/engineering/to-spec/SKILL.md");
   const metadata = read("skills/engineering/to-spec/agents/openai.yaml");
   const docs = read("docs/engineering/to-spec.md");
@@ -376,45 +391,42 @@ test("to-spec owns checkpointed producer publication and Single-Issue Run handof
   const implement = read("skills/engineering/implement/SKILL.md");
   const implementDocs = read("docs/engineering/implement.md");
 
-  const handoffEntry = spec.indexOf("Validate the Planning handoff");
-  const seal = spec.indexOf("Select the Planning Seal", handoffEntry);
-  const checkpoint = spec.indexOf("Start or resume the Workflow checkpoint transaction", seal);
+  const handoffEntry = spec.indexOf("Consume the planning lane handoff");
+  const seal = spec.indexOf("Revalidate the Planning baseline and select the Planning Seal", handoffEntry);
+  const checkpoint = spec.indexOf("Start or resume the Spec producer transaction", seal);
   const publication = spec.indexOf("Publish and complete the handoff", checkpoint);
   assert.equal(
     handoffEntry !== -1 && seal > handoffEntry && checkpoint > seal && publication > checkpoint,
     true,
-    "to-spec must validate handoff, seal, checkpoint, and publish in order",
+    "to-spec must consume its lane, revalidate, checkpoint, and publish in order",
   );
 
-  assert.match(spec, /visible Planning handoff.*target.*baseline.*accepted glossary.*ADR.*path or hunk.*content identity.*revalidat/isu);
-  assert.match(spec, /new Workflow checkpoint.*exact target.*clean.*unrelated staged.*unstaged.*untracked.*modified.*mixed.*provenance-ambiguous.*preserv.*stop.*before.*transaction.*plan.*Git.*tracker mutation/isu);
-  assert.match(spec, /only one exact matching.*transaction.*resume.*first unsatisfied stage.*mismatch.*stop.*without regenerating.*overwriting.*duplicating.*attributing unrelated work/isu);
+  assert.match(spec, /fresh ordinary.*`to-spec@v2`.*exact operation.*repository.*Spec.*producer.*target.*baseline.*Planning Seal.*classification.*approved-scope/isu);
+  assert.match(spec, /ordered stages.*`planning_seal\.read_back`.*`publication\.read_back`.*`handoff\.completed`/isu);
+  assert.match(spec, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
+  assert.match(spec, /existing valid incomplete.*transaction-v1.*`to-spec@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
+  assert.match(spec, /only one exact matching.*transaction.*resume.*first unsatisfied stage.*mismatch.*stop.*without.*duplicate.*attribut.*unrelated/isu);
 
-  assert.match(spec, /generate.*durable operational plan.*in memory.*bind.*content identity.*before.*write/isu);
-  assert.match(spec, /create.*Workflow checkpoint transaction.*before writing.*plan/isu);
-  assert.match(spec, /shared Target mutation writer.*commit only.*exact.*plan.*post-commit Git.*read-back.*before releasing/isu);
-  assert.match(spec, /automatically invoke.*model-invoked `attest-target-contribution`.*exact prospective packet.*immutable.*record identity.*no second confirmation/isu);
-  assert.match(spec, /retry.*never regenerate.*duplicate.*commit.*evidence.*switch.*Planning Seal.*another confirmation/isu);
-
-  assert.match(spec, /primary mode.*create or reuse.*one tracker Spec identity.*bind.*transaction.*evidence read-back.*before.*canonical body.*label/isu);
-  assert.match(spec, /revision mode.*evidence read-back.*before updating.*existing Spec/isu);
+  assert.match(spec, /primary mode.*`tracker\.reserve`.*read.*draft tracker identity.*version token.*retry.*revision mode.*`tracker\.read`.*existing Spec.*version token.*Bind.*tracker identity.*transaction.*publication/isu);
+  assert.match(spec, /Publish only.*tracker identity.*version token.*bound.*transaction.*Primary mode.*reserved draft.*revision mode.*same existing Spec.*Neither.*replacement Spec/isu);
   assert.match(spec, /read back.*body.*classification.*Planning Seal.*target.*template.*label.*tracker identity/isu);
-  assert.match(spec, /partial failure.*transaction identity.*checkpoint SHA.*evidence identity.*first unsatisfied stage/isu);
+  assert.match(spec, /Recoverable blocker.*owning source.*observed evidence.*smallest human action.*preserved stages.*same `\/to-spec` retry/isu);
 
-  assert.match(spec, /append.*one immutable `handoff\.completed`.*producer.*Spec.*target.*Planning Seal.*checkpoint commit.*record identity.*publication identity.*classification.*approved-scope identity/isu);
+  assert.match(spec, /append.*one immutable `handoff\.completed`.*producer.*Spec.*target.*Planning Seal.*transaction identity.*publication identity.*classification.*approved-scope identity/isu);
   assert.match(spec, /Single-Issue.*only.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*only.*`\/to-tickets <Spec-ID>`/isu);
   assert.doesNotMatch(spec + docs + template, /\/execute-issue <Spec-ID>/u);
   assert.doesNotMatch(matt + mattDocs, /Single-Issue Tracker Spec (?:→|uses) (?:\[execute-issue|`\/execute-issue)/iu);
 
-  assert.match(spec, /missing or conflicting.*Planning handoff.*Seal.*transaction.*writer.*commit.*attestation.*publication.*handoff.*target.*classification.*retry evidence.*stop.*without repair.*rollback.*duplicate.*Run start.*implementation.*push.*deploy/isu);
-  assert.match(metadata, /short_description:.*checkpoint.*Run handoff/iu);
-  assert.match(docs, /retry-safe Workflow checkpoint.*`handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
+  assert.match(spec, /Hard gate.*wrong target.*duplicate.*misattributed publication.*durable state/isu);
+  assert.match(spec, /advisory.*never block/isu);
+  assert.match(metadata, /short_description:.*isolated planning lane.*Run handoff/iu);
+  assert.match(docs, /isolated planning lane.*operation-scoped.*`handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
   assert.match(matt, /Single-Issue Tracker Spec.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue Tracker Spec.*`\/to-tickets <Spec-ID>`/isu);
   assert.match(mattDocs, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`/isu);
   assert.match(implement, /Tracker Spec.*published `\/to-spec` route/isu);
   assert.match(implementDocs, /Tracker Spec.*published.*to-spec.*route/isu);
   for (const path of ["README.md", "skills/engineering/README.md"]) {
-    assert.match(read(path), /to-spec.*checkpoint.*Run handoff/iu, `${path} omits the checkpointed to-spec route`);
+    assert.match(read(path), /to-spec.*isolated planning lane.*Run handoff/iu, `${path} omits the isolated to-spec route`);
   }
 });
 
@@ -722,7 +734,8 @@ test("prospective checkpoint attestation is transaction-bound and preserves reco
 
   assert.match(skill, /two exact caller routes.*confirmation-gated recovery.*producer-owned prospective/isu);
   assert.match(skill, /recovery.*active `\/verify-target-before-push`.*exact confirmed recovery packet.*human confirmed/isu);
-  assert.match(skill, /prospective.*currently active.*explicitly human-invoked.*`to-spec` or `to-tickets`.*producer.*owner Spec.*target.*transaction identity.*checkpoint commit.*plan purpose.*baseline.*read-back expectations/isu);
+  assert.match(skill, /prospective.*currently active.*explicitly human-invoked.*`to-tickets`.*frozen transaction-v1.*`to-spec@v1`.*producer.*owner Spec.*target.*transaction identity.*checkpoint commit.*plan purpose.*baseline.*read-back expectations/isu);
+  assert.match(skill, /Fresh `to-spec@v2`.*no checkpoint-commit.*prospective-attestation stage/isu);
   assert.match(skill, /manual helper.*stale invocation.*inferred plan.*downstream Run.*cross-route substitution.*stops without writing/isu);
   assert.match(skill, /prospective.*no second human confirmation/isu);
 
@@ -738,11 +751,11 @@ test("prospective checkpoint attestation is transaction-bound and preserves reco
   assert.match(skill, /return.*exact reused or appended.*immutable tracker identity.*active caller/isu);
   assert.match(skill, /never creates commits or transactions.*resumes a producer.*publishes a Spec or decomposition.*starts Run/isu);
 
-  assert.match(metadata, /confirmed coverage recovery.*producer-owned prospective Workflow plan checkpoint.*no second confirmation/isu);
+  assert.match(metadata, /human-confirmed coverage recovery.*prospective Workflow plan checkpoint.*active to-tickets.*frozen legacy\/profile-v1 to-spec.*fresh to-spec@v2.*no such route.*no second confirmation/isu);
   assert.match(docs, /two caller routes.*confirmation-gated recovery.*producer-owned prospective checkpoint/isu);
   assert.match(docs, /standalone invocation.*stops/iu);
-  assert.match(matt, /`to-spec` and `to-tickets`.*Workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
-  assert.match(mattDocs, /`to-spec` and `to-tickets`.*workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
+  assert.match(matt, /Fresh `to-spec`.*no target operational-plan checkpoint.*`to-tickets`.*Workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
+  assert.match(mattDocs, /Fresh `to-spec`.*no target operational-plan checkpoint.*to-tickets.*workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     assert.match(read(path), /attest-target-contribution.*recovery.*producer-owned prospective.*workflow plan checkpoint/iu);
@@ -2648,7 +2661,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.match(matt, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`.*Standalone Spec.*`\/implement`/isu);
   assert.match(matt, /Issue worktrees may run concurrently/iu);
   assert.match(matt, /close-issue.*exact candidate.*recorded Issue target branch.*removes.*closes/isu);
-  assert.match(matt, /planning producers and closeout share one target mutation writer per target/iu);
+  assert.match(matt, /Planning lanes and Issue worktrees may run concurrently.*only.*Planning Seal write.*closeout.*target mutation writer/isu);
   assert.match(matt, /Published Tracker Specs route.*authorized coordinator.*direct human invocation.*individual.*leaves.*DAG Run Grant/isu);
   assert.match(matt, /coordinator.*does not create.*broaden.*leaf.*authority/isu);
   assert.match(matt, /Multi-Issue parent.*every exact child.*closed.*reachable/isu);
@@ -2658,7 +2671,7 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   assert.doesNotMatch(matt, /ask-ron|to-spec-ron|to-tickets-ron/u);
 
   const mattDocs = read("docs/engineering/ask-matt.md");
-  assert.match(mattDocs, /planning producers and closeout share one target mutation writer per recorded target/isu);
+  assert.match(mattDocs, /Planning lanes and Issue worktrees may run concurrently.*only.*Planning Seal writes.*closeout.*target mutation writer/isu);
   assert.match(mattDocs, /Published Tracker Specs route.*authorized coordinator.*individual.*leaves.*direct human invocation.*DAG Run Grant/isu);
   assert.match(mattDocs, /same command.*Multi-Issue parent.*every exact child.*closed.*reachable/isu);
   assert.match(mattDocs, /verify-target-before-push.*local-ahead.*completion-note.*already-pushed.*explicit.*range.*aggregate/isu);

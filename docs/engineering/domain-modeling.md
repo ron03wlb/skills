@@ -2,7 +2,7 @@
 
 `domain-modeling` builds and sharpens a project's **ubiquitous language** while you are designing: challenging a term that conflicts with the glossary, forcing a precise word where you used a vague one, and stress-testing a relationship with a concrete scenario until the boundaries are exact.
 
-It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. That is what makes it interrupt. It writes a resolved term into `CONTEXT.md` at the moment it is resolved, in the middle of the conversation, rather than producing a tidy glossary at the end, because the batched version is a summary of a [session](https://www.aihero.dev/ai-coding-dictionary/session), and the inline version is the session's actual output.
+It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. Under `grill-with-docs`, it writes only inside the active task's isolated planning worktree and returns accepted path or hunk identities to that lane. A standalone invocation keeps using the current worktree.
 
 ## When to reach for it
 
@@ -21,7 +21,7 @@ Reach for it when the *words* are the problem:
 
 ## Prerequisites
 
-None up front. The skill writes into two places and creates both lazily:
+None up front. The skill writes into two places and creates both lazily. When a caller supplies an active Spec workflow lane, both paths live inside that lane's isolated planning worktree:
 
 - **`CONTEXT.md`** at the repo root, created by the first resolved term. In a repo with a `CONTEXT-MAP.md` at the root, terms go into the per-context `CONTEXT.md` the map points at instead.
 - **`docs/adr/`**, created by the first ADR that clears the bar.
@@ -36,7 +36,7 @@ The glossary and the ADR are held to different standards, and conflating them is
 | --- | --- | --- |
 | Holds | Terms. What a thing **is**, in one or two sentences, with rejected synonyms under `_Avoid_` | One decision, in one to three sentences: context, choice, reason |
 | Bar to write | A vague term became canonical | **All three**: hard to reverse, surprising without context, the result of a real trade-off |
-| Written | Inline, the moment the term is settled | Offered, not assumed |
+| Written | Inline, the moment the term is settled, inside the active lane when one exists | Offered, not assumed, inside the same lane |
 | Never holds | Implementation details, a [spec](https://www.aihero.dev/ai-coding-dictionary/spec), a scratch pad, general programming concepts | A diary of every choice made this session |
 
 Miss any one of the ADR's three tests and there is no ADR. An easily-reversed decision will just get reversed; an unsurprising one is nobody's question; one with no real alternative records that you did the obvious thing.
@@ -76,6 +76,7 @@ No, and there is no plan for a skill that does. A domain language you do not und
 
 - It stops you mid-sentence to ask which of two things you meant, instead of picking one and moving on.
 - `CONTEXT.md` changes **during** the conversation, not in a burst at the end.
+- A planning-lane invocation leaves the target checkout and every other lane unchanged.
 - It refuses to write an ADR for something you could undo tomorrow, and says which of the three tests failed.
 - New entries define what a thing *is* in one or two sentences and name the words you are giving up under `_Avoid_`.
 - It quotes your code back at you when your code and your sentence disagree.

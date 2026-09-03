@@ -7,6 +7,12 @@ description: Build and sharpen a project's domain model. Use when discussing cod
 
 Actively build and sharpen the project's domain model as you design. This is the *active* discipline: challenging terms, inventing edge-case scenarios, and writing the glossary and decisions down the moment they crystallise. (Merely *reading* `CONTEXT.md` for vocabulary is not this skill: that's a one-line habit any skill can do. This skill is for when you're changing the model, not just consuming it.)
 
+## Active Spec workflow lanes
+
+When the caller supplies an active **Spec workflow lane**, validate its Codex task, proposed Tracker Spec, target, baseline, and isolated planning worktree before writing. Record accepted `CONTEXT.md` or ADR changes only in that planning worktree and return their exact paths or hunks and content identities to the lane owner. A lane identity mismatch stops before any write; keep the target checkout and every other lane unchanged.
+
+Standalone invocation keeps the ordinary current-worktree behavior below. It never invents a planning lane or treats unrelated worktree state as one.
+
 ## File structure
 
 Most repos have a single context:

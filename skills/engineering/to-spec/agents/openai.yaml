@@ -1,5 +1,5 @@
 interface:
   display_name: "To Spec"
-  short_description: "Publish a checkpointed Spec and exact Run handoff"
+  short_description: "Publish from an isolated planning lane to a Run handoff"
 policy:
   allow_implicit_invocation: false
