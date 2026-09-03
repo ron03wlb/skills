@@ -998,7 +998,10 @@ export function createCoordinator({
               const compatible = candidateRuns.filter((candidate) => (
                 authorityMismatch(current.runIdentity, candidate.runIdentity ?? candidate) === null
               ));
-              const matching = deterministic.length > 0 ? deterministic : compatible;
+              const deterministicConflict = deterministic.some((candidate) => (
+                authorityMismatch(current.runIdentity, candidate.runIdentity ?? candidate) !== null
+              ));
+              const matching = deterministicConflict ? deterministic : compatible;
               if (matching.length > 1) return runSelectionRequired(matching.length);
               if (matching.length === 1) {
                 const selectedCandidate = matching[0];

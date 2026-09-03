@@ -590,6 +590,42 @@ test("duplicate same-authority pre-identity Runs stop before selecting or creati
   }
 });
 
+test("deterministic and opaque same-authority Runs stop as duplicate compatibility evidence", async () => {
+  const { root, store } = createStoreFixture();
+  const deterministicIdentity = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  });
+  const candidates = [
+    { ...identity, runId: deterministicIdentity.key },
+    { ...identity, runId: "pre-identity-run-17" },
+  ];
+  for (const runIdentity of candidates) {
+    const seed = store.acquireWriter(runIdentity.runId);
+    seed.append({
+      type: "grant.recorded",
+      at: "2026-09-03T00:00:00.000Z",
+      runIdentity,
+      maxParallel: 3,
+    });
+    seed.release();
+  }
+
+  try {
+    const { result, creates } = await runExplicitSelection({ store, candidates, currentRun: identity });
+
+    assert.equal(result.status.run.runId, null);
+    assert.equal(result.status.diagnoses[0].reasonCode, "run_selection_required");
+    assert.equal(creates, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("runtime interface rejects a caller-invented handoff adapter", () => {
   const { root, store } = createStoreFixture();
   const tasks = Object.fromEntries(
