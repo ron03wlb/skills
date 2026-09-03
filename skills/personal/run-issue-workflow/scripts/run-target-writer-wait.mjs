@@ -15,7 +15,18 @@ const issueFields = new Set([
   "completionState",
   "candidateReachable",
   "worktreeState",
+  "authorityEvidence",
 ]);
+const authorityEvidenceFields = new Set([
+  "trackerIdentity",
+  "targetHead",
+  "candidateCommit",
+  "completionEvidenceId",
+  "completionBodySha256",
+  "worktreeIdentity",
+]);
+const gitObjectPattern = /^[a-f0-9]{40,64}$/u;
+const sha256Pattern = /^sha256:[a-f0-9]{64}$/u;
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isText = (value) => typeof value === "string" && value.length > 0;
@@ -60,6 +71,29 @@ const copyRunIdentity = (identity) => ({
   decompositionIdentity: identity.decompositionIdentity,
 });
 
+export const validateCloseAuthorityEvidence = (evidence, label = "close authority evidence") => {
+  assertExactFields(evidence, authorityEvidenceFields, label);
+  for (const key of ["trackerIdentity", "completionEvidenceId", "worktreeIdentity"]) {
+    if (!isText(evidence[key])) throw new TypeError(`${label}.${key} is required`);
+  }
+  for (const key of ["targetHead", "candidateCommit"]) {
+    if (!gitObjectPattern.test(evidence[key])) throw new TypeError(`${label}.${key} must be a Git object id`);
+  }
+  if (!sha256Pattern.test(evidence.completionBodySha256)) {
+    throw new TypeError(`${label}.completionBodySha256 must be an exact SHA-256 identity`);
+  }
+  return evidence;
+};
+
+const copyCloseAuthorityEvidence = (evidence) => ({
+  trackerIdentity: evidence.trackerIdentity,
+  targetHead: evidence.targetHead,
+  candidateCommit: evidence.candidateCommit,
+  completionEvidenceId: evidence.completionEvidenceId,
+  completionBodySha256: evidence.completionBodySha256,
+  worktreeIdentity: evidence.worktreeIdentity,
+});
+
 export const createCloseWaitEvidence = ({
   runIdentity,
   grant,
@@ -80,13 +114,20 @@ export const createCloseWaitEvidence = ({
   controlRevision,
   issues: [...nodes]
     .sort((left, right) => String(left.issueId).localeCompare(String(right.issueId), "en"))
-    .map((node) => ({
-      issueId: node.issueId,
-      trackerState: node.close.trackerState,
-      completionState: node.close.completionState,
-      candidateReachable: node.close.candidateReachable,
-      worktreeState: node.close.worktreeState,
-    })),
+    .map((node) => {
+      const close = node.close ?? node;
+      const authorityEvidence = node.closeAuthorityEvidence ?? close.authorityEvidence ?? null;
+      return {
+        issueId: node.issueId,
+        trackerState: close.trackerState,
+        completionState: close.completionState,
+        candidateReachable: close.candidateReachable,
+        worktreeState: close.worktreeState,
+        authorityEvidence: authorityEvidence === null
+          ? null
+          : copyCloseAuthorityEvidence(authorityEvidence),
+      };
+    }),
 });
 
 export const validateCloseWaitEvidence = (evidence) => {
@@ -120,6 +161,11 @@ export const validateCloseWaitEvidence = (evidence) => {
     }
     if (issue.candidateReachable !== null && typeof issue.candidateReachable !== "boolean") {
       throw new TypeError("close-wait pre-wait issue.candidateReachable must be boolean or null");
+    }
+    if (issue.completionState === "COMPLETE") {
+      validateCloseAuthorityEvidence(issue.authorityEvidence, "close-wait pre-wait issue.authorityEvidence");
+    } else if (issue.authorityEvidence !== null) {
+      validateCloseAuthorityEvidence(issue.authorityEvidence, "close-wait pre-wait issue.authorityEvidence");
     }
   }
   if (new Set(evidence.issues.map(({ issueId }) => issueId)).size !== evidence.issues.length) {

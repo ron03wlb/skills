@@ -1,5 +1,8 @@
 import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
-import { createCloseWaitEvidence } from "./run-target-writer-wait.mjs";
+import {
+  createCloseWaitEvidence,
+  validateCloseAuthorityEvidence,
+} from "./run-target-writer-wait.mjs";
 
 export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
@@ -666,6 +669,17 @@ export function reduceRun(input) {
     && (input.nodes.length !== 1 || input.nodes[0].issueId !== input.run.specId)) {
     return blockedResult(input, REASON_CODES.invalidFactSchema, ["A SINGLE Run must contain only its Spec Issue node."]);
   }
+  for (const node of input.nodes) {
+    if (node.completionState !== "COMPLETE") continue;
+    try {
+      validateCloseAuthorityEvidence(
+        node.closeAuthorityEvidence,
+        `Issue ${node.issueId} close authority evidence`,
+      );
+    } catch (error) {
+      return blockedResult(input, REASON_CODES.insufficientEvidence, [error.message], [node.issueId]);
+    }
+  }
   try {
     validateJournal(input.journal, { storageRunId: input.run.runId });
   } catch (error) {
@@ -1035,9 +1049,6 @@ export function reduceRun(input) {
     || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterHealthy);
   const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
   const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable;
-  if (closeoutAvailable && closeable.length > 0) {
-    normalActions.push({ type: "close_issue", issueId: closeable[0] });
-  }
   const remediations = retrying.flatMap((issueId) => {
     const node = byId.get(issueId);
     if (node.taskState !== "ENVIRONMENT_FAILURE") return [];
@@ -1064,6 +1075,9 @@ export function reduceRun(input) {
   }));
   normalActions.push(...dispatchActions);
   const executionActionsScheduled = remediations.length > 0 || dispatchActions.length > 0;
+  if (!executionActionsScheduled && closeoutAvailable && closeable.length > 0) {
+    normalActions.push({ type: "close_issue", issueId: closeable[0] });
+  }
   const needsParentClose = allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
   if (!executionActionsScheduled && needsParentClose && closeoutAvailable) {
@@ -1086,7 +1100,7 @@ export function reduceRun(input) {
     runIdentity: input.run,
     grant,
     run: input.run,
-    nodes,
+    nodes: normalizedNodes,
     controlRevision,
   });
   if (!executionActionsScheduled && repositoryCloseLeaseHealthy && waitingIssueId !== null) {

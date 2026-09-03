@@ -543,6 +543,7 @@ export function createCoordinator({
       && task.closeRequest.issueId === action.issueId;
     if (!accepted) {
       const node = status.nodes.find(({ issueId }) => issueId === action.issueId);
+      const sourceNode = current.facts.nodes.find(({ issueId }) => issueId === action.issueId);
       const requestEvidence = {
         runIdentity: current.runIdentity,
         maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
@@ -553,6 +554,7 @@ export function createCoordinator({
         completionState: node.close.completionState,
         candidateReachable: node.close.candidateReachable,
         worktreeState: node.close.worktreeState,
+        authorityEvidence: sourceNode.closeAuthorityEvidence,
       };
       await tasks.message(
         taskRef,
@@ -603,7 +605,12 @@ export function createCoordinator({
         issueId: action.issueId,
         target: current.runIdentity.target,
         controlRevision: status.run.controlRevision,
-        childCloseStates: status.nodes.map(({ issueId, close }) => ({ issueId, ...close })),
+        childCloseStates: status.nodes.map(({ issueId, close }) => ({
+          issueId,
+          ...close,
+          authorityEvidence: current.facts.nodes
+            .find((node) => node.issueId === issueId).closeAuthorityEvidence,
+        })),
       },
     });
     return { settled: result?.settled === true };
@@ -748,7 +755,7 @@ export function createCoordinator({
           runIdentity: refreshed.runIdentity,
           grant: refreshed.grant,
           run: refreshed.facts.run,
-          nodes: recoveryStatus.nodes,
+          nodes: refreshed.facts.nodes,
           controlRevision: recoveryStatus.run.controlRevision,
         });
         if (!sameCloseWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {

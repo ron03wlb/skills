@@ -65,6 +65,20 @@ const multiIdentity = {
 
 const selectedPlanningSeal = "c".repeat(40);
 
+const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
+  trackerIdentity: `github-issue:${issueId}:version:1`,
+  targetHead: "a".repeat(40),
+  candidateCommit: "b".repeat(40),
+  completionEvidenceId: `github-comment:completion-${issueId}`,
+  completionBodySha256: `sha256:${"d".repeat(64)}`,
+  worktreeIdentity: `registered-worktree:issue-${issueId}`,
+  ...overrides,
+});
+
+const withCloseAuthorityEvidence = (node) => node.completionState === "COMPLETE"
+  ? { ...node, closeAuthorityEvidence: node.closeAuthorityEvidence ?? closeAuthorityEvidenceFor(node.issueId) }
+  : node;
+
 const readyHandoffFor = (runIdentity) => {
   const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const recordIdentities = runIdentity.classification === "SINGLE"
@@ -232,7 +246,7 @@ const singleRunCurrent = ({
       parentTrackerState: "OPEN",
       ...run,
     },
-    nodes: [{ issueId: "17", blockers: [], ...model }],
+    nodes: [withCloseAuthorityEvidence({ issueId: "17", blockers: [], ...model })],
     contradictions,
   },
 });
@@ -1963,7 +1977,9 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
         closeWriterState: "ABSENT",
         parentTrackerState,
       },
-      nodes: [...nodes.values()].map((node) => ({ ...node, blockers: [...node.blockers] })),
+      nodes: [...nodes.values()]
+        .map((node) => ({ ...node, blockers: [...node.blockers] }))
+        .map(withCloseAuthorityEvidence),
       contradictions: [],
     },
   });

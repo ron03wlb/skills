@@ -48,6 +48,20 @@ import {
   WORKFLOW_OPERATION_IDENTITY_SCHEMA,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
+const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
+  trackerIdentity: `github-issue:${issueId}:version:1`,
+  targetHead: "a".repeat(40),
+  candidateCommit: "b".repeat(40),
+  completionEvidenceId: `github-comment:completion-${issueId}`,
+  completionBodySha256: `sha256:${"d".repeat(64)}`,
+  worktreeIdentity: `registered-worktree:issue-${issueId}`,
+  ...overrides,
+});
+
+const withCloseAuthorityEvidence = (value) => value.completionState === "COMPLETE"
+  ? { ...value, closeAuthorityEvidence: value.closeAuthorityEvidence ?? closeAuthorityEvidenceFor(value.issueId) }
+  : value;
+
 const node = (issueId, blockers = []) => ({
   issueId,
   blockers,
@@ -121,7 +135,7 @@ const facts = (nodes) => ({
     closeWriterState: "ABSENT",
     parentTrackerState: "OPEN",
   },
-  nodes,
+  nodes: nodes.map(withCloseAuthorityEvidence),
   contradictions: [],
   journal: [grant],
 });
@@ -133,7 +147,7 @@ const preWaitEvidenceFor = (input) => {
     runIdentity: input.run,
     grant: currentGrant,
     run: input.run,
-    nodes: status.nodes,
+    nodes: input.nodes,
     controlRevision: status.run.controlRevision,
   });
 };
@@ -1775,7 +1789,7 @@ test("node lifecycle follows task, completion, Git, worktree, and tracker eviden
       closeWriterState: "ABSENT",
       parentTrackerState: "NOT_APPLICABLE",
     },
-    nodes: [{ ...node("12"), ...nodeFacts }],
+    nodes: [withCloseAuthorityEvidence({ ...node("12"), ...nodeFacts })],
     contradictions: [],
     journal,
   });
@@ -1816,6 +1830,22 @@ test("node lifecycle follows task, completion, Git, worktree, and tracker eviden
   }));
   assert.equal(succeeded.run.state, "SUCCEEDED");
   assert.deepEqual(succeeded.legalActions, []);
+});
+
+test("closeout requires exact tracker, target, candidate, completion, and worktree identities", () => {
+  const missing = facts([{
+    ...node("13"),
+    completionState: "COMPLETE",
+    worktreeState: "PRESENT",
+  }]);
+  missing.nodes[0].closeAuthorityEvidence = null;
+
+  const status = reduceRun(missing);
+
+  assert.equal(status.run.state, "BLOCKED");
+  assert.equal(status.diagnoses[0].reasonCode, "insufficient_evidence");
+  assert.match(status.diagnoses[0].evidence[0], /Issue 13 close authority evidence must be an object/u);
+  assert.deepEqual(status.legalActions, []);
 });
 
 test("a failed branch blocks only its descendants while independent work remains legal", () => {
@@ -2018,16 +2048,23 @@ test("dispatch, retry, remediation, and close writers stay within their budgets"
     node("14"),
   ]));
   assert.deepEqual(closeDoesNotConsumeExecution.legalActions, [
-    { type: "close_issue", issueId: "13" },
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
   ]);
+  const closeAfterDispatch = reduceRun({
+    ...facts([
+      { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+      { ...node("14"), taskState: "EXECUTING", worktreeState: "PRESENT" },
+    ]),
+    journal: [grant, dispatchEvent("14", 1, 2)],
+  });
+  assert.deepEqual(closeAfterDispatch.frontier.active, ["14"]);
+  assert.deepEqual(closeAfterDispatch.legalActions, [{ type: "close_issue", issueId: "13" }]);
 
   const partialCloseDoesNotConsumeExecution = reduceRun(facts([
     { ...node("13"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" },
     node("14"),
   ]));
   assert.deepEqual(partialCloseDoesNotConsumeExecution.legalActions, [
-    { type: "close_issue", issueId: "13" },
     { type: "dispatch_issue", issueId: "14", attempt: 1 },
   ]);
 

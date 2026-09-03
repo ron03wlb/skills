@@ -45,6 +45,20 @@ const multiIdentity = {
 
 const selectedPlanningSeal = "c".repeat(40);
 
+const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
+  trackerIdentity: `github-issue:${issueId}:version:1`,
+  targetHead: "a".repeat(40),
+  candidateCommit: "b".repeat(40),
+  completionEvidenceId: `github-comment:completion-${issueId}`,
+  completionBodySha256: `sha256:${"d".repeat(64)}`,
+  worktreeIdentity: `registered-worktree:issue-${issueId}`,
+  ...overrides,
+});
+
+const withCloseAuthorityEvidence = (node) => node.completionState === "COMPLETE"
+  ? { ...node, closeAuthorityEvidence: node.closeAuthorityEvidence ?? closeAuthorityEvidenceFor(node.issueId) }
+  : node;
+
 const readyHandoffFor = (runIdentity) => {
   const producerCommand = runIdentity.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const recordIdentities = runIdentity.classification === "SINGLE"
@@ -141,7 +155,7 @@ const reconciliation = ({
       parentTrackerState: "OPEN",
       ...run,
     },
-    nodes,
+    nodes: nodes.map(withCloseAuthorityEvidence),
     contradictions,
   },
 });
@@ -1142,31 +1156,20 @@ for (const [command, terminalState, transitionType] of [
     seed.release();
 
     let appendControl;
-    let closeWaits = 0;
+    let remediationCalls = 0;
     const tasks = {
       async findIssueLane() { throw new Error("stale dispatch must not start"); },
       async create() { throw new Error("stale dispatch must not create a lane"); },
-      async read(taskRef) {
-        assert.deepEqual(taskRef, closeTaskRef);
-        return {
-          closeRequest: {
-            state: "ACCEPTED",
-            runId: multiIdentity.runId,
-            issueId: "13",
-          },
-        };
-      },
-      async message() { throw new Error("accepted close must not be sent again"); },
-      async wait(taskRefs) {
-        assert.deepEqual(taskRefs, [closeTaskRef]);
-        closeWaits += 1;
-        appendControl({ type: "control.revised", at: now(), revision: 1, command });
-        return { coordinatorActive: true, taskSettled: true };
-      },
+      async read() { throw new Error("stale close must not read its lane"); },
+      async message() { throw new Error("stale close must not send a request"); },
+      async wait() { throw new Error("stale close must not wait"); },
     };
     const tracker = { async read() { return {}; } };
     const environment = {
-      async remediate() { throw new Error("stale remediation must not start"); },
+      async remediate() {
+        remediationCalls += 1;
+        appendControl({ type: "control.revised", at: now(), revision: 1, command });
+      },
     };
     const panel = {
       async open({ appendEvent }) {
@@ -1229,8 +1232,8 @@ for (const [command, terminalState, transitionType] of [
       const events = store.readEvents(multiIdentity.runId);
 
       assert.equal(status.run.state, terminalState);
-      assert.equal(closeWaits, 1);
-      assert.equal(events.some(({ type }) => type === "remediation.recorded"), false);
+      assert.equal(remediationCalls, 1);
+      assert.equal(events.some(({ type }) => type === "remediation.recorded"), true);
       assert.equal(events.some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "15"), false);
       assert.deepEqual(
         events.filter(({ type }) => type === transitionType).map(({ revision }) => revision),
@@ -1485,16 +1488,14 @@ const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
     targetState: "CLEAN",
     parentTrackerState: "OPEN",
   },
-  nodes: [{
+  nodes: [withCloseAuthorityEvidence({
     issueId: "15",
-    state: "IMPLEMENTATION_COMPLETE",
-    close: {
-      trackerState: "OPEN",
-      completionState: "COMPLETE",
-      candidateReachable: false,
-      worktreeState: "PRESENT",
-    },
-  }],
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "COMPLETE",
+    candidateReachable: false,
+    worktreeState: "PRESENT",
+  })],
   controlRevision: 0,
 });
 
@@ -1876,6 +1877,94 @@ test("repository close wait times out without consuming retries or reclaiming th
     assert.equal(store.observeRepositoryCloseLease().owner.operationId, competitorOperationId);
   } finally {
     competitor.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("real close leaf request follows max_parallel dispatch when both leases are available", async () => {
+  const { root, store } = createStoreFixture();
+  const closeTaskRef = { threadId: "thread-13", hostId: "local" };
+  const executeTaskRef = { threadId: "thread-14", hostId: "local" };
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T01:45:00.000Z",
+    runIdentity: multiIdentity,
+    maxParallel: 1,
+  });
+  seed.append({
+    type: "dispatch.recorded",
+    at: "2026-09-03T01:45:01.000Z",
+    issueId: "13",
+    attempt: 1,
+    taskRef: closeTaskRef,
+  });
+  seed.release();
+  let issue14Dispatched = false;
+  const order = [];
+  const tasks = {
+    async findIssueLane({ issueId }) {
+      if (issueId === "13") return [closeTaskRef];
+      if (issueId === "14") return [];
+      throw new Error(`unexpected Issue ${issueId}`);
+    },
+    async create({ issueId }) {
+      assert.equal(issueId, "14");
+      issue14Dispatched = true;
+      order.push("dispatch:14");
+      return executeTaskRef;
+    },
+    async read() { return {}; },
+    async message(_taskRef, prompt) {
+      assert.equal(issue14Dispatched, true, "ready work must start before the available close leaf");
+      assert.match(prompt, new RegExp(`"candidateCommit":"${"b".repeat(40)}"`, "u"));
+      assert.match(prompt, /"completionBodySha256":"sha256:d{64}"/u);
+      order.push("close:13");
+    },
+    async wait() { return { coordinatorActive: false, taskSettled: true }; },
+  };
+  const reconcile = async () => reconciliation({
+    runIdentity: multiIdentity,
+    maxParallel: 1,
+    taskRefs: { 13: closeTaskRef, ...(issue14Dispatched ? { 14: executeTaskRef } : {}) },
+    nodes: [
+      {
+        issueId: "13",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+      },
+      {
+        issueId: "14",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: issue14Dispatched ? "EXECUTING" : "NONE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: issue14Dispatched ? "PRESENT" : "ABSENT",
+      },
+    ],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: () => "2026-09-03T01:45:02.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: multiIdentity.specId });
+
+    assert.equal(status.run.state, "RUNNING");
+    assert.deepEqual(order, ["dispatch:14", "close:13"]);
+    assert.equal(store.readEvents(multiIdentity.runId)
+      .filter(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14").length, 1);
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2477,6 +2566,26 @@ test("writer release rejects regressed completion and candidate evidence before 
         ...current.facts,
         nodes: current.facts.nodes.map((candidate) => candidate.issueId === "15"
           ? { ...candidate, completionState: "NONE", candidateReachable: false }
+          : candidate),
+      },
+    }),
+  });
+});
+
+test("fresh evidence rejects candidate identity drift even when aggregate states are unchanged", async () => {
+  await assertWriterReleaseEvidenceChange({
+    label: "exact candidate identity",
+    mutate: (current) => ({
+      ...current,
+      facts: {
+        ...current.facts,
+        nodes: current.facts.nodes.map((candidate) => candidate.issueId === "15"
+          ? {
+              ...candidate,
+              closeAuthorityEvidence: closeAuthorityEvidenceFor("15", {
+                candidateCommit: "e".repeat(40),
+              }),
+            }
           : candidate),
       },
     }),

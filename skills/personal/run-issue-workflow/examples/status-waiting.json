@@ -79,7 +79,15 @@
             "trackerState": "OPEN",
             "completionState": "COMPLETE",
             "candidateReachable": false,
-            "worktreeState": "PRESENT"
+            "worktreeState": "PRESENT",
+            "authorityEvidence": {
+              "trackerIdentity": "github-issue:17:version:1",
+              "targetHead": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "candidateCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "completionEvidenceId": "github-comment:completion-17",
+              "completionBodySha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "worktreeIdentity": "registered-worktree:issue-17"
+            }
           }
         ]
       }

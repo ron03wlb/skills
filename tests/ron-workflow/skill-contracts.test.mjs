@@ -3084,6 +3084,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /manual `implementation_complete`.*no journaled task reference.*adopt one uniquely matching.*Zero or multiple.*structured diagnosis.*never creates or guesses/isu);
   assert.match(skill, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.*coordinator only observes.*never acquires, releases, reclaims, or delegates/isu);
   assert.match(skill, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*every currently legal Issue dispatch.*repository-close-wait\.started.*repository-close-wait\.settled.*execution slot or retry/isu);
+  assert.match(skill, /tracker identity\/state.*target HEAD\/state.*candidate commit\/reachability.*completion evidence ID\/body SHA-256\/state.*registered worktree identity\/state.*control revision/isu);
   assert.match(skill, /healthy target-writer contention retains.*`WAITING_FOR_TARGET_WRITER`.*`target-writer-wait\.\*`/isu);
   assert.match(skill, /unknown repository-close or target-writer ownership.*timeout.*coordinator loss.*changed evidence.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
   assert.match(core, /REPOSITORY_CLOSE_WAIT_TIMEOUT_MS\s*=\s*30_000/iu);
