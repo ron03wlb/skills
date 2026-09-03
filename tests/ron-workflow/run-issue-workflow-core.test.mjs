@@ -359,7 +359,7 @@ test("Run-ready handoff requires exact producer ownership for dirty incomplete s
   assert.equal(reduceRunReadyHandoff(input).state, "INCOMPLETE");
 });
 
-test("to-spec workflow checkpoint producer profiles create only supported v2 transactions", () => {
+test("workflow checkpoint producer profiles create only supported current transactions", () => {
   const { root, gitCommonDir } = createGitCommonDirFixture("workflow-checkpoint-profiles-");
   try {
     const store = createWorkflowControlStore({ gitCommonDir });
@@ -380,6 +380,22 @@ test("to-spec workflow checkpoint producer profiles create only supported v2 tra
         approvedScopeIdentity: `sha256:${"3".repeat(64)}`,
         classification: "SINGLE",
         planningSeal: "d".repeat(40),
+      },
+    });
+    const currentToTickets = checkpointIdentityV2({
+      producerCommand: "to-tickets",
+      operationId: `decomposition:sha256:${"4".repeat(64)}`,
+      profileVersion: "v2",
+      baseline: "e".repeat(40),
+      bindings: {
+        approvedScopeIdentity: `sha256:${"4".repeat(64)}`,
+        classification: "MULTI",
+        planningSeal: "e".repeat(40),
+        upstream: {
+          handoffIdentity: "IC_to_spec_handoff",
+          publicationIdentity: "tracker-version:37",
+          trackerIdentity: "issue:37",
+        },
       },
     });
 
@@ -404,10 +420,16 @@ test("to-spec workflow checkpoint producer profiles create only supported v2 tra
       "publication.read_back",
       "handoff.completed",
     ]);
+    assert.deepEqual(WORKFLOW_CHECKPOINT_PROFILES["to-tickets@v2"], [
+      "decomposition.read_back",
+      "ready_state.read_back",
+      "handoff.completed",
+    ]);
 
     const specCheckpoint = store.createCheckpoint(toSpec);
     const ticketsCheckpoint = store.createCheckpoint(toTickets);
     const currentSpecCheckpoint = store.createCheckpoint(currentToSpec);
+    const currentTicketsCheckpoint = store.createCheckpoint(currentToTickets);
     assert.equal(specCheckpoint.schema, WORKFLOW_CHECKPOINT_SCHEMA);
     assert.equal(specCheckpoint.nextStage, "plan.written");
     assert.deepEqual(Object.keys(specCheckpoint.identity.bindings), ["plan", "planningSeal"]);
@@ -418,6 +440,13 @@ test("to-spec workflow checkpoint producer profiles create only supported v2 tra
       "approvedScopeIdentity",
       "classification",
       "planningSeal",
+    ]);
+    assert.equal(currentTicketsCheckpoint.nextStage, "decomposition.read_back");
+    assert.deepEqual(Object.keys(currentTicketsCheckpoint.identity.bindings), [
+      "approvedScopeIdentity",
+      "classification",
+      "planningSeal",
+      "upstream",
     ]);
     assert.throws(
       () => store.advanceCheckpoint({
@@ -461,8 +490,39 @@ test("to-spec workflow checkpoint producer profiles create only supported v2 tra
     });
     assert.equal(completed.state, "COMPLETED");
     assert.equal(completed.nextStage, null);
+    assert.throws(
+      () => store.advanceCheckpoint({
+        identity: currentToTickets,
+        stage: "plan.written",
+        receipt: { path: "superpowers/docs/plans/forbidden.md" },
+      }),
+      /Unknown workflow checkpoint stage plan\.written/u,
+    );
+    const decomposed = store.advanceCheckpoint({
+      identity: currentToTickets,
+      stage: "decomposition.read_back",
+      receipt: {
+        decompositionIdentity: "IC_decomposition",
+        decompositionDigest: `sha256:${"5".repeat(64)}`,
+      },
+    });
+    assert.equal(decomposed.nextStage, "ready_state.read_back");
+    const ready = store.advanceCheckpoint({
+      identity: currentToTickets,
+      stage: "ready_state.read_back",
+      receipt: { frontier: ["40"] },
+    });
+    assert.equal(ready.nextStage, "handoff.completed");
+    const ticketsCompleted = store.advanceCheckpoint({
+      identity: currentToTickets,
+      stage: "handoff.completed",
+      receipt: { handoffIdentity: "handoff:37:decomposition" },
+    });
+    assert.equal(ticketsCompleted.state, "COMPLETED");
+    assert.equal(ticketsCompleted.nextStage, null);
     assert.notEqual(specCheckpoint.scopeKey, ticketsCheckpoint.scopeKey);
     assert.notEqual(specCheckpoint.scopeKey, currentSpecCheckpoint.scopeKey);
+    assert.notEqual(ticketsCheckpoint.scopeKey, currentTicketsCheckpoint.scopeKey);
     assert.equal(Object.hasOwn(store, "classifyCheckpoints"), false);
 
     assert.throws(

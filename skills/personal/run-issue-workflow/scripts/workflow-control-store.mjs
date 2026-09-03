@@ -38,10 +38,16 @@ const TO_TICKETS_CHECKPOINT_STAGES = Object.freeze([
   "ready_state.read_back",
   "handoff.completed",
 ]);
+const TO_TICKETS_PUBLICATION_STAGES = Object.freeze([
+  "decomposition.read_back",
+  "ready_state.read_back",
+  "handoff.completed",
+]);
 export const WORKFLOW_CHECKPOINT_PROFILES = Object.freeze({
   "to-spec@v1": WORKFLOW_CHECKPOINT_STAGES,
   "to-spec@v2": TO_SPEC_PUBLICATION_STAGES,
   "to-tickets@v1": TO_TICKETS_CHECKPOINT_STAGES,
+  "to-tickets@v2": TO_TICKETS_PUBLICATION_STAGES,
 });
 
 const legacyIdentityFields = new Set([
