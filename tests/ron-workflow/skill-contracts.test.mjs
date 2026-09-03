@@ -475,7 +475,7 @@ test("to-tickets publishes one recoverable decomposition record and the exact re
   assert.match(tickets, /decomposition:v1.*parent.*Planning Seal.*target.*key-to-Issue mapping.*blocker edges/isu);
   assert.match(tickets, /no current record.*write exactly one.*one matching record.*reuse.*conflicting or multiple records.*stop without mutation/isu);
   assert.match(tickets, /record.*completeness.*never.*child identity/isu);
-  assert.match(tickets, /failure before or during record publication.*recoverable partial publication by key.*retry.*verified successor Planning Seal.*never.*inherited seal/isu);
+  assert.match(tickets, /failure before or during record publication.*recoverable partial publication by key.*fresh.*retry.*exact consumed Planning Seal.*frozen legacy.*profile-v1.*existing bound successor.*never.*cross.*operation/isu);
   assert.match(tickets, /bootstrap rerun.*reuse.*matching children.*publish only the missing parent record/isu);
   assert.match(tickets, /open child.*every owned and External blocker.*closed.*dependency-ready frontier/isu);
   assert.match(tickets, /blocked or closed children.*no ready label/isu);
