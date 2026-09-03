@@ -1,6 +1,6 @@
 # Spec publication interfaces
 
-Use these repository-configured adapters for a current ordinary Spec publication. Each adapter owns its source and returns a compact read-back receipt; callers compare identities and never reconstruct another adapter's result.
+Use these repository-configured adapters for a current ordinary Spec publication. Each adapter owns its source and returns a compact read-back receipt; callers compare identities and never reconstruct another adapter's result. Fresh operations use the owner-local `workflow-operation-identity.mjs` module for one versioned operation identity receipt.
 
 ## Planning adapter
 
@@ -10,7 +10,7 @@ Use these repository-configured adapters for a current ordinary Spec publication
 
 ## Checkpoint adapter
 
-- `checkpoint.read` takes the exact repository, Spec, producer `to-spec`, operation identity, profile version, target, baseline, and bindings. It returns no transaction or one exact transaction with its first unsatisfied stage.
+- `checkpoint.read` takes the exact repository, Spec, producer `to-spec`, versioned operation identity receipt, profile version, target, baseline, and bindings. For a fresh `to-spec@v2` operation, the operation identity receipt binds repository, Spec, approved publication identity or hash, producer `to-spec`, and stage `publication`. It returns no transaction or one exact transaction with its first unsatisfied stage.
 - `checkpoint.create` creates only a fresh current `to-spec@v2` transaction. Its bindings contain the Planning Seal, classification, and approved-scope identity. Its ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`.
 - `checkpoint.advance` appends one stage receipt and reads the exact transaction back. Repeating the same receipt is idempotent; a different receipt or out-of-order stage is a Hard gate.
 
@@ -18,7 +18,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 
 ## Tracker adapter
 
-- `tracker.reserve` takes the repository, `primary` or `revision` mode, exact operation identity, and requested Spec identity. It returns one immutable tracker identity; revision requires the existing Spec.
+- `tracker.reserve` takes the repository, `primary` or `revision` mode, exact operation identity, and requested Spec identity. Primary reservation derives its bootstrap key only from the repository and immutable proposed-Spec identity. It returns one immutable tracker identity; exact read-back then replaces bootstrap authority with the reserved tracker identity and a Spec-bound versioned operation identity for every later stage. Revision requires the existing Spec and its approved publication identity or hash.
 - `tracker.read` returns that identity's body, comments, labels, version token, and publication identity.
 - `tracker.publish` compare-and-sets the expected version token with the canonical body and `ready-for-agent` label, then returns the new version token and publication identity. A timeout or missing response is unresolved until `tracker.read` proves the result.
 

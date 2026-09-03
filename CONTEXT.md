@@ -111,7 +111,7 @@ The continuation of one exact valid incomplete v1 transaction under its frozen o
 _Avoid_: Automatic receipt migration, duplicate successor receipt, synthesized successor identity, in-place schema upgrade
 
 **Producer operation identity**:
-The minimal identity of one planning operation: repository, Tracker Spec, producer, and an opaque operation or revision identity. Workflow gates read only this exact scope for retry and conflict; target-wide listings are diagnostic and cannot block unrelated operations.
+The versioned deterministic identity of one workflow operation, derived from canonical repository identity, stable Spec identity, approved publication identity or hash, producer, workflow stage, and stable Issue identity for Issue-scoped stages. Primary reservation uses only the immutable proposed-Spec identity until reserved tracker read-back binds the Spec. Caller correlation never defines authority. Workflow gates read only this exact scope for retry and conflict; target-wide listings are diagnostic and cannot block unrelated operations.
 _Avoid_: Target-wide checkpoint gate, parsed operation name, tracker body snapshot, workflow rule engine
 
 **Producer checkpoint bindings**:

@@ -6,7 +6,7 @@ Skills I use daily for code work.
 
 Reachable only when you type them (Claude Code: `disable-model-invocation: true`; Codex: `policy.allow_implicit_invocation: false` in `agents/openai.yaml`).
 
-- **[verify-target-before-push](./verify-target-before-push/SKILL.md)** — Verify a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
+- **[verify-target-before-push](./verify-target-before-push/SKILL.md)** — Verify a deterministic operation identity set for a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
 - **[grill-with-docs](./grill-with-docs/SKILL.md)** — Bind one proposed Spec and target to an isolated planning worktree, then grill and record accepted `CONTEXT.md` and ADR changes there.
@@ -15,8 +15,8 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
 - **[wiki](./wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
-- **[to-spec](./to-spec/SKILL.md)** — Revalidate an isolated planning lane into a Planning Seal, publish through a minimal operation-scoped transaction, and emit its exact Run handoff or decomposition command.
-- **[to-tickets](./to-tickets/SKILL.md)** — Run one minimal Multi-Issue decomposition producer, publish its Decomposition publication record, and emit one composite Run handoff.
+- **[to-spec](./to-spec/SKILL.md)** — Revalidate an isolated planning lane into a Planning Seal, publish through a deterministic operation-scoped transaction, and emit its exact Run handoff or decomposition command.
+- **[to-tickets](./to-tickets/SKILL.md)** — Run one minimal deterministic Multi-Issue decomposition producer, publish its Decomposition publication record, and emit one composite Run handoff.
 - **[implement](./implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./wayfinder/SKILL.md)** — Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on the issue tracker, resolved one at a time until the way to the destination is clear.
 
@@ -26,8 +26,8 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 
 - **[pre-execute-issue](./pre-execute-issue/SKILL.md)** — Prepare and attest one exact declared Issue prerequisite through content-bound Operator SQL outcomes.
 - **[prepare-prerequisite-artifact](./prepare-prerequisite-artifact/SKILL.md)** — Build one adapter-bound, fail-closed Operator SQL prerequisite candidate without touching an external environment.
-- **[execute-issue](./execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue, declaring exact `workflowArtifacts`, while preserving completion across recorded-target movement.
-- **[close-issue](./close-issue/SKILL.md)** — Validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
+- **[execute-issue](./execute-issue/SKILL.md)** — Bind a deterministic Issue operation, implement and fully verify one human- or DAG-authorized Issue, and declare exact `workflowArtifacts` while preserving completion across recorded-target movement.
+- **[close-issue](./close-issue/SKILL.md)** — Bind a deterministic closeout operation, validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
 - **[attest-target-contribution](./attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery or a frozen producer-owned prospective Workflow plan checkpoint.
 - **[record-closed-issue-reconciliation](./record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for human-confirmed failed-command or command-representation reconciliation.
 - **[prototype](./prototype/SKILL.md)** — Build a throwaway prototype to answer a design question: a runnable terminal app for state/logic, or several toggleable UI variations.

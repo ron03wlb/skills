@@ -2,7 +2,7 @@
 
 `verify-target-before-push` freezes one exact target range and runs the aggregate Standards, multi-[Spec](https://www.aihero.dev/ai-coding-dictionary/spec), focused, and full-suite gate without pushing. It has three narrow confirmation-gated recoveries: eligible direct target contribution coverage, one eligible closed Issue historical failed-command case, and one eligible historical command placeholder.
 
-It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison.
+It has two evidence modes. Local-ahead starts at the target's unique upstream tip; already-pushed work requires an explicit merge request, pull request, or exact range. Neither mode guesses a comparison. After freezing members, the verifier derives a deterministic versioned operation identity for each Spec from immutable repository, Spec, approved-publication, producer, and stage inputs, then consumes member completion receipts without repeating Issue execution semantics.
 
 ## When to reach for it
 

@@ -1,4 +1,4 @@
 interface:
   display_name: "Close Issue"
   short_description: "Close one human- or DAG-authorized Issue"
-  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant bound to the exact Issue or parent, acquire the repository close lease and target mutation writer in that order without caller-owned leases, classify workflowArtifacts compatibility from the exact Spec-scoped workflow_artifacts_contract_adopted:v1 record, then resume the idempotent merge, worktree removal, and tracker closure path without widening authority."
+  default_prompt: "Use $close-issue only for a direct human request or valid read-back DAG Run Grant bound to the exact Issue or parent, bind its deterministic owner-derived closeout identity, acquire the repository close lease and target mutation writer in that order without caller-owned leases, classify workflowArtifacts compatibility from the exact Spec-scoped workflow_artifacts_contract_adopted:v1 record, then resume the idempotent merge, worktree removal, and tracker closure path without widening authority."

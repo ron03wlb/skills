@@ -4,7 +4,7 @@
 
 The defining constraint is idempotent close progress. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. Coordinator membership is exact: a Single-Issue target is the bound [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), a Multi-Issue child is an exact mapping member, and a parent-only target is the bound Spec itself. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
 
-Closeout has two nested leases. One repository close lease covers the same Git common dir and serializes closeout across targets. The leaf acquires the repository lease and target mutation writer in that order, then releases them in reverse after required read-back. Different repositories remain concurrent, while planning uses only its exact target writer.
+Closeout has two nested leases. One repository close lease covers the same Git common dir and serializes closeout across targets. The leaf acquires the repository lease and target mutation writer in that order, then releases them in reverse after required read-back. Different repositories remain concurrent, while planning uses only its exact target writer. The close attempt uses a deterministic versioned operation identity derived from immutable repository, Spec, approved-publication, producer, stage, and Issue inputs, then consumes the exact `implementation_complete` receipt without repeating execution semantics.
 
 ## When to reach for it
 

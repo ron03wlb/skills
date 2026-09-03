@@ -61,6 +61,58 @@ const createPushReadyReceipt = ({
   worktree: "clean",
 });
 
+test("deterministic operation identity and receipt ownership stay synchronized across workflow seams", () => {
+  const operationModule = read("skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs");
+  const specInterfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
+  const ticketInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  const executionInterfaces = read("skills/engineering/execute-issue/references/operation-identity.md");
+  const closeInterfaces = read("skills/engineering/close-issue/references/operation-identity.md");
+  const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/operation-identity.md");
+  const run = read("skills/personal/run-issue-workflow/SKILL.md");
+  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const close = read("skills/engineering/close-issue/SKILL.md");
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const runOperator = read("skills/personal/run-issue-workflow/OPERATOR.md");
+
+  assert.match(operationModule, /workflow-operation-identity:v1.*repositoryId.*specId.*approvedPublicationIdentity.*producer.*stage.*issueId.*workflow-op-v1/isu);
+  assert.match(specInterfaces, /primary reservation.*proposed-Spec identity.*reserved tracker identity.*Spec-bound.*versioned operation identity/isu);
+  assert.match(specInterfaces, /fresh.*`to-spec@v2`.*operation identity receipt.*repository.*Spec.*approved publication.*`to-spec`.*`publication`/isu);
+  assert.match(ticketInterfaces, /fresh.*`to-tickets@v2`.*operation identity receipt.*repository.*Spec.*approved publication.*`to-tickets`.*`decomposition`/isu);
+  assert.doesNotMatch(ticketInterfaces, /opaque operation identity/iu);
+
+  assert.match(run, /repository identity.*versioned operation identity.*approved publication.*caller correlation.*never.*authority/isu);
+  assert.match(runOperator, /canonical repository identity.*deterministic versioned operation identity.*immutable.*caller correlation never defines the Run/isu);
+  assert.match(execute, /references\/operation-identity\.md.*deterministic operation identity.*implementation receipt owner/isu);
+  assert.match(close, /references\/operation-identity\.md.*deterministic operation identity.*closeout operation owner/isu);
+  assert.match(verify, /references\/operation-identity\.md.*deterministic operation identity.*aggregate receipt owner/isu);
+  assert.match(executionInterfaces, /`execute-issue`.*`implementation`.*stable Issue/isu);
+  assert.match(executionInterfaces, /does not rerun Run.*semantic.*implementation_complete.*downstream closeout does not rerun implementation.*review/isu);
+  assert.match(closeInterfaces, /`close-issue`.*`closeout`.*stable Issue.*implementation_complete.*does not rerun implementation.*review/isu);
+  assert.match(aggregateInterfaces, /`verify-target-before-push`.*selected Spec.*`aggregate-verification`/isu);
+  assert.match(aggregateInterfaces, /completion receipt.*does not rerun Issue implementation.*review/isu);
+
+  for (const path of [
+    "docs/engineering/to-spec.md",
+    "docs/engineering/to-tickets.md",
+    "docs/engineering/execute-issue.md",
+    "docs/engineering/close-issue.md",
+    "docs/engineering/verify-target-before-push.md",
+  ]) {
+    assert.match(read(path), /deterministic.*operation identity.*immutable/isu, `${path} omits deterministic operation identity`);
+  }
+  for (const path of [
+    "skills/engineering/to-spec/agents/openai.yaml",
+    "skills/engineering/to-tickets/agents/openai.yaml",
+    "skills/personal/run-issue-workflow/agents/openai.yaml",
+    "skills/engineering/execute-issue/agents/openai.yaml",
+    "skills/engineering/close-issue/agents/openai.yaml",
+    "skills/engineering/verify-target-before-push/agents/openai.yaml",
+  ]) {
+    assert.match(read(path), /deterministic|owner-derived/iu, `${path} omits operation identity behavior`);
+  }
+  assert.match(read("CONTEXT.md"), /Producer operation identity.*versioned.*canonical repository.*stable Spec.*approved publication.*workflow stage.*stable Issue.*caller correlation.*never.*authority/isu);
+});
+
 test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () => {
   const manifest = JSON.parse(read(".claude-plugin/plugin.json")).skills.sort();
   const expected = [];
@@ -420,7 +472,7 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
 
   assert.match(spec, /Hard gate.*wrong target.*duplicate.*misattributed publication.*durable state/isu);
   assert.match(spec, /advisory.*never block/isu);
-  assert.match(metadata, /short_description:.*isolated planning lane.*Run handoff/iu);
+  assert.match(metadata, /short_description:.*deterministic.*owner-derived identity/iu);
   assert.match(docs, /isolated planning lane.*operation-scoped.*`handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
   assert.match(matt, /Single-Issue Tracker Spec.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue Tracker Spec.*`\/to-tickets <Spec-ID>`/isu);
   assert.match(mattDocs, /Single-Issue Tracker Spec.*`\/run-issue-workflow`.*Multi-Issue Tracker Spec.*`\/to-tickets`/isu);
@@ -517,7 +569,7 @@ test("re-entrant to-tickets behavior stays synchronized across promoted surfaces
   const routerDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(skill, /^description: Consume one Multi-Issue Spec handoff.*minimal.*composite Run handoff\.$/mu);
-  assert.match(metadata, /short_description: "Publish a minimal composite Run handoff"/u);
+  assert.match(metadata, /short_description: "Publish a deterministic composite Run handoff"/u);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(docs, /completed `to-spec` handoff.*minimal operation-scoped transaction.*Decomposition key.*Decomposition publication record.*composite `handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
   assert.doesNotMatch(docs, /zero matches|one exact match|Publish missing children/iu);

@@ -1,6 +1,6 @@
 # Decomposition publication interfaces
 
-Use these repository-configured adapters for a current ordinary Multi-Issue decomposition. Each adapter owns its source and returns one compact read-back receipt; callers compare exact identities and never reconstruct another adapter's result.
+Use these repository-configured adapters for a current ordinary Multi-Issue decomposition. Each adapter owns its source and returns one compact read-back receipt; callers compare exact identities and never reconstruct another adapter's result. Fresh operations use the owner-local `workflow-operation-identity.mjs` module for one versioned operation identity receipt.
 
 ## Upstream adapter
 
@@ -9,7 +9,7 @@ Use these repository-configured adapters for a current ordinary Multi-Issue deco
 
 ## Checkpoint adapter
 
-- `checkpoint.read` takes the exact repository, Spec, producer `to-tickets`, opaque operation identity, profile version, target, baseline, and bindings. It returns no transaction or one exact transaction with its first unsatisfied stage.
+- `checkpoint.read` takes the exact repository, Spec, producer `to-tickets`, versioned operation identity receipt, profile version, target, baseline, and bindings. For a fresh `to-tickets@v2` operation, the operation identity receipt binds repository, Spec, approved publication identity or hash, producer `to-tickets`, and stage `decomposition`. It returns no transaction or one exact transaction with its first unsatisfied stage.
 - `checkpoint.create` creates only a fresh current `to-tickets@v2` transaction. Its bindings contain the tracker Spec, upstream publication and handoff, Planning Seal, Multi-Issue classification, and approved-scope identities. Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`.
 - `checkpoint.advance` appends one stage receipt and reads the exact transaction back. Repeating the same receipt is idempotent; a different receipt or out-of-order stage is a Hard gate.
 

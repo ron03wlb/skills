@@ -2,7 +2,7 @@
 
 `to-spec` turns the settled work in one isolated planning lane into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), then publishes one immutable downstream handoff.
 
-It does not restart the interview, commit an operational plan, or create prospective contribution evidence for ordinary publication. It revalidates the lane against the latest target and uses a minimal operation-scoped transaction so concurrent lanes do not share a planning checkout or block one another.
+It does not restart the interview, commit an operational plan, or create prospective contribution evidence for ordinary publication. It revalidates the lane against the latest target and uses a minimal operation-scoped transaction so concurrent lanes do not share a planning checkout or block one another. Fresh publication uses a deterministic versioned operation identity derived from immutable repository, Spec, approved-publication, producer, and stage inputs; primary reservation temporarily uses only the proposed-Spec identity, then binds the reserved tracker identity before publication.
 
 ## When to reach for it
 
