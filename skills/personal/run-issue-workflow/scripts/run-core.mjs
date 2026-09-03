@@ -73,6 +73,12 @@ const observedRunReadyFacts = (input) => ({
     ? input.checkpoint.transactionIdentity
     : null,
   handoffIdentity: isText(input?.handoff?.identity) ? input.handoff.identity : null,
+  handoffTransactionIdentity: isText(input?.handoff?.transactionIdentity)
+    ? input.handoff.transactionIdentity
+    : null,
+  handoffPublicationIdentity: isText(input?.handoff?.publicationIdentity)
+    ? input.handoff.publicationIdentity
+    : null,
   trackerRecordIdentities: Array.isArray(input?.trackerRecordIdentities)
     ? input.trackerRecordIdentities.filter(isText)
     : [],
@@ -374,6 +380,28 @@ export function reduceRunReadyHandoff(input) {
       ["The decomposition publication identity does not match selected Multi-Issue authority."],
       ["decomposition_identity_matches"],
     );
+  }
+
+  if (currentProfile && authority.classification === "SINGLE") {
+    const stageReceipts = checkpoint.stageReceipts;
+    const publicationReadBack = stageReceipts?.publicationReadBack;
+    const currentPublicationMatches = isRecord(stageReceipts)
+      && stageReceipts.planningSealReadBack?.planningSeal === authority.planningSeal
+      && isRecord(publicationReadBack)
+      && isText(publicationReadBack.publicationIdentity)
+      && isText(publicationReadBack.trackerIdentity)
+      && handoff.transactionIdentity === checkpoint.transactionIdentity
+      && handoff.publicationIdentity === publicationReadBack.publicationIdentity
+      && handoff.trackerIdentity === publicationReadBack.trackerIdentity
+      && handoff.recordIdentities[0] === handoff.publicationIdentity;
+    if (!currentPublicationMatches) {
+      return unknownRunReady(
+        input,
+        "publication_handoff_identity_conflict",
+        ["The current to-spec handoff conflicts with its transaction or publication read-back."],
+        ["current_publication_handoff_matches_owning_sources"],
+      );
+    }
   }
 
   if (currentProfile && authority.classification === "MULTI") {

@@ -282,6 +282,40 @@ const currentMultiRunReadyFacts = () => {
   return input;
 };
 
+const currentSingleRunReadyFacts = () => {
+  const input = runReadyFacts({ classification: "SINGLE" });
+  const publicationReadBack = {
+    publicationIdentity: "tracker-version:31",
+    trackerIdentity: "issue:31",
+  };
+  delete input.checkpoint.initialTargetState;
+  delete input.checkpoint.planPath;
+  delete input.checkpoint.generatedContentIdentity;
+  input.checkpoint.profileVersion = "v2";
+  input.checkpoint.operationId = "primary";
+  input.checkpoint.bindings = {
+    approvedScopeIdentity: input.authority.approvedScopeHash,
+    classification: input.authority.classification,
+    planningSeal: input.authority.planningSeal,
+  };
+  input.checkpoint.stageReceipts = {
+    planningSealReadBack: {
+      planningSeal: input.authority.planningSeal,
+      state: "reused",
+    },
+    publicationReadBack,
+  };
+  input.handoff = {
+    ...input.handoff,
+    transactionIdentity: input.checkpoint.transactionIdentity,
+    publicationIdentity: publicationReadBack.publicationIdentity,
+    trackerIdentity: publicationReadBack.trackerIdentity,
+    recordIdentities: [publicationReadBack.publicationIdentity],
+  };
+  input.trackerRecordIdentities = [...input.handoff.recordIdentities];
+  return input;
+};
+
 test("Run-ready handoff reduces exact Single and Multi producer evidence to READY", () => {
   for (const classification of ["SINGLE", "MULTI"]) {
     const result = reduceRunReadyHandoff(runReadyFacts({ classification }));
@@ -304,6 +338,35 @@ test("Run-ready handoff consumes the current to-tickets composite receipt", () =
   assert.equal(result.observed.handoffUpstreamPublicationIdentity, "tracker-version:37");
   assert.equal(result.observed.handoffUpstreamHandoffIdentity, "to-spec:handoff:37");
   assert.equal(result.observed.handoffDecompositionDigest, `sha256:${"5".repeat(64)}`);
+});
+
+test("Run-ready handoff consumes the current to-spec publication receipt", () => {
+  const result = reduceRunReadyHandoff(currentSingleRunReadyFacts());
+
+  assert.equal(result.state, "READY");
+  assert.equal(result.reasonCode, null);
+  assert.equal(result.observed.handoffTransactionIdentity, `sha256:${"3".repeat(64)}`);
+  assert.equal(result.observed.handoffPublicationIdentity, "tracker-version:31");
+});
+
+test("Run-ready handoff rejects a current to-spec handoff that drifts from its transaction or publication", () => {
+  const changedTransaction = currentSingleRunReadyFacts();
+  changedTransaction.handoff.transactionIdentity = `sha256:${"9".repeat(64)}`;
+
+  const changedPublication = currentSingleRunReadyFacts();
+  changedPublication.handoff.publicationIdentity = "tracker-version:changed";
+
+  const changedReceipt = currentSingleRunReadyFacts();
+  changedReceipt.checkpoint.stageReceipts.publicationReadBack = {
+    ...changedReceipt.checkpoint.stageReceipts.publicationReadBack,
+    trackerIdentity: "issue:changed",
+  };
+
+  for (const input of [changedTransaction, changedPublication, changedReceipt]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, "publication_handoff_identity_conflict");
+  }
 });
 
 test("Run-ready handoff rejects a current composite receipt that drifts from tracker or operation read-back", () => {

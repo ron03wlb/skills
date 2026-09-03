@@ -2737,6 +2737,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /owning-source `handoff\.read` adapter.*Invoke it once.*already-read tracker snapshot.*reconciliation snapshot.*Spec.*target.*Planning Seal.*approved-scope.*tracker publication.*Decomposition.*one Git-common-dir.*checkpoint.*`run-ready-handoff-facts:v1`/isu);
   assert.match(skill, /Fresh Single-Issue.*`to-spec`.*publication.*handoff.*Fresh Multi-Issue.*`to-tickets`.*upstream publication.*upstream handoff.*operation receipt.*`decomposition:v1`.*digest.*mapping.*blocker edges.*frozen.*profile-v1.*record identities/isu);
   assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker.*identities.*clean target.*decomposition identity.*current Multi-Issue.*operation.*tracker read-back/isu);
+  assert.match(skill, /current Single-Issue handoff.*exact transaction identity.*publication read-back/isu);
   assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*profile.*Planning Seal.*classification.*approved-scope identity.*baseline.*transaction identity.*first unsatisfied stage.*current producer.*never owns target dirt.*frozen.*initially-clean state.*plan path.*generated-content identity.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
   assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*exact observed checkpoint and handoff producer.*Spec.*target.*Planning Seal.*classification.*scope.*record.*decomposition.*no-automatic-transition.*recovery predicates/isu);
   assert.match(skill, /both `READY` and actionable `INCOMPLETE`.*live selected reconciliation.*mismatch.*`UNKNOWN`.*conflicting field.*observed handoff value.*expected selected value.*never return a retry command for stale producer authority/isu);
@@ -2750,6 +2751,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(core, /currentProfile.*checkpoint\.profileVersion.*v2.*frozenProfile.*checkpoint\.planPath.*checkpoint\.generatedContentIdentity/isu);
   assert.match(core, /handoffPlanningSeal.*handoffApprovedScopeHash.*handoffUpstreamPublicationIdentity.*handoffUpstreamHandoffIdentity.*handoffDecompositionDigest/isu);
   assert.match(core, /operationReceipt.*transactionIdentity.*stageReceipts.*decompositionReadBack.*readyStateReadBack.*decompositionMapping.*blockerEdges/isu);
+  assert.match(core, /currentProfile.*classification === "SINGLE".*publicationReadBack.*handoff\.transactionIdentity.*handoff\.publicationIdentity.*handoff\.trackerIdentity/isu);
   assert.match(skill, /saved project.*`local` environment/isu);
   assert.match(skill, /Every executable Issue maps to one sidebar-visible child Codex task/iu);
   assert.match(skill, /Never create a duplicate live lane/iu);
