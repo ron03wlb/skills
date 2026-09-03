@@ -31,7 +31,14 @@ const createStoreFixture = () => {
 };
 
 const identity = {
-  runId: "run-17-single",
+  runId: deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: "17",
+    approvedPublicationIdentity: "sha256:issue-17",
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  }).key,
   specId: "17",
   approvedScopeHash: "sha256:issue-17",
   target: "features/ron",
@@ -40,7 +47,14 @@ const identity = {
 };
 
 const multiIdentity = {
-  runId: "run-12-multi",
+  runId: deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: "12",
+    approvedPublicationIdentity: "sha256:spec-12",
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  }).key,
   specId: "12",
   approvedScopeHash: "sha256:spec-12",
   target: "features/ron",
@@ -368,6 +382,10 @@ test("Run receipt owner derives one operation identity from the immediate produc
     },
     runReadyHandoff: currentReadyHandoffFor(identity),
   });
+  const callerRunId = "caller-correlation-for-run-17";
+  current.runIdentity = { ...current.runIdentity, runId: callerRunId };
+  current.grant = { ...current.grant, runIdentity: current.runIdentity };
+  current.facts = { ...current.facts, run: { ...current.facts.run, runId: callerRunId } };
   const expected = deriveWorkflowOperationIdentity({
     repositoryId: "github:ron03wlb/skills",
     specId: identity.specId,
@@ -394,7 +412,7 @@ test("Run receipt owner derives one operation identity from the immediate produc
     const facts = await adapters.handoff.read({ request: { specId: "17" }, tracker: {}, current: reconciled });
 
     assert.deepEqual(facts.operationIdentity, expected);
-    assert.notEqual(facts.operationIdentity.key, identity.runId, "caller correlation must not define Run authority");
+    assert.notEqual(facts.operationIdentity.key, callerRunId, "caller correlation must not define Run authority");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1541,7 +1559,7 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
       const response = await fetch(panelUrl);
       assert.equal(response.status, 200);
       const html = await response.text();
-      assert.match(html, /run-17-single/u);
+      assert.match(html, new RegExp(identity.runId, "u"));
       const token = new URL(panelUrl).searchParams.get("token");
       openedStatus = await fetch(`${openedOrigin}/api/status`, {
         headers: { authorization: `Bearer ${token}` },
