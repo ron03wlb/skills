@@ -1689,7 +1689,7 @@ test("Issue closeout is direct, ordered, retryable, and conflict-safe", () => {
   }
 });
 
-test("aggregate target verification selects exact ranges and covers completion-note contributions", () => {
+test("installed route derives push_ready from the frozen reachable closed-member range", () => {
   const { repo, git, isAncestor } = createGitFixture("skills-target-range-fixture-");
   const commits = (range) => {
     const output = git("rev-list", "--reverse", range);
@@ -2073,6 +2073,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
 
     const localRange = selectRange({ mode: "local-ahead", upstreamTips: [baseline] });
     const members = freezeMembers({ issues: completeIssues, range: localRange });
+    assert.deepEqual(members.map(({ issue }) => issue), ["A", "B"], "open unreachable candidate stays outside the frozen range");
     const [contributionA, contributionB] = proveCoverage({ range: localRange, members });
     assert.ok([...contributionA].some((commit) => contributionB.has(commit)), "overlapping contributions are valid");
 
@@ -2199,7 +2200,7 @@ test("aggregate target verification selects exact ranges and covers completion-n
   }
 });
 
-test("push-target consumes one current receipt for one exact non-force push", () => {
+test("installed route consumes push_ready through one exact non-force push", () => {
   const skill = read("skills/engineering/push-target/SKILL.md");
   const metadata = read("skills/engineering/push-target/agents/openai.yaml");
   const docs = read("docs/engineering/push-target.md");

@@ -538,6 +538,169 @@ test("multiple runtime instances keep per-Run max_parallel on one target", async
   }
 });
 
+test("installed route lets another Spec Run progress while closeout waits for the shared writer", async () => {
+  const { root, gitCommonDir } = createStoreFixture();
+  const closeStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-close-run" });
+  const executionStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-execution-run" });
+  const competingWriter = executionStore.acquireTargetMutationWriter({
+    target: identity.target,
+    operationId: "planning-seal-spec-82",
+  });
+  const closeTaskRef = { threadId: "thread-17", hostId: "local" };
+  const closeModel = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "COMPLETE",
+    candidateReachable: false,
+    worktreeState: "PRESENT",
+    closeAccepted: false,
+  };
+  const executionIssueIds = ["821", "822"];
+  const executionModel = new Map(executionIssueIds.map((issueId) => [issueId, "NONE"]));
+  const created = [];
+  let resolveExecutionStarted;
+  const executionStarted = new Promise((resolve) => { resolveExecutionStarted = resolve; });
+  let competingWriterReleased = false;
+  let trackerReads = 0;
+  let closeMessageTrackerReads = null;
+  let second = 0;
+  const now = () => `2026-08-30T08:10:${String(second++).padStart(2, "0")}.000Z`;
+
+  const closeRuntime = createWorkflowRuntime({
+    store: closeStore,
+    tracker: {
+      async read() {
+        trackerReads += 1;
+        return { issueId: "17", state: closeModel.trackerState };
+      },
+    },
+    tasks: {
+      async findIssueLane() { return [closeTaskRef]; },
+      async create() { throw new Error("completed Issue must reuse its lane"); },
+      async read() {
+        return {
+          state: "SETTLED",
+          closeRequest: closeModel.closeAccepted
+            ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+            : null,
+        };
+      },
+      async message() {
+        assert.deepEqual(created, executionIssueIds, "the other Run must dispatch while closeout is waiting");
+        closeMessageTrackerReads = trackerReads;
+        closeModel.closeAccepted = true;
+      },
+      async wait() {
+        closeModel.trackerState = "CLOSED";
+        closeModel.candidateReachable = true;
+        closeModel.worktreeState = "ABSENT";
+        return { coordinatorActive: true, taskSettled: true };
+      },
+    },
+    reconcile: async ({ journal }) => {
+      const lock = closeStore.readTargetMutationWriterLock(identity.target);
+      return singleRunCurrent({
+        journal,
+        model: closeModel,
+        run: lock === null ? {} : {
+          closeWriterRunId: lock.operationId,
+          closeWriterState: "ACTIVE",
+          closeWriterHealth: "HEALTHY",
+          closeWriterOwner: {
+            operationId: lock.operationId,
+            coordinatorInstanceId: lock.coordinatorInstanceId,
+            generation: lock.generation,
+          },
+        },
+      });
+    },
+    browser: { async open() {} },
+    cleanup: { async listRuns() { return []; } },
+    now,
+    sleep: async () => {
+      await executionStarted;
+      if (!competingWriterReleased) {
+        competingWriter.release();
+        competingWriterReleased = true;
+      }
+    },
+  });
+
+  const executionRuntime = createWorkflowRuntime({
+    store: executionStore,
+    tracker: { async read() { return {}; } },
+    tasks: {
+      async findIssueLane() { return []; },
+      async create({ issueId }) {
+        created.push(issueId);
+        executionModel.set(issueId, "DISPATCHED");
+        if (created.length === executionIssueIds.length) resolveExecutionStarted();
+        return { threadId: `thread-${issueId}`, hostId: "local" };
+      },
+      async read() { throw new Error("task read is unnecessary before the first wait"); },
+      async message() { throw new Error("task message is unnecessary before the first wait"); },
+      async wait() {
+        await executionStarted;
+        return { coordinatorActive: false };
+      },
+    },
+    reconcile: async ({ journal }) => ({
+      runIdentity: multiIdentity,
+      grant: { runIdentity: multiIdentity, maxParallel: 2 },
+      planningSeal: selectedPlanningSeal,
+      runReadyHandoff: readyHandoffFor(multiIdentity),
+      taskRefs: Object.fromEntries(journal
+        .filter(({ type }) => type === "dispatch.recorded")
+        .map(({ issueId, taskRef }) => [issueId, taskRef])),
+      facts: {
+        schema: "dag-run-facts:v1",
+        run: {
+          ...multiIdentity,
+          reconciled: true,
+          trackerAvailable: true,
+          targetState: "CLEAN",
+          closeWriterRunId: "planning-seal-spec-82",
+          closeWriterState: "ACTIVE",
+          closeWriterHealth: "HEALTHY",
+          parentTrackerState: "OPEN",
+        },
+        nodes: executionIssueIds.map((issueId) => ({
+          issueId,
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: executionModel.get(issueId),
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: "ABSENT",
+        })),
+        contradictions: [],
+      },
+    }),
+    browser: { async open() {} },
+    cleanup: { async listRuns() { return []; } },
+    now,
+    sleep: async () => {},
+  });
+
+  try {
+    const [closeResult, executionResult] = await Promise.all([
+      closeRuntime.run({ specId: identity.specId, cleanupPreview: true }),
+      executionRuntime.run({ specId: multiIdentity.specId, cleanupPreview: true }),
+    ]);
+    const waits = closeResult.journal.filter(({ type }) => type.startsWith("target-writer-wait."));
+
+    assert.equal(closeResult.status.run.state, "SUCCEEDED");
+    assert.equal(executionResult.status.run.state, "RUNNING");
+    assert.deepEqual(created, executionIssueIds);
+    assert.deepEqual(waits.map(({ outcome }) => outcome ?? null), [null, "RELEASED"]);
+    assert.ok(closeMessageTrackerReads >= 3, "closeout must use post-wait tracker evidence");
+    assert.equal(closeStore.readTargetMutationWriterLock(identity.target), null);
+  } finally {
+    if (!competingWriterReleased) competingWriter.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("end-to-end closeout contention waits, reacquires, and then closes", async () => {
   const { root, store } = createStoreFixture();
   const competitor = store.acquireTargetMutationWriter({
