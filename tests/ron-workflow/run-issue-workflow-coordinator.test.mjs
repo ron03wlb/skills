@@ -1001,7 +1001,7 @@ test("default max_parallel adopts one lane and creates only two more of four rea
   }
 });
 
-test("an unknown environment fingerprint stops with diagnosis and no automatic remediation", async () => {
+test("operation identity remains owner-derived while an unknown environment fingerprint stops", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let clockMinute = 0;
@@ -1019,19 +1019,31 @@ test("an unknown environment fingerprint stops with diagnosis and no automatic r
     async wait() { throw new Error("no wait is legal"); },
   };
   const tracker = { async read() { return {}; } };
-  const reconcile = async () => reconciliation({
-    taskRefs: { 15: taskRef },
-    nodes: [{
-      issueId: "15",
-      blockers: [],
-      trackerState: "OPEN",
-      taskState: "ENVIRONMENT_FAILURE",
-      completionState: "NONE",
-      candidateReachable: false,
-      worktreeState: "PRESENT",
-      failure: { fingerprint: "windows:some-other-environment-failure" },
-    }],
-  });
+  const runReadyHandoff = {
+    ...readyHandoffFor(identity),
+    operationIdentity: { key: identity.runId },
+  };
+  let reconciliations = 0;
+  const reconcile = async () => {
+    reconciliations += 1;
+    return reconciliation({
+      runIdentity: reconciliations === 1
+        ? identity
+        : { ...identity, runId: "caller-correlation-after-environment-stop" },
+      runReadyHandoff,
+      taskRefs: { 15: taskRef },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "ENVIRONMENT_FAILURE",
+        completionState: "NONE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+        failure: { fingerprint: "windows:some-other-environment-failure" },
+      }],
+    });
+  };
   const environment = {
     async remediate() {
       remediationCalls += 1;

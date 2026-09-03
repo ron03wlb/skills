@@ -1131,12 +1131,13 @@ export function createCoordinator({
             if (!trackerResult.available) {
               return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
             }
-            const refreshed = await reconcile({
+            let refreshed = await reconcile({
               request: selectedRequest,
               tracker: trackerResult.snapshot,
               journal: store.readEvents(runIdentity.runId),
               tasks,
             });
+            if (runOperationIdentity) refreshed = bindFreshRunOperation(refreshed, runOperationIdentity);
             const refreshedStatus = rebuildStatus(refreshed.facts);
             const recordedGrant = store.readEvents(runIdentity.runId)
               .findLast(({ type }) => type === "grant.recorded");
