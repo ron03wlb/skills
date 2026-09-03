@@ -36,6 +36,11 @@ import {
   WORKFLOW_CHECKPOINT_SCHEMA,
   WORKFLOW_CHECKPOINT_STAGES,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
+import {
+  deriveSpecReservationOperationIdentity,
+  deriveWorkflowOperationIdentity,
+  WORKFLOW_OPERATION_IDENTITY_SCHEMA,
+} from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
 const node = (issueId, blockers = []) => ({
   issueId,
@@ -167,6 +172,23 @@ const checkpointIdentityV2 = (overrides = {}) => ({
   ...overrides,
 });
 
+const currentCheckpointIdentity = (overrides = {}) => {
+  const identity = checkpointIdentityV2({ profileVersion: "v2", ...overrides });
+  const operationIdentity = deriveWorkflowOperationIdentity({
+    repositoryId: identity.repositoryId,
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.bindings.approvedScopeIdentity,
+    producer: identity.producerCommand,
+    stage: identity.producerCommand === "to-spec" ? "publication" : "decomposition",
+    issueId: null,
+  });
+  return {
+    ...identity,
+    operationId: operationIdentity.key,
+    bindings: { ...identity.bindings, operationIdentity },
+  };
+};
+
 const writeLegacyCheckpoint = ({ gitCommonDir, identity, progress = [] }) => {
   const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
   const scopeKey = `sha256:${digest({
@@ -186,6 +208,166 @@ const writeLegacyCheckpoint = ({ gitCommonDir, identity, progress = [] }) => {
   writeFileSync(path, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
   return path;
 };
+
+const writeStoredCurrentCheckpoint = ({ gitCommonDir, identity, progress = [] }) => {
+  const canonicalize = (value) => (Array.isArray(value)
+    ? value.map(canonicalize)
+    : value !== null && typeof value === "object"
+      ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalize(value[key])]))
+      : value);
+  const digest = (value) => createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex");
+  const scopeKey = `sha256:${digest({
+    repositoryId: identity.repositoryId,
+    specId: identity.specId,
+    producerCommand: identity.producerCommand,
+    operationId: identity.operationId,
+  })}`;
+  const transactionsRoot = join(gitCommonDir, "matt-workflow-control", "workflow-checkpoints");
+  const path = join(transactionsRoot, `${scopeKey.slice("sha256:".length)}.json`);
+  const transaction = {
+    schema: WORKFLOW_CHECKPOINT_SCHEMA,
+    scopeKey,
+    transactionId: `sha256:${digest(identity)}`,
+    identity,
+    progress,
+  };
+  mkdirSync(transactionsRoot, { recursive: true });
+  writeFileSync(path, `${JSON.stringify(transaction, null, 2)}\n`, "utf8");
+  return path;
+};
+
+test("operation identity is deterministic and isolates different Spec, Issue, approved revision, stage, and repository", () => {
+  const input = {
+    repositoryId: "github:ron03wlb/skills",
+    specId: "43",
+    approvedPublicationIdentity: `sha256:${"1".repeat(64)}`,
+    producer: "execute-issue",
+    stage: "implementation",
+    issueId: "45",
+  };
+  const first = deriveWorkflowOperationIdentity(input);
+  const retry = deriveWorkflowOperationIdentity({ ...input });
+
+  assert.equal(first.schema, WORKFLOW_OPERATION_IDENTITY_SCHEMA);
+  assert.match(first.key, /^workflow-op-v1-[a-f0-9]{64}$/u);
+  assert.deepEqual(retry, first);
+  for (const changed of [
+    { specId: "44" },
+    { issueId: "46" },
+    { approvedPublicationIdentity: `sha256:${"2".repeat(64)}` },
+    { producer: "close-issue", stage: "closeout" },
+    { repositoryId: "github:ron03wlb/other" },
+  ]) {
+    assert.notEqual(deriveWorkflowOperationIdentity({ ...input, ...changed }).key, first.key);
+  }
+  assert.throws(
+    () => deriveWorkflowOperationIdentity({ ...input, correlationId: "caller-defined" }),
+    /unknown field correlationId/u,
+  );
+  assert.throws(
+    () => deriveWorkflowOperationIdentity({ ...input, issueId: null }),
+    /issueId is required/u,
+  );
+});
+
+test("primary reservation operation identity uses only the immutable proposed-Spec identity before tracker read-back", () => {
+  const reservation = deriveSpecReservationOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    proposedSpecIdentity: `sha256:${"3".repeat(64)}`,
+  });
+  const retry = deriveSpecReservationOperationIdentity({
+    proposedSpecIdentity: `sha256:${"3".repeat(64)}`,
+    repositoryId: "github:ron03wlb/skills",
+  });
+
+  assert.deepEqual(retry, reservation);
+  assert.equal(reservation.specId, null);
+  assert.equal(reservation.producer, "to-spec");
+  assert.equal(reservation.stage, "reservation");
+  assert.equal(reservation.approvedPublicationIdentity, `sha256:${"3".repeat(64)}`);
+  assert.notEqual(
+    deriveSpecReservationOperationIdentity({
+      repositoryId: "github:ron03wlb/skills",
+      proposedSpecIdentity: `sha256:${"4".repeat(64)}`,
+    }).key,
+    reservation.key,
+  );
+});
+
+test("checkpoint receipt owner attaches duplicate current operations and rejects caller-defined or mismatched identity", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-operation-receipt-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const identity = currentCheckpointIdentity({
+      bindings: {
+        approvedScopeIdentity: `sha256:${"5".repeat(64)}`,
+        classification: "SINGLE",
+        planningSeal: "c".repeat(40),
+      },
+    });
+    const created = store.createCheckpoint(identity);
+
+    assert.deepEqual(store.createCheckpoint(identity), created);
+    assert.equal(created.identity.operationId, identity.bindings.operationIdentity.key);
+    assert.throws(
+      () => store.createCheckpoint(checkpointIdentityV2({
+        specId: "99",
+        profileVersion: "v2",
+        bindings: {
+          approvedScopeIdentity: `sha256:${"6".repeat(64)}`,
+          classification: "SINGLE",
+          planningSeal: "d".repeat(40),
+        },
+      })),
+      (error) => error.code === "WORKFLOW_OPERATION_IDENTITY_REQUIRED",
+    );
+    const mismatched = currentCheckpointIdentity({
+      specId: "100",
+      bindings: {
+        approvedScopeIdentity: `sha256:${"7".repeat(64)}`,
+        classification: "SINGLE",
+        planningSeal: "e".repeat(40),
+      },
+    });
+    mismatched.bindings.operationIdentity = identity.bindings.operationIdentity;
+    assert.throws(
+      () => store.createCheckpoint(mismatched),
+      /workflow operation identity (?:key|specId|approvedPublicationIdentity) mismatch|does not match/iu,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("operation identity enforcement preserves stored current and frozen profile-v1 resume evidence", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("workflow-operation-compatibility-");
+  try {
+    const store = createWorkflowControlStore({ gitCommonDir });
+    const storedCurrent = checkpointIdentityV2({
+      operationId: "pre-identity-v2-operation",
+      profileVersion: "v2",
+      bindings: {
+        approvedScopeIdentity: `sha256:${"8".repeat(64)}`,
+        classification: "SINGLE",
+        planningSeal: "f".repeat(40),
+      },
+    });
+    writeStoredCurrentCheckpoint({ gitCommonDir, identity: storedCurrent });
+
+    assert.equal(store.readCheckpoint(storedCurrent).state, "INCOMPLETE");
+    assert.equal(store.createCheckpoint(storedCurrent).identity.operationId, "pre-identity-v2-operation");
+    assert.equal(store.advanceCheckpoint({
+      identity: storedCurrent,
+      stage: "planning_seal.read_back",
+      receipt: { planningSeal: "f".repeat(40), state: "reused" },
+    }).nextStage, "publication.read_back");
+
+    const frozenProfile = checkpointIdentityV2({ specId: "32", operationId: "frozen-profile-v1" });
+    assert.equal(store.createCheckpoint(frozenProfile).nextStage, "plan.written");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
   const producerCommand = classification === "SINGLE" ? "to-spec" : "to-tickets";
@@ -565,9 +747,7 @@ test("workflow checkpoint producer profiles create only supported current transa
         planningSeal: "c9c9aafef8c0a59eb8535fdfe12640b51a947448",
       },
     });
-    const currentToSpec = checkpointIdentityV2({
-      operationId: "revision:2",
-      profileVersion: "v2",
+    const currentToSpec = currentCheckpointIdentity({
       baseline: "d".repeat(40),
       bindings: {
         approvedScopeIdentity: `sha256:${"3".repeat(64)}`,
@@ -575,10 +755,8 @@ test("workflow checkpoint producer profiles create only supported current transa
         planningSeal: "d".repeat(40),
       },
     });
-    const currentToTickets = checkpointIdentityV2({
+    const currentToTickets = currentCheckpointIdentity({
       producerCommand: "to-tickets",
-      operationId: `decomposition:sha256:${"4".repeat(64)}`,
-      profileVersion: "v2",
       baseline: "e".repeat(40),
       bindings: {
         approvedScopeIdentity: `sha256:${"4".repeat(64)}`,
@@ -632,12 +810,14 @@ test("workflow checkpoint producer profiles create only supported current transa
     assert.deepEqual(Object.keys(currentSpecCheckpoint.identity.bindings), [
       "approvedScopeIdentity",
       "classification",
+      "operationIdentity",
       "planningSeal",
     ]);
     assert.equal(currentTicketsCheckpoint.nextStage, "decomposition.read_back");
     assert.deepEqual(Object.keys(currentTicketsCheckpoint.identity.bindings), [
       "approvedScopeIdentity",
       "classification",
+      "operationIdentity",
       "planningSeal",
       "upstream",
     ]);
