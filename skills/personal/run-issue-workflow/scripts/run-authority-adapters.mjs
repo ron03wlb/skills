@@ -1,5 +1,6 @@
 import { RUN_READY_FACT_SCHEMA } from "./run-core.mjs";
 import { isExactStaleOwnerProof } from "./run-stale-proof.mjs";
+import { deriveWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -19,6 +20,7 @@ const provesInactiveWriter = ({ proof, owner, runId, health }) => health === "IN
 export function createRunAuthorityAdapters({ sources, store, tasks }) {
   if (!isRecord(sources)) throw new TypeError("Run authority owning sources are required");
   requireMethod(sources.tracker, "read", "Tracker");
+  requireMethod(sources.repository, "readIdentity", "Repository identity");
   requireMethod(sources.reconciliation, "read", "Reconciliation");
   requireMethod(sources.target, "read", "Target");
   requireMethod(sources.checkpoint, "read", "Checkpoint");
@@ -109,6 +111,12 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
   const handoff = {
     async read({ request, tracker: trackerSnapshot, current }) {
       const base = current.runReadyAuthority;
+      const repositoryId = await sources.repository.readIdentity({
+        request,
+        tracker: trackerSnapshot,
+        current,
+        authority: base.authority,
+      });
       const checkpoint = await sources.checkpoint.read({
         request,
         tracker: trackerSnapshot,
@@ -122,9 +130,20 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         authority: base.authority,
         checkpoint,
       });
+      const operationIdentity = checkpoint.profileVersion === "v2"
+        ? deriveWorkflowOperationIdentity({
+          repositoryId,
+          specId: base.authority.specId,
+          approvedPublicationIdentity: base.authority.approvedScopeHash,
+          producer: "run-issue-workflow",
+          stage: "run",
+          issueId: null,
+        })
+        : null;
       return {
         ...base,
         schema: RUN_READY_FACT_SCHEMA,
+        operationIdentity,
         targetState: current.authorityReadBack.target.state,
         targetOwnership: current.authorityReadBack.target.ownership ?? base.targetOwnership,
         checkpoint,

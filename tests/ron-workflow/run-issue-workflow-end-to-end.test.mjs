@@ -6,9 +6,11 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
+import { createRunAuthorityAdapters } from "../../skills/personal/run-issue-workflow/scripts/run-authority-adapters.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createWorkflowRuntime as createWorkflowRuntimeSource } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
+import { deriveWorkflowOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-runtime-"));
@@ -110,6 +112,7 @@ const createWorkflowRuntime = (options) => {
   return createWorkflowRuntimeSource({
     ...runtimeOptions,
     authoritySources: {
+      repository: { async readIdentity() { return "github:ron03wlb/skills"; } },
       tracker,
       selector,
       reconciliation: { read: reconcile },
@@ -178,6 +181,12 @@ test("runtime composition builds the owning-source handoff adapter", async () =>
   };
   const current = singleRunCurrent({ journal: [], model });
   const authoritySources = {
+    repository: {
+      async readIdentity() {
+        reads.push("repository");
+        return "github:ron03wlb/skills";
+      },
+    },
     tracker: {
       async read() {
         reads.push("tracker");
@@ -236,11 +245,58 @@ test("runtime composition builds the owning-source handoff adapter", async () =>
     assert.equal(result.status.run.state, "BLOCKED");
     assert.equal(result.status.diagnoses[0].reasonCode, "target_dirty_without_owner");
     assert.equal(result.status.runReadyHandoff.state, "UNKNOWN");
-    assert.deepEqual(reads.slice(0, 5), ["tracker", "reconciliation", "target", "checkpoint", "handoff"]);
+    assert.deepEqual(
+      reads.slice(0, 6),
+      ["tracker", "reconciliation", "target", "repository", "checkpoint", "handoff"],
+    );
     assert.equal(reads.filter((name) => name === "checkpoint").length, 1);
     assert.equal(reads.filter((name) => name === "handoff").length, 1);
     assert.equal(panelOpens, 0);
     assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Run receipt owner derives one operation identity from the immediate producer receipt", async () => {
+  const { root, store } = createStoreFixture();
+  const current = singleRunCurrent({
+    journal: [],
+    model: {
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "NONE",
+      candidateReachable: false,
+      worktreeState: "ABSENT",
+    },
+  });
+  const expected = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  });
+  const sources = {
+    repository: { async readIdentity() { return "github:ron03wlb/skills"; } },
+    tracker: { async read() { return {}; } },
+    reconciliation: { async read() { return current; } },
+    target: { async read() { return { state: "CLEAN", ownership: "NONE" }; } },
+    checkpoint: {
+      async read() { return { ...current.runReadyHandoff.checkpoint, profileVersion: "v2" }; },
+    },
+    handoff: { async read() { return current.runReadyHandoff.handoff; } },
+    writer: { async readHealth() { throw new Error("writer is absent"); } },
+  };
+
+  try {
+    const adapters = createRunAuthorityAdapters({ sources, store, tasks: {} });
+    const reconciled = await adapters.reconcile({ request: { specId: "17" }, tracker: {}, journal: [] });
+    const facts = await adapters.handoff.read({ request: { specId: "17" }, tracker: {}, current: reconciled });
+
+    assert.deepEqual(facts.operationIdentity, expected);
+    assert.notEqual(facts.operationIdentity.key, identity.runId, "caller correlation must not define Run authority");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -548,11 +604,26 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   let liveTargetHead = proposedBaseline;
   let targetReconfirmed = false;
   let activeToSpecOperation = null;
-  const toSpecOperationFor = (baseline) => ({
+  const bindCheckpointOperation = (operation) => {
+    const operationIdentity = deriveWorkflowOperationIdentity({
+      repositoryId: operation.repositoryId,
+      specId: operation.specId,
+      approvedPublicationIdentity: operation.bindings.approvedScopeIdentity,
+      producer: operation.producerCommand,
+      stage: operation.producerCommand === "to-spec" ? "publication" : "decomposition",
+      issueId: null,
+    });
+    return {
+      ...operation,
+      operationId: operationIdentity.key,
+      bindings: { ...operation.bindings, operationIdentity },
+    };
+  };
+  const toSpecOperationFor = (baseline) => bindCheckpointOperation({
     repositoryId: "github:ron03wlb/skills",
     specId: identity.specId,
     producerCommand: "to-spec",
-    operationId: "publication:lane-17",
+    operationId: "replaced-by-owner-derived-identity",
     profileVersion: "v2",
     target: identity.target,
     baseline,
@@ -562,11 +633,11 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
       planningSeal: selectedPlanningSeal,
     },
   });
-  const toTicketsOperation = {
+  const toTicketsOperation = bindCheckpointOperation({
     repositoryId: "github:ron03wlb/skills",
     specId: multiIdentity.specId,
     producerCommand: "to-tickets",
-    operationId: "decomposition:lane-12",
+    operationId: "replaced-by-owner-derived-identity",
     profileVersion: "v2",
     target: multiIdentity.target,
     baseline: "9".repeat(40),
@@ -580,7 +651,23 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
         trackerIdentity: "issue:12",
       },
     },
-  };
+  });
+  const singleRunOperationKey = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  }).key;
+  const multiRunOperationKey = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: multiIdentity.specId,
+    approvedPublicationIdentity: multiIdentity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  }).key;
   const runReadyHandoffFromProducer = ({ runIdentity, operation }) => {
     const transaction = producerStore.readCheckpoint(operation);
     const receipts = Object.fromEntries(transaction.progress.map(({ stage, receipt }) => [stage, receipt]));
@@ -795,7 +882,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
         return {
           state: "SETTLED",
           closeRequest: closeModel.closeAccepted
-            ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+            ? { state: "ACCEPTED", runId: singleRunOperationKey, issueId: "17" }
             : null,
         };
       },
@@ -935,6 +1022,16 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     assert.equal(completedDecomposition.state, "COMPLETED");
     assert.deepEqual(producerStore.readCheckpoint(toTicketsOperation), completedDecomposition, "repair must not mutate the other lane");
     assert.notEqual(stoppedSpec.scopeKey, initialDecomposition.scopeKey, "producer operations remain isolated on one target");
+    assert.equal(
+      closeResult.journal.find(({ type }) => type === "grant.recorded").runIdentity.runId,
+      singleRunOperationKey,
+      "fresh Single Run must bind the owner-derived operation identity",
+    );
+    assert.equal(
+      executionResult.journal.find(({ type }) => type === "grant.recorded").runIdentity.runId,
+      multiRunOperationKey,
+      "different Spec authority must bind a different Run operation identity",
+    );
     assert.ok(producerHandoffReads.SINGLE > 0, "the Single Run must consume its producer through the concrete authority adapter");
     assert.ok(producerHandoffReads.MULTI > 0, "the Multi Run must consume its producer through the concrete authority adapter");
     assert.equal(closeStore.readTargetMutationWriterLock(identity.target), null);

@@ -72,6 +72,21 @@ const identityMismatch = (expected, actual) => (
   RUN_IDENTITY_KEYS.find((key) => expected?.[key] !== actual?.[key]) ?? null
 );
 
+const bindFreshRunOperation = (current, operationIdentity) => {
+  if (!isText(operationIdentity?.key)) throw new TypeError("Run operation identity is malformed");
+  const runIdentity = { ...current.runIdentity, runId: operationIdentity.key };
+  return {
+    ...current,
+    operationIdentity,
+    runIdentity,
+    grant: current.grant ? { ...current.grant, runIdentity } : current.grant,
+    facts: {
+      ...current.facts,
+      run: { ...current.facts.run, runId: operationIdentity.key },
+    },
+  };
+};
+
 const initialTrackerUnavailable = (request, attempts) => ({
   schema: "dag-run-status:v1",
   run: {
@@ -627,7 +642,7 @@ export function createCoordinator({
     }
   };
 
-  const waitForTargetWriter = async ({ action, current, request, status, writer }) => {
+  const waitForTargetWriter = async ({ action, current, operationIdentity, request, status, writer }) => {
     const events = store.readEvents(current.runIdentity.runId);
     let recoveryStatus = status;
     const unsettled = events.findLast((event) => event.type === "target-writer-wait.started"
@@ -732,6 +747,7 @@ export function createCoordinator({
           journal: store.readEvents(current.runIdentity.runId),
           tasks,
         });
+        if (operationIdentity) refreshed = bindFreshRunOperation(refreshed, operationIdentity);
         recoveryStatus = writer.rebuildStatus(refreshed.facts);
         const refreshedEvidence = createTargetWriterWaitEvidence({
           runIdentity: refreshed.runIdentity,
@@ -876,6 +892,7 @@ export function createCoordinator({
         }
       }
       let runIdentity;
+      let runOperationIdentity;
       let writer;
       let grantRecorded = false;
       let lastStatus = null;
@@ -910,12 +927,13 @@ export function createCoordinator({
           const trackerResult = await readTracker(selectedRequest);
           if (!trackerResult.available) return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
           const journal = runIdentity ? store.readEvents(runIdentity.runId) : [];
-          const current = await reconcile({
+          let current = await reconcile({
             request: selectedRequest,
             tracker: trackerResult.snapshot,
             journal,
             tasks,
           });
+          if (runOperationIdentity) current = bindFreshRunOperation(current, runOperationIdentity);
           if (current.runIdentity?.specId !== selectedRequest.specId) {
             return preflightConflict(current, {
               reasonCode: "spec_selection_conflict",
@@ -962,6 +980,14 @@ export function createCoordinator({
               }
             }
             if (runReadyHandoff.state !== "READY") return runReadyStop(current, runReadyHandoff);
+            const selectedGrant = selectedRequest.runIdentity?.runId
+              ? store.readEvents(selectedRequest.runIdentity.runId)
+                .findLast(({ type }) => type === "grant.recorded")
+              : null;
+            if (runReadyFacts.operationIdentity && !selectedGrant) {
+              runOperationIdentity = runReadyFacts.operationIdentity;
+              current = bindFreshRunOperation(current, runReadyFacts.operationIdentity);
+            }
             runIdentity = current.runIdentity;
             const selectedMismatch = selectedRequest.runIdentity
               ? identityMismatch(selectedRequest.runIdentity, runIdentity)
@@ -1077,6 +1103,7 @@ export function createCoordinator({
               const outcome = await waitForTargetWriter({
                 action,
                 current,
+                operationIdentity: runOperationIdentity,
                 request: selectedRequest,
                 status: lastStatus,
                 writer,
