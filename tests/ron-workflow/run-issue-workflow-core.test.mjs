@@ -1203,6 +1203,121 @@ test("target mutation writer observation distinguishes absence, match, change, a
   }
 });
 
+test("repository close lease serializes different targets while different repositories stay independent", () => {
+  const repositoryA = createGitCommonDirFixture("repository-close-a-");
+  const repositoryB = createGitCommonDirFixture("repository-close-b-");
+  const ownerStore = createRunStore({
+    gitCommonDir: repositoryA.gitCommonDir,
+    coordinatorInstanceId: "repository-close-owner",
+  });
+  const contenderStore = createRunStore({
+    gitCommonDir: repositoryA.gitCommonDir,
+    coordinatorInstanceId: "repository-close-contender",
+  });
+  const independentStore = createRunStore({
+    gitCommonDir: repositoryB.gitCommonDir,
+    coordinatorInstanceId: "repository-close-independent",
+  });
+
+  try {
+    const owner = ownerStore.acquireRepositoryCloseLease({ operationId: "close-44" });
+    assert.equal(owner.assertCurrent(), true);
+    assert.throws(
+      () => contenderStore.acquireRepositoryCloseLease({ operationId: "close-46" }),
+      /REPOSITORY_CLOSE_LEASE_LOCKED/u,
+    );
+
+    const independent = independentStore.acquireRepositoryCloseLease({ operationId: "close-47" });
+    assert.equal(independent.assertCurrent(), true);
+    independent.release();
+
+    owner.release();
+    const successor = contenderStore.acquireRepositoryCloseLease({ operationId: "close-46" });
+    assert.equal(successor.assertCurrent(), true);
+    successor.release();
+  } finally {
+    rmSync(repositoryA.root, { recursive: true, force: true });
+    rmSync(repositoryB.root, { recursive: true, force: true });
+  }
+});
+
+test("repository close lease observation distinguishes owner changes from unknown state", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("repository-close-observation-");
+  const store = createRunStore({
+    gitCommonDir,
+    coordinatorInstanceId: "repository-close-observer",
+  });
+
+  try {
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    const lease = store.acquireRepositoryCloseLease({ operationId: "close-44" });
+    const present = store.observeRepositoryCloseLease();
+    assert.equal(present.state, "PRESENT");
+    assert.equal(present.owner.operationId, "close-44");
+    assert.deepEqual(store.observeRepositoryCloseLease({ expectedOwner: present.owner }), {
+      state: "MATCH",
+      owner: present.owner,
+    });
+    assert.deepEqual(store.observeRepositoryCloseLease({
+      expectedOwner: { ...present.owner, generation: "different-generation" },
+    }), { state: "CHANGED", owner: present.owner });
+    lease.release();
+
+    const lock = join(gitCommonDir, "matt-workflow-control", "repository-close.lock");
+    mkdirSync(lock);
+    writeFileSync(join(lock, "owner.json"), "{malformed", "utf8");
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "UNKNOWN", owner: null });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("repository close lease recovery requires exact stale-owner proof and fences the old handle", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("repository-close-recovery-");
+  const oldStore = createRunStore({
+    gitCommonDir,
+    coordinatorInstanceId: "repository-close-old",
+  });
+  const newStore = createRunStore({
+    gitCommonDir,
+    coordinatorInstanceId: "repository-close-new",
+  });
+
+  try {
+    const oldLease = oldStore.acquireRepositoryCloseLease({ operationId: "close-44" });
+    const oldOwner = oldStore.observeRepositoryCloseLease().owner;
+    const staleProof = {
+      previousCoordinatorInstanceId: oldOwner.coordinatorInstanceId,
+      previousGeneration: oldOwner.generation,
+      coordinatorState: "INACTIVE",
+      reconciled: true,
+      evidence: ["Task read-back proves the previous closeout owner is inactive."],
+      abandonedOperationIds: [],
+    };
+
+    assert.throws(() => newStore.reclaimRepositoryCloseLease({
+      operationId: "close-44",
+      staleProof: { ...staleProof, previousGeneration: "wrong-generation" },
+    }), /REPOSITORY_CLOSE_LEASE_STALE_PROOF_MISMATCH/u);
+    assert.deepEqual(oldStore.observeRepositoryCloseLease({ expectedOwner: oldOwner }), {
+      state: "MATCH",
+      owner: oldOwner,
+    });
+
+    const recovered = newStore.reclaimRepositoryCloseLease({
+      operationId: "close-44",
+      staleProof,
+    });
+    assert.equal(recovered.assertCurrent(), true);
+    assert.throws(() => oldLease.assertCurrent(), /LOCK_LEASE_FENCED/u);
+    assert.throws(() => oldLease.release(), /LOCK_LEASE_FENCED/u);
+    recovered.release();
+    assert.deepEqual(newStore.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("two planning lanes isolate work, revalidate target movement, and serialize Planning Seal writes", () => {
   const parent = mkdtempSync(join(tmpdir(), "planning-lanes-"));
   const targetCheckout = join(parent, "target");

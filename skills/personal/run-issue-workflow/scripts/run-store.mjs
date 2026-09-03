@@ -126,6 +126,14 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   const cleanupLock = join(controlRoot, "cleanup.lock");
   // Keep the legacy directory so existing close-writer leases remain visible to every generic caller.
   const targetMutationWritersRoot = join(controlRoot, "close-writers");
+  const repositoryCloseLeaseLock = join(controlRoot, "repository-close.lock");
+  const repositoryCloseLeasePaths = {
+    lock: repositoryCloseLeaseLock,
+    owner: join(repositoryCloseLeaseLock, "owner.json"),
+    reclaimLock: join(controlRoot, "repository-close-reclaim.lock"),
+    operationRoot: repositoryCloseLeaseLock,
+    operationPrefix: "operation",
+  };
 
   const writeLockOwner = (ownerPath, owner) => {
     const descriptor = openSync(ownerPath, "wx");
@@ -824,6 +832,120 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return writerHandle(runId, paths, generation);
   };
 
+  const repositoryCloseLeaseHandle = (operationId, generation) => {
+    let active = true;
+    return {
+      operationId,
+      assertCurrent() {
+        if (!active) throw new Error("REPOSITORY_CLOSE_LEASE_RELEASED");
+        return withLease({
+          paths: repositoryCloseLeasePaths,
+          kind: "repository-close",
+          runId: operationId,
+          generation,
+        }, () => true);
+      },
+      release() {
+        if (!active) throw new Error("REPOSITORY_CLOSE_LEASE_RELEASED");
+        return withLease({
+          paths: repositoryCloseLeasePaths,
+          kind: "repository-close",
+          runId: operationId,
+          generation,
+        }, () => {
+          retireLease({
+            paths: repositoryCloseLeasePaths,
+            kind: "repository-close",
+            runId: operationId,
+            generation,
+          });
+          active = false;
+        });
+      },
+    };
+  };
+
+  const acquireRepositoryCloseLease = ({ operationId }) => {
+    assertSafeRunId(operationId);
+    const generation = randomUUID();
+    installLease({
+      paths: repositoryCloseLeasePaths,
+      owner: {
+        schema: LOCK_OWNER_SCHEMA,
+        kind: "repository-close",
+        runId: operationId,
+        coordinatorInstanceId,
+        generation,
+      },
+      lockedError: "REPOSITORY_CLOSE_LEASE_LOCKED",
+      preflight: () => (gateStateExists(repositoryCloseLeasePaths.reclaimLock)
+        ? "REPOSITORY_CLOSE_LEASE_RECLAIM_IN_PROGRESS" : null),
+      postflight: () => (gateStateExists(repositoryCloseLeasePaths.reclaimLock)
+        ? "REPOSITORY_CLOSE_LEASE_RECLAIM_IN_PROGRESS" : null),
+    });
+    return repositoryCloseLeaseHandle(operationId, generation);
+  };
+
+  const readRepositoryCloseLeaseLock = () => {
+    if (!existsSync(repositoryCloseLeasePaths.lock)) return null;
+    try {
+      const owner = readLockOwner(repositoryCloseLeasePaths.owner, "repository-close");
+      return {
+        ...owner,
+        operationId: owner.runId,
+        activeOperationIds: operationLocks(repositoryCloseLeasePaths, owner.generation)
+          .map((path) => basename(path)).sort(),
+      };
+    } catch {
+      return { schema: LOCK_OWNER_SCHEMA, kind: "repository-close", state: "UNKNOWN" };
+    }
+  };
+
+  const observeRepositoryCloseLease = ({ expectedOwner } = {}) => {
+    const normalizeOwner = (lock) => (
+      isText(lock?.operationId) && lock.operationId !== "UNKNOWN"
+        && isText(lock?.coordinatorInstanceId) && isText(lock?.generation)
+        ? {
+            operationId: lock.operationId,
+            coordinatorInstanceId: lock.coordinatorInstanceId,
+            generation: lock.generation,
+          }
+        : null
+    );
+    if (expectedOwner !== undefined && normalizeOwner(expectedOwner) === null) {
+      throw new TypeError("Expected repository close lease owner is malformed");
+    }
+    const lock = readRepositoryCloseLeaseLock();
+    if (lock === null) return { state: "ABSENT", owner: null };
+    const owner = normalizeOwner(lock);
+    if (owner === null) return { state: "UNKNOWN", owner: null };
+    if (expectedOwner === undefined) return { state: "PRESENT", owner };
+    const same = owner.operationId === expectedOwner.operationId
+      && owner.coordinatorInstanceId === expectedOwner.coordinatorInstanceId
+      && owner.generation === expectedOwner.generation;
+    return { state: same ? "MATCH" : "CHANGED", owner };
+  };
+
+  const reclaimRepositoryCloseLease = ({
+    operationId,
+    staleProof,
+    gateStaleProof,
+    gateClaimStaleProof,
+  }) => {
+    assertSafeRunId(operationId);
+    const generation = reclaimLease({
+      paths: repositoryCloseLeasePaths,
+      kind: "repository-close",
+      runId: operationId,
+      staleProof,
+      gateStaleProof,
+      gateClaimStaleProof,
+      staleMismatchError: "REPOSITORY_CLOSE_LEASE_STALE_PROOF_MISMATCH",
+      operationError: "REPOSITORY_CLOSE_LEASE_OPERATION_ACTIVE_OR_UNPROVEN",
+    });
+    return repositoryCloseLeaseHandle(operationId, generation);
+  };
+
   const acquireCloseWriter = ({ target, runId }) => {
     assertSafeRunId(runId);
     const paths = targetMutationPathsFor(target);
@@ -1016,6 +1138,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     reclaimWriter,
     readWriterLock,
     readWriterReclaimLock,
+    acquireRepositoryCloseLease,
+    reclaimRepositoryCloseLease,
+    observeRepositoryCloseLease,
     acquireTargetMutationWriter,
     reclaimTargetMutationWriter,
     readTargetMutationWriter,
