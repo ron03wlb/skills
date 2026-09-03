@@ -1,5 +1,9 @@
 import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
-import { reduceRunReadyHandoff } from "./run-core.mjs";
+import {
+  createRecoverableOperatorPacket,
+  REASON_CODES,
+  reduceRunReadyHandoff,
+} from "./run-core.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
@@ -173,6 +177,7 @@ const diagnosedStop = (status, {
   noAutomaticTransition,
   affectedNodes,
   resumePredicates,
+  operatorPacket,
 }) => {
   const allNodes = status.nodes.map(({ issueId }) => issueId);
   return {
@@ -198,6 +203,7 @@ const diagnosedStop = (status, {
       unaffectedNodes: allNodes.filter((issueId) => !affectedNodes.includes(issueId)),
       nextOwner: "human",
       resumePredicates,
+      ...(operatorPacket === undefined ? {} : { operatorPacket }),
     }],
   };
 };
@@ -278,30 +284,49 @@ const panelUnavailable = (status) => diagnosedStop(status, {
   resumePredicates: ["panel_can_open"],
 });
 
-const authorityDrift = ({ status, runIdentity, current, recordedGrant }) => {
+const authorityDrift = ({ status, runIdentity, current, recordedGrant, afterWriterWait = false }) => {
+  const recoverablePacket = (evidence, smallestHumanAction) => afterWriterWait
+    ? createRecoverableOperatorPacket({
+      owningSource: "Run identity and DAG Run Grant read-back",
+      observedEvidence: evidence,
+      smallestHumanAction,
+      run: status.run,
+      nodes: status.nodes,
+    })
+    : undefined;
   const mismatch = identityMismatch(runIdentity, current.runIdentity)
     ?? identityMismatch(runIdentity, current.grant?.runIdentity);
   if (mismatch) {
+    const evidence = [`Run identity changed at ${mismatch} during reconciliation.`];
     return diagnosedStop(status, {
       reasonCode: "grant_identity_conflict",
       limitationClass: "contract-blocker",
-      evidence: [`Run identity changed at ${mismatch} during reconciliation.`],
+      evidence,
       noAutomaticTransition: "A live Run cannot change its bound authority.",
       affectedNodes: status.nodes.map(({ issueId }) => issueId),
       resumePredicates: ["grant_and_reconciled_run_identity_match"],
+      operatorPacket: recoverablePacket(
+        evidence,
+        "Restore one exact Run identity and Grant read-back without changing the preserved candidate or Issue stages.",
+      ),
     });
   }
   const grantMaxParallel = current.grant?.maxParallel ?? DEFAULT_MAX_PARALLEL;
   if (recordedGrant && recordedGrant.maxParallel !== grantMaxParallel) {
+    const evidence = [
+      `Run ${runIdentity.runId} Grant max_parallel is ${recordedGrant.maxParallel}; reconciliation proposed ${grantMaxParallel}.`,
+    ];
     return diagnosedStop(status, {
       reasonCode: "grant_identity_conflict",
       limitationClass: "contract-blocker",
-      evidence: [
-        `Run ${runIdentity.runId} Grant max_parallel is ${recordedGrant.maxParallel}; reconciliation proposed ${grantMaxParallel}.`,
-      ],
+      evidence,
       noAutomaticTransition: "Grant renewal cannot change max_parallel without a valid revisioned setting.",
       affectedNodes: status.nodes.map(({ issueId }) => issueId),
       resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
+      operatorPacket: recoverablePacket(
+        evidence,
+        "Restore the journaled max_parallel or publish its authorized revision before retrying.",
+      ),
     });
   }
   return null;
@@ -592,18 +617,46 @@ export function createCoordinator({
 
   const waitForTargetWriter = async ({ action, current, status, writer }) => {
     const events = store.readEvents(current.runIdentity.runId);
+    let recoveryStatus = status;
     const unsettled = events.findLast((event) => event.type === "target-writer-wait.started"
       && !events.some((candidate) => (
         candidate.type === "target-writer-wait.settled" && candidate.waitSequence === event.sequence
       )));
-    const stop = (reasonCode, evidence, resumePredicates) => ({ stopped: diagnosedStop(status, {
-      reasonCode,
-      limitationClass: "instance-blocker",
-      evidence,
-      noAutomaticTransition: "Target closeout cannot continue from stale or exceptional writer-wait evidence.",
-      affectedNodes: [action.issueId],
-      resumePredicates,
-    }) });
+    const recovery = {
+      [REASON_CODES.targetWriterOwnerChanged]: {
+        owningSource: "shared target-writer lock read-back",
+        smallestHumanAction: "Reconcile the current target-writer owner without releasing or replacing it.",
+      },
+      [REASON_CODES.targetWriterWaitTimeout]: {
+        owningSource: "shared target-writer lock and liveness read-back",
+        smallestHumanAction: "Wait for the healthy writer to finish, then retry the same command.",
+      },
+      [REASON_CODES.targetWriterWaitCoordinatorLost]: {
+        owningSource: "active coordinator liveness read-back",
+        smallestHumanAction: "Start one active coordinator by retrying the same command.",
+      },
+      [REASON_CODES.targetWriterWaitInterrupted]: {
+        owningSource: "append-only coordinator journal read-back",
+        smallestHumanAction: "Inspect the settled orphaned wait, then retry the same command.",
+      },
+    };
+    const stop = (reasonCode, evidence, resumePredicates) => {
+      const recoveryAction = recovery[reasonCode];
+      return { stopped: diagnosedStop(recoveryStatus, {
+        reasonCode,
+        limitationClass: "instance-blocker",
+        evidence,
+        noAutomaticTransition: "Target closeout cannot continue from stale or exceptional writer-wait evidence.",
+        affectedNodes: [action.issueId],
+        resumePredicates,
+        operatorPacket: createRecoverableOperatorPacket({
+          ...recoveryAction,
+          observedEvidence: evidence,
+          run: recoveryStatus.run,
+          nodes: recoveryStatus.nodes,
+        }),
+      }) };
+    };
     const appendSettlement = ({ started, outcome, evidence, at = now() }) => writer.append({
       type: "target-writer-wait.settled",
       at,
@@ -622,7 +675,7 @@ export function createCoordinator({
         evidence: [`Writer wait ${unsettled.sequence} was left unsettled by a prior coordinator.`],
       });
       return stop(
-        "target_writer_wait_interrupted",
+        REASON_CODES.targetWriterWaitInterrupted,
         [
           `Run ${current.runIdentity.runId} recovered unsettled writer wait ${unsettled.sequence}.`,
           "The Run, Issue completion, and target writer state remain preserved.",
@@ -655,7 +708,7 @@ export function createCoordinator({
         evidence: [`Target writer changed from ${JSON.stringify(action.owner)} to ${JSON.stringify(observation.owner)} (${observation.state}).`],
       });
       return stop(
-        "target_writer_owner_changed",
+        REASON_CODES.targetWriterOwnerChanged,
         [
           `Target ${current.runIdentity.target} writer ownership changed during wait.`,
           `Observed owning source ${JSON.stringify(observation)}.`,
@@ -667,7 +720,7 @@ export function createCoordinator({
       target: current.runIdentity.target,
       expectedOwner: action.owner,
     });
-    writer.rebuildStatus(current.facts);
+    recoveryStatus = writer.rebuildStatus(current.facts);
     let elapsedMs = 0;
     const pollMs = Math.min(1_000, action.timeoutMs);
     while (elapsedMs < action.timeoutMs) {
@@ -684,7 +737,7 @@ export function createCoordinator({
           evidence: ["The active coordinator was lost while the target writer remained owned."],
         });
         return stop(
-          "target_writer_wait_coordinator_lost",
+          REASON_CODES.targetWriterWaitCoordinatorLost,
           ["Coordinator liveness became inactive during target-writer wait."],
           ["coordinator_is_active", "retry_same_run_issue_workflow"],
         );
@@ -712,7 +765,7 @@ export function createCoordinator({
       evidence: [`The exact competing writer remained present for ${action.timeoutMs} milliseconds.`],
     });
     return stop(
-      "target_writer_wait_timeout",
+      REASON_CODES.targetWriterWaitTimeout,
       [
         `Target ${current.runIdentity.target} writer ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds.`,
         "The Run, Issue completion, and target state remain preserved.",
@@ -868,7 +921,16 @@ export function createCoordinator({
           } else {
             const recordedGrant = store.readEvents(runIdentity.runId)
               .findLast(({ type }) => type === "grant.recorded");
-            const stopped = authorityDrift({ status: lastStatus, runIdentity, current, recordedGrant });
+            const afterWriterWait = journal.some((event) => (
+              event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+            ));
+            const stopped = authorityDrift({
+              status: lastStatus,
+              runIdentity,
+              current,
+              recordedGrant,
+              afterWriterWait,
+            });
             if (stopped) return stopped;
           }
           if (!grantRecorded) {
@@ -989,6 +1051,9 @@ export function createCoordinator({
               runIdentity,
               current: refreshed,
               recordedGrant,
+              afterWriterWait: store.readEvents(runIdentity.runId).some((event) => (
+                event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+              )),
             });
             if (authorityStopped) return authorityStopped;
             const stillPresent = refreshedStatus.legalActions.some((action) => (

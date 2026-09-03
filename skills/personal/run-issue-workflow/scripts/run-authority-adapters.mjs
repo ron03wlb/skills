@@ -8,6 +8,19 @@ const requireMethod = (owner, name, label) => {
   }
 };
 
+const provesInactiveWriter = ({ proof, owner, runId, health }) => health === "INACTIVE"
+  && isRecord(proof)
+  && owner?.operationId === runId
+  && proof.previousCoordinatorInstanceId === owner.coordinatorInstanceId
+  && proof.previousGeneration === owner.generation
+  && proof.coordinatorState === "INACTIVE"
+  && proof.reconciled === true
+  && Array.isArray(proof.evidence)
+  && proof.evidence.length > 0
+  && proof.evidence.every((item) => typeof item === "string" && item.length > 0)
+  && Array.isArray(proof.abandonedOperationIds)
+  && proof.abandonedOperationIds.every((item) => typeof item === "string" && item.length > 0);
+
 export function createRunAuthorityAdapters({ sources, store, tasks }) {
   if (!isRecord(sources)) throw new TypeError("Run authority owning sources are required");
   requireMethod(sources.tracker, "read", "Tracker");
@@ -44,6 +57,10 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
     if (!isRecord(target) || !["CLEAN", "DIRTY", "UNKNOWN"].includes(target.state)) {
       throw new TypeError("Target owning source must return CLEAN, DIRTY, or UNKNOWN");
     }
+    if (target.ownership !== undefined
+      && !["NONE", "EXACT_PRODUCER", "UNOWNED", "UNKNOWN"].includes(target.ownership)) {
+      throw new TypeError("Target owning source returned an unsupported ownership state");
+    }
 
     const writerObservation = store.observeTargetMutationWriter({ target: current.runIdentity.target });
     const writerOwner = writerObservation.owner;
@@ -60,6 +77,12 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
     if (writerHealth !== null && !["HEALTHY", "INACTIVE", "UNKNOWN"].includes(writerHealth)) {
       throw new TypeError("Target-writer owning source must return HEALTHY, INACTIVE, or UNKNOWN");
     }
+    const writerReclaimable = writerObservation.state === "PRESENT" && provesInactiveWriter({
+      proof: current.closeWriterReclaimProof,
+      owner: writerOwner,
+      runId: current.runIdentity.runId,
+      health: writerHealth,
+    });
 
     const runReadyAuthority = current.runReadyAuthority ?? current.runReadyHandoff;
     if (!isRecord(runReadyAuthority?.authority)) {
@@ -82,6 +105,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
             : writerObservation.state === "UNKNOWN" ? "UNKNOWN" : "ACTIVE",
           closeWriterHealth: writerHealth,
           closeWriterOwner: writerOwner,
+          closeWriterReclaimable: writerReclaimable,
         },
       },
     };
@@ -106,8 +130,8 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
       return {
         ...base,
         schema: RUN_READY_FACT_SCHEMA,
-        targetState: base.targetState,
-        targetOwnership: base.targetOwnership,
+        targetState: current.authorityReadBack.target.state,
+        targetOwnership: current.authorityReadBack.target.ownership ?? base.targetOwnership,
         checkpoint,
         handoff: handoffReadBack,
       };

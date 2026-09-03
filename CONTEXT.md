@@ -191,7 +191,7 @@ The child state in which its reviewed candidate is reachable from the **Issue ta
 _Avoid_: Execution completion, worker completion, passing tests alone
 
 **DAG run state**:
-The run-level lifecycle value `RECONCILING`, `RUNNING`, `PAUSING`, `PAUSED`, `BLOCKED`, `STOPPING`, `STOPPED`, or `SUCCEEDED`. It describes coordinator progress and control authority without replacing any Issue's **DAG node state**.
+The run-level lifecycle value `RECONCILING`, `RUNNING`, `WAITING_FOR_TARGET_WRITER`, `PAUSING`, `PAUSED`, `BLOCKED`, `STOPPING`, `STOPPED`, or `SUCCEEDED`. It describes coordinator progress and control authority without replacing any Issue's **DAG node state**.
 _Avoid_: Aggregate child status, panel status, worker status
 
 **DAG node state**:

@@ -487,6 +487,7 @@ const diagnosis = ({
   allNodes,
   nextOwner = "human",
   resumePredicates,
+  operatorPacket,
 }) => ({
   reasonCode,
   limitationClass,
@@ -498,6 +499,25 @@ const diagnosis = ({
   unaffectedNodes: allNodes.filter((issueId) => !affectedNodes.includes(issueId)),
   nextOwner,
   resumePredicates,
+  ...(operatorPacket === undefined ? {} : { operatorPacket }),
+});
+
+export const createRecoverableOperatorPacket = ({
+  owningSource,
+  observedEvidence,
+  smallestHumanAction,
+  run,
+  nodes,
+}) => ({
+  disposition: "Recoverable blocker",
+  owningSource,
+  observedEvidence: [...observedEvidence],
+  smallestHumanAction,
+  preservedStages: {
+    run: { runId: run.runId, state: run.state },
+    issues: nodes.map(({ issueId, state }) => ({ issueId, state })),
+  },
+  retryCommand: `/run-issue-workflow ${run.specId}`,
 });
 
 const publicRun = (run, state, maxParallel = 3) => ({
@@ -663,6 +683,9 @@ export function reduceRun(input) {
   if (dependencyCycle) {
     return blockedResult(input, REASON_CODES.dependencyCycle, [`Issue ${dependencyCycle} participates in a blocker cycle.`], [dependencyCycle]);
   }
+  const parentWriterWait = (event) => input.run.classification === "MULTI"
+    && event.issueId === input.run.specId
+    && ["target-writer-wait.started", "target-writer-wait.settled"].includes(event.type);
   const outOfScopeJournalEvent = input.journal.find((event) => (
     [
       "dispatch.recorded",
@@ -672,6 +695,7 @@ export function reduceRun(input) {
       "target-writer-wait.settled",
     ].includes(event.type)
       && !seen.has(event.issueId)
+      && !parentWriterWait(event)
   ));
   if (outOfScopeJournalEvent) {
     return blockedResult(
@@ -909,6 +933,19 @@ export function reduceRun(input) {
       affectedNodes: nodes.filter(({ state }) => state !== "SUCCEEDED").map(({ issueId }) => issueId),
     });
   }
+  const releasedTargetWriterWait = input.journal.some((event) => (
+    event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+  ));
+  const postWaitPacket = (evidence, {
+    owningSource = "post-wait owning-source reconciliation",
+    smallestHumanAction = "Restore consistent current authority without changing the preserved Run or Issue stages.",
+  } = {}) => createRecoverableOperatorPacket({
+    owningSource,
+    observedEvidence: evidence,
+    smallestHumanAction,
+    run: { ...input.run, state: "BLOCKED" },
+    nodes,
+  });
   const contradictionDiagnoses = [...input.contradictions, ...derivedContradictions]
     .sort((left, right) => compareIds(left.code, right.code))
     .map((contradiction) => diagnosis({
@@ -919,6 +956,14 @@ export function reduceRun(input) {
       affectedNodes: [...contradiction.affectedNodes].sort(compareIds),
       allNodes: allNodeIds,
       resumePredicates: [`resolve_contradiction:${contradiction.code}`],
+      operatorPacket: contradiction.reasonCode === "merge_conflict"
+        ? postWaitPacket(contradiction.evidence, {
+          owningSource: "target integration result",
+          smallestHumanAction: "Resolve the exact Issue integration conflict without changing its accepted scope.",
+        })
+        : releasedTargetWriterWait
+          ? postWaitPacket(contradiction.evidence)
+        : undefined,
     }));
   const ready = nodes.filter(({ state }) => state === "READY").map(({ issueId }) => issueId);
   const retrying = nodes.filter(({ state }) => state === "RETRYING").map(({ issueId }) => issueId);
@@ -944,11 +989,21 @@ export function reduceRun(input) {
     && closeWriterOwner.operationId === input.run.closeWriterRunId
     && isText(closeWriterOwner.coordinatorInstanceId)
     && isText(closeWriterOwner.generation);
+  const targetCloseWriterReclaimable = input.run.closeWriterState === "ACTIVE"
+    && input.run.closeWriterRunId === input.run.runId
+    && input.run.closeWriterHealth === "INACTIVE"
+    && input.run.closeWriterReclaimable === true;
   const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
-    || (targetCloseWriterForeign && !targetCloseWriterHealthy);
+    || (targetCloseWriterForeign && !targetCloseWriterHealthy)
+    || (input.run.closeWriterState === "ACTIVE"
+      && input.run.closeWriterRunId === input.run.runId
+      && input.run.closeWriterHealth === "INACTIVE"
+      && !targetCloseWriterReclaimable);
   const targetCloseWriterOwned = input.run.closeWriterState === "ACTIVE"
-    && input.run.closeWriterRunId === input.run.runId;
-  const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
+    && input.run.closeWriterRunId === input.run.runId
+    && !targetCloseWriterReclaimable;
+  const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT"
+    || targetCloseWriterReclaimable;
   if (targetCloseWriterAvailable && closeable.length > 0) {
     normalActions.push({ type: "close_issue", issueId: closeable[0] });
   }
@@ -1020,48 +1075,65 @@ export function reduceRun(input) {
       affectedNodes: closeable,
       allNodes: allNodeIds,
       resumePredicates: ["prove_single_close_writer"],
+      operatorPacket: createRecoverableOperatorPacket({
+        owningSource: "shared target-writer lock and liveness read-back",
+        observedEvidence: targetCloseWriterUncertain
+          ? [`Close-writer liveness for Run ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`]
+          : [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
+        smallestHumanAction: "Restore one exact readable target-writer owner and liveness result without releasing another Run's writer.",
+        run: { ...input.run, state: "BLOCKED" },
+        nodes,
+      }),
     })]
     : [];
   const globalGateDiagnoses = [];
   if (input.run.trackerAvailable !== true) {
+    const evidence = ["Current tracker evidence is unavailable."];
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.trackerUnavailable,
       limitationClass: "unresolved-evidence",
-      evidence: ["Current tracker evidence is unavailable."],
+      evidence,
       noAutomaticTransition: "Cached tracker state cannot authorize workflow actions.",
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["tracker_read_succeeds"],
+      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (input.run.targetState === "DIRTY") {
+    const evidence = [`Target ${input.run.target} has uncommitted work.`];
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.targetDirty,
-      evidence: [`Target ${input.run.target} has uncommitted work.`],
+      evidence,
       noAutomaticTransition: "Target-wide mutation must stop while the target is dirty.",
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["target_is_clean"],
+      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (input.run.targetState !== "CLEAN") {
+    const evidence = [`Target ${input.run.target} cleanliness is uncertain.`];
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.targetStateUncertain,
       limitationClass: "unresolved-evidence",
-      evidence: [`Target ${input.run.target} cleanliness is uncertain.`],
+      evidence,
       noAutomaticTransition: "Unknown target state cannot authorize mutation.",
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["target_state_is_known"],
+      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (allSucceeded && input.run.classification === "MULTI"
     && !["OPEN", "CLOSED"].includes(input.run.parentTrackerState)) {
+    const evidence = [`Parent Issue ${input.run.specId} state is uncertain.`];
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.parentStateUncertain,
       limitationClass: "unresolved-evidence",
-      evidence: [`Parent Issue ${input.run.specId} state is uncertain.`],
+      evidence,
       noAutomaticTransition: "Parent closeout requires current tracker evidence.",
       affectedNodes: [],
       allNodes: allNodeIds,
       resumePredicates: ["parent_tracker_state_is_known"],
+      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
     }));
   }
   const hasContradiction = contradictionDiagnoses.length > 0

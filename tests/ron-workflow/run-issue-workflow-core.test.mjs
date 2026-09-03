@@ -1926,6 +1926,120 @@ test("an unsettled target-writer event projects the bounded coordinator wait sta
   assert.equal(planControl(status, "STOP", "2026-08-30T00:01:01.000Z").accepted, true);
 });
 
+test("a Multi-Issue parent writer wait stays inside the Run journal scope", () => {
+  const owner = {
+    operationId: "run-other-spec",
+    coordinatorInstanceId: "coordinator-other-spec",
+    generation: "generation-other-spec",
+  };
+  const succeeded = (issueId) => ({
+    ...node(issueId),
+    trackerState: "CLOSED",
+    completionState: "COMPLETE",
+    candidateReachable: true,
+    worktreeState: "ABSENT",
+  });
+  const input = facts([succeeded("13"), succeeded("14")]);
+  input.run = {
+    ...input.run,
+    closeWriterRunId: owner.operationId,
+    closeWriterState: "ACTIVE",
+    closeWriterHealth: "HEALTHY",
+    closeWriterOwner: owner,
+  };
+
+  const initial = reduceRun(input);
+  assert.deepEqual(initial.legalActions, [{
+    type: "wait_target_writer",
+    issueId: "12",
+    owner,
+    timeoutMs: 30_000,
+  }]);
+
+  const waiting = reduceRun({
+    ...input,
+    journal: [...input.journal, {
+      schema: "dag-run-event:v1",
+      sequence: 2,
+      type: "target-writer-wait.started",
+      at: "2026-08-30T00:01:00.000Z",
+      issueId: "12",
+      target: "features/ron",
+      owner,
+      timeoutMs: 30_000,
+    }],
+  });
+
+  assert.equal(waiting.run.state, "WAITING_FOR_TARGET_WRITER");
+  assert.equal(waiting.diagnoses.some(({ reasonCode }) => reasonCode === "journal_scope_conflict"), false);
+});
+
+test("unknown target-writer ownership exposes same-command Recoverable recovery", () => {
+  const input = facts([{
+    ...node("13"),
+    completionState: "COMPLETE",
+    worktreeState: "PRESENT",
+  }]);
+  input.run = {
+    ...input.run,
+    closeWriterRunId: "UNKNOWN",
+    closeWriterState: "UNKNOWN",
+  };
+
+  const status = reduceRun(input);
+  const diagnosis = status.diagnoses.find(({ reasonCode }) => reasonCode === "close_writer_conflict");
+
+  assert.equal(diagnosis.operatorPacket.disposition, "Recoverable blocker");
+  assert.match(diagnosis.operatorPacket.owningSource, /target-writer lock/u);
+  assert.equal(diagnosis.operatorPacket.retryCommand, "/run-issue-workflow 12");
+  assert.deepEqual(diagnosis.operatorPacket.preservedStages.issues, [{
+    issueId: "13",
+    state: "IMPLEMENTATION_COMPLETE",
+  }]);
+});
+
+test("changed target evidence after writer release exposes Recoverable recovery", () => {
+  const owner = {
+    operationId: "run-other-spec",
+    coordinatorInstanceId: "coordinator-other-spec",
+    generation: "generation-other-spec",
+  };
+  const input = facts([{
+    ...node("13"),
+    completionState: "COMPLETE",
+    worktreeState: "PRESENT",
+  }]);
+  input.run = { ...input.run, targetState: "DIRTY" };
+  input.journal = [...input.journal, {
+    schema: "dag-run-event:v1",
+    sequence: 2,
+    type: "target-writer-wait.started",
+    at: "2026-08-30T00:01:00.000Z",
+    issueId: "13",
+    target: "features/ron",
+    owner,
+    timeoutMs: 30_000,
+  }, {
+    schema: "dag-run-event:v1",
+    sequence: 3,
+    type: "target-writer-wait.settled",
+    at: "2026-08-30T00:01:01.000Z",
+    waitSequence: 2,
+    issueId: "13",
+    target: "features/ron",
+    owner,
+    outcome: "RELEASED",
+    evidence: ["The exact competing target writer is absent."],
+  }];
+
+  const status = reduceRun(input);
+  const diagnosis = status.diagnoses.find(({ reasonCode }) => reasonCode === "target_dirty");
+
+  assert.equal(diagnosis.operatorPacket.disposition, "Recoverable blocker");
+  assert.match(diagnosis.operatorPacket.owningSource, /post-wait.*reconciliation/u);
+  assert.equal(diagnosis.operatorPacket.retryCommand, "/run-issue-workflow 12");
+});
+
 test("Pause, Resume, and Stop are revisioned and idempotent with no Start control", () => {
   const running = reduceRun(facts([node("13")]));
   const pause = planControl(running, "PAUSE", "2026-08-30T00:01:00.000Z");

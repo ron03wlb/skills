@@ -2749,6 +2749,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(core, /RUN_READY_FACT_SCHEMA.*run-ready-handoff-facts:v1.*RUN_READY_RESULT_SCHEMA.*run-ready-handoff:v1.*reduceRunReadyHandoff/isu);
   assert.match(runtime, /authoritySources.*createRunAuthorityAdapters.*createCoordinator.*authorityAdapters\.handoff/isu);
   assert.match(authorityAdapters, /sources\.tracker.*sources\.reconciliation.*sources\.target.*sources\.checkpoint.*sources\.handoff.*sources\.writer.*observeTargetMutationWriter.*RUN_READY_FACT_SCHEMA/isu);
+  assert.match(authorityAdapters, /provesInactiveWriter.*closeWriterReclaimable.*targetState: current\.authorityReadBack\.target\.state.*targetOwnership: current\.authorityReadBack\.target\.ownership/isu);
   assert.match(coordinator, /handoff\.read\(\{.*tracker: trackerResult\.snapshot.*current.*reduceRunReadyHandoff\(runReadyFacts\).*planningSeal.*state !== "READY".*runReadyStop.*onSelected/isu);
   assert.match(coordinator, /\["READY", "INCOMPLETE"\]\.includes.*selected_authority_conflict.*retryCommand: null.*selectedAuthorityConflict.*field: mismatch.*observed.*expected/isu);
   assert.match(core, /targetOwnership.*EXACT_PRODUCER/isu);
@@ -2778,6 +2779,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /healthy.*target.*writer.*bounded.*`WAITING_FOR_TARGET_WRITER`.*journal.*execution slot.*release.*reacquire.*tracker.*candidate.*completion.*control revision.*Grant/isu);
   assert.match(skill, /unknown.*writer ownership.*timeout.*coordinator loss.*changed evidence.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
   assert.match(core, /WAITING_FOR_TARGET_WRITER.*wait_target_writer.*TARGET_WRITER_WAIT_TIMEOUT_MS/isu);
+  assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
   assert.match(coordinator, /target-writer-wait\.started.*target-writer-wait\.settled/isu);
   for (const outcome of ["OWNER_CHANGED", "TIMED_OUT", "CONTROL_CHANGED", "COORDINATOR_INACTIVE"]) {
     assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
@@ -2803,6 +2805,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
   assert.match(operator, /healthy.*writer.*`WAITING_FOR_TARGET_WRITER`.*bounded.*journal.*Issue execution.*release.*reacquire/isu);
   assert.match(operator, /Unknown owner.*timeout.*coordinator loss.*changed evidence.*owning source.*smallest human action.*same `\/run-issue-workflow`/isu);
+  assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
+  assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*target-writer wait starts and settlements/isu);
   assert.match(operator, /exact Run.*identity is reconciled.*retention sweep.*selected Run is protected.*Zero or ambiguous no-argument.*only previews.*cleanupPreview: true.*without deletion/isu);
   assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
   for (const name of ["status-succeeded", "status-diagnosed", "status-waiting"]) {

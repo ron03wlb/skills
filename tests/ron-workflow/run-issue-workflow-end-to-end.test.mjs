@@ -233,12 +233,13 @@ test("runtime composition builds the owning-source handoff adapter", async () =>
     const result = await runtime.run({ specId: "17", cleanupPreview: true });
 
     assert.equal(result.status.run.state, "BLOCKED");
-    assert.equal(result.status.diagnoses[0].reasonCode, "target_dirty");
+    assert.equal(result.status.diagnoses[0].reasonCode, "target_dirty_without_owner");
+    assert.equal(result.status.runReadyHandoff.state, "UNKNOWN");
     assert.deepEqual(reads.slice(0, 5), ["tracker", "reconciliation", "target", "checkpoint", "handoff"]);
     assert.equal(reads.filter((name) => name === "checkpoint").length, 1);
     assert.equal(reads.filter((name) => name === "handoff").length, 1);
-    assert.equal(panelOpens, 1);
-    assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 1);
+    assert.equal(panelOpens, 0);
+    assert.equal(store.readEvents(identity.runId).filter(({ type }) => type === "grant.recorded").length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -262,6 +263,89 @@ test("runtime interface rejects a caller-invented handoff adapter", () => {
       now: () => "2026-08-30T07:45:00.000Z",
       sleep: async () => {},
     }), /authoritySources/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("composed runtime reclaims one exactly proven inactive writer", async () => {
+  const { root, gitCommonDir } = createStoreFixture();
+  const staleStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-stale-owner" });
+  staleStore.acquireTargetMutationWriter({
+    target: identity.target,
+    operationId: identity.runId,
+  });
+  const staleOwner = staleStore.readTargetMutationWriterLock(identity.target);
+  const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-reclaimer" });
+  const reclaimProof = {
+    previousCoordinatorInstanceId: staleOwner.coordinatorInstanceId,
+    previousGeneration: staleOwner.generation,
+    coordinatorState: "INACTIVE",
+    reconciled: true,
+    evidence: ["The exact prior coordinator is inactive."],
+    abandonedOperationIds: [],
+  };
+  const taskRef = { threadId: "thread-17", hostId: "local" };
+  let closeAccepted = false;
+  let closed = false;
+  const tasks = {
+    async findIssueLane() { return [taskRef]; },
+    async create() { throw new Error("manual completion must reuse its Issue lane"); },
+    async read() {
+      return {
+        state: "SETTLED",
+        closeRequest: closeAccepted
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          : null,
+      };
+    },
+    async message() { closeAccepted = true; },
+    async wait() {
+      closed = true;
+      return { coordinatorActive: true, taskSettled: true };
+    },
+  };
+  const reconcile = async ({ journal }) => {
+    const lock = store.readTargetMutationWriterLock(identity.target);
+    const current = singleRunCurrent({
+      journal,
+      model: {
+        trackerState: closed ? "CLOSED" : "OPEN",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: closed,
+        worktreeState: closed ? "ABSENT" : "PRESENT",
+      },
+      run: lock === null ? {} : {
+        closeWriterRunId: lock.operationId,
+        closeWriterState: "ACTIVE",
+        closeWriterHealth: "INACTIVE",
+        closeWriterOwner: {
+          operationId: lock.operationId,
+          coordinatorInstanceId: lock.coordinatorInstanceId,
+          generation: lock.generation,
+        },
+      },
+    });
+    return { ...current, closeWriterReclaimProof: reclaimProof };
+  };
+
+  try {
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-08-30T07:50:00.000Z",
+      sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: "17", cleanupPreview: true });
+
+    assert.equal(result.status.run.state, "SUCCEEDED");
+    assert.equal(closeAccepted, true);
+    assert.equal(store.readTargetMutationWriterLock(identity.target), null);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -724,6 +808,7 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
     assert.equal(resumed.panel.closed, true);
     await assert.rejects(fetch(`${priorOrigin}/api/status`));
 
+    targetState = "CLEAN";
     const stopped = await runtime.run({ specId: "17" });
     assert.equal(stopped.status.run.state, "STOPPED");
     assert.equal(stopped.panel.closed, true);
@@ -1234,7 +1319,7 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
       reconcile: async ({ journal }) => singleRunCurrent({
         journal,
         model,
-        targetState: "DIRTY",
+        targetState: "CLEAN",
       }),
       browser,
       cleanup: { async listRuns() { return retentionRuns; } },
@@ -1277,8 +1362,9 @@ test("end-to-end target and contract stops remain structured after panel shutdow
       name: "dirty target",
       targetState: "DIRTY",
       contradictions: [],
-      reasonCode: "target_dirty",
-      resumePredicate: "target_is_clean",
+      reasonCode: "target_dirty_without_owner",
+      resumePredicate: "target_is_clean_or_exact_incomplete_owner_is_proven",
+      expectedPanels: 0,
     },
     {
       name: "merge conflict",
@@ -1291,6 +1377,7 @@ test("end-to-end target and contract stops remain structured after panel shutdow
       }],
       reasonCode: "merge_conflict",
       resumePredicate: "resolve_contradiction:merge_conflict",
+      expectedPanels: 1,
     },
   ];
 
@@ -1330,13 +1417,22 @@ test("end-to-end target and contract stops remain structured after panel shutdow
         const result = await runtime.run({ specId: "17" });
         const diagnosis = result.status.diagnoses.find(({ reasonCode }) => reasonCode === scenario.reasonCode);
         assert.equal(result.status.run.state, "BLOCKED");
-        assert.equal(panels, 1);
-        assert.equal(result.panel.closed, true);
+        assert.equal(panels, scenario.expectedPanels);
+        assert.equal(result.panel.closed, scenario.expectedPanels === 1);
         assert.deepEqual(diagnosis.affectedNodes, ["17"]);
         assert.deepEqual(diagnosis.unaffectedNodes, []);
         assert.equal(diagnosis.nextOwner, "human");
         assert.ok(diagnosis.evidence.length > 0);
         assert.deepEqual(diagnosis.resumePredicates, [scenario.resumePredicate]);
+        if (scenario.reasonCode === "merge_conflict") {
+          assert.equal(diagnosis.operatorPacket.disposition, "Recoverable blocker");
+          assert.match(diagnosis.operatorPacket.owningSource, /target integration result/u);
+          assert.equal(diagnosis.operatorPacket.retryCommand, "/run-issue-workflow 17");
+          assert.deepEqual(diagnosis.operatorPacket.preservedStages.issues, [{
+            issueId: "17",
+            state: "READY",
+          }]);
+        }
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

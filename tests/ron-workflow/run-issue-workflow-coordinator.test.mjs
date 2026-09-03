@@ -101,6 +101,18 @@ const createCoordinator = (options) => createCoordinatorRuntime({
   ...options,
 });
 
+const assertRecoverablePacket = (diagnosis, { specId = "15", source }) => {
+  const packet = diagnosis.operatorPacket;
+  assert.equal(packet.disposition, "Recoverable blocker");
+  assert.match(packet.owningSource, source);
+  assert.ok(packet.observedEvidence.length > 0);
+  assert.ok(packet.smallestHumanAction.length > 0);
+  assert.equal(packet.retryCommand, `/run-issue-workflow ${specId}`);
+  assert.ok(packet.preservedStages.run.runId.length > 0);
+  assert.ok(packet.preservedStages.run.state.length > 0);
+  assert.ok(packet.preservedStages.issues.every(({ issueId, state }) => issueId.length > 0 && state.length > 0));
+};
+
 const reconciliation = ({
   runIdentity = identity,
   maxParallel = 3,
@@ -1598,6 +1610,7 @@ test("unknown writer ownership stops the wait without treating ambiguity as rele
     assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_owner_changed");
     assert.equal(waitEvents.at(-1).outcome, "OWNER_CHANGED");
     assert.match(status.diagnoses.at(-1).evidence.join(" "), /owning source/u);
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /target-writer lock/u });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1661,6 +1674,11 @@ test("target-writer wait times out with preserved ownership and same-command rec
       "target_writer_is_absent_or_healthy",
       "retry_same_run_issue_workflow",
     ]);
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /target-writer lock/u });
+    assert.equal(
+      status.diagnoses.at(-1).operatorPacket.preservedStages.run.state,
+      "WAITING_FOR_TARGET_WRITER",
+    );
     assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, "run-other-spec");
   } finally {
     competitor.release();
@@ -1721,6 +1739,7 @@ test("coordinator loss settles the writer wait without releasing another Run's w
     assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_wait_coordinator_lost");
     assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
     assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, "run-other-spec");
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /coordinator liveness/u });
   } finally {
     competitor.release();
     rmSync(root, { recursive: true, force: true });
@@ -1803,6 +1822,7 @@ test("coordinator loss recovery fails closed on an unsettled journaled writer wa
     assert.equal(waitEvents.filter(({ type }) => type === "target-writer-wait.started").length, 1);
     assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
     assert.equal(recoveredStore.readTargetMutationWriterLock(identity.target).operationId, "run-other-spec");
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /coordinator journal/u });
   } finally {
     competitor.release();
     rmSync(root, { recursive: true, force: true });
@@ -1956,6 +1976,7 @@ test("writer release reacquires changed Grant evidence and never closes from the
     assert.equal(waitEvents.at(-1).outcome, "RELEASED");
     assert.equal(reconciliations, 3);
     assert.equal(taskCalls, 0);
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /Run identity.*Grant/u });
   } finally {
     if (!competitorReleased) competitor.release();
     rmSync(root, { recursive: true, force: true });
