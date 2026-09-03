@@ -2642,6 +2642,39 @@ test("GitLab tracker guidance uses current machine-readable glab output", () => 
   assert.doesNotMatch(gitlab, /envelope-verify|tracker_adapter: gitlab/u);
 });
 
+test("installed route diagnostics expose owning seams without setup authority", () => {
+  const setup = read("skills/engineering/setup-matt-pocock-skills/SKILL.md");
+  const diagnosticsPath = "skills/engineering/setup-matt-pocock-skills/installed-workflow-diagnostics.md";
+  const setupDocs = read("docs/engineering/setup-matt-pocock-skills.md");
+
+  assert.equal(existsSync(diagnosticsPath), true, "setup must ship its installed-workflow diagnostic contract");
+  const diagnostics = read(diagnosticsPath);
+  assert.match(setup, /installed workflow.*diagnostic.*installed-workflow-diagnostics\.md/isu);
+  assert.match(diagnostics, /read-only.*diagnostic.*never authorizes.*publication.*execution.*integration.*verification.*push/isu);
+  for (const seam of [
+    "configured tracker",
+    "triage labels",
+    "operation-scoped producer store",
+    "producer handoff",
+    "target reader",
+    "shared target writer",
+    "public skill surfaces",
+  ]) {
+    assert.match(diagnostics, new RegExp(seam, "iu"), `missing installed ${seam} diagnostic`);
+  }
+  assert.match(diagnostics, /owning source.*observed evidence.*smallest human action/isu);
+  assert.match(setupDocs, /installed workflow diagnostics/iu);
+  assert.match(setupDocs, /read-only/iu);
+  assert.match(setupDocs, /missing or unknown seam.*owning source/isu);
+
+  assert.match(read("skills/engineering/to-spec/SKILL.md"), /references\/spec-publication-interfaces\.md/u);
+  assert.match(read("skills/engineering/to-tickets/SKILL.md"), /references\/decomposition-publication-interfaces\.md/u);
+  assert.match(read("skills/personal/run-issue-workflow/SKILL.md"), /run-authority-adapters\.mjs.*run-workflow\.mjs/isu);
+  assert.match(read("skills/engineering/verify-target-before-push/SKILL.md"), /references\/aggregate-verification-interfaces\.md/u);
+  assert.match(read("skills/engineering/push-target/SKILL.md"), /references\/push-delivery-interfaces\.md/u);
+  assert.match(read("skills/engineering/ask-matt/SKILL.md"), /grill-with-docs.*to-spec.*to-tickets.*run-issue-workflow.*verify-target-before-push.*push-target/isu);
+});
+
 test("router exposes the Issue worktree flow and independent controls", () => {
   const matt = read("skills/engineering/ask-matt/SKILL.md");
   assert.match(matt, /`\/wiki`/u);

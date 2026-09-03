@@ -18,6 +18,10 @@ Create a new file under `.scratch/<feature-slug>/` (creating the directory if ne
 
 Read the file at the referenced path. The user will normally pass the path or the issue number directly.
 
+## Setup diagnostics
+
+`setup-matt-pocock-skills` may read the configured `.scratch/` paths to confirm that this tracker convention is reachable. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit a local Issue file.
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a file with one **child** file per ticket.

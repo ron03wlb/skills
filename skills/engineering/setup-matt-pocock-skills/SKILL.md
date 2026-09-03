@@ -11,6 +11,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
+- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, and separately installed producer/Run adapter seams
 
 This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
 
@@ -28,6 +29,8 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - `.scratch/`: a sign that a local-markdown issue tracker convention is already in use
 - Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) This decides whether Section B runs at all.
 - Monorepo signals: a `pnpm-workspace.yaml`, a `workspaces` field in `package.json`, or a populated `packages/*` with its own `src/`. These are present only in a genuinely large multi-package repo; their absence means single-context, which is almost every repo.
+
+Read [installed-workflow-diagnostics.md](./installed-workflow-diagnostics.md) and inspect only the current harness's resolved installed surfaces. Report each installed workflow seam with its owning source, observed evidence, and `PRESENT`, `MISSING`, or `UNKNOWN` state. This diagnostic is read-only and non-authorizing: never create or repair a skill, adapter, transaction, receipt, writer lease, or tracker object, and never use aggregate setup health as another skill's gate.
 
 ### 2. Present findings and ask
 
@@ -113,4 +116,4 @@ For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch us
 
 ### 5. Done
 
-Tell the user the setup is complete and which engineering skills will now read from these files. Mention they can edit `docs/agents/*.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch.
+Tell the user the repository configuration is complete and which engineering skills will now read from these files. Report the read-only installed workflow diagnostic separately, including the exact owning source and smallest human action for each missing or unknown seam. Mention they can edit `docs/agents/*.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch. Never imply that a passing diagnostic authorized publication, execution, integration, aggregate verification, or push.

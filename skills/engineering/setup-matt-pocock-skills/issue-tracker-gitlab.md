@@ -35,6 +35,10 @@ Create a GitLab issue.
 
 Run `glab issue view <number> --comments`.
 
+## Setup diagnostics
+
+`setup-matt-pocock-skills` may use one project-scoped, read-only `glab issue view --output json` or `glab issue list --output json` call to confirm that this configured tracker is reachable. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit an Issue, label, or note.
+
 ## Wayfinding operations
 
 Used by `/wayfinder`. The **map** is a single issue with **child** issues as tickets.

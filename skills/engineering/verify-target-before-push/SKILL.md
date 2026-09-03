@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Verify one frozen target range after Issue closeout. This skill has two evidence modes, **local-ahead** and **already-pushed**. Both run the same aggregate review and verification gate; only local-ahead may emit push readiness. Its only tracker-write recoveries are the exact human-confirmed Direct target contribution and closed-Issue evidence paths below. This skill never repairs product code, closes or reopens Issues, changes other tracker state, pushes, remote-merges, or deploys.
 
+Before deriving members, read [`references/aggregate-verification-interfaces.md`](references/aggregate-verification-interfaces.md). Keep normalized range, member, coverage, aggregate-gate, and result payload detail behind that owner-local interface while this public skill retains invocation, human confirmation gates, failure ownership, result boundaries, and the next explicit push route.
+
 ## Freeze exact `B` and `V`
 
 Read repository instructions and tracker configuration, resolve exact commits, and select one mode without fallback or inference:

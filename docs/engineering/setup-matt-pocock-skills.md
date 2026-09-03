@@ -1,6 +1,6 @@
 ## What it does
 
-`setup-matt-pocock-skills` answers three questions about one repo: where issues live, what the triage labels are called, and where the domain docs sit. It records the answers as markdown files under `docs/agents/`.
+`setup-matt-pocock-skills` answers three questions about one repo: where issues live, what the triage labels are called, and where the domain docs sit. It records the answers as markdown files under `docs/agents/`, then reports read-only installed workflow diagnostics for the public skills and separately installed producer/Run adapters visible to the current harness.
 
 Those files are the only thing that varies between repos. The skills themselves are identical everywhere; they read `docs/agents/issue-tracker.md` at run time and do what it says. That is why the set is not tied to GitHub, and why no skill file ever needs editing to point it somewhere else. Invoking it with "link the skills to a custom issue tracker" works with anything you can connect to programmatically, with zero changes to the skills.
 
@@ -48,6 +48,12 @@ The first three ship as templates in the skill and work out of the box. Local ma
 
 "Other" is not a stub either. It is the reason Jira, Linear, Azure DevOps and Beads all work: you describe the workflow, the skill records your prose in `docs/agents/issue-tracker.md`, and the downstream skills follow the prose. The community has already done this: a Jira-over-[MCP](https://www.aihero.dev/ai-coding-dictionary/mcp) variant, a Gitea CLI shaped like `gh`, a hand-built local dashboard.
 
+## Installed workflow diagnostics
+
+After configuration, setup reads the current harness's resolved installations and reports the configured tracker, triage labels when applicable, required public skill surfaces, operation-scoped producer store, producer handoff, target reader, shared target writer, and Run composition. A missing or unknown seam names its owning source, observed evidence, and the smallest human action there, such as repairing tracker access or updating the package that owns the adapter.
+
+The diagnostic is deliberately read-only. It does not install or repair a separately owned coordinator, create a producer transaction, acquire a writer, mutate the tracker, or authorize publication, execution, integration, aggregate verification, or push. Aggregate setup health is orientation for the human; every later skill reads its own authority at its own boundary.
+
 ## Common questions
 
 **Do I have to use GitHub?**
@@ -86,6 +92,7 @@ One long-standing complaint says yes, in these words: *"having a skill to set up
 - `docs/agents/issue-tracker.md` and `docs/agents/domain.md` exist, plus `triage-labels.md` if `triage` is installed.
 - An `## Agent skills` section appears in the instruction file your harness actually reads, with a one-line summary pointing at each of those files.
 - The tracker it proposed matches the remote you really use, and the label strings match labels that really exist in your tracker.
+- Installed workflow diagnostics name the owning source and smallest action for every missing or unknown public skill or adapter seam without changing it.
 - Afterwards, `/to-tickets` publishes without asking you where issues live, and `/triage` applies labels rather than inventing them.
 - Nothing in the skill files themselves changed. If setup edited a `SKILL.md`, something went wrong.
 

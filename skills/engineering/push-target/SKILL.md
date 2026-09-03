@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Consume one current local-ahead `push_ready:v1` receipt and deliver only its exact verified target. This is the sole narrow remote-push step after Issue closeout and aggregate target verification. It does not create readiness, repair drift, or treat a successful push as deployment or production verification.
 
+Before reading the receipt or resolving a remote, read [`references/push-delivery-interfaces.md`](references/push-delivery-interfaces.md). Keep receipt fields, destination normalization, and remote read-back payload detail behind that owner-local interface while this public skill retains the explicit human authority, drift gate, one-push boundary, and result.
+
 ## Freeze the target and receipt
 
 Read repository instructions without changing the checkout. Resolve the argument as one named existing local target branch, its full `refs/heads/<target>` ref, and exact local `HEAD`; never infer the target from the current checkout or switch branches.
