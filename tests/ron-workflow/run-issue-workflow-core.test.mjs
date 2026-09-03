@@ -196,6 +196,7 @@ const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
     checkpoint: {
       state: "COMPLETED",
       producerCommand,
+      profileVersion: "v1",
       transactionIdentity: `sha256:${"3".repeat(64)}`,
       specId: authority.specId,
       target: authority.target,
@@ -226,6 +227,61 @@ const runReadyFacts = ({ classification = "SINGLE" } = {}) => {
   };
 };
 
+const currentMultiRunReadyFacts = () => {
+  const input = runReadyFacts({ classification: "MULTI" });
+  const decompositionDigest = `sha256:${"5".repeat(64)}`;
+  const decompositionMapping = {
+    "37/01": "39",
+    "37/02": "40",
+    "37/03": "41",
+  };
+  const blockerEdges = [["39", "40"], ["40", "41"]];
+  const readyFrontier = ["39"];
+  const decompositionReadBack = {
+    decompositionIdentity: input.decompositionIdentity,
+    decompositionDigest,
+  };
+  const readyStateReadBack = { frontier: readyFrontier };
+  delete input.checkpoint.initialTargetState;
+  delete input.checkpoint.planPath;
+  delete input.checkpoint.generatedContentIdentity;
+  input.checkpoint.profileVersion = "v2";
+  input.checkpoint.operationId = `decomposition:sha256:${"2".repeat(64)}`;
+  input.checkpoint.bindings = {
+    approvedScopeIdentity: input.authority.approvedScopeHash,
+    classification: input.authority.classification,
+    planningSeal: input.authority.planningSeal,
+    upstream: {
+      handoffIdentity: "to-spec:handoff:37",
+      publicationIdentity: "tracker-version:37",
+    },
+  };
+  input.checkpoint.stageReceipts = {
+    decompositionReadBack,
+    readyStateReadBack,
+  };
+  input.handoff = {
+    ...input.handoff,
+    upstreamPublicationIdentity: "tracker-version:37",
+    upstreamHandoffIdentity: "to-spec:handoff:37",
+    operationReceipt: {
+      transactionIdentity: input.checkpoint.transactionIdentity,
+      decompositionReadBack,
+      readyStateReadBack,
+    },
+    decompositionDigest,
+    decompositionMapping,
+    blockerEdges,
+    recordIdentities: ["tracker-version:37", input.decompositionIdentity],
+  };
+  input.trackerRecordIdentities = [...input.handoff.recordIdentities];
+  input.decompositionDigest = decompositionDigest;
+  input.decompositionMapping = decompositionMapping;
+  input.blockerEdges = blockerEdges;
+  input.readyFrontier = readyFrontier;
+  return input;
+};
+
 test("Run-ready handoff reduces exact Single and Multi producer evidence to READY", () => {
   for (const classification of ["SINGLE", "MULTI"]) {
     const result = reduceRunReadyHandoff(runReadyFacts({ classification }));
@@ -236,6 +292,67 @@ test("Run-ready handoff reduces exact Single and Multi producer evidence to READ
     assert.equal(result.nextOwner, "run-issue-workflow");
     assert.equal(result.affectedScope.specId, "31");
     assert.equal(result.observed.producerCommand, classification === "SINGLE" ? "to-spec" : "to-tickets");
+  }
+});
+
+test("Run-ready handoff consumes the current to-tickets composite receipt", () => {
+  const result = reduceRunReadyHandoff(currentMultiRunReadyFacts());
+
+  assert.equal(result.state, "READY");
+  assert.equal(result.reasonCode, null);
+  assert.equal(result.observed.checkpointProfileVersion, "v2");
+  assert.equal(result.observed.handoffUpstreamPublicationIdentity, "tracker-version:37");
+  assert.equal(result.observed.handoffUpstreamHandoffIdentity, "to-spec:handoff:37");
+  assert.equal(result.observed.handoffDecompositionDigest, `sha256:${"5".repeat(64)}`);
+});
+
+test("Run-ready handoff rejects a current composite receipt that drifts from tracker or operation read-back", () => {
+  const changedMapping = currentMultiRunReadyFacts();
+  changedMapping.handoff.decompositionMapping = { ...changedMapping.handoff.decompositionMapping, "37/03": "99" };
+
+  const changedOperationReceipt = currentMultiRunReadyFacts();
+  changedOperationReceipt.handoff.operationReceipt = {
+    ...changedOperationReceipt.handoff.operationReceipt,
+    readyStateReadBack: { frontier: [] },
+  };
+
+  const changedUpstream = currentMultiRunReadyFacts();
+  changedUpstream.handoff.upstreamHandoffIdentity = "to-spec:handoff:changed";
+
+  for (const input of [changedMapping, changedOperationReceipt, changedUpstream]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, "composite_handoff_identity_conflict");
+  }
+});
+
+test("Run-ready handoff returns the exact current to-tickets retry stage without owning target dirt", () => {
+  for (const firstUnsatisfiedStage of [
+    "decomposition.read_back",
+    "ready_state.read_back",
+    "handoff.completed",
+  ]) {
+    const input = currentMultiRunReadyFacts();
+    input.checkpoint = {
+      ...input.checkpoint,
+      state: firstUnsatisfiedStage === "decomposition.read_back" ? "ACTIVE" : "INCOMPLETE",
+      firstUnsatisfiedStage,
+      handoffIdentity: null,
+    };
+    input.handoff = null;
+    input.trackerRecordIdentities = [];
+    input.decompositionIdentity = null;
+
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "INCOMPLETE");
+    assert.equal(result.firstUnsatisfiedStage, firstUnsatisfiedStage);
+    assert.equal(result.retryCommand, "/to-tickets 31");
+
+    input.targetState = "DIRTY";
+    input.targetOwnership = "UNOWNED";
+    assert.equal(reduceRunReadyHandoff(input).state, "INCOMPLETE");
+    input.targetOwnership = "EXACT_PRODUCER";
+    assert.equal(reduceRunReadyHandoff(input).state, "UNKNOWN");
   }
 });
 

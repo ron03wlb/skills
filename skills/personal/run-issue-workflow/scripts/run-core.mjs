@@ -63,6 +63,9 @@ const normalizedPathPattern = /^(?!\/)(?!.*(?:^|\/)\.\.?(?:\/|$))(?!.*\\).+/u;
 const observedRunReadyFacts = (input) => ({
   targetState: isText(input?.targetState) ? input.targetState : null,
   checkpointState: isText(input?.checkpoint?.state) ? input.checkpoint.state : null,
+  checkpointProfileVersion: isText(input?.checkpoint?.profileVersion)
+    ? input.checkpoint.profileVersion
+    : null,
   producerCommand: isText(input?.checkpoint?.producerCommand)
     ? input.checkpoint.producerCommand
     : isText(input?.handoff?.producerCommand) ? input.handoff.producerCommand : null,
@@ -98,6 +101,15 @@ const observedRunReadyFacts = (input) => ({
     : [],
   handoffDecompositionIdentity: isText(input?.handoff?.decompositionIdentity)
     ? input.handoff.decompositionIdentity
+    : null,
+  handoffUpstreamPublicationIdentity: isText(input?.handoff?.upstreamPublicationIdentity)
+    ? input.handoff.upstreamPublicationIdentity
+    : null,
+  handoffUpstreamHandoffIdentity: isText(input?.handoff?.upstreamHandoffIdentity)
+    ? input.handoff.upstreamHandoffIdentity
+    : null,
+  handoffDecompositionDigest: isText(input?.handoff?.decompositionDigest)
+    ? input.handoff.decompositionDigest
     : null,
 });
 
@@ -141,6 +153,19 @@ const unknownRunReady = (input, reasonCode, evidence, recoveryPredicates) => run
 const sameList = (left, right) => left.length === right.length
   && left.every((value, index) => value === right[index]);
 
+const canonicalFact = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalFact);
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonicalFact(value[key])]),
+    );
+  }
+  return value;
+};
+
+const sameFact = (left, right) => JSON.stringify(canonicalFact(left))
+  === JSON.stringify(canonicalFact(right));
+
 export function reduceRunReadyHandoff(input) {
   const authority = input?.authority;
   const checkpoint = input?.checkpoint;
@@ -167,17 +192,33 @@ export function reduceRunReadyHandoff(input) {
   }
 
   const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
-  const checkpointOwnsScope = checkpoint.producerCommand === expectedProducer
+  const checkpointOwnsBaseScope = checkpoint.producerCommand === expectedProducer
     && checkpoint.specId === authority.specId
     && checkpoint.target === authority.target
     && checkpoint.planningSeal === authority.planningSeal
     && checkpoint.classification === authority.classification
     && checkpoint.approvedScopeHash === authority.approvedScopeHash
     && isText(checkpoint.transactionIdentity)
-    && gitObjectPattern.test(checkpoint.baseline)
-    && checkpoint.initialTargetState === "CLEAN"
-    && normalizedPathPattern.test(checkpoint.planPath)
-    && sha256Pattern.test(checkpoint.generatedContentIdentity);
+    && gitObjectPattern.test(checkpoint.baseline);
+  const currentProfile = checkpoint.profileVersion === "v2";
+  const frozenProfile = checkpoint.profileVersion === undefined
+    || checkpoint.profileVersion === null
+    || checkpoint.profileVersion === "v1";
+  const currentBindingsOwnScope = isRecord(checkpoint.bindings)
+    && checkpoint.bindings.approvedScopeIdentity === authority.approvedScopeHash
+    && checkpoint.bindings.classification === authority.classification
+    && checkpoint.bindings.planningSeal === authority.planningSeal
+    && (authority.classification === "SINGLE"
+      || isRecord(checkpoint.bindings.upstream)
+        && isText(checkpoint.bindings.upstream.handoffIdentity)
+        && isText(checkpoint.bindings.upstream.publicationIdentity));
+  const checkpointOwnsScope = checkpointOwnsBaseScope
+    && (currentProfile
+      ? isText(checkpoint.operationId) && currentBindingsOwnScope
+      : frozenProfile
+        && checkpoint.initialTargetState === "CLEAN"
+        && normalizedPathPattern.test(checkpoint.planPath)
+        && sha256Pattern.test(checkpoint.generatedContentIdentity));
   if (input.evidence.length > 0 || ["UNKNOWN", "MULTIPLE"].includes(checkpoint.state)) {
     return unknownRunReady(
       input,
@@ -203,9 +244,14 @@ export function reduceRunReadyHandoff(input) {
         ["one_exact_producer_transaction_is_identified"],
       );
     }
-    const dirtyOwned = input.targetState === "DIRTY" && input.targetOwnership === "EXACT_PRODUCER";
+    const frozenDirtyOwned = frozenProfile
+      && input.targetState === "DIRTY"
+      && input.targetOwnership === "EXACT_PRODUCER";
     const cleanTarget = input.targetState === "CLEAN" && input.targetOwnership === "NONE";
-    if (!dirtyOwned && !cleanTarget) {
+    const currentKnownUnownedDirt = currentProfile
+      && input.targetState === "DIRTY"
+      && input.targetOwnership === "UNOWNED";
+    if (!frozenDirtyOwned && !cleanTarget && !currentKnownUnownedDirt) {
       return unknownRunReady(
         input,
         input.targetState === "DIRTY" ? "target_dirty_without_owner" : "target_state_uncertain",
@@ -328,6 +374,39 @@ export function reduceRunReadyHandoff(input) {
       ["The decomposition publication identity does not match selected Multi-Issue authority."],
       ["decomposition_identity_matches"],
     );
+  }
+
+  if (currentProfile && authority.classification === "MULTI") {
+    const operationReceipt = handoff.operationReceipt;
+    const stageReceipts = checkpoint.stageReceipts;
+    const currentCompositeMatches = isText(handoff.upstreamPublicationIdentity)
+      && isText(handoff.upstreamHandoffIdentity)
+      && handoff.upstreamPublicationIdentity === checkpoint.bindings.upstream.publicationIdentity
+      && handoff.upstreamHandoffIdentity === checkpoint.bindings.upstream.handoffIdentity
+      && isRecord(operationReceipt)
+      && operationReceipt.transactionIdentity === checkpoint.transactionIdentity
+      && isRecord(stageReceipts)
+      && sameFact(operationReceipt.decompositionReadBack, stageReceipts.decompositionReadBack)
+      && sameFact(operationReceipt.readyStateReadBack, stageReceipts.readyStateReadBack)
+      && sha256Pattern.test(handoff.decompositionDigest)
+      && handoff.decompositionDigest === input.decompositionDigest
+      && stageReceipts.decompositionReadBack?.decompositionIdentity === authority.decompositionIdentity
+      && stageReceipts.decompositionReadBack?.decompositionDigest === input.decompositionDigest
+      && sameFact(stageReceipts.readyStateReadBack?.frontier, input.readyFrontier)
+      && isRecord(handoff.decompositionMapping)
+      && sameFact(handoff.decompositionMapping, input.decompositionMapping)
+      && Array.isArray(handoff.blockerEdges)
+      && sameFact(handoff.blockerEdges, input.blockerEdges)
+      && handoff.recordIdentities[0] === handoff.upstreamPublicationIdentity
+      && handoff.recordIdentities[1] === authority.decompositionIdentity;
+    if (!currentCompositeMatches) {
+      return unknownRunReady(
+        input,
+        "composite_handoff_identity_conflict",
+        ["The current to-tickets handoff conflicts with its operation or tracker read-back."],
+        ["current_composite_handoff_matches_owning_sources"],
+      );
+    }
   }
 
   return runReadyResult(input, {
