@@ -544,20 +544,24 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   const producerStore = createWorkflowControlStore({ gitCommonDir });
   const closeStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-close-run" });
   const executionStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-execution-run" });
-  const toSpecOperation = {
+  const proposedBaseline = "8".repeat(40);
+  let liveTargetHead = proposedBaseline;
+  let targetReconfirmed = false;
+  let activeToSpecOperation = null;
+  const toSpecOperationFor = (baseline) => ({
     repositoryId: "github:ron03wlb/skills",
     specId: identity.specId,
     producerCommand: "to-spec",
     operationId: "publication:lane-17",
     profileVersion: "v2",
     target: identity.target,
-    baseline: "8".repeat(40),
+    baseline,
     bindings: {
-      approvedScopeIdentity: `sha256:${"8".repeat(64)}`,
-      classification: "SINGLE",
-      planningSeal: "8".repeat(40),
+      approvedScopeIdentity: identity.approvedScopeHash,
+      classification: identity.classification,
+      planningSeal: selectedPlanningSeal,
     },
-  };
+  });
   const toTicketsOperation = {
     repositoryId: "github:ron03wlb/skills",
     specId: multiIdentity.specId,
@@ -567,9 +571,9 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     target: multiIdentity.target,
     baseline: "9".repeat(40),
     bindings: {
-      approvedScopeIdentity: `sha256:${"9".repeat(64)}`,
-      classification: "MULTI",
-      planningSeal: "9".repeat(40),
+      approvedScopeIdentity: multiIdentity.approvedScopeHash,
+      classification: multiIdentity.classification,
+      planningSeal: selectedPlanningSeal,
       upstream: {
         handoffIdentity: "handoff:to-spec:12",
         publicationIdentity: "tracker-version:12",
@@ -577,40 +581,169 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
       },
     },
   };
+  const runReadyHandoffFromProducer = ({ runIdentity, operation }) => {
+    const transaction = producerStore.readCheckpoint(operation);
+    const receipts = Object.fromEntries(transaction.progress.map(({ stage, receipt }) => [stage, receipt]));
+    const handoffIdentity = receipts["handoff.completed"]?.handoffIdentity ?? null;
+    const common = {
+      schema: RUN_READY_FACT_SCHEMA,
+      authority: {
+        specId: operation.specId,
+        target: operation.target,
+        planningSeal: operation.bindings.planningSeal,
+        classification: operation.bindings.classification,
+        approvedScopeHash: operation.bindings.approvedScopeIdentity,
+        decompositionIdentity: runIdentity.decompositionIdentity,
+      },
+      targetState: "CLEAN",
+      targetOwnership: "NONE",
+      checkpoint: {
+        state: transaction.state,
+        producerCommand: operation.producerCommand,
+        profileVersion: operation.profileVersion,
+        transactionIdentity: transaction.transactionId,
+        specId: operation.specId,
+        target: operation.target,
+        planningSeal: operation.bindings.planningSeal,
+        classification: operation.bindings.classification,
+        approvedScopeHash: operation.bindings.approvedScopeIdentity,
+        baseline: operation.baseline,
+        operationId: operation.operationId,
+        bindings: operation.bindings,
+        firstUnsatisfiedStage: transaction.nextStage,
+        handoffIdentity,
+      },
+      decompositionIdentity: runIdentity.decompositionIdentity,
+      evidence: [],
+    };
+    if (runIdentity.classification === "SINGLE") {
+      const publication = receipts["publication.read_back"];
+      const recordIdentities = publication ? [publication.publicationIdentity] : [];
+      return {
+        ...common,
+        checkpoint: {
+          ...common.checkpoint,
+          stageReceipts: {
+            planningSealReadBack: receipts["planning_seal.read_back"],
+            publicationReadBack: publication,
+          },
+        },
+        handoff: handoffIdentity === null ? null : {
+          identity: handoffIdentity,
+          producerCommand: operation.producerCommand,
+          specId: operation.specId,
+          target: operation.target,
+          planningSeal: operation.bindings.planningSeal,
+          classification: operation.bindings.classification,
+          approvedScopeHash: operation.bindings.approvedScopeIdentity,
+          decompositionIdentity: null,
+          transactionIdentity: transaction.transactionId,
+          publicationIdentity: publication.publicationIdentity,
+          trackerIdentity: publication.trackerIdentity,
+          recordIdentities,
+        },
+        trackerRecordIdentities: recordIdentities,
+      };
+    }
+
+    const decomposition = receipts["decomposition.read_back"];
+    const readyState = receipts["ready_state.read_back"];
+    const recordIdentities = [operation.bindings.upstream.publicationIdentity, decomposition.decompositionIdentity];
+    const blockerEdges = [];
+    return {
+      ...common,
+      checkpoint: {
+        ...common.checkpoint,
+        stageReceipts: {
+          decompositionReadBack: decomposition,
+          readyStateReadBack: readyState,
+        },
+      },
+      handoff: handoffIdentity === null ? null : {
+        identity: handoffIdentity,
+        producerCommand: operation.producerCommand,
+        specId: operation.specId,
+        target: operation.target,
+        planningSeal: operation.bindings.planningSeal,
+        classification: operation.bindings.classification,
+        approvedScopeHash: operation.bindings.approvedScopeIdentity,
+        decompositionIdentity: decomposition.decompositionIdentity,
+        recordIdentities,
+        upstreamPublicationIdentity: operation.bindings.upstream.publicationIdentity,
+        upstreamHandoffIdentity: operation.bindings.upstream.handoffIdentity,
+        operationReceipt: {
+          transactionIdentity: transaction.transactionId,
+          decompositionReadBack: decomposition,
+          readyStateReadBack: readyState,
+        },
+        decompositionDigest: decomposition.decompositionDigest,
+        decompositionMapping: decomposition.mapping,
+        blockerEdges,
+      },
+      trackerRecordIdentities: recordIdentities,
+      decompositionDigest: decomposition.decompositionDigest,
+      decompositionMapping: decomposition.mapping,
+      blockerEdges,
+      readyFrontier: readyState.frontier,
+    };
+  };
+  const producerHandoffReads = { SINGLE: 0, MULTI: 0 };
+  const producerHandoffAdapter = ({ runIdentity, readOperation }) => ({
+    async read() {
+      producerHandoffReads[runIdentity.classification] += 1;
+      return runReadyHandoffFromProducer({ runIdentity, operation: readOperation() });
+    },
+  });
+  const runReadyAuthorityFromProducer = ({ runIdentity, operation }) => {
+    const { checkpoint: _checkpoint, handoff: _handoff, ...authority } = runReadyHandoffFromProducer({ runIdentity, operation });
+    return authority;
+  };
+
   let publicationReadBack = null;
   let repairedSpec = null;
   const runToSpec = () => {
-    let checkpoint = producerStore.createCheckpoint(toSpecOperation);
+    if (activeToSpecOperation === null) {
+      if (liveTargetHead !== proposedBaseline && !targetReconfirmed) {
+        return { state: "BLOCKED", reasonCode: "TARGET_MOVED", expected: proposedBaseline, observed: liveTargetHead };
+      }
+      activeToSpecOperation = toSpecOperationFor(liveTargetHead);
+    }
+    let checkpoint = producerStore.createCheckpoint(activeToSpecOperation);
     if (checkpoint.nextStage === "planning_seal.read_back") {
       checkpoint = producerStore.advanceCheckpoint({
-        identity: toSpecOperation,
+        identity: activeToSpecOperation,
         stage: "planning_seal.read_back",
-        receipt: { planningSeal: "8".repeat(40), state: "reused" },
+        receipt: { planningSeal: selectedPlanningSeal, state: "reused" },
       });
     }
     if (checkpoint.nextStage === "publication.read_back") {
       if (publicationReadBack === null) return checkpoint;
       checkpoint = producerStore.advanceCheckpoint({
-        identity: toSpecOperation,
+        identity: activeToSpecOperation,
         stage: "publication.read_back",
         receipt: publicationReadBack,
       });
     }
     if (checkpoint.nextStage === "handoff.completed") {
       checkpoint = producerStore.advanceCheckpoint({
-        identity: toSpecOperation,
+        identity: activeToSpecOperation,
         stage: "handoff.completed",
         receipt: { handoffIdentity: "handoff:to-spec:17" },
       });
     }
     return checkpoint;
   };
-  const stoppedSpec = runToSpec();
+  liveTargetHead = "9".repeat(40);
+  const targetMovedSpec = runToSpec();
   const initialDecomposition = producerStore.createCheckpoint(toTicketsOperation);
   producerStore.advanceCheckpoint({
     identity: toTicketsOperation,
     stage: "decomposition.read_back",
-    receipt: { decompositionIdentity: multiIdentity.decompositionIdentity, mapping: { "12/01": "821", "12/02": "822" } },
+    receipt: {
+      decompositionIdentity: multiIdentity.decompositionIdentity,
+      decompositionDigest: `sha256:${"5".repeat(64)}`,
+      mapping: { "12/01": "821", "12/02": "822" },
+    },
   });
   producerStore.advanceCheckpoint({
     identity: toTicketsOperation,
@@ -648,6 +781,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
 
   const closeRuntime = createWorkflowRuntime({
     store: closeStore,
+    handoff: producerHandoffAdapter({ runIdentity: identity, readOperation: () => activeToSpecOperation }),
     tracker: {
       async read() {
         trackerReads += 1;
@@ -679,7 +813,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     },
     reconcile: async ({ journal }) => {
       const lock = closeStore.readTargetMutationWriterLock(identity.target);
-      return singleRunCurrent({
+      const current = singleRunCurrent({
         journal,
         model: closeModel,
         run: lock === null ? {} : {
@@ -693,6 +827,11 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
           },
         },
       });
+      return {
+        ...current,
+        runReadyHandoff: undefined,
+        runReadyAuthority: runReadyAuthorityFromProducer({ runIdentity: identity, operation: activeToSpecOperation }),
+      };
     },
     browser: { async open() {} },
     cleanup: { async listRuns() { return []; } },
@@ -700,8 +839,6 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     sleep: async () => {
       await executionStarted;
       if (!competingWriterReleased) {
-        publicationReadBack = { publicationIdentity: "tracker-version:17", trackerIdentity: "issue:17" };
-        repairedSpec = runToSpec();
         competingWriter.release();
         competingWriterReleased = true;
       }
@@ -710,6 +847,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
 
   const executionRuntime = createWorkflowRuntime({
     store: executionStore,
+    handoff: producerHandoffAdapter({ runIdentity: multiIdentity, readOperation: () => toTicketsOperation }),
     tracker: { async read() { return {}; } },
     tasks: {
       async findIssueLane() { return []; },
@@ -730,7 +868,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
       runIdentity: multiIdentity,
       grant: { runIdentity: multiIdentity, maxParallel: 2 },
       planningSeal: selectedPlanningSeal,
-      runReadyHandoff: readyHandoffFor(multiIdentity),
+      runReadyAuthority: runReadyAuthorityFromProducer({ runIdentity: multiIdentity, operation: toTicketsOperation }),
       taskRefs: Object.fromEntries(journal
         .filter(({ type }) => type === "dispatch.recorded")
         .map(({ issueId, taskRef }) => [issueId, taskRef])),
@@ -765,9 +903,17 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   });
 
   try {
+    const executionPromise = executionRuntime.run({ specId: multiIdentity.specId, cleanupPreview: true });
+    await executionStarted;
+    assert.deepEqual(created, executionIssueIds, "target movement in one lane must not block the other Run");
+
+    targetReconfirmed = true;
+    const stoppedSpec = runToSpec();
+    publicationReadBack = { publicationIdentity: "tracker-version:17", trackerIdentity: "issue:17" };
+    repairedSpec = runToSpec();
     const [closeResult, executionResult] = await Promise.all([
       closeRuntime.run({ specId: identity.specId, cleanupPreview: true }),
-      executionRuntime.run({ specId: multiIdentity.specId, cleanupPreview: true }),
+      executionPromise,
     ]);
     const waits = closeResult.journal.filter(({ type }) => type.startsWith("target-writer-wait."));
 
@@ -776,6 +922,12 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     assert.deepEqual(created, executionIssueIds);
     assert.deepEqual(waits.map(({ outcome }) => outcome ?? null), [null, "RELEASED"]);
     assert.ok(closeMessageTrackerReads >= 3, "closeout must use post-wait tracker evidence");
+    assert.deepEqual(
+      targetMovedSpec,
+      { state: "BLOCKED", reasonCode: "TARGET_MOVED", expected: proposedBaseline, observed: liveTargetHead },
+      "the planning lane must revalidate a moved target before publication",
+    );
+    assert.equal(activeToSpecOperation.baseline, liveTargetHead, "human reconfirmation binds the moved target baseline");
     assert.equal(stoppedSpec.nextStage, "publication.read_back", "owning-source failure preserves the producer stage");
     assert.equal(repairedSpec.state, "COMPLETED", "the same to-spec command resumes after human repair");
     assert.equal(repairedSpec.scopeKey, stoppedSpec.scopeKey, "same-command recovery keeps the exact producer operation");
@@ -783,6 +935,8 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     assert.equal(completedDecomposition.state, "COMPLETED");
     assert.deepEqual(producerStore.readCheckpoint(toTicketsOperation), completedDecomposition, "repair must not mutate the other lane");
     assert.notEqual(stoppedSpec.scopeKey, initialDecomposition.scopeKey, "producer operations remain isolated on one target");
+    assert.ok(producerHandoffReads.SINGLE > 0, "the Single Run must consume its producer through the concrete authority adapter");
+    assert.ok(producerHandoffReads.MULTI > 0, "the Multi Run must consume its producer through the concrete authority adapter");
     assert.equal(closeStore.readTargetMutationWriterLock(identity.target), null);
   } finally {
     if (!competingWriterReleased) competingWriter.release();

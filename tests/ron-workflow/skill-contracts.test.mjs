@@ -2694,6 +2694,10 @@ test("installed route keeps payload and recovery detail behind one cross-seam co
   const pushInterfaces = read("skills/engineering/push-target/references/push-delivery-interfaces.md");
   const coreTests = read("tests/ron-workflow/run-issue-workflow-core.test.mjs");
   const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
+  const installedScenario = endToEndTests.slice(
+    endToEndTests.indexOf('test("installed route'),
+    endToEndTests.indexOf('test("end-to-end closeout contention'),
+  );
 
   assert.equal(existsSync(recoveryPath), true, "aggregate recovery must have one owner-local reference");
   const recoveryInterfaces = read(recoveryPath);
@@ -2705,7 +2709,11 @@ test("installed route keeps payload and recovery detail behind one cross-seam co
   assert.match(pushInterfaces, /member Issue and candidate identities.*Successor verification evidence/isu);
 
   assert.doesNotMatch(coreTests, /test\("installed route keeps concurrent Spec operations/iu);
-  assert.match(endToEndTests, /test\("installed route[^]*createWorkflowControlStore[^]*runToSpec[^]*Promise\.all/iu);
+  for (const requiredSeam of ["createWorkflowControlStore", "runToSpec", "runReadyHandoffFromProducer", "producerHandoffAdapter", "Promise.all"]) {
+    assert.match(installedScenario, new RegExp(requiredSeam.replace(".", "\\."), "u"), `installed scenario omits ${requiredSeam}`);
+  }
+  assert.match(installedScenario, /reasonCode: "TARGET_MOVED"[^]*targetReconfirmed/iu);
+  assert.doesNotMatch(installedScenario, /runReadyHandoff:\s*readyHandoffFor/iu);
 });
 
 test("router exposes the Issue worktree flow and independent controls", () => {
