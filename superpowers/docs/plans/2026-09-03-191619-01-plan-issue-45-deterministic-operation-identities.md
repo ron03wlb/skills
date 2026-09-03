@@ -12,6 +12,7 @@
 - `github:ron03wlb/skills` is the repository adapter's canonical repository identity; the identity module validates and hashes this owner-supplied value but does not rediscover remotes.
 - The existing `approvedScopeIdentity` / `approvedScopeHash` is the immutable approved publication hash used to distinguish revisions.
 - Existing checkpoint and Run records without the new versioned operation receipt are compatibility evidence. They remain readable and resumable, while newly created current-profile operations must bind the deterministic receipt.
+- Existing completion notes without the receipt remain compatible only through an immutable Spec-scoped adoption frontier of exact evidence identities and body hashes; workflow-artifact adoption cannot classify this field.
 - `to-spec` primary reservation is the only pre-Spec bootstrap. It derives from the proposed-Spec identity and is replaced by a Spec-bound publication operation after tracker read-back.
 
 ## Success criteria
@@ -19,7 +20,7 @@
 1. One owner-local module returns a canonical, versioned, secret-free receipt and key from repository, Spec, approved publication, producer, stage, and Issue when required; identical inputs produce the same key and every material identity change produces a different key.
 2. Fresh `to-spec@v2` and `to-tickets@v2` checkpoint transactions must bind a matching receipt, while stored current receipts and frozen legacy/profile-v1 operations retain exact read/resume behavior.
 3. Fresh Run selection derives its `runId` from the same receipt instead of caller correlation; selected stored Runs retain their recorded identity for compatibility.
-4. Public and owner-local contracts assign one semantic owner to each of `to-spec`, `to-tickets`, `run-issue-workflow`, `execute-issue`, `close-issue`, and `verify-target-before-push`, with downstream checks limited to receipt identity/hash/freshness and current mutation preconditions.
+4. Public and owner-local contracts assign one semantic owner to each of `to-spec`, `to-tickets`, `run-issue-workflow`, `execute-issue`, `close-issue`, and `verify-target-before-push`, with downstream checks limited to receipt identity/hash/freshness, exact legacy-frontier membership, and current mutation preconditions.
 5. Focused identity/ownership tests, the three affected test files, the full Ron workflow suite, `git diff --check`, and two-axis review are clean.
 
 ## Implementation sequence

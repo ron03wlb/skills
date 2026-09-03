@@ -14,6 +14,8 @@ Direct entry consumes the exact human invocation plus current tracker and Git re
 
 The terminal owner-produced receipt is the exact read-back `implementation_complete` note. Its `operationIdentity` is the full `workflow-operation-identity:v1` receipt; the approved publication identity and stable Issue inputs bind the reviewed candidate and verification evidence for `close-issue`. Downstream closeout does not rerun implementation, Standards or Spec review, or execution verification.
 
+Before the first prospective completion in one exact repository, tracker, Spec, and Issue-target scope, append or reuse one logical `workflow_operation_identity_contract_adopted:v1` record in the parent or linked Spec. Its frozen `legacyCompletionFrontier` lists every already valid field-less completion by exact Issue, immutable tracker evidence identity or durable local locator, and SHA-256 of its exact body. Payload-identical physical records collapse; malformed, conflicting, duplicate-entry, unreadable, mismatched, or digest-mismatched evidence stops. After adoption, only an exact frontier member may omit `operationIdentity`; a truly unadopted scope retains its original legacy contract. This compatibility record grants no implementation, review, close, verification, push, or deployment authority.
+
 ## Compatibility and stops
 
 An existing valid completion or active legacy execution lane that predates this receipt contract retains its recorded identity without a synthetic field. Never migrate, overwrite, delete, or recreate it. Missing, duplicate, mismatched, stale, out-of-order, or ambiguous current evidence stops before implementation or tracker mutation and reports the conflicting identities.

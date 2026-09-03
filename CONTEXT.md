@@ -114,6 +114,10 @@ _Avoid_: Automatic receipt migration, duplicate successor receipt, synthesized s
 The versioned deterministic identity of one workflow operation, derived from canonical repository identity, stable Spec identity, approved publication identity or hash, producer, workflow stage, and stable Issue identity for Issue-scoped stages. Primary reservation uses only the immutable proposed-Spec identity until reserved tracker read-back binds the Spec. Caller correlation never defines authority. Workflow gates read only this exact scope for retry and conflict; target-wide listings are diagnostic and cannot block unrelated operations.
 _Avoid_: Target-wide checkpoint gate, parsed operation name, tracker body snapshot, workflow rule engine
 
+**Operation identity adoption frontier**:
+The immutable Spec-scoped compatibility record that lists each already valid completion lacking `operationIdentity` by exact Issue, tracker evidence identity or durable local locator, and exact-body digest. Once adopted, only an exact frozen member remains readable without the receipt; the record is independent from workflow-artifact adoption and grants no execution, close, verification, push, or deployment authority.
+_Avoid_: Timestamp inference, cross-history ordering, shared adoption frontier, retroactive receipt synthesis
+
 **Producer checkpoint bindings**:
 The immutable producer-owned identities attached to one checkpoint transaction for exact retry. The store canonicalizes and compares them without interpreting their Tracker Spec, Issue, Planning Seal, or handoff meaning.
 _Avoid_: Store-owned authority model, caller-supplied binding digest, mutable tracker snapshot

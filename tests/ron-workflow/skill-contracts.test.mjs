@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+
+import {
+  assertWorkflowOperationIdentity,
+  deriveExecuteIssueOperationIdentity,
+} from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
 const read = (path) => readFileSync(path, "utf8").replace(/\r\n?/gu, "\n");
 const plainMarkdown = (content) => content.replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1");
@@ -106,6 +112,9 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   assert.match(execute, /completion note.*operationIdentity.*canonical repository.*approved publication.*stable Issue/isu);
   assert.match(close, /implementation_complete.*current receipt.*operationIdentity.*approved publication/isu);
   assert.match(verify, /current completion.*operationIdentity.*approved publication/isu);
+  for (const contract of [execute, executionInterfaces, close, closeInterfaces, verify, aggregateInterfaces]) {
+    assert.match(contract, /workflow_operation_identity_contract_adopted:v1.*legacyCompletionFrontier/isu);
+  }
 
   for (const path of [
     "docs/engineering/to-spec.md",
@@ -127,6 +136,121 @@ test("deterministic operation identity and receipt ownership stay synchronized a
     assert.match(read(path), /deterministic|owner-derived/iu, `${path} omits operation identity behavior`);
   }
   assert.match(read("CONTEXT.md"), /Producer operation identity.*versioned.*canonical repository.*stable Spec.*approved publication.*workflow stage.*stable Issue.*caller correlation.*never.*authority/isu);
+});
+
+test("completion operation identity adoption freezes exact legacy members and rejects later omissions", () => {
+  const scope = {
+    repository: "ron03wlb/skills",
+    tracker: "github:ron03wlb/skills",
+    spec: 43,
+    targetBranch: "features/ron",
+  };
+  const operationInput = {
+    repositoryId: "github:ron03wlb/skills",
+    specId: "43",
+    approvedPublicationIdentity: `sha256:${"8".repeat(64)}`,
+  };
+  const digest = (body) => createHash("sha256").update(body).digest("hex");
+  const legacyBody = "legacy Issue 44 implementation_complete body";
+  const legacy = {
+    issue: "44",
+    evidenceId: "github-comment:legacy-44",
+    body: legacyBody,
+  };
+  const adoption = {
+    kind: "workflow_operation_identity_contract_adopted:v1",
+    ...scope,
+    legacyCompletionFrontier: [{
+      issue: legacy.issue,
+      evidenceId: legacy.evidenceId,
+      bodySha256: digest(legacyBody),
+    }],
+  };
+  const located = (payload) => ({
+    location: { tracker: scope.tracker, spec: scope.spec },
+    payload,
+  });
+  const classify = (completion, adoptionRecords = []) => {
+    const records = adoptionRecords
+      .filter(({ location, payload }) => payload.kind === adoption.kind
+        && location.tracker === scope.tracker
+        && location.spec === scope.spec)
+      .map(({ payload }) => payload);
+    for (const record of records) {
+      assert.deepEqual(
+        Object.keys(record).sort(),
+        ["kind", "legacyCompletionFrontier", "repository", "spec", "targetBranch", "tracker"],
+        "malformed operation identity adoption record",
+      );
+      for (const field of ["repository", "tracker", "spec", "targetBranch"]) {
+        assert.equal(record[field], scope[field], `mismatched operation identity adoption ${field}`);
+      }
+      assert.ok(Array.isArray(record.legacyCompletionFrontier), "unreadable operation identity legacy frontier");
+      const seen = new Set();
+      for (const entry of record.legacyCompletionFrontier) {
+        assert.deepEqual(Object.keys(entry).sort(), ["bodySha256", "evidenceId", "issue"]);
+        assert.match(entry.bodySha256, /^[a-f0-9]{64}$/u);
+        const key = `${entry.issue}:${entry.evidenceId}`;
+        assert.equal(seen.has(key), false, "duplicate operation identity legacy frontier entry");
+        seen.add(key);
+      }
+    }
+    const canonical = new Set(records.map((record) => JSON.stringify({
+      ...record,
+      legacyCompletionFrontier: [...record.legacyCompletionFrontier]
+        .sort((a, b) => `${a.issue}:${a.evidenceId}`.localeCompare(`${b.issue}:${b.evidenceId}`)),
+    })));
+    assert.ok(canonical.size <= 1, "conflicting operation identity adoption records");
+    if (Object.hasOwn(completion, "operationIdentity")) {
+      assertWorkflowOperationIdentity(completion.operationIdentity, {
+        ...operationInput,
+        producer: "execute-issue",
+        stage: "implementation",
+        issueId: completion.issue,
+      });
+      return "current";
+    }
+    if (records.length === 0) return "unadopted-legacy";
+    const bodySha256 = digest(completion.body);
+    const listed = records[0].legacyCompletionFrontier.some((entry) => entry.issue === completion.issue
+      && entry.evidenceId === completion.evidenceId
+      && entry.bodySha256 === bodySha256);
+    assert.equal(listed, true, "completion missing operationIdentity is not in the frozen frontier");
+    return "frozen-legacy";
+  };
+
+  const current = {
+    issue: "45",
+    evidenceId: "github-comment:current-45",
+    body: "current Issue 45 implementation_complete body",
+    operationIdentity: deriveExecuteIssueOperationIdentity({ ...operationInput, issueId: "45" }),
+  };
+  assert.equal(classify(current, [located(adoption)]), "current");
+  assert.equal(classify(legacy, [located(adoption)]), "frozen-legacy");
+  assert.equal(classify(legacy), "unadopted-legacy");
+  assert.throws(
+    () => classify({ ...legacy, issue: "45", evidenceId: "github-comment:later-45" }, [located(adoption)]),
+    /not in the frozen frontier/u,
+  );
+  assert.throws(
+    () => classify({ ...legacy, body: `${legacy.body} edited` }, [located(adoption)]),
+    /not in the frozen frontier/u,
+  );
+  assert.equal(classify(current, [located(adoption), located({ ...adoption })]), "current");
+  assert.throws(
+    () => classify(current, [located(adoption), located({ ...adoption, legacyCompletionFrontier: [] })]),
+    /conflicting operation identity adoption records/u,
+  );
+  assert.throws(
+    () => classify(current, [located({
+      ...adoption,
+      legacyCompletionFrontier: [
+        adoption.legacyCompletionFrontier[0],
+        adoption.legacyCompletionFrontier[0],
+      ],
+    })]),
+    /duplicate operation identity legacy frontier entry/u,
+  );
 });
 
 test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () => {
@@ -1824,12 +1948,21 @@ test("installed route derives push_ready from the frozen reachable closed-member
       "baseline",
       "candidate",
       "planningSeal",
+      "operationIdentity",
       "manualAttestations",
       "standardsReview",
       "specReview",
       "verification",
     ]) assert.ok(completion[field], `${issue.id}: missing ${field}`);
     assert.equal(completion.issue, issue.id, `${issue.id}: mismatched Issue identity`);
+    assertWorkflowOperationIdentity(completion.operationIdentity, {
+      repositoryId: "github:ron03wlb/skills",
+      specId: "aggregate-spec",
+      approvedPublicationIdentity: `sha256:${"7".repeat(64)}`,
+      producer: "execute-issue",
+      stage: "implementation",
+      issueId: issue.id,
+    });
     for (const axis of ["standardsReview", "specReview"]) {
       assert.equal(completion[axis].candidate, completion.candidate, `${issue.id}: mismatched ${axis} candidate`);
       assert.equal(completion[axis].result, "clean", `${issue.id}: ${axis} is not clean`);
@@ -2059,6 +2192,12 @@ test("installed route derives push_ready from the frozen reachable closed-member
       baseline: issueBaseline,
       candidate,
       planningSeal,
+      operationIdentity: deriveExecuteIssueOperationIdentity({
+        repositoryId: "github:ron03wlb/skills",
+        specId: "aggregate-spec",
+        approvedPublicationIdentity: `sha256:${"7".repeat(64)}`,
+        issueId: issue,
+      }),
       manualAttestations,
       standardsReview: { candidate, result: "clean" },
       specReview: { candidate, result: "clean" },

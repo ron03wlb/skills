@@ -72,6 +72,10 @@ const identityMismatch = (expected, actual) => (
   RUN_IDENTITY_KEYS.find((key) => expected?.[key] !== actual?.[key]) ?? null
 );
 
+const authorityMismatch = (expected, actual) => (
+  RUN_IDENTITY_KEYS.find((key) => key !== "runId" && expected?.[key] !== actual?.[key]) ?? null
+);
+
 const bindFreshRunOperation = (current, operationIdentity) => {
   if (!isText(operationIdentity?.key)) throw new TypeError("Run operation identity is malformed");
   const runIdentity = { ...current.runIdentity, runId: operationIdentity.key };
@@ -986,11 +990,15 @@ export function createCoordinator({
             }
             if (runReadyHandoff.state !== "READY") return runReadyStop(current, runReadyHandoff);
             if (candidateRuns && !selectedRequest.runIdentity) {
-              const matching = runReadyFacts.operationIdentity
+              const deterministic = runReadyFacts.operationIdentity
                 ? candidateRuns.filter((candidate) => (
                   (candidate.runIdentity ?? candidate)?.runId === runReadyFacts.operationIdentity.key
                 ))
-                : candidateRuns;
+                : [];
+              const compatible = candidateRuns.filter((candidate) => (
+                authorityMismatch(current.runIdentity, candidate.runIdentity ?? candidate) === null
+              ));
+              const matching = deterministic.length > 0 ? deterministic : compatible;
               if (matching.length > 1) return runSelectionRequired(matching.length);
               if (matching.length === 1) {
                 const selectedCandidate = matching[0];

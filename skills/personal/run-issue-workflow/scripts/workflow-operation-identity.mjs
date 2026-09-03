@@ -154,6 +154,16 @@ export function bindProducerCheckpointOperationIdentity(identity) {
     : identity.producerCommand === "to-tickets"
       ? deriveToTicketsOperationIdentity(input)
       : (() => { throw new TypeError("Unsupported producer checkpoint operation"); })();
+  if (Object.hasOwn(identity.bindings, "operationIdentity")) {
+    const existing = assertWorkflowOperationIdentity(
+      identity.bindings.operationIdentity,
+      operationIdentity,
+    );
+    if (identity.operationId !== existing.key) {
+      throw new TypeError("Producer checkpoint operation identity key mismatch");
+    }
+    return identity;
+  }
   return {
     ...identity,
     operationId: operationIdentity.key,
@@ -164,6 +174,11 @@ export function bindProducerCheckpointOperationIdentity(identity) {
 export function createProducerOperationCheckpoint({ store, identity }) {
   if (typeof store?.readCheckpoint !== "function" || typeof store?.createCheckpoint !== "function") {
     throw new TypeError("Producer checkpoint adapter requires readCheckpoint() and createCheckpoint()");
+  }
+  if (identity?.profileVersion === "v2"
+    && isRecord(identity.bindings)
+    && Object.hasOwn(identity.bindings, "operationIdentity")) {
+    return store.createCheckpoint(bindProducerCheckpointOperationIdentity(identity));
   }
   const existing = store.readCheckpoint(identity);
   if (existing) return store.createCheckpoint(identity);

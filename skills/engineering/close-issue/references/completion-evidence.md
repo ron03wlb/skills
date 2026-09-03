@@ -2,6 +2,8 @@
 
 Read this reference only for an Executable Issue whose `implementation_complete` note must be validated. Parent-only closeout has no implementation completion.
 
+Before accepting a completion without `operationIdentity`, apply the independent `workflow_operation_identity_contract_adopted:v1` frontier in [`operation-identity.md`](operation-identity.md). Never use the workflow-artifact adoption record to classify the operation-identity field, or vice versa.
+
 ## Workflow artifacts
 
 Before interpreting an absent field, inspect the parent or linked Spec for the logical `workflow_artifacts_contract_adopted:v1` record that exactly matches the completion's repository, tracker, Spec, and Issue target branch. Collapse multiple payload-identical physical records into one logical adoption. Validate its explicit `legacyCompletionFrontier`, including an empty list: every unique entry must bind one exact Issue, tracker-native immutable completion-note identity when available or durable local record locator, and SHA-256 of the exact note body. Do not compare order across parent and child histories. When the scope is adopted, a completion without `workflowArtifacts` remains legacy only if its exact identity and body digest occur in that frozen frontier; otherwise closeout must stop. Missing, duplicate, malformed, unreadable, or digest-mismatched frontier evidence stops. A scope with no adoption record remains readable as legacy under its original contract; never retrofit it. Malformed, mismatched, unreadable, or payload-conflicting adoption records plausibly bound to the same repository, tracker, and Spec stop, while a well-formed record for another exact scope does not classify this one.

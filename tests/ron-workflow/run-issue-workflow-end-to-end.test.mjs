@@ -218,6 +218,50 @@ const singleRunCurrent = ({
   },
 });
 
+const runExplicitSelection = async ({ store, candidates, currentRun }) => {
+  const model = {
+    trackerState: "OPEN",
+    taskState: "NONE",
+    completionState: "NONE",
+    candidateReachable: false,
+    worktreeState: "ABSENT",
+  };
+  let creates = 0;
+  const runReadyHandoff = currentReadyHandoffFor(currentRun);
+  const reconcile = async ({ request, journal }) => {
+    const selectedRun = request.runIdentity ?? currentRun;
+    const current = singleRunCurrent({ journal, model, runReadyHandoff });
+    return {
+      ...current,
+      runIdentity: selectedRun,
+      grant: { ...current.grant, runIdentity: selectedRun },
+      facts: { ...current.facts, run: { ...current.facts.run, ...selectedRun } },
+    };
+  };
+  const runtime = createWorkflowRuntime({
+    store,
+    tracker: { async read() { return {}; } },
+    selector: { async listNonTerminalRuns() { return candidates.map((runIdentity) => ({ runIdentity })); } },
+    tasks: {
+      async findIssueLane() { return []; },
+      async create() {
+        creates += 1;
+        model.taskState = "DISPATCHED";
+        return { threadId: "thread-selected-run", hostId: "local" };
+      },
+      async read() { return { state: "RUNNING" }; },
+      async message() { throw new Error("retry is unnecessary"); },
+      async wait() { return { coordinatorActive: false, taskSettled: false }; },
+    },
+    reconcile,
+    browser: { async open() {} },
+    cleanup: { async listRuns() { return []; } },
+    now: () => "2026-09-03T00:01:00.000Z",
+    sleep: async () => {},
+  });
+  return { result: await runtime.run({ specId: currentRun.specId }), creates };
+};
+
 test("runtime composition builds the owning-source handoff adapter", async () => {
   const { root, store } = createStoreFixture();
   const reads = [];
@@ -471,6 +515,76 @@ test("approved revision operation identity does not resume another revision's Ru
     assert.equal(result.status.run.runId, expected.key);
     assert.equal(store.readEvents(oldRun.runId).filter(({ type }) => type === "grant.recorded").length, 1);
     assert.equal(result.journal.filter(({ type }) => type === "grant.recorded").length, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("same approved revision resumes one pre-identity Run without creating the deterministic Run", async () => {
+  const { root, store } = createStoreFixture();
+  const opaqueRun = { ...identity, runId: "pre-identity-run-17" };
+  const deterministic = deriveWorkflowOperationIdentity({
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    approvedPublicationIdentity: identity.approvedScopeHash,
+    producer: "run-issue-workflow",
+    stage: "run",
+    issueId: null,
+  });
+  const seed = store.acquireWriter(opaqueRun.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T00:00:00.000Z",
+    runIdentity: opaqueRun,
+    maxParallel: 3,
+  });
+  seed.release();
+
+  try {
+    const { result, creates } = await runExplicitSelection({
+      store,
+      candidates: [opaqueRun],
+      currentRun: identity,
+    });
+
+    assert.equal(result.status.run.runId, opaqueRun.runId);
+    assert.equal(creates, 1);
+    assert.deepEqual(store.readEvents(deterministic.key), []);
+    assert.ok(store.readEvents(opaqueRun.runId)
+      .filter(({ type }) => type === "grant.recorded")
+      .every(({ runIdentity }) => runIdentity.runId === opaqueRun.runId));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("duplicate same-authority pre-identity Runs stop before selecting or creating a Run", async () => {
+  const { root, store } = createStoreFixture();
+  const opaqueRuns = [
+    { ...identity, runId: "pre-identity-run-17-a" },
+    { ...identity, runId: "pre-identity-run-17-b" },
+  ];
+  for (const runIdentity of opaqueRuns) {
+    const seed = store.acquireWriter(runIdentity.runId);
+    seed.append({
+      type: "grant.recorded",
+      at: "2026-09-03T00:00:00.000Z",
+      runIdentity,
+      maxParallel: 3,
+    });
+    seed.release();
+  }
+
+  try {
+    const { result, creates } = await runExplicitSelection({
+      store,
+      candidates: opaqueRuns,
+      currentRun: identity,
+    });
+
+    assert.equal(result.status.run.runId, null);
+    assert.equal(result.status.diagnoses[0].reasonCode, "run_selection_required");
+    assert.equal(creates, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -37,11 +37,13 @@ import {
   WORKFLOW_CHECKPOINT_STAGES,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 import {
+  bindProducerCheckpointOperationIdentity,
   createProducerOperationCheckpoint,
   deriveAggregateVerificationOperationIdentity,
   deriveCloseIssueOperationIdentity,
   deriveExecuteIssueOperationIdentity,
   deriveSpecReservationOperationIdentity,
+  deriveToSpecPublicationOperationIdentity,
   deriveWorkflowOperationIdentity,
   WORKFLOW_OPERATION_IDENTITY_SCHEMA,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
@@ -335,6 +337,26 @@ test("checkpoint receipt owner derives current operations outside the thin store
     assert.deepEqual(createProducerOperationCheckpoint({ store, identity: proposed }), created);
     assert.equal(created.identity.operationId, created.identity.bindings.operationIdentity.key);
     assert.notEqual(created.identity.operationId, proposed.operationId);
+
+    const mismatchedReceipt = deriveToSpecPublicationOperationIdentity({
+      repositoryId: proposed.repositoryId,
+      specId: "different-spec",
+      approvedPublicationIdentity: proposed.bindings.approvedScopeIdentity,
+    });
+    const mismatched = {
+      ...proposed,
+      operationId: mismatchedReceipt.key,
+      bindings: { ...proposed.bindings, operationIdentity: mismatchedReceipt },
+    };
+    assert.throws(
+      () => bindProducerCheckpointOperationIdentity(mismatched),
+      /identity.*mismatch/u,
+    );
+    assert.throws(
+      () => createProducerOperationCheckpoint({ store, identity: mismatched }),
+      /identity.*mismatch/u,
+    );
+    assert.strictEqual(mismatched.bindings.operationIdentity, mismatchedReceipt);
 
     const opaque = checkpointIdentityV2({
       specId: "99",
