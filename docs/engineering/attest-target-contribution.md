@@ -1,6 +1,6 @@
 ## What it does
 
-`attest-target-contribution` appends or reuses one exact tracker record through two caller routes: confirmation-gated recovery and a producer-owned prospective checkpoint. The latter is limited to an active `to-tickets` checkpoint or the exact checkpoint stage of a frozen legacy or `to-spec@v1` resume, and needs no second human confirmation.
+`attest-target-contribution` appends or reuses one exact tracker record through two caller routes: confirmation-gated recovery and a producer-owned prospective checkpoint. The latter is limited to the exact checkpoint stage of a frozen legacy, `to-spec@v1`, or `to-tickets@v1` resume, and needs no second human confirmation.
 
 Both routes write the unchanged `direct_target_contribution:v1` schema. The record proves only authority, scope, target, and commit identity; it never replaces producer publication or Issue delivery and never claims review, verification, Run readiness, push readiness, or push authority.
 
@@ -9,8 +9,8 @@ Both routes write the unchanged `direct_target_contribution:v1` schema. The reco
 Type `/attest-target-contribution`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task fits. The caller route determines its authority:
 
 - **Recovery:** [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) invokes it after showing you the complete draft and receiving one exact confirmation.
-- **Prospective checkpoint:** An active `to-tickets` operation or a frozen legacy/profile-v1 `to-spec` resume invokes it for its own transaction-bound Workflow plan checkpoint without another confirmation.
-- **Fresh `to-spec@v2`:** It has no prospective checkpoint stage and does not invoke this helper.
+- **Prospective checkpoint:** A frozen legacy/profile-v1 `to-spec` or `to-tickets` resume invokes it for its own transaction-bound Workflow plan checkpoint without another confirmation.
+- **Fresh profile-v2 producer:** Neither `to-spec@v2` nor `to-tickets@v2` has a prospective checkpoint stage or invokes this helper.
 
 A standalone invocation without one of those active caller packets stops without writing.
 
@@ -19,7 +19,7 @@ A standalone invocation without one of those active caller packets stops without
 The repository needs a configured Issue tracker. The active caller supplies one exact packet:
 
 - **Recovery:** An active [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) flow supplies the exact packet with the complete draft the human confirmed.
-- **Prospective checkpoint:** A currently active, explicitly invoked `to-tickets` operation or frozen legacy/profile-v1 `to-spec` resume supplies the matching Workflow checkpoint transaction, checkpoint commit, baseline, purpose, and expected read-back.
+- **Prospective checkpoint:** A currently active, explicitly invoked frozen legacy/profile-v1 `to-spec` or `to-tickets` resume supplies the matching Workflow checkpoint transaction, checkpoint commit, baseline, purpose, and expected read-back.
 
 This helper writes only the matching tracker comment.
 
@@ -37,4 +37,4 @@ The helper reads the owner's complete ordered history, reuses one exact record, 
 
 ## Where it fits
 
-This is a [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked authority helper inside the recovery path of [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push), the Workflow plan checkpoint path owned by `to-tickets`, and the frozen compatibility path of legacy/profile-v1 `to-spec`. Normal product or active workflow changes still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue); see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+This is a [model](https://www.aihero.dev/ai-coding-dictionary/model)-invoked authority helper inside the recovery path of [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) and the frozen Workflow plan checkpoint compatibility path of legacy/profile-v1 `to-spec` or `to-tickets`. Normal product or active workflow changes still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue); see [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

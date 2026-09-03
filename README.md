@@ -184,7 +184,7 @@ Skills I use daily for code work.
 - **[wiki](./skills/engineering/wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./skills/engineering/remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
 - **[to-spec](./skills/engineering/to-spec/SKILL.md)** — Revalidate an isolated planning lane into a Planning Seal, publish through a minimal operation-scoped transaction, and emit its exact Run handoff or decomposition command.
-- **[to-tickets](./skills/engineering/to-tickets/SKILL.md)** — Checkpoint one Multi-Issue decomposition, publish its Decomposition publication record, and emit one composite Run handoff.
+- **[to-tickets](./skills/engineering/to-tickets/SKILL.md)** — Run one minimal Multi-Issue decomposition producer, publish its Decomposition publication record, and emit one composite Run handoff.
 - **[implement](./skills/engineering/implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./skills/engineering/wayfinder/SKILL.md)** — Plan a huge chunk of work, more than one agent session can hold, as a shared map of investigation tickets on the issue tracker — resolve them one at a time until the way to the destination is clear.
 
@@ -194,7 +194,7 @@ Skills I use daily for code work.
 - **[prepare-prerequisite-artifact](./skills/engineering/prepare-prerequisite-artifact/SKILL.md)** — Build one adapter-bound, fail-closed Operator SQL prerequisite candidate without touching an external environment.
 - **[execute-issue](./skills/engineering/execute-issue/SKILL.md)** — Implement and fully verify one human- or DAG-authorized Issue, declaring exact `workflowArtifacts`, while preserving completion across recorded-target movement.
 - **[close-issue](./skills/engineering/close-issue/SKILL.md)** — Validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
-- **[attest-target-contribution](./skills/engineering/attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery or a producer-owned prospective Workflow plan checkpoint.
+- **[attest-target-contribution](./skills/engineering/attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery or a frozen producer-owned prospective Workflow plan checkpoint.
 - **[record-closed-issue-reconciliation](./skills/engineering/record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for human-confirmed failed-command or command-representation reconciliation.
 - **[prototype](./skills/engineering/prototype/SKILL.md)** — Build a throwaway prototype to answer a design question — a runnable terminal app for state/logic questions, or several radically different UI variations toggleable from one route.
 - **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.

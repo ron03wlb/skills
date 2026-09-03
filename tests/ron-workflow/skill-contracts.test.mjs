@@ -307,22 +307,16 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
     assert.match(skill, /otherwise stop.*tell the human to invoke `\/setup-matt-pocock-skills`/isu, `${name} must not invoke a user-invoked setup skill`);
   }
 
-  const ticketsSeal = tickets.indexOf("Planning Seal");
+  const ticketsInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  const ticketsSeal = tickets.indexOf("Validate the consumed Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish Executable Issues", ticketsSeal);
-  assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate or advance the seal before publish");
-  assert.match(tickets, /no relevant planning-artifact delta.*reuse/isu);
-  assert.match(tickets, /in-Spec.*successor Planning Seal/isu);
+  assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate its consumed seal before publish");
+  assert.match(tickets, /consume.*exact Planning Seal.*to-spec.*read-back.*exist locally.*ancestor.*target/isu);
+  assert.match(tickets, /does not rerun.*planning.*generation.*review.*validation.*does not create.*successor Planning Seal/isu);
   assert.match(tickets, /public behavior, acceptance, target, or exclusion.*stop.*tell the human to invoke `\/to-spec`/isu);
   assert.match(tickets, /do not modify.*parent/isu);
-  const inheritedSealCheck = tickets.indexOf("Validate the inherited Planning Seal");
-  const successorSeal = tickets.indexOf("successor Planning Seal");
-  assert.equal(inheritedSealCheck !== -1 && inheritedSealCheck < successorSeal, true, "to-tickets must validate inherited lineage before a successor");
-  assert.match(tickets, /inherited Planning Seal.*exist locally.*ancestor of the target.*before.*successor/isu);
-  const retryRecovery = tickets.indexOf("Before classifying the current delta on a retry");
-  const noDeltaSelection = tickets.indexOf("If there is no relevant planning-artifact delta");
-  assert.equal(retryRecovery !== -1 && retryRecovery < noDeltaSelection, true, "to-tickets must recover a partial-publication seal before no-delta selection");
-  assert.match(tickets, /partial-publication state.*verified Planning Seal.*reuse it.*never fall back to the inherited seal/isu);
-  assert.match(tickets, /report its full SHA with the partial state/isu);
+  assert.match(ticketsInterfaces, /upstream adapter.*checkpoint adapter.*tracker adapter.*handoff adapter/isu);
+  assert.match(ticketsInterfaces, /to-tickets@v2.*decomposition\.read_back.*ready_state\.read_back.*handoff\.completed/isu);
   const childContract = tickets.match(/<child-contract>(.*?)<\/child-contract>/su)?.[1] ?? "";
   assert.match(childContract, /Parent.*Decomposition key.*What to build/su, "canonical child contract omits stable identity");
   assert.match(childContract, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, "canonical child contract has an incomplete Planning baseline");
@@ -432,27 +426,26 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
   }
 });
 
-test("to-tickets consumes the completed to-spec handoff and checkpoints its plan before publication", () => {
+test("to-tickets consumes the completed to-spec handoff through a minimal current producer", () => {
   const tickets = read("skills/engineering/to-tickets/SKILL.md");
 
   const upstream = tickets.indexOf("Consume the completed to-spec handoff");
-  const checkpoint = tickets.indexOf("Start or resume the Workflow checkpoint transaction", upstream);
+  const checkpoint = tickets.indexOf("Start or resume the decomposition producer transaction", upstream);
   const publication = tickets.indexOf("Reconcile and Publish Executable Issues", checkpoint);
   assert.equal(
     upstream !== -1 && checkpoint > upstream && publication > checkpoint,
     true,
-    "to-tickets must consume upstream authority and settle its checkpoint before tracker publication",
+    "to-tickets must consume upstream authority and settle its current transaction before tracker publication",
   );
 
-  assert.match(tickets, /completed `to-spec`.*handoff.*parent.*target.*Planning Seal.*classification.*approved-scope identity.*checkpoint commit.*immutable.*record identity/isu);
-  assert.match(tickets, /new.*Workflow checkpoint transaction.*exact target.*clean.*no conflicting active or incomplete.*transaction.*before.*plan.*Git.*child.*relation.*label.*parent-comment mutation/isu);
-  assert.match(tickets, /matching incomplete `to-tickets` transaction.*resume.*first unsatisfied stage.*missing.*stale.*contradictory.*legacy plan-only.*ambiguous.*stop.*without mutation/isu);
-
-  assert.match(tickets, /generate.*durable decomposition plan.*in memory.*bind.*exact path.*content identity.*before.*write/isu);
-  assert.match(tickets, /create.*Workflow checkpoint transaction.*before writing.*plan/isu);
-  assert.match(tickets, /shared Target mutation writer.*commit only.*exact plan.*post-commit Git.*target read-back.*before releasing/isu);
-  assert.match(tickets, /automatically invoke.*model-invoked `attest-target-contribution`.*exact prospective packet.*immutable.*record identity.*before.*decomposition publication/isu);
-  assert.match(tickets, /exact retry.*never regenerate.*duplicate.*plan.*commit.*evidence.*confirmation/isu);
+  assert.match(tickets, /completed `to-spec`.*handoff.*producer.*parent.*tracker identity.*target.*Planning Seal.*classification.*approved-scope identity.*publication identity/isu);
+  assert.match(tickets, /read.*upstream.*owning source.*once.*never rerun.*generation.*review.*validation/isu);
+  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*repository.*Spec.*producer.*operation identity.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
+  assert.match(tickets, /ordered stages.*`decomposition\.read_back`.*`ready_state\.read_back`.*`handoff\.completed`/isu);
+  assert.match(tickets, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
+  assert.match(tickets, /existing valid incomplete.*transaction-v1.*`to-tickets@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
+  assert.match(tickets, /exact.*operation.*only.*unrelated operations.*same target.*neither conflict nor block/isu);
+  assert.match(tickets, /target-checkout dirt.*preserved.*not transaction authority/isu);
 });
 
 test("to-tickets reconciles one Issue decomposition before tracker mutation", () => {
@@ -504,11 +497,11 @@ test("to-tickets appends one composite handoff and routes only the parent Run", 
     "the composite handoff must follow decomposition and ready-state read-back",
   );
 
-  assert.match(tickets, /append or reuse.*one.*`handoff\.completed`.*consumed `to-spec`.*record identity.*this producer.*checkpoint commit.*record identity.*decomposition.*comment identity.*SHA-256.*body digest.*parent.*target.*Planning Seal.*mapping.*blocker edges.*Multi-Issue classification.*approved-scope identity/isu);
+  assert.match(tickets, /append or reuse.*one.*`handoff\.completed`.*upstream publication.*upstream handoff.*current operation.*receipt.*decomposition.*comment identity.*SHA-256.*body digest.*parent.*target.*Planning Seal.*mapping.*blocker edges.*Multi-Issue classification.*approved-scope identity/isu);
   assert.match(tickets, /no current matching handoff.*append exactly one.*one exact matching handoff.*reuse.*conflicting or multiple.*stop without mutation/isu);
   assert.match(tickets, /dependency-ready frontier.*without.*child `\/execute-issue` command.*end.*exactly `\/run-issue-workflow <Spec-ID>`/isu);
   assert.doesNotMatch(tickets, /`\/execute-issue <Issue-ID>`/u);
-  assert.match(tickets, /transaction.*writer.*checkpoint.*attestation.*upstream handoff.*child.*relation.*decomposition record.*label.*final handoff.*target.*scope.*identity failure.*exact partial state.*stop.*without rollback.*duplication.*scheduling.*task creation.*Run start.*implementation.*closeout.*push.*deploy/isu);
+  assert.match(tickets, /transaction.*upstream publication.*upstream handoff.*child.*relation.*decomposition record.*label.*final handoff.*target.*scope.*identity failure.*exact partial state.*stop.*without rollback.*duplication.*scheduling.*task creation.*Run start.*implementation.*closeout.*push.*deploy/isu);
 });
 
 test("re-entrant to-tickets behavior stays synchronized across promoted surfaces", () => {
@@ -518,18 +511,18 @@ test("re-entrant to-tickets behavior stays synchronized across promoted surfaces
   const router = read("skills/engineering/ask-matt/SKILL.md");
   const routerDocs = read("docs/engineering/ask-matt.md");
 
-  assert.match(skill, /^description: Consume a checkpointed Multi-Issue Spec.*composite Run handoff\.$/mu);
-  assert.match(metadata, /short_description: "Publish a checkpointed composite Run handoff"/u);
+  assert.match(skill, /^description: Consume one Multi-Issue Spec handoff.*minimal.*composite Run handoff\.$/mu);
+  assert.match(metadata, /short_description: "Publish a minimal composite Run handoff"/u);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
-  assert.match(docs, /completed `to-spec` handoff.*retry-safe Workflow checkpoint.*Decomposition key.*Decomposition publication record.*composite `handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
+  assert.match(docs, /completed `to-spec` handoff.*minimal operation-scoped transaction.*Decomposition key.*Decomposition publication record.*composite `handoff\.completed`.*`\/run-issue-workflow <Spec-ID>`/isu);
   assert.doesNotMatch(docs, /zero matches|one exact match|Publish missing children/iu);
   assert.doesNotMatch(skill + docs, /`\/execute-issue <Issue-ID>`/u);
-  assert.match(router, /Multi-Issue Tracker Spec.*to-tickets.*completed `to-spec` handoff.*checkpoint.*Decomposition publication record.*composite.*`\/run-issue-workflow <Spec-ID>`/isu);
-  assert.match(routerDocs, /Multi-Issue Tracker Spec.*to-tickets.*completed `to-spec` handoff.*checkpoint.*Decomposition publication record.*composite.*`\/run-issue-workflow`/isu);
+  assert.match(router, /Multi-Issue Tracker Spec.*to-tickets.*completed `to-spec` handoff.*minimal.*transaction.*Decomposition publication record.*composite.*`\/run-issue-workflow <Spec-ID>`/isu);
+  assert.match(routerDocs, /Multi-Issue Tracker Spec.*to-tickets.*completed `to-spec` handoff.*minimal.*transaction.*Decomposition publication record.*composite.*`\/run-issue-workflow`/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     const entry = read(path).match(/^- \*\*\[to-tickets\][^\n]*/mu)?.[0] ?? "";
-    assert.match(entry, /checkpoint.*Decomposition publication record.*composite Run handoff/iu, `${path} has a stale to-tickets description`);
+    assert.match(entry, /minimal.*Decomposition publication record.*composite Run handoff/iu, `${path} has a stale to-tickets description`);
   }
 });
 
@@ -726,7 +719,7 @@ test("direct target contribution attestation is exact, minimal, and model-invoke
 });
 
 
-test("prospective checkpoint attestation is transaction-bound and preserves recovery", () => {
+test("prospective checkpoint attestation is frozen-profile-only and preserves recovery", () => {
   const name = "attest-target-contribution";
   const skill = read(`skills/engineering/${name}/SKILL.md`);
   const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
@@ -736,8 +729,8 @@ test("prospective checkpoint attestation is transaction-bound and preserves reco
 
   assert.match(skill, /two exact caller routes.*confirmation-gated recovery.*producer-owned prospective/isu);
   assert.match(skill, /recovery.*active `\/verify-target-before-push`.*exact confirmed recovery packet.*human confirmed/isu);
-  assert.match(skill, /prospective.*currently active.*explicitly human-invoked.*`to-tickets`.*frozen transaction-v1.*`to-spec@v1`.*producer.*owner Spec.*target.*transaction identity.*checkpoint commit.*plan purpose.*baseline.*read-back expectations/isu);
-  assert.match(skill, /Fresh `to-spec@v2`.*no checkpoint-commit.*prospective-attestation stage/isu);
+  assert.match(skill, /prospective.*currently active.*explicitly human-invoked.*frozen transaction-v1.*`to-spec@v1`.*`to-tickets@v1`.*producer.*owner Spec.*target.*transaction identity.*checkpoint commit.*plan purpose.*baseline.*read-back expectations/isu);
+  assert.match(skill, /Fresh `to-spec@v2` and `to-tickets@v2`.*no checkpoint-commit.*prospective-attestation stage/isu);
   assert.match(skill, /manual helper.*stale invocation.*inferred plan.*downstream Run.*cross-route substitution.*stops without writing/isu);
   assert.match(skill, /prospective.*no second human confirmation/isu);
 
@@ -753,14 +746,14 @@ test("prospective checkpoint attestation is transaction-bound and preserves reco
   assert.match(skill, /return.*exact reused or appended.*immutable tracker identity.*active caller/isu);
   assert.match(skill, /never creates commits or transactions.*resumes a producer.*publishes a Spec or decomposition.*starts Run/isu);
 
-  assert.match(metadata, /human-confirmed coverage recovery.*prospective Workflow plan checkpoint.*active to-tickets.*frozen legacy\/profile-v1 to-spec.*fresh to-spec@v2.*no such route.*no second confirmation/isu);
+  assert.match(metadata, /human-confirmed coverage recovery.*prospective Workflow plan checkpoint.*frozen legacy\/profile-v1.*to-spec.*to-tickets.*fresh profile-v2 producers.*no such route.*no second confirmation/isu);
   assert.match(docs, /two caller routes.*confirmation-gated recovery.*producer-owned prospective checkpoint/isu);
   assert.match(docs, /standalone invocation.*stops/iu);
-  assert.match(matt, /Fresh `to-spec`.*no target operational-plan checkpoint.*`to-tickets`.*Workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
-  assert.match(mattDocs, /Fresh `to-spec`.*no target operational-plan checkpoint.*to-tickets.*workflow plan checkpoint.*attest-target-contribution.*no second confirmation.*immutable record identity/isu);
+  assert.match(matt, /Fresh `to-spec` and `to-tickets`.*no target operational-plan checkpoint.*prospective contribution record.*frozen legacy and profile-v1.*attest-target-contribution/isu);
+  assert.match(mattDocs, /Fresh `to-spec` and `to-tickets`.*no target operational-plan checkpoint.*prospective contribution record.*frozen legacy and profile-v1.*attest-target-contribution/isu);
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
-    assert.match(read(path), /attest-target-contribution.*recovery.*producer-owned prospective.*workflow plan checkpoint/iu);
+    assert.match(read(path), /attest-target-contribution.*recovery.*frozen.*prospective.*workflow plan checkpoint/iu);
   }
 });
 

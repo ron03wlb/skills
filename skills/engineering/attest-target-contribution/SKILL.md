@@ -1,6 +1,6 @@
 ---
 name: attest-target-contribution
-description: Append or reuse exact direct-target contribution authority evidence. Use when /verify-target-before-push hands off a human-confirmed recovery packet, to-tickets hands off its exact checkpoint, or a frozen legacy to-spec operation resumes that checkpoint stage.
+description: Append or reuse exact direct-target contribution authority evidence. Use when /verify-target-before-push hands off a human-confirmed recovery packet or a frozen legacy/profile-v1 planning producer resumes its exact checkpoint stage.
 ---
 
 # Attest Target Contribution
@@ -11,7 +11,7 @@ Append or reuse the narrow tracker authority record for exact eligible Direct ta
 
 For recovery, require an active `/verify-target-before-push` recovery and one exact confirmed recovery packet containing the owner Tracker Spec or Issue, Issue target branch, fixed `classification: non-product-workflow-governance-maintenance`, ordered full commit SHAs, per-commit purposes, and the complete tracker comment draft. Require evidence that the active verification workflow produced the packet only after its frozen selected-range coverage check found those commits uncovered and the human confirmed that exact draft once.
 
-For prospective creation, require one packet from the currently active, explicitly human-invoked `to-tickets` operation or an exact frozen transaction-v1 or `to-spec@v1` resume already at its attestation stage. It binds the producer, owner Spec identity, target, Workflow checkpoint transaction identity, one checkpoint commit, exact plan purpose, baseline, and read-back expectations. Require evidence that the same active producer invocation handed off this packet for its own checkpoint. Fresh `to-spec@v2` has no checkpoint-commit or prospective-attestation stage. The prospective route needs no second human confirmation.
+For prospective creation, require one packet from the currently active, explicitly human-invoked frozen transaction-v1, `to-spec@v1`, or `to-tickets@v1` resume already at its attestation stage. It binds the producer, owner Spec identity, target, Workflow checkpoint transaction identity, one checkpoint commit, exact plan purpose, baseline, and read-back expectations. Require evidence that the same active producer invocation handed off this packet for its own checkpoint. Fresh `to-spec@v2` and `to-tickets@v2` have no checkpoint-commit or prospective-attestation stage. The prospective route needs no second human confirmation.
 
 A manual helper invocation, stale invocation, inferred plan, downstream Run, other workflow, or cross-route substitution stops without writing. Missing authority, multiple packets, conflicting route evidence, or any packet ambiguity also stops without guessed selection.
 

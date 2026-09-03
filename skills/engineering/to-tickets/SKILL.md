@@ -1,6 +1,6 @@
 ---
 name: to-tickets
-description: Consume a checkpointed Multi-Issue Spec, publish its Decomposition publication record, and emit one composite Run handoff.
+description: Consume one Multi-Issue Spec handoff through a minimal decomposition producer and emit one composite Run handoff.
 disable-model-invocation: true
 ---
 
@@ -8,13 +8,13 @@ disable-model-invocation: true
 
 Consume one completed `/to-spec` handoff and its published classification; never reclassify delivery shape. `to-tickets` accepts only a Multi-Issue Spec. For a Single-Issue Spec, stop without mutation and report its published `/run-issue-workflow <Spec-ID>` route. For a Multi-Issue Spec, read its full body and comments and decompose only its approved scope.
 
-The configured issue tracker, triage labels, Workflow checkpoint transaction store, and shared Target mutation writer must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Never create or repair those authority seams here.
+The configured issue tracker, triage labels, current Workflow checkpoint profiles, and concrete upstream, checkpoint, tracker, and handoff adapters must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. A frozen legacy or profile-v1 resume also requires its existing shared Target mutation writer. Never create or repair those authority seams here.
 
 ## 1. Consume the completed to-spec handoff
 
-Read the exact completed `to-spec` `handoff.completed` result and require its producer, parent and tracker identity, target, Planning Seal, Multi-Issue classification, approved-scope identity, checkpoint commit, immutable `direct_target_contribution:v1` record identity, publication identity, and next command to match the current parent body, ordered comments, local target, and approved scope. Read the handoff and every referenced immutable identity back from its owning source; a cached summary or durable plan is not authority.
+Read the exact completed `to-spec` `handoff.completed` result through the upstream adapter once. Require its producer, parent and tracker identity, target, Planning Seal, Multi-Issue classification, approved-scope identity, transaction identity, publication identity, and next command to match the current parent body, ordered comments, local target, and approved scope. Read the upstream publication and handoff identities back from their owning sources once; never rerun `to-spec` generation, review, validation, or publication logic, and never treat a cached summary or durable plan as authority.
 
-Before a new `to-tickets` Workflow checkpoint transaction, require the exact target to be clean and require no conflicting active or incomplete Workflow checkpoint transaction. Unrelated staged, unstaged, untracked, modified, mixed, or provenance-ambiguous work is preserved and stops before transaction, plan, Git, child, relation, label, or parent-comment mutation. A matching incomplete `to-tickets` transaction is the only resumable producer state: re-read every bound result and resume its first unsatisfied stage. Missing, stale, contradictory, unrelated dirty, legacy plan-only, or ambiguous upstream or transaction state stops without mutation; never synthesize a handoff, infer ownership, or repair another operation.
+Read the exact `to-tickets` operation only. Unrelated operations on the same target neither conflict nor block. Target-checkout dirt and unrelated staged, unstaged, untracked, modified, or mixed work are preserved and are not transaction authority because fresh decomposition performs no target write. Missing, stale, contradictory, legacy plan-only, or ambiguous upstream or operation state stops before child, relation, label, or parent-comment mutation; never synthesize a handoff, infer ownership, or repair another operation.
 
 ## 2. Draft independent children
 
@@ -24,31 +24,27 @@ The parent keeps only the overall outcome, cross-Issue constraints, and decompos
 
 Prefer tracer-bullet vertical slices. For one wide mechanical refactor that cannot stay green per slice, use expand-contract: expand, independently green migration batches, then contract after all migrations.
 
-Generate the exact durable decomposition plan in memory from the approved parent, expected canonical child contracts, owned blocker graph, External blockers, publication order, and verification. Select its repository-conventional path and bind its exact path plus the generated content identity before any write. Do not write the plan until the Workflow checkpoint transaction below exists.
+Generate the exact decomposition in memory from the approved parent, expected canonical child contracts, owned blocker graph, External blockers, publication order, and verification. It is producer input, not a repository artifact: never write or commit a target operational plan for a fresh operation.
 
-## 3. Validate or advance the Planning Seal
+## 3. Validate the consumed Planning Seal
 
-Validate the inherited Planning Seal before any successor Planning Seal: require its commit to exist locally and be an ancestor of the target `HEAD`. Missing or unreachable lineage stops and returns to `/to-spec`.
+Consume the exact Planning Seal from the completed `to-spec` read-back. Require its full commit to exist locally and be an ancestor of the target `HEAD`; require the parent body, target, Multi-Issue classification, and approved-scope identity to remain the same publication. Missing or unreachable lineage is a Hard gate and returns to `/to-spec`.
 
-Before classifying the current delta on a retry, read prior partial-publication state. If it records a verified Planning Seal, require that full SHA to exist locally and be an ancestor of target `HEAD`, reuse it, and never fall back to the inherited seal. Conflicting or missing evidence stops.
+`to-tickets` does not rerun upstream planning generation, review, or validation and does not create a successor Planning Seal. Exact approved glossary or ADR changes require a renewed `to-spec` publication rather than a downstream planning write.
 
-- If there is no relevant planning-artifact delta and no recovered successor, reuse the inherited seal.
-- Exact approved in-Spec glossary or ADR refinement may create at most one successor Planning Seal containing only that isolated delta. Preserve unrelated staged, unstaged, and untracked work.
-- New public behavior, acceptance, target, or exclusion is a Spec revision: stop, tell the human to invoke `/to-spec`, and do not modify or silently expand the parent.
+New public behavior, acceptance, target, or exclusion is a Spec revision: stop, tell the human to invoke `/to-spec`, and do not modify or silently expand the parent. Preserve any existing partial publication and report the exact consumed seal.
 
-Verify the selected full SHA, ancestry, exact owned diff, and unrelated-state preservation. If publication later fails, retain the seal and report its full SHA with the partial state; do not amend, reset, or roll it back.
+## 4. Start or resume the decomposition producer transaction
 
-## 4. Start or resume the Workflow checkpoint transaction
+Before transaction creation or tracker mutation, read [`references/decomposition-publication-interfaces.md`](references/decomposition-publication-interfaces.md) and use only its upstream, checkpoint, tracker, and handoff adapters.
 
-After the selected Planning Seal is exact, bind one versioned Workflow checkpoint transaction to the repository identity, producer command `to-tickets`, exact parent Spec and tracker identity, consumed `to-spec` handoff and immutable record identity, target, post-Seal baseline, initially clean state, exact durable plan path and generated content identity, Multi-Issue classification, and approved-scope identity. Create the Workflow checkpoint transaction before writing the plan. Advance only this ordered prefix: `plan.written`, `checkpoint.committed`, `attestation.read_back`, `decomposition.read_back`, `ready_state.read_back`, `handoff.completed`.
+First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt. That compatibility branch has frozen exact resume behavior: continue its existing plan, checkpoint commit, attestation, decomposition, ready-state, and handoff stages at the first unsatisfied stage. Do not migrate, copy, rewrite, delete, or recreate it, and never use its behavior to shape a fresh operation.
 
-Only one exact matching incomplete transaction may resume at its first unsatisfied stage. Re-read every completed result and require every bound identity to match. A mismatched producer, parent, tracker identity, upstream handoff, target, baseline, Planning Seal, path, content, checkpoint commit, evidence record, decomposition publication, ready state, final handoff, multiple active transaction, or ambiguous state stops without regeneration, overwrite, duplicate mutation, rollback, or unrelated attribution.
+A fresh ordinary decomposition uses `to-tickets@v2`. Bind one exact operation-scoped transaction to repository, Spec and tracker identity, producer `to-tickets`, opaque operation identity, profile `v2`, target, observed baseline, consumed Planning Seal, Multi-Issue classification, approved-scope identity, upstream publication identity, and upstream handoff identity. Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`.
 
-For a fresh `plan.written` stage, write only the already bound generated content to the exact plan path and read its content identity back. For `checkpoint.committed`, acquire the shared Target mutation writer, revalidate the clean baseline and transaction, commit only the exact plan, and require post-commit Git and target read-back to equal that checkpoint before releasing the writer. Acquisition failure stops before Git or tracker mutation.
+The current profile has no target operational-plan file, plan-content stage, checkpoint commit, shared-writer acquisition, prospective `direct_target_contribution:v1` record, or attestation stage. Target-checkout dirt is preserved and is not transaction authority; only a ref, upstream, tracker, Planning Seal, or operation identity conflict that risks the wrong mutation is a Hard gate.
 
-After the checkpoint commit, automatically invoke model-invoked `attest-target-contribution` with the exact prospective packet owned by this producer. It binds the active producer, parent Spec identity, target, transaction identity, checkpoint commit, plan purpose, baseline, and read-back expectations. Require the exact reused or appended immutable `direct_target_contribution:v1` record identity before any decomposition publication. No second confirmation is permitted or required.
-
-An exact retry never regenerates or duplicates the plan, plan write, checkpoint commit, evidence, tracker comment, or confirmation, and it never switches the Planning Seal or consumed upstream handoff. Completed transaction results remain immutable; do not mark them consumed, archive them, or delete them automatically.
+Only one exact matching transaction may resume at its first unsatisfied stage. Re-read every completed receipt and require every bound identity to match. A missing transaction with observed downstream mutation, duplicate exact operation, mismatched receipt, out-of-order stage, conflicting upstream publication or handoff, or ambiguous adapter result stops without regeneration, overwrite, duplicate mutation, rollback, or unrelated attribution. Completed transaction receipts remain immutable; do not mark them consumed, archive them, or delete them automatically.
 
 ## 5. Reconcile and Publish Executable Issues
 
@@ -61,6 +57,8 @@ Classify every expected key in one preflight:
 - **More than one match:** stop without mutation and report the duplicate key and Issue identities.
 
 Any conflict in key, parent, target, Planning Seal, executable contract, body, or tracker-native relationship evidence must stop without mutation; never automatically repair conflicting evidence. An expected native relationship that points elsewhere is a conflict, not an incomplete match. Validate all existing matches, the owned acyclic graph, and every External blocker before creating any missing child. This preflight makes a retry recover partial publication by Decomposition key instead of duplicating children.
+
+Read any prior partial-publication state and bind its exact child, key, expected relation, and failed read-back before continuing.
 
 ### Complete a recorded partial publication
 
@@ -100,11 +98,13 @@ Compute readiness only after record read-back. An open child whose every owned a
 
 ### Append the composite Run handoff
 
-Append or reuse one final `handoff.completed` bound to the consumed `to-spec` immutable v1 record identity, this producer's checkpoint commit and immutable v1 record identity, the exact Decomposition publication comment identity or durable local record locator, its SHA-256 exact body digest, parent and tracker identity, target, Planning Seal, complete key-to-Issue mapping, blocker edges, Multi-Issue classification, and approved-scope identity. With no current matching handoff, append exactly one. With one exact matching handoff, reuse it. Conflicting or multiple handoffs stop without mutation. Read the appended or reused receipt back exactly before advancing `handoff.completed`.
+Append or reuse one final `handoff.completed` bound to the upstream publication identity, upstream handoff identity, this current operation transaction receipt, the exact Decomposition publication comment identity or durable local record locator, its SHA-256 exact body digest, parent and tracker identity, target, Planning Seal, complete key-to-Issue mapping, blocker edges, Multi-Issue classification, and approved-scope identity. The current operation receipt contains the transaction identity plus the exact `decomposition.read_back` and `ready_state.read_back` receipts. With no current matching handoff, append exactly one. With one exact matching handoff, reuse it. Conflicting or multiple handoffs stop without mutation. Read the appended or reused receipt back exactly before advancing `handoff.completed`.
+
+An existing frozen transaction-v1 or `to-tickets@v1` handoff retains its original checkpoint commit and immutable `direct_target_contribution:v1` bindings. Never rewrite or migrate that receipt into the current shape.
 
 Report the dependency-ready frontier without any child `/execute-issue` command and end with exactly `/run-issue-workflow <Spec-ID>`. `/to-tickets` never schedules or creates tasks and never depends on Codex, Orca, titles, inferred blockers, or global queue state.
 
-Any transaction, writer, checkpoint, attestation, upstream handoff, child, relation, Decomposition record, label, final handoff, target, scope, or identity failure preserves and reports the exact partial state and stops without rollback, duplication, scheduling, task creation, Run start, implementation, closeout, push, or deploy. Report the transaction identity, selected Planning Seal, checkpoint commit and v1 record identity when they exist, consumed upstream identity, exact first unsatisfied stage, published mapping and edge state, and any successful tracker identities. Never amend, reset, delete, or silently repair evidence.
+Any current transaction, upstream publication, upstream handoff, child, relation, Decomposition record, label, final handoff, target, scope, or identity failure preserves and reports the exact partial state and stops without rollback, duplication, scheduling, task creation, Run start, implementation, closeout, push, or deploy. Report the transaction identity, consumed Planning Seal, upstream publication and handoff identities, exact first unsatisfied stage, published mapping and edge state, and any successful tracker identities. A frozen compatibility resume additionally reports its existing checkpoint and attestation evidence. Never amend, reset, delete, or silently repair evidence.
 
 <child-contract>
 
