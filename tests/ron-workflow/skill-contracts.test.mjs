@@ -267,9 +267,11 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
 
   assert.match(grill, /Spec workflow lane.*one Codex task.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
   assert.match(grill, /same target.*without.*shared planning checkout.*global workflow lock.*cross-lane.*mutation/isu);
-  assert.match(grill, /hand.*to-spec.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
+  assert.match(grill, /Call the Skill tool twice.*"grilling".*"domain-modeling".*same lane identity/isu);
+  assert.match(grill, /handoff packet.*tell the human to run `\/to-spec`.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
+  assert.match(grill, /Recoverable blocker.*lane registry.*observed evidence.*smallest human action.*preserved stages.*same `\/grill-with-docs`/isu);
   assert.match(domain, /active Spec workflow lane.*accepted.*CONTEXT\.md.*ADR.*only.*planning worktree/isu);
-  assert.match(domain, /lane identity.*mismatch.*stop.*target checkout.*other lane/isu);
+  assert.match(domain, /lane identity.*mismatch.*Hard gate.*stop.*target checkout.*other lane/isu);
   assert.match(grillDocs + domainDocs, /one proposed (?:Tracker )?Spec.*target.*isolated planning worktree/isu);
 
   const specSeal = spec.indexOf("Revalidate the Planning baseline and select the Planning Seal");

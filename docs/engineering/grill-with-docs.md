@@ -28,7 +28,7 @@ It also needs two other skills present: [grilling](https://aihero.dev/skills-gri
 
 ## The planning lane
 
-One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target because each writes only its own planning worktree; there is no shared planning checkout or global workflow lock. The task hands the lane to [to-spec](https://aihero.dev/skills-to-spec), keeps it for a retry after partial publication, and disposes only that exact clean worktree after successful handoff read-back.
+One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target because each writes only its own planning worktree; there is no shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry. The task produces an exact lane handoff packet, tells you to run [to-spec](https://aihero.dev/skills-to-spec), keeps the lane for a retry after partial publication, and disposes only that exact clean worktree after successful handoff read-back.
 
 ## The paper trail
 

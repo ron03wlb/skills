@@ -912,6 +912,111 @@ test("target mutation writer serializes generic producers with legacy closeout o
   }
 });
 
+test("two planning lanes isolate work, revalidate target movement, and serialize Planning Seal writes", () => {
+  const parent = mkdtempSync(join(tmpdir(), "planning-lanes-"));
+  const targetCheckout = join(parent, "target");
+  const laneAPath = join(parent, "lane-a");
+  const laneBPath = join(parent, "lane-b");
+  mkdirSync(targetCheckout);
+  const git = (args) => execFileSync("git", args, {
+    cwd: targetCheckout,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
+
+  try {
+    git(["init", "-b", "features/ron"]);
+    git(["config", "user.name", "Ron Workflow Test"]);
+    git(["config", "user.email", "workflow@example.invalid"]);
+    git(["config", "core.autocrlf", "false"]);
+    writeFileSync(join(targetCheckout, "CONTEXT.md"), "Order: a wager accepted by the platform.\n", "utf8");
+    writeFileSync(join(targetCheckout, "notes.txt"), "baseline\n", "utf8");
+    git(["add", "CONTEXT.md", "notes.txt"]);
+    git(["commit", "-m", "baseline"]);
+    const startingBaseline = git(["rev-parse", "HEAD"]);
+
+    git(["worktree", "add", "-b", "planning/spec-a", laneAPath, startingBaseline]);
+    git(["worktree", "add", "-b", "planning/spec-b", laneBPath, startingBaseline]);
+    const lanes = [
+      { task: "task-a", proposedSpec: "spec-a", target: "features/ron", baseline: startingBaseline, worktree: laneAPath },
+      { task: "task-b", proposedSpec: "spec-b", target: "features/ron", baseline: startingBaseline, worktree: laneBPath },
+    ];
+    assert.notEqual(lanes[0].task, lanes[1].task);
+    assert.notEqual(lanes[0].proposedSpec, lanes[1].proposedSpec);
+    assert.notEqual(lanes[0].worktree, lanes[1].worktree);
+
+    writeFileSync(join(laneAPath, "CONTEXT.md"), "Order: a wager accepted by the platform.\nLane A term.\n", "utf8");
+    writeFileSync(join(laneBPath, "CONTEXT.md"), "Order: a wager accepted by the platform.\nLane B term.\n", "utf8");
+    assert.match(readFileSync(join(laneAPath, "CONTEXT.md"), "utf8"), /Lane A term/u);
+    assert.doesNotMatch(readFileSync(join(laneAPath, "CONTEXT.md"), "utf8"), /Lane B term/u);
+    assert.match(readFileSync(join(laneBPath, "CONTEXT.md"), "utf8"), /Lane B term/u);
+    assert.equal(readFileSync(join(targetCheckout, "CONTEXT.md"), "utf8"), "Order: a wager accepted by the platform.\n");
+
+    const relevantContextAt = (revision) => git(["show", `${revision}:CONTEXT.md`]);
+    const revalidate = (baseline, latest) => {
+      const acceptedFact = relevantContextAt(baseline);
+      const currentFact = relevantContextAt(latest);
+      if (acceptedFact === currentFact) return { disposition: "compatible", baseline: latest };
+      return {
+        disposition: "Recoverable blocker",
+        owningSource: "CONTEXT.md",
+        observedEvidence: { baseline: acceptedFact, latest: currentFact },
+        smallestHumanAction: "Confirm or revise the affected Order term",
+        preservedStages: ["lane.bound", "decisions.accepted"],
+        retry: "/to-spec",
+      };
+    };
+
+    writeFileSync(join(targetCheckout, "notes.txt"), "compatible movement\n", "utf8");
+    git(["add", "notes.txt"]);
+    git(["commit", "-m", "compatible target movement"]);
+    const compatibleHead = git(["rev-parse", "HEAD"]);
+    assert.deepEqual(revalidate(startingBaseline, compatibleHead), {
+      disposition: "compatible",
+      baseline: compatibleHead,
+    });
+
+    writeFileSync(join(targetCheckout, "CONTEXT.md"), "Order: a settled wager.\n", "utf8");
+    git(["add", "CONTEXT.md"]);
+    git(["commit", "-m", "conflicting target movement"]);
+    const conflictingHead = git(["rev-parse", "HEAD"]);
+    assert.deepEqual(revalidate(startingBaseline, conflictingHead), {
+      disposition: "Recoverable blocker",
+      owningSource: "CONTEXT.md",
+      observedEvidence: {
+        baseline: "Order: a wager accepted by the platform.",
+        latest: "Order: a settled wager.",
+      },
+      smallestHumanAction: "Confirm or revise the affected Order term",
+      preservedStages: ["lane.bound", "decisions.accepted"],
+      retry: "/to-spec",
+    });
+
+    const gitCommonDir = resolve(targetCheckout, git(["rev-parse", "--git-common-dir"]));
+    const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "planning-lane-test" });
+    const laneAWriter = store.acquireTargetMutationWriter({
+      target: "features/ron",
+      operationId: "planning-seal-task-a-spec-a",
+    });
+    assert.equal(store.readTargetMutationWriter("features/ron"), "planning-seal-task-a-spec-a");
+    assert.throws(
+      () => store.acquireTargetMutationWriter({
+        target: "features/ron",
+        operationId: "planning-seal-task-b-spec-b",
+      }),
+      /TARGET_CLOSE_WRITER_LOCKED/u,
+    );
+    laneAWriter.release();
+    store.acquireTargetMutationWriter({
+      target: "features/ron",
+      operationId: "planning-seal-task-b-spec-b",
+    }).release();
+    assert.equal(store.readTargetMutationWriter("features/ron"), null);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test("the versioned runtime interface publishes the accepted state machines", () => {
   assert.deepEqual(RUN_STATES, [
     "RECONCILING", "RUNNING", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",

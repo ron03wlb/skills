@@ -2,7 +2,7 @@
 
 `domain-modeling` builds and sharpens a project's **ubiquitous language** while you are designing: challenging a term that conflicts with the glossary, forcing a precise word where you used a vague one, and stress-testing a relationship with a concrete scenario until the boundaries are exact.
 
-It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. Under `grill-with-docs`, it writes only inside the active task's isolated planning worktree and returns accepted path or hunk identities to that lane. A standalone invocation keeps using the current worktree.
+It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. Under `grill-with-docs`, it writes only inside the active task's isolated planning worktree and returns accepted path or hunk identities to that lane. A lane-identity mismatch is a Hard gate before any write, leaving the target checkout and other lanes unchanged. A standalone invocation keeps using the current worktree.
 
 ## When to reach for it
 
