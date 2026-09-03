@@ -9,7 +9,7 @@ Resolve installed paths from the current harness's available-skill inventory or 
 | Seam | Owning source | Read-only proof |
 | --- | --- | --- |
 | Configured tracker | `docs/agents/issue-tracker.md` plus its configured CLI or local-file convention | The configuration is readable and one non-mutating tracker health/read operation is available. |
-| Triage labels | `docs/agents/triage-labels.md`, only when `triage` is installed | Every configured role has one readable label mapping; label creation is outside diagnostics. |
+| Triage labels | `docs/agents/triage-labels.md` plus the configured tracker's read-only label-list operation, only when `triage` is installed | Read the mapping, list tracker labels without mutation, and verify every configured exact label exists. A missing label is `MISSING`; unreadable tracker evidence is `UNKNOWN`; label creation is outside diagnostics. |
 | Public skill surfaces | The current harness's resolved installations of `grill-with-docs`, `to-spec`, `to-tickets`, `verify-target-before-push`, and `push-target` | Each required `SKILL.md` and `agents/openai.yaml` resolves from the same installed release. |
 | Operation-scoped producer store | The separately installed coordinator's `scripts/workflow-control-store.mjs` | `to-spec@v2` and `to-tickets@v2` profiles are exported; no transaction or receipt is created. |
 | Producer handoff | `to-spec/references/spec-publication-interfaces.md`, `to-tickets/references/decomposition-publication-interfaces.md`, and the installed coordinator's `scripts/run-authority-adapters.mjs` | Producer-owned handoff read-back and the Run-ready adapter surface are present without invoking a producer. |

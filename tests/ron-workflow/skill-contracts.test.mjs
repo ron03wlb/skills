@@ -7,6 +7,11 @@ import test from "node:test";
 
 const read = (path) => readFileSync(path, "utf8").replace(/\r\n?/gu, "\n");
 const plainMarkdown = (content) => content.replace(/\[([^\]]+)\]\([^)]+\)/gu, "$1");
+const readVerifyTargetContract = () => [
+  read("skills/engineering/verify-target-before-push/SKILL.md"),
+  read("skills/engineering/verify-target-before-push/references/aggregate-verification-interfaces.md"),
+  read("skills/engineering/verify-target-before-push/references/aggregate-recovery-interfaces.md"),
+].join("\n");
 
 const createGitFixture = (prefix) => {
   const repo = mkdtempSync(join(tmpdir(), prefix));
@@ -169,7 +174,7 @@ test("code review advisory and confirmed code review finding route to Aggregate 
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const executeDocs = read("docs/engineering/execute-issue.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const router = read("skills/engineering/ask-matt/SKILL.md");
@@ -590,7 +595,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
   const close = read("skills/engineering/close-issue/SKILL.md");
   const closeDocs = read("docs/engineering/close-issue.md");
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const router = read("skills/engineering/ask-matt/SKILL.md");
   const routerDocs = read("docs/engineering/ask-matt.md");
@@ -800,7 +805,7 @@ test("record-closed-issue-reconciliation is exact, immutable, and model-invoked"
 
 
 test("closed Issue evidence reconciliation is narrow and restarts fresh target verification", () => {
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const matt = read("skills/engineering/ask-matt/SKILL.md");
@@ -929,7 +934,7 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
 
 
 test("historical command placeholder reconciliation is exact and fresh-entry only", () => {
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const helper = read("skills/engineering/record-closed-issue-reconciliation/SKILL.md");
@@ -1075,7 +1080,7 @@ test("historical command placeholder reconciliation is exact and fresh-entry onl
 
 
 test("target coverage recovery is confirmation-gated and restarts aggregate verification", () => {
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const matt = read("skills/engineering/ask-matt/SKILL.md");
@@ -1126,7 +1131,7 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   const execute = read("skills/engineering/execute-issue/SKILL.md");
   const review = read("skills/engineering/code-review/SKILL.md");
   const close = read("skills/engineering/close-issue/SKILL.md");
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   const matt = read("skills/engineering/ask-matt/SKILL.md");
 
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
@@ -1479,7 +1484,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.equal(existsSync("skills/engineering/close-issue/scripts/preservation.mjs"), false);
   assert.equal(existsSync("tests/ron-workflow/close-issue-preservation.test.mjs"), false);
 
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const verify = readVerifyTargetContract();
   assert.match(verify, /two evidence modes.*local-ahead.*already-pushed/isu);
   assert.match(verify, /local-ahead.*unique configured upstream tracking tip.*`B\.\.V`.*non-empty.*guess/isu);
   assert.match(verify, /already-pushed.*explicit merge request.*pull request.*exact base\/head range.*never guess/isu);
@@ -2201,7 +2206,8 @@ test("installed route derives push_ready from the frozen reachable closed-member
 });
 
 test("installed route consumes push_ready through one exact non-force push", () => {
-  const skill = read("skills/engineering/push-target/SKILL.md");
+  const publicSkill = read("skills/engineering/push-target/SKILL.md");
+  const skill = `${publicSkill}\n${read("skills/engineering/push-target/references/push-delivery-interfaces.md")}`;
   const metadata = read("skills/engineering/push-target/agents/openai.yaml");
   const docs = read("docs/engineering/push-target.md");
 
@@ -2664,6 +2670,10 @@ test("installed route diagnostics expose owning seams without setup authority", 
     assert.match(diagnostics, new RegExp(seam, "iu"), `missing installed ${seam} diagnostic`);
   }
   assert.match(diagnostics, /owning source.*observed evidence.*smallest human action/isu);
+  assert.match(diagnostics, /triage labels.*tracker.*read-only.*label.*list.*every configured.*exists/isu);
+  assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-github.md"), /gh label list --json name/iu);
+  assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md"), /glab label list --output json/iu);
+  assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md"), /no separate label registry.*non-empty.*unique.*Status/isu);
   assert.match(setupDocs, /installed workflow diagnostics/iu);
   assert.match(setupDocs, /read-only/iu);
   assert.match(setupDocs, /missing or unknown seam.*owning source/isu);
@@ -2674,6 +2684,28 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.match(read("skills/engineering/verify-target-before-push/SKILL.md"), /references\/aggregate-verification-interfaces\.md/u);
   assert.match(read("skills/engineering/push-target/SKILL.md"), /references\/push-delivery-interfaces\.md/u);
   assert.match(read("skills/engineering/ask-matt/SKILL.md"), /grill-with-docs.*to-spec.*to-tickets.*run-issue-workflow.*verify-target-before-push.*push-target/isu);
+});
+
+test("installed route keeps payload and recovery detail behind one cross-seam consumer fixture", () => {
+  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
+  const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/aggregate-verification-interfaces.md");
+  const recoveryPath = "skills/engineering/verify-target-before-push/references/aggregate-recovery-interfaces.md";
+  const push = read("skills/engineering/push-target/SKILL.md");
+  const pushInterfaces = read("skills/engineering/push-target/references/push-delivery-interfaces.md");
+  const coreTests = read("tests/ron-workflow/run-issue-workflow-core.test.mjs");
+  const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
+
+  assert.equal(existsSync(recoveryPath), true, "aggregate recovery must have one owner-local reference");
+  const recoveryInterfaces = read(recoveryPath);
+  assert.doesNotMatch(verify, /In clean temporary worktrees at the exact affected execution baseline/iu);
+  assert.match(recoveryInterfaces, /In clean temporary worktrees at the exact affected execution baseline/iu);
+  assert.doesNotMatch(verify, /For every member require the completion note's exact Issue identity/iu);
+  assert.match(aggregateInterfaces, /For every member require the completion note's exact Issue identity/iu);
+  assert.doesNotMatch(push, /member Issue and candidate identities.*Successor verification evidence/isu);
+  assert.match(pushInterfaces, /member Issue and candidate identities.*Successor verification evidence/isu);
+
+  assert.doesNotMatch(coreTests, /test\("installed route keeps concurrent Spec operations/iu);
+  assert.match(endToEndTests, /test\("installed route[^]*createWorkflowControlStore[^]*runToSpec[^]*Promise\.all/iu);
 });
 
 test("router exposes the Issue worktree flow and independent controls", () => {

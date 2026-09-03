@@ -35,7 +35,7 @@ Run `gh issue view <number> --comments`.
 
 ## Setup diagnostics
 
-`setup-matt-pocock-skills` may use one repository-scoped, read-only `gh issue view` or `gh issue list` call to confirm that this configured tracker is reachable. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit an Issue, label, or comment.
+`setup-matt-pocock-skills` may use one repository-scoped, read-only `gh issue view` or `gh issue list` call to confirm that this configured tracker is reachable. When `triage` is installed, also run `gh label list --json name --limit 1000`, compare exact names with every configured label in `docs/agents/triage-labels.md`, and report a missing label as `MISSING` without creating it. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit an Issue, label, or comment.
 
 ## Wayfinding operations
 

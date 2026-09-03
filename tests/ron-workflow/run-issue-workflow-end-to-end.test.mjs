@@ -8,6 +8,7 @@ import test from "node:test";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createWorkflowRuntime as createWorkflowRuntimeSource } from "../../skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
+import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-runtime-"));
@@ -538,13 +539,92 @@ test("multiple runtime instances keep per-Run max_parallel on one target", async
   }
 });
 
-test("installed route lets another Spec Run progress while closeout waits for the shared writer", async () => {
+test("installed route composes concurrent Spec operations, Runs, writer wait, and same-command recovery", async () => {
   const { root, gitCommonDir } = createStoreFixture();
+  const producerStore = createWorkflowControlStore({ gitCommonDir });
   const closeStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-close-run" });
   const executionStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "installed-execution-run" });
+  const toSpecOperation = {
+    repositoryId: "github:ron03wlb/skills",
+    specId: identity.specId,
+    producerCommand: "to-spec",
+    operationId: "publication:lane-17",
+    profileVersion: "v2",
+    target: identity.target,
+    baseline: "8".repeat(40),
+    bindings: {
+      approvedScopeIdentity: `sha256:${"8".repeat(64)}`,
+      classification: "SINGLE",
+      planningSeal: "8".repeat(40),
+    },
+  };
+  const toTicketsOperation = {
+    repositoryId: "github:ron03wlb/skills",
+    specId: multiIdentity.specId,
+    producerCommand: "to-tickets",
+    operationId: "decomposition:lane-12",
+    profileVersion: "v2",
+    target: multiIdentity.target,
+    baseline: "9".repeat(40),
+    bindings: {
+      approvedScopeIdentity: `sha256:${"9".repeat(64)}`,
+      classification: "MULTI",
+      planningSeal: "9".repeat(40),
+      upstream: {
+        handoffIdentity: "handoff:to-spec:12",
+        publicationIdentity: "tracker-version:12",
+        trackerIdentity: "issue:12",
+      },
+    },
+  };
+  let publicationReadBack = null;
+  let repairedSpec = null;
+  const runToSpec = () => {
+    let checkpoint = producerStore.createCheckpoint(toSpecOperation);
+    if (checkpoint.nextStage === "planning_seal.read_back") {
+      checkpoint = producerStore.advanceCheckpoint({
+        identity: toSpecOperation,
+        stage: "planning_seal.read_back",
+        receipt: { planningSeal: "8".repeat(40), state: "reused" },
+      });
+    }
+    if (checkpoint.nextStage === "publication.read_back") {
+      if (publicationReadBack === null) return checkpoint;
+      checkpoint = producerStore.advanceCheckpoint({
+        identity: toSpecOperation,
+        stage: "publication.read_back",
+        receipt: publicationReadBack,
+      });
+    }
+    if (checkpoint.nextStage === "handoff.completed") {
+      checkpoint = producerStore.advanceCheckpoint({
+        identity: toSpecOperation,
+        stage: "handoff.completed",
+        receipt: { handoffIdentity: "handoff:to-spec:17" },
+      });
+    }
+    return checkpoint;
+  };
+  const stoppedSpec = runToSpec();
+  const initialDecomposition = producerStore.createCheckpoint(toTicketsOperation);
+  producerStore.advanceCheckpoint({
+    identity: toTicketsOperation,
+    stage: "decomposition.read_back",
+    receipt: { decompositionIdentity: multiIdentity.decompositionIdentity, mapping: { "12/01": "821", "12/02": "822" } },
+  });
+  producerStore.advanceCheckpoint({
+    identity: toTicketsOperation,
+    stage: "ready_state.read_back",
+    receipt: { frontier: ["821", "822"] },
+  });
+  const completedDecomposition = producerStore.advanceCheckpoint({
+    identity: toTicketsOperation,
+    stage: "handoff.completed",
+    receipt: { handoffIdentity: "handoff:to-tickets:12" },
+  });
   const competingWriter = executionStore.acquireTargetMutationWriter({
     target: identity.target,
-    operationId: "planning-seal-spec-82",
+    operationId: "planning-seal-spec-12",
   });
   const closeTaskRef = { threadId: "thread-17", hostId: "local" };
   const closeModel = {
@@ -620,6 +700,8 @@ test("installed route lets another Spec Run progress while closeout waits for th
     sleep: async () => {
       await executionStarted;
       if (!competingWriterReleased) {
+        publicationReadBack = { publicationIdentity: "tracker-version:17", trackerIdentity: "issue:17" };
+        repairedSpec = runToSpec();
         competingWriter.release();
         competingWriterReleased = true;
       }
@@ -659,7 +741,7 @@ test("installed route lets another Spec Run progress while closeout waits for th
           reconciled: true,
           trackerAvailable: true,
           targetState: "CLEAN",
-          closeWriterRunId: "planning-seal-spec-82",
+          closeWriterRunId: "planning-seal-spec-12",
           closeWriterState: "ACTIVE",
           closeWriterHealth: "HEALTHY",
           parentTrackerState: "OPEN",
@@ -694,6 +776,13 @@ test("installed route lets another Spec Run progress while closeout waits for th
     assert.deepEqual(created, executionIssueIds);
     assert.deepEqual(waits.map(({ outcome }) => outcome ?? null), [null, "RELEASED"]);
     assert.ok(closeMessageTrackerReads >= 3, "closeout must use post-wait tracker evidence");
+    assert.equal(stoppedSpec.nextStage, "publication.read_back", "owning-source failure preserves the producer stage");
+    assert.equal(repairedSpec.state, "COMPLETED", "the same to-spec command resumes after human repair");
+    assert.equal(repairedSpec.scopeKey, stoppedSpec.scopeKey, "same-command recovery keeps the exact producer operation");
+    assert.equal(repairedSpec.transactionId, stoppedSpec.transactionId);
+    assert.equal(completedDecomposition.state, "COMPLETED");
+    assert.deepEqual(producerStore.readCheckpoint(toTicketsOperation), completedDecomposition, "repair must not mutate the other lane");
+    assert.notEqual(stoppedSpec.scopeKey, initialDecomposition.scopeKey, "producer operations remain isolated on one target");
     assert.equal(closeStore.readTargetMutationWriterLock(identity.target), null);
   } finally {
     if (!competingWriterReleased) competingWriter.release();

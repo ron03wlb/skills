@@ -20,7 +20,7 @@ Read the file at the referenced path. The user will normally pass the path or th
 
 ## Setup diagnostics
 
-`setup-matt-pocock-skills` may read the configured `.scratch/` paths to confirm that this tracker convention is reachable. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit a local Issue file.
+`setup-matt-pocock-skills` may read the configured `.scratch/` paths to confirm that this tracker convention is reachable. The local adapter has no separate label registry: when `triage` is installed, validate that every configured mapping is non-empty, unique, and representable as the Issue file's `Status:` value. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit a local Issue file.
 
 ## Wayfinding operations
 
