@@ -1,4 +1,5 @@
 import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
+import { createTargetWriterWaitEvidence } from "./run-target-writer-wait.mjs";
 
 export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
@@ -51,6 +52,7 @@ export const REASON_CODES = Object.freeze({
   targetWriterWaitTimeout: "target_writer_wait_timeout",
   targetWriterWaitCoordinatorLost: "target_writer_wait_coordinator_lost",
   targetWriterWaitInterrupted: "target_writer_wait_interrupted",
+  targetWriterEvidenceChanged: "target_writer_evidence_changed",
   trackerUnavailable: "tracker_unavailable",
   targetDirty: "target_dirty",
   targetStateUncertain: "target_state_uncertain",
@@ -979,6 +981,8 @@ export function reduceRun(input) {
   );
   const slots = Math.max(0, maxParallel - active.length);
   const normalActions = [];
+  const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
+  const controlRevision = latestControl?.revision ?? 0;
   const targetCloseWriterForeign = input.run.closeWriterState !== "ABSENT"
     && input.run.closeWriterRunId !== input.run.runId;
   const closeWriterOwner = input.run.closeWriterOwner;
@@ -1043,6 +1047,13 @@ export function reduceRun(input) {
     ))
   ));
   const waitingIssueId = closeable[0] ?? (needsParentClose ? input.run.specId : null);
+  const preWaitEvidence = createTargetWriterWaitEvidence({
+    runIdentity: input.run,
+    grant,
+    run: input.run,
+    nodes,
+    controlRevision,
+  });
   if (targetCloseWriterHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_target_writer",
@@ -1053,6 +1064,7 @@ export function reduceRun(input) {
         generation: closeWriterOwner.generation,
       },
       timeoutMs: TARGET_WRITER_WAIT_TIMEOUT_MS,
+      preWaitEvidence,
     });
   }
   if (activeTargetWriterWait) {
@@ -1061,6 +1073,7 @@ export function reduceRun(input) {
       issueId: activeTargetWriterWait.issueId,
       owner: { ...activeTargetWriterWait.owner },
       timeoutMs: activeTargetWriterWait.timeoutMs,
+      preWaitEvidence: activeTargetWriterWait.preWaitEvidence,
     });
   }
   const closeWriterDiagnoses = targetCloseWriterUncertain
@@ -1138,10 +1151,10 @@ export function reduceRun(input) {
   }
   const hasContradiction = contradictionDiagnoses.length > 0
     || globalGateDiagnoses.length > 0;
-  const hasActiveWork = active.length > 0 || targetCloseWriterOwned || activeTargetWriterWait !== undefined;
+  const hasActiveWork = active.length > 0
+    || (targetCloseWriterOwned && !targetCloseWriterUncertain)
+    || activeTargetWriterWait !== undefined;
   const noProgress = !deliverySucceeded && !hasContradiction && normalActions.length === 0 && !hasActiveWork;
-  const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
-  const controlRevision = latestControl?.revision ?? 0;
   const hasPauseTransition = input.journal.some((event) => (
     event.type === "pause.transitioned" && event.revision === controlRevision
   ));

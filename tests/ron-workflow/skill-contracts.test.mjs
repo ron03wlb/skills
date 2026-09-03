@@ -2781,7 +2781,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(core, /WAITING_FOR_TARGET_WRITER.*wait_target_writer.*TARGET_WRITER_WAIT_TIMEOUT_MS/isu);
   assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
   assert.match(coordinator, /target-writer-wait\.started.*target-writer-wait\.settled/isu);
-  for (const outcome of ["OWNER_CHANGED", "TIMED_OUT", "CONTROL_CHANGED", "COORDINATOR_INACTIVE"]) {
+  for (const outcome of ["OWNER_CHANGED", "TIMED_OUT", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
     assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
   }
   for (const evidence of [

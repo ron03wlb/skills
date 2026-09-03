@@ -1,4 +1,5 @@
 import { RUN_READY_FACT_SCHEMA } from "./run-core.mjs";
+import { isExactStaleOwnerProof } from "./run-stale-proof.mjs";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -9,17 +10,11 @@ const requireMethod = (owner, name, label) => {
 };
 
 const provesInactiveWriter = ({ proof, owner, runId, health }) => health === "INACTIVE"
-  && isRecord(proof)
+  && isExactStaleOwnerProof(proof)
   && owner?.operationId === runId
   && proof.previousCoordinatorInstanceId === owner.coordinatorInstanceId
   && proof.previousGeneration === owner.generation
-  && proof.coordinatorState === "INACTIVE"
-  && proof.reconciled === true
-  && Array.isArray(proof.evidence)
-  && proof.evidence.length > 0
-  && proof.evidence.every((item) => typeof item === "string" && item.length > 0)
-  && Array.isArray(proof.abandonedOperationIds)
-  && proof.abandonedOperationIds.every((item) => typeof item === "string" && item.length > 0);
+  && proof.abandonedOperationIds.length === 0;
 
 export function createRunAuthorityAdapters({ sources, store, tasks }) {
   if (!isRecord(sources)) throw new TypeError("Run authority owning sources are required");

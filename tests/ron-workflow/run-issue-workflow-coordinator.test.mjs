@@ -11,6 +11,7 @@ import {
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-coordinator-"));
@@ -1456,6 +1457,27 @@ test("a competing target mutation writer returns a structured stop before lane m
   }
 });
 
+const singlePreWaitEvidence = () => createTargetWriterWaitEvidence({
+  runIdentity: identity,
+  grant: { runIdentity: identity, maxParallel: 3 },
+  run: {
+    trackerAvailable: true,
+    targetState: "CLEAN",
+    parentTrackerState: "OPEN",
+  },
+  nodes: [{
+    issueId: "15",
+    state: "IMPLEMENTATION_COMPLETE",
+    close: {
+      trackerState: "OPEN",
+      completionState: "COMPLETE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+    },
+  }],
+  controlRevision: 0,
+});
+
 test("a healthy competing writer waits for release and reacquires authority before closeout", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
@@ -1772,6 +1794,7 @@ test("coordinator loss recovery fails closed on an unsettled journaled writer wa
     target: identity.target,
     owner,
     timeoutMs: 30_000,
+    preWaitEvidence: singlePreWaitEvidence(),
   });
   abandoned.append({
     type: "control.revised",
@@ -1903,7 +1926,7 @@ test("control revision drift abandons a target-writer wait before closeout", asy
   }
 });
 
-test("writer release reacquires changed Grant evidence and never closes from the stale snapshot", async () => {
+const assertWriterReleaseEvidenceChange = async ({ mutate, label }) => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   const competitor = store.acquireTargetMutationWriter({
@@ -1916,7 +1939,7 @@ test("writer release reacquires changed Grant evidence and never closes from the
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
       taskCalls += 1;
-      throw new Error(`${name} is forbidden after post-wait Grant drift`);
+      throw new Error(`${name} is forbidden after post-wait ${label} drift`);
     }]),
   );
   const reconcile = async () => {
@@ -1944,13 +1967,7 @@ test("writer release reacquires changed Grant evidence and never closes from the
         worktreeState: "PRESENT",
       }],
     });
-    return reconciliations < 3 ? current : {
-      ...current,
-      grant: {
-        ...current.grant,
-        runIdentity: { ...identity, approvedScopeHash: "sha256:changed-after-wait" },
-      },
-    };
+    return reconciliations < 3 ? current : mutate(current);
   };
 
   try {
@@ -1972,15 +1989,43 @@ test("writer release reacquires changed Grant evidence and never closes from the
       .filter(({ type }) => type.startsWith("target-writer-wait."));
 
     assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "grant_identity_conflict");
-    assert.equal(waitEvents.at(-1).outcome, "RELEASED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_evidence_changed");
+    assert.equal(waitEvents.at(-1).outcome, "EVIDENCE_CHANGED");
     assert.equal(reconciliations, 3);
     assert.equal(taskCalls, 0);
-    assertRecoverablePacket(status.diagnoses.at(-1), { source: /Run identity.*Grant/u });
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /post-wait.*reconciliation/u });
   } finally {
     if (!competitorReleased) competitor.release();
     rmSync(root, { recursive: true, force: true });
   }
+};
+
+test("writer release rejects changed Grant evidence before closeout", async () => {
+  await assertWriterReleaseEvidenceChange({
+    label: "Grant",
+    mutate: (current) => ({
+      ...current,
+      grant: {
+        ...current.grant,
+        runIdentity: { ...identity, approvedScopeHash: "sha256:changed-after-wait" },
+      },
+    }),
+  });
+});
+
+test("writer release rejects regressed completion and candidate evidence before closeout", async () => {
+  await assertWriterReleaseEvidenceChange({
+    label: "completion and candidate",
+    mutate: (current) => ({
+      ...current,
+      facts: {
+        ...current.facts,
+        nodes: current.facts.nodes.map((candidate) => candidate.issueId === "15"
+          ? { ...candidate, completionState: "NONE", candidateReachable: false }
+          : candidate),
+      },
+    }),
+  });
 });
 
 test("a lost close-writer reclaim race returns the same structured stop", async () => {
@@ -2039,6 +2084,7 @@ test("a lost close-writer reclaim race returns the same structured stop", async 
     assert.equal(status.run.state, "BLOCKED");
     assert.equal(status.diagnoses.at(-1).reasonCode, "close_writer_conflict");
     assert.match(status.diagnoses.at(-1).evidence.join(" "), /run-race-winner/u);
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /target-writer.*read-back/u });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

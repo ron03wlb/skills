@@ -31,7 +31,7 @@ Closing the browser panel has no effect. The bridge closes automatically when th
 
 ## Observe target-writer waits
 
-Healthy target writer contention projects `WAITING_FOR_TARGET_WRITER` and one bounded, paired journal wait. Ready Issue execution continues within that Run's own `max_parallel`; the wait consumes no Issue execution slot and never releases another Run's writer. When the writer releases, the coordinator reacquires tracker, target, candidate, completion, worktree, control-revision, and Grant evidence before closeout.
+Healthy target writer contention projects `WAITING_FOR_TARGET_WRITER` and one bounded, paired journal wait. The start records the exact pre-wait Run, Grant, target, tracker, candidate, completion, worktree, and control-revision evidence. Ready Issue execution continues within that Run's own `max_parallel`; the wait consumes no Issue execution slot and never releases another Run's writer. When the writer releases, the coordinator reacquires and compares every recorded field. Only an unchanged comparison records `RELEASED`; changed or unavailable evidence records `EVIDENCE_CHANGED` and stops before closeout.
 
 Unknown owner evidence, timeout, coordinator loss, or changed evidence returns a Recoverable blocker naming the owning source, exact evidence, smallest human action, preserved stages, and the same `/run-issue-workflow` command to retry. Do not steal a lease, close from the pre-wait snapshot, or use elapsed time as reclaim proof.
 

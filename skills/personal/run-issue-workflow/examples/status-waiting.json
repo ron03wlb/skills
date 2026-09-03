@@ -44,7 +44,43 @@
         "coordinatorInstanceId": "coordinator-other-spec",
         "generation": "generation-other-spec"
       },
-      "timeoutMs": 30000
+      "timeoutMs": 30000,
+      "preWaitEvidence": {
+        "runIdentity": {
+          "runId": "run-17-single",
+          "specId": "17",
+          "approvedScopeHash": "sha256:issue-17",
+          "target": "features/ron",
+          "classification": "SINGLE",
+          "decompositionIdentity": null
+        },
+        "grant": {
+          "runIdentity": {
+            "runId": "run-17-single",
+            "specId": "17",
+            "approvedScopeHash": "sha256:issue-17",
+            "target": "features/ron",
+            "classification": "SINGLE",
+            "decompositionIdentity": null
+          },
+          "maxParallel": 3
+        },
+        "target": {
+          "state": "CLEAN",
+          "trackerAvailable": true,
+          "parentTrackerState": "OPEN"
+        },
+        "controlRevision": 0,
+        "issues": [
+          {
+            "issueId": "17",
+            "trackerState": "OPEN",
+            "completionState": "COMPLETE",
+            "candidateReachable": false,
+            "worktreeState": "PRESENT"
+          }
+        ]
+      }
     }
   ],
   "legalControls": ["PAUSE", "STOP", "REFRESH"],

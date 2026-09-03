@@ -24,6 +24,7 @@ import {
   validateEventSemantics,
   validateJournal,
 } from "./run-journal.mjs";
+import { validateStaleOwnerProof } from "./run-stale-proof.mjs";
 
 export { EVENT_SCHEMA, RUN_EVENT_TYPES };
 export const CLEANUP_SCHEMA = "dag-run-cleanup:v1";
@@ -31,14 +32,6 @@ export const CLEANUP_PREVIEW_SCHEMA = "dag-run-cleanup-preview:v1";
 export const LOCK_OWNER_SCHEMA = "dag-run-lock-owner:v1";
 
 const runIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
-const staleProofFields = new Set([
-  "previousCoordinatorInstanceId",
-  "previousGeneration",
-  "coordinatorState",
-  "reconciled",
-  "evidence",
-  "abandonedOperationIds",
-]);
 const cleanupEvidenceFields = new Set([
   "runId",
   "specId",
@@ -125,19 +118,6 @@ const requireText = (value, label) => {
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 
-const validateStaleProof = (proof) => {
-  assertExactFields(proof, staleProofFields, "stale-owner proof");
-  requireText(proof.previousCoordinatorInstanceId, "stale-owner previousCoordinatorInstanceId");
-  requireText(proof.previousGeneration, "stale-owner previousGeneration");
-  if (proof.coordinatorState !== "INACTIVE" || proof.reconciled !== true
-    || !Array.isArray(proof.evidence) || proof.evidence.length === 0 || !proof.evidence.every(isText)
-    || !Array.isArray(proof.abandonedOperationIds)
-    || !proof.abandonedOperationIds.every(isText)
-    || new Set(proof.abandonedOperationIds).size !== proof.abandonedOperationIds.length) {
-    throw new TypeError("Reclaim requires reconciled INACTIVE coordinator evidence");
-  }
-};
-
 export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUID() }) {
   requireText(coordinatorInstanceId, "coordinatorInstanceId");
   const controlRoot = join(resolve(gitCommonDir), "matt-workflow-control");
@@ -220,7 +200,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     let movedToStale = false;
     if (existsSync(takeoverPath) && existsSync(stalePath)) {
       if (!staleProof) throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
-      validateStaleProof(staleProof);
+      validateStaleOwnerProof(staleProof);
       const current = readLockOwner(join(takeoverPath, "owner.json"), owner.kind);
       if (current.runId !== owner.runId || current.target !== owner.target
         || current.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
@@ -247,7 +227,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     if (existsSync(stalePath)) {
       if (!staleProof) throw new Error("RECLAIM_GATE_TAKEOVER_LOCKED");
       try {
-        validateStaleProof(staleProof);
+        validateStaleOwnerProof(staleProof);
         const previous = readLockOwner(join(stalePath, "owner.json"), owner.kind);
         if (previous.runId !== owner.runId || previous.target !== owner.target
           || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
@@ -297,7 +277,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     try {
       if (existsSync(lockPath)) {
         if (!staleProof) throw new Error("RECLAIM_GATE_LOCKED");
-        validateStaleProof(staleProof);
+        validateStaleOwnerProof(staleProof);
         const previous = readLockOwner(join(lockPath, "owner.json"), owner.kind);
         if (previous.runId !== owner.runId || previous.target !== owner.target
           || previous.coordinatorInstanceId !== staleProof.previousCoordinatorInstanceId
@@ -768,7 +748,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     staleMismatchError,
     operationError,
   }) => {
-    validateStaleProof(staleProof);
+    validateStaleOwnerProof(staleProof);
     const before = guard?.();
     if (before) throw new Error(before);
     mkdirSync(dirname(paths.lock), { recursive: true });

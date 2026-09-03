@@ -4,6 +4,10 @@ import {
   REASON_CODES,
   reduceRunReadyHandoff,
 } from "./run-core.mjs";
+import {
+  createTargetWriterWaitEvidence,
+  sameTargetWriterWaitEvidence,
+} from "./run-target-writer-wait.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
@@ -524,13 +528,21 @@ export function createCoordinator({
     } catch (error) {
       if (!CLOSE_WRITER_CONTENTION.has(error?.message)) throw error;
       const owner = store.readTargetMutationWriterLock(current.runIdentity.target);
+      const evidence = [`${error.message}; observed target mutation-writer owner ${JSON.stringify(owner)}.`];
       return { stopped: diagnosedStop(status, {
-        reasonCode: "close_writer_conflict",
+        reasonCode: REASON_CODES.closeWriterConflict,
         limitationClass: "unresolved-evidence",
-        evidence: [`${error.message}; observed target mutation-writer owner ${JSON.stringify(owner)}.`],
+        evidence,
         noAutomaticTransition: "Target closeout cannot race or replace an active or unproven writer.",
         affectedNodes: status.nodes.map(({ issueId }) => issueId),
         resumePredicates: ["target_close_writer_is_absent_or_exactly_reclaimable"],
+        operatorPacket: createRecoverableOperatorPacket({
+          owningSource: "shared target-writer lock and reclaim-proof read-back",
+          observedEvidence: evidence,
+          smallestHumanAction: "Reconcile the exact current target-writer owner and its reclaim proof, then retry the same command.",
+          run: status.run,
+          nodes: status.nodes,
+        }),
       }) };
     }
   };
@@ -615,7 +627,7 @@ export function createCoordinator({
     }
   };
 
-  const waitForTargetWriter = async ({ action, current, status, writer }) => {
+  const waitForTargetWriter = async ({ action, current, request, status, writer }) => {
     const events = store.readEvents(current.runIdentity.runId);
     let recoveryStatus = status;
     const unsettled = events.findLast((event) => event.type === "target-writer-wait.started"
@@ -638,6 +650,10 @@ export function createCoordinator({
       [REASON_CODES.targetWriterWaitInterrupted]: {
         owningSource: "append-only coordinator journal read-back",
         smallestHumanAction: "Inspect the settled orphaned wait, then retry the same command.",
+      },
+      [REASON_CODES.targetWriterEvidenceChanged]: {
+        owningSource: "post-wait owning-source reconciliation",
+        smallestHumanAction: "Restore or accept the changed owning-source evidence, then retry the same command.",
       },
     };
     const stop = (reasonCode, evidence, resumePredicates) => {
@@ -691,16 +707,61 @@ export function createCoordinator({
       target: current.runIdentity.target,
       owner: action.owner,
       timeoutMs: action.timeoutMs,
+      preWaitEvidence: action.preWaitEvidence,
     });
-    const settleObservedOwner = (observation) => {
+    const changedEvidenceStop = (evidence) => {
+      appendSettlement({ started, outcome: "EVIDENCE_CHANGED", evidence });
+      return stop(
+        REASON_CODES.targetWriterEvidenceChanged,
+        evidence,
+        ["post_wait_evidence_is_reconciled", "retry_same_run_issue_workflow"],
+      );
+    };
+    const reconcileReleasedWriter = async () => {
+      const trackerResult = await readTracker(request);
+      if (!trackerResult.available) {
+        return changedEvidenceStop([
+          `The exact competing target writer released, but Tracker read-back failed after probes ${trackerResult.attempts.join(", ")}.`,
+        ]);
+      }
+      let refreshed;
+      try {
+        refreshed = await reconcile({
+          request,
+          tracker: trackerResult.snapshot,
+          journal: store.readEvents(current.runIdentity.runId),
+          tasks,
+        });
+        recoveryStatus = writer.rebuildStatus(refreshed.facts);
+        const refreshedEvidence = createTargetWriterWaitEvidence({
+          runIdentity: refreshed.runIdentity,
+          grant: refreshed.grant,
+          run: refreshed.facts.run,
+          nodes: recoveryStatus.nodes,
+          controlRevision: recoveryStatus.run.controlRevision,
+        });
+        if (!sameTargetWriterWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {
+          return changedEvidenceStop([
+            `Pre-wait evidence ${JSON.stringify(started.preWaitEvidence)}.`,
+            `Post-wait evidence ${JSON.stringify(refreshedEvidence)}.`,
+          ]);
+        }
+      } catch (error) {
+        return changedEvidenceStop([
+          `The exact competing target writer released, but owning-source reconciliation failed: ${error?.message ?? String(error)}.`,
+        ]);
+      }
+      appendSettlement({
+        started,
+        outcome: "RELEASED",
+        evidence: ["The exact competing target writer is absent and all pre-wait evidence was reacquired unchanged."],
+      });
+      return { released: true };
+    };
+    const settleObservedOwner = async (observation) => {
       if (observation.state === "MATCH") return null;
       if (observation.state === "ABSENT") {
-        appendSettlement({
-          started,
-          outcome: "RELEASED",
-          evidence: ["The exact competing target writer is absent."],
-        });
-        return { released: true };
+        return reconcileReleasedWriter();
       }
       appendSettlement({
         started,
@@ -724,7 +785,7 @@ export function createCoordinator({
     let elapsedMs = 0;
     const pollMs = Math.min(1_000, action.timeoutMs);
     while (elapsedMs < action.timeoutMs) {
-      const observedOutcome = settleObservedOwner(observeOwner());
+      const observedOutcome = await settleObservedOwner(observeOwner());
       if (observedOutcome) return observedOutcome;
 
       const delayMs = Math.min(pollMs, action.timeoutMs - elapsedMs);
@@ -754,7 +815,7 @@ export function createCoordinator({
       }
     }
 
-    const deadlineOutcome = settleObservedOwner(observeOwner());
+    const deadlineOutcome = await settleObservedOwner(observeOwner());
     if (deadlineOutcome) return deadlineOutcome;
     const minimumTimeoutAt = new Date(Date.parse(started.at) + action.timeoutMs).toISOString();
     const observedAt = now();
@@ -1013,7 +1074,13 @@ export function createCoordinator({
               if (outcome.stopped) return outcome.stopped;
               if (!outcome.settled) return lastStatus;
             } else if (action.type === "wait_target_writer") {
-              const outcome = await waitForTargetWriter({ action, current, status: lastStatus, writer });
+              const outcome = await waitForTargetWriter({
+                action,
+                current,
+                request: selectedRequest,
+                status: lastStatus,
+                writer,
+              });
               if (outcome.stopped) return outcome.stopped;
               if (outcome.controlRevisionChanged) {
                 controlRevisionChanged = true;

@@ -351,6 +351,87 @@ test("composed runtime reclaims one exactly proven inactive writer", async () =>
   }
 });
 
+for (const { label, corrupt } of [
+  {
+    label: "unknown proof fields",
+    corrupt: (proof) => ({ ...proof, unownedAssertion: true }),
+  },
+  {
+    label: "duplicate abandoned operation ids",
+    corrupt: (proof) => ({ ...proof, abandonedOperationIds: ["operation-1", "operation-1"] }),
+  },
+]) {
+  test(`composed runtime fences inactive-writer reclaim with ${label}`, async () => {
+    const { root, gitCommonDir } = createStoreFixture();
+    const staleStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-stale-owner" });
+    staleStore.acquireTargetMutationWriter({
+      target: identity.target,
+      operationId: identity.runId,
+    });
+    const staleOwner = staleStore.readTargetMutationWriterLock(identity.target);
+    const store = createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-reclaimer" });
+    const reclaimProof = corrupt({
+      previousCoordinatorInstanceId: staleOwner.coordinatorInstanceId,
+      previousGeneration: staleOwner.generation,
+      coordinatorState: "INACTIVE",
+      reconciled: true,
+      evidence: ["The exact prior coordinator is inactive."],
+      abandonedOperationIds: [],
+    });
+    const forbiddenTasks = Object.fromEntries(
+      ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+        throw new Error(`${name} is forbidden for a non-exact reclaim proof`);
+      }]),
+    );
+    const reconcile = async ({ journal }) => {
+      const lock = store.readTargetMutationWriterLock(identity.target);
+      const current = singleRunCurrent({
+        journal,
+        model: {
+          trackerState: "OPEN",
+          taskState: "NONE",
+          completionState: "COMPLETE",
+          candidateReachable: false,
+          worktreeState: "PRESENT",
+        },
+        run: {
+          closeWriterRunId: lock.operationId,
+          closeWriterState: "ACTIVE",
+          closeWriterHealth: "INACTIVE",
+          closeWriterOwner: {
+            operationId: lock.operationId,
+            coordinatorInstanceId: lock.coordinatorInstanceId,
+            generation: lock.generation,
+          },
+        },
+      });
+      return { ...current, closeWriterReclaimProof: reclaimProof };
+    };
+
+    try {
+      const runtime = createWorkflowRuntime({
+        store,
+        tracker: { async read() { return {}; } },
+        tasks: forbiddenTasks,
+        reconcile,
+        browser: { async open() {} },
+        cleanup: { async listRuns() { return []; } },
+        now: () => "2026-08-30T07:55:00.000Z",
+        sleep: async () => {},
+      });
+      const result = await runtime.run({ specId: "17", cleanupPreview: true });
+      const diagnosis = result.status.diagnoses.find(({ reasonCode }) => reasonCode === "close_writer_conflict");
+
+      assert.equal(result.status.run.state, "BLOCKED");
+      assert.equal(diagnosis.operatorPacket.disposition, "Recoverable blocker");
+      assert.match(diagnosis.operatorPacket.owningSource, /target-writer lock/u);
+      assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, identity.runId);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("multiple runtime instances keep per-Run max_parallel on one target", async () => {
   const { root, gitCommonDir } = createStoreFixture();
   const runA = {

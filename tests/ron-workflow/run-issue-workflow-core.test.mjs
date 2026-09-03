@@ -28,6 +28,7 @@ import {
   RUN_STATES,
 } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 import {
   createWorkflowControlStore,
   LEGACY_WORKFLOW_CHECKPOINT_SCHEMA,
@@ -113,6 +114,18 @@ const facts = (nodes) => ({
   contradictions: [],
   journal: [grant],
 });
+
+const preWaitEvidenceFor = (input) => {
+  const status = reduceRun(input);
+  const currentGrant = input.journal.findLast(({ type }) => type === "grant.recorded");
+  return createTargetWriterWaitEvidence({
+    runIdentity: input.run,
+    grant: currentGrant,
+    run: input.run,
+    nodes: status.nodes,
+    controlRevision: status.run.controlRevision,
+  });
+};
 
 const createGitCommonDirFixture = (prefix) => {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -1872,15 +1885,28 @@ test("a healthy target writer becomes a bounded wait after independent Issue dis
   });
 
   assert.equal(status.run.state, "RUNNING");
-  assert.deepEqual(status.legalActions, [
-    { type: "dispatch_issue", issueId: "14", attempt: 1 },
+  assert.deepEqual(status.legalActions[0], { type: "dispatch_issue", issueId: "14", attempt: 1 });
+  assert.deepEqual(
+    { ...status.legalActions[1], preWaitEvidence: undefined },
     {
       type: "wait_target_writer",
       issueId: "13",
       owner: healthyOwner,
       timeoutMs: 30_000,
+      preWaitEvidence: undefined,
     },
-  ]);
+  );
+  assert.deepEqual(status.legalActions[1].preWaitEvidence.runIdentity, grant.runIdentity);
+  assert.deepEqual(status.legalActions[1].preWaitEvidence.grant, {
+    runIdentity: grant.runIdentity,
+    maxParallel: 3,
+  });
+  assert.deepEqual(status.legalActions[1].preWaitEvidence.target, {
+    state: "CLEAN",
+    trackerAvailable: true,
+    parentTrackerState: "OPEN",
+  });
+  assert.deepEqual(status.legalActions[1].preWaitEvidence.issues.map(({ issueId }) => issueId), ["13", "14"]);
   assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "close_writer_conflict"), false);
 });
 
@@ -1901,6 +1927,7 @@ test("an unsettled target-writer event projects the bounded coordinator wait sta
     closeWriterHealth: "HEALTHY",
     closeWriterOwner: owner,
   };
+  const preWaitEvidence = preWaitEvidenceFor(input);
   input.journal = [...input.journal, {
     schema: "dag-run-event:v1",
     sequence: 2,
@@ -1910,6 +1937,7 @@ test("an unsettled target-writer event projects the bounded coordinator wait sta
     target: "features/ron",
     owner,
     timeoutMs: 30_000,
+    preWaitEvidence,
   }];
 
   const status = reduceRun(input);
@@ -1920,6 +1948,7 @@ test("an unsettled target-writer event projects the bounded coordinator wait sta
     issueId: "13",
     owner,
     timeoutMs: 30_000,
+    preWaitEvidence,
   }]);
   assert.deepEqual(status.frontier.ready, ["14"]);
   assert.equal(planControl(status, "PAUSE", "2026-08-30T00:01:01.000Z").accepted, true);
@@ -1954,7 +1983,9 @@ test("a Multi-Issue parent writer wait stays inside the Run journal scope", () =
     issueId: "12",
     owner,
     timeoutMs: 30_000,
+    preWaitEvidence: initial.legalActions[0].preWaitEvidence,
   }]);
+  const preWaitEvidence = initial.legalActions[0].preWaitEvidence;
 
   const waiting = reduceRun({
     ...input,
@@ -1967,6 +1998,7 @@ test("a Multi-Issue parent writer wait stays inside the Run journal scope", () =
       target: "features/ron",
       owner,
       timeoutMs: 30_000,
+      preWaitEvidence,
     }],
   });
 
@@ -2009,6 +2041,7 @@ test("changed target evidence after writer release exposes Recoverable recovery"
     completionState: "COMPLETE",
     worktreeState: "PRESENT",
   }]);
+  const preWaitEvidence = preWaitEvidenceFor(input);
   input.run = { ...input.run, targetState: "DIRTY" };
   input.journal = [...input.journal, {
     schema: "dag-run-event:v1",
@@ -2019,6 +2052,7 @@ test("changed target evidence after writer release exposes Recoverable recovery"
     target: "features/ron",
     owner,
     timeoutMs: 30_000,
+    preWaitEvidence,
   }, {
     schema: "dag-run-event:v1",
     sequence: 3,
@@ -2594,6 +2628,7 @@ test("the Run journal pairs one bounded target-writer wait with its exact outcom
   };
 
   try {
+    const preWaitEvidence = preWaitEvidenceFor(facts([node("13")]));
     writer.append({
       type: "grant.recorded",
       at: "2026-08-30T00:00:00.000Z",
@@ -2607,6 +2642,7 @@ test("the Run journal pairs one bounded target-writer wait with its exact outcom
       target: "features/ron",
       owner,
       timeoutMs: 30_000,
+      preWaitEvidence,
     });
     assert.equal(started.sequence, 2);
     assert.throws(() => writer.append({
@@ -2616,6 +2652,7 @@ test("the Run journal pairs one bounded target-writer wait with its exact outcom
       target: "features/ron",
       owner,
       timeoutMs: 30_000,
+      preWaitEvidence,
     }), /already active/u);
 
     const settled = writer.append({

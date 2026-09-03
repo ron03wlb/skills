@@ -1,3 +1,5 @@
+import { validateTargetWriterWaitEvidence } from "./run-target-writer-wait.mjs";
+
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
@@ -31,7 +33,7 @@ const eventFields = new Map([
   ])],
   ["remediation.recorded", new Set(["type", "at", "issueId", "attempt", "fingerprint", "cycle", "adapter"])],
   ["target-writer-wait.started", new Set([
-    "type", "at", "issueId", "target", "owner", "timeoutMs",
+    "type", "at", "issueId", "target", "owner", "timeoutMs", "preWaitEvidence",
   ])],
   ["target-writer-wait.settled", new Set([
     "type", "at", "waitSequence", "issueId", "target", "owner", "outcome", "evidence",
@@ -170,13 +172,14 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requireText(event.target, "target-writer wait target");
       validateTargetWriterOwner(event.owner, "target-writer wait owner");
       requirePositiveInteger(event.timeoutMs, "target-writer wait timeoutMs", 300_000);
+      validateTargetWriterWaitEvidence(event.preWaitEvidence);
       break;
     case "target-writer-wait.settled":
       requirePositiveInteger(event.waitSequence, "target-writer wait sequence");
       requireText(event.issueId, "target-writer wait issueId");
       requireText(event.target, "target-writer wait target");
       validateTargetWriterOwner(event.owner, "target-writer wait owner");
-      if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE"].includes(event.outcome)) {
+      if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"].includes(event.outcome)) {
         throw new TypeError("Unsupported target-writer wait outcome");
       }
       if (!Array.isArray(event.evidence) || event.evidence.length === 0 || !event.evidence.every((item) => (
@@ -310,6 +313,14 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     const grant = events.findLast(({ type }) => type === "grant.recorded");
     if (grant?.runIdentity?.target !== event.target) {
       throw new TypeError("Target-writer wait target must match the Run Grant");
+    }
+    if (immutableRunIdentityKeys.some((key) => (
+      event.preWaitEvidence.runIdentity[key] !== grant.runIdentity[key]
+      || event.preWaitEvidence.grant.runIdentity[key] !== grant.runIdentity[key]
+    )) || event.preWaitEvidence.grant.maxParallel !== (grant.maxParallel ?? DEFAULT_MAX_PARALLEL)
+      || event.preWaitEvidence.target.state === undefined
+      || event.preWaitEvidence.runIdentity.target !== event.target) {
+      throw new TypeError("Target-writer pre-wait evidence must match the current Run Grant and target");
     }
   }
   if (event.type === "target-writer-wait.settled") {
