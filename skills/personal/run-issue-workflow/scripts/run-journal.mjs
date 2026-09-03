@@ -1,4 +1,4 @@
-import { validateTargetWriterWaitEvidence } from "./run-target-writer-wait.mjs";
+import { validateCloseWaitEvidence } from "./run-target-writer-wait.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
@@ -9,6 +9,8 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "dispatch.recorded",
   "retry.recorded",
   "remediation.recorded",
+  "repository-close-wait.started",
+  "repository-close-wait.settled",
   "target-writer-wait.started",
   "target-writer-wait.settled",
   "pause.transitioned",
@@ -32,6 +34,12 @@ const eventFields = new Map([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
   ])],
   ["remediation.recorded", new Set(["type", "at", "issueId", "attempt", "fingerprint", "cycle", "adapter"])],
+  ["repository-close-wait.started", new Set([
+    "type", "at", "issueId", "target", "owner", "timeoutMs", "preWaitEvidence",
+  ])],
+  ["repository-close-wait.settled", new Set([
+    "type", "at", "waitSequence", "issueId", "target", "owner", "outcome", "evidence",
+  ])],
   ["target-writer-wait.started", new Set([
     "type", "at", "issueId", "target", "owner", "timeoutMs", "preWaitEvidence",
   ])],
@@ -167,25 +175,27 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requirePositiveInteger(event.cycle, "remediation cycle", 1);
       requireText(event.adapter, "remediation adapter");
       break;
+    case "repository-close-wait.started":
     case "target-writer-wait.started":
-      requireText(event.issueId, "target-writer wait issueId");
-      requireText(event.target, "target-writer wait target");
-      validateTargetWriterOwner(event.owner, "target-writer wait owner");
-      requirePositiveInteger(event.timeoutMs, "target-writer wait timeoutMs", 300_000);
-      validateTargetWriterWaitEvidence(event.preWaitEvidence);
+      requireText(event.issueId, "close wait issueId");
+      requireText(event.target, "close wait target");
+      validateTargetWriterOwner(event.owner, "close wait owner");
+      requirePositiveInteger(event.timeoutMs, "close wait timeoutMs", 300_000);
+      validateCloseWaitEvidence(event.preWaitEvidence);
       break;
+    case "repository-close-wait.settled":
     case "target-writer-wait.settled":
-      requirePositiveInteger(event.waitSequence, "target-writer wait sequence");
-      requireText(event.issueId, "target-writer wait issueId");
-      requireText(event.target, "target-writer wait target");
-      validateTargetWriterOwner(event.owner, "target-writer wait owner");
+      requirePositiveInteger(event.waitSequence, "close wait sequence");
+      requireText(event.issueId, "close wait issueId");
+      requireText(event.target, "close wait target");
+      validateTargetWriterOwner(event.owner, "close wait owner");
       if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"].includes(event.outcome)) {
-        throw new TypeError("Unsupported target-writer wait outcome");
+        throw new TypeError("Unsupported close wait outcome");
       }
       if (!Array.isArray(event.evidence) || event.evidence.length === 0 || !event.evidence.every((item) => (
         typeof item === "string" && item.length > 0
       ))) {
-        throw new TypeError("Target-writer wait settlement requires exact evidence");
+        throw new TypeError("Close wait settlement requires exact evidence");
       }
       break;
     case "pause.transitioned":
@@ -304,15 +314,17 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       throw new TypeError(`Only one remediation cycle is allowed per exact fingerprint in dispatch attempt ${attempt}`);
     }
   }
-  if (event.type === "target-writer-wait.started") {
-    const activeWait = events.findLast((item) => item.type === "target-writer-wait.started"
+  if (["repository-close-wait.started", "target-writer-wait.started"].includes(event.type)) {
+    const eventPrefix = event.type.split(".")[0];
+    const settledType = `${eventPrefix}.settled`;
+    const activeWait = events.findLast((item) => item.type === event.type
       && !events.some((candidate) => (
-        candidate.type === "target-writer-wait.settled" && candidate.waitSequence === item.sequence
+        candidate.type === settledType && candidate.waitSequence === item.sequence
       )));
-    if (activeWait) throw new TypeError(`Target-writer wait ${activeWait.sequence} is already active`);
+    if (activeWait) throw new TypeError(`Close wait ${activeWait.sequence} is already active`);
     const grant = events.findLast(({ type }) => type === "grant.recorded");
     if (grant?.runIdentity?.target !== event.target) {
-      throw new TypeError("Target-writer wait target must match the Run Grant");
+      throw new TypeError("Close wait target must match the Run Grant");
     }
     if (immutableRunIdentityKeys.some((key) => (
       event.preWaitEvidence.runIdentity[key] !== grant.runIdentity[key]
@@ -320,28 +332,29 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     )) || event.preWaitEvidence.grant.maxParallel !== (grant.maxParallel ?? DEFAULT_MAX_PARALLEL)
       || event.preWaitEvidence.target.state === undefined
       || event.preWaitEvidence.runIdentity.target !== event.target) {
-      throw new TypeError("Target-writer pre-wait evidence must match the current Run Grant and target");
+      throw new TypeError("Close pre-wait evidence must match the current Run Grant and target");
     }
   }
-  if (event.type === "target-writer-wait.settled") {
+  if (["repository-close-wait.settled", "target-writer-wait.settled"].includes(event.type)) {
+    const startedType = `${event.type.split(".")[0]}.started`;
     const started = events.find((item) => (
-      item.type === "target-writer-wait.started" && item.sequence === event.waitSequence
+      item.type === startedType && item.sequence === event.waitSequence
     ));
     const duplicate = events.some((item) => (
-      item.type === "target-writer-wait.settled" && item.waitSequence === event.waitSequence
+      item.type === event.type && item.waitSequence === event.waitSequence
     ));
-    if (!started || duplicate) throw new TypeError("Target-writer wait settlement requires one active start");
+    if (!started || duplicate) throw new TypeError("Close wait settlement requires one active start");
     if (started.issueId !== event.issueId || started.target !== event.target
       || !sameTargetWriterOwner(started.owner, event.owner)) {
-      throw new TypeError("Target-writer wait settlement must match its exact start");
+      throw new TypeError("Close wait settlement must match its exact start");
     }
     if (requireIsoInstant(event.at, "target-writer wait settlement timestamp")
       < requireIsoInstant(started.at, "target-writer wait start timestamp")) {
-      throw new TypeError("Target-writer wait cannot settle before it starts");
+      throw new TypeError("Close wait cannot settle before it starts");
     }
     if (event.outcome === "TIMED_OUT"
       && Date.parse(event.at) - Date.parse(started.at) < started.timeoutMs) {
-      throw new TypeError("Target-writer wait cannot time out before its bound");
+      throw new TypeError("Close wait cannot time out before its bound");
     }
   }
   if (["pause.transitioned", "stop.transitioned"].includes(event.type)) {

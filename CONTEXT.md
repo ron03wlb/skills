@@ -195,7 +195,7 @@ The child state in which its reviewed candidate is reachable from the **Issue ta
 _Avoid_: Execution completion, worker completion, passing tests alone
 
 **DAG run state**:
-The run-level lifecycle value `RECONCILING`, `RUNNING`, `WAITING_FOR_TARGET_WRITER`, `PAUSING`, `PAUSED`, `BLOCKED`, `STOPPING`, `STOPPED`, or `SUCCEEDED`. It describes coordinator progress and control authority without replacing any Issue's **DAG node state**.
+The run-level lifecycle value `RECONCILING`, `RUNNING`, `WAITING_FOR_REPOSITORY_CLOSE_LEASE`, `WAITING_FOR_TARGET_WRITER`, `PAUSING`, `PAUSED`, `BLOCKED`, `STOPPING`, `STOPPED`, or `SUCCEEDED`. It describes coordinator progress and control authority without replacing any Issue's **DAG node state**.
 _Avoid_: Aggregate child status, panel status, worker status
 
 **DAG node state**:
@@ -604,7 +604,8 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - `to-spec` Planning Seal writes, frozen legacy/profile-v1 producer checkpoints, and `close-issue` acquire the same target-scoped **Target mutation serialization** writer for their bounded target mutation; fresh tracker-only publication and Issue execution never consume this writer
 - Every proposed **Tracker Spec** owns one **Spec workflow lane** with one Codex task, isolated planning worktree, and later **DAG Run**; lanes sharing a target remain concurrent and never require a global multi-Spec coordinator
 - Target movement during grilling does not invalidate the lane; **Planning baseline revalidation** may bind a semantically compatible handoff to the latest baseline, while relevant drift stops only that lane for renewed human confirmation
-- Healthy target-writer contention enters bounded **Target writer wait** and leaves unrelated Issue execution eligible; its journaled pre-wait evidence must match a post-release reacquisition before closeout, while unknown ownership, timeout, coordinator loss, or changed evidence returns a blocker without stealing the lease
+- A real `close-issue` leaf alone acquires the repository close lease and then **Target mutation serialization**; the DAG coordinator observes both, never acquires, releases, reclaims, or delegates either lease, and preserves closeout outside Issue execution slots and retry budgets
+- Healthy repository-close contention enters `WAITING_FOR_REPOSITORY_CLOSE_LEASE`; compatible target-writer contention retains bounded **Target writer wait**. Both leave unrelated Issue execution eligible and require journaled pre-wait evidence to match a post-release reacquisition before closeout, while unknown ownership, timeout, coordinator loss, or changed evidence returns a blocker without stealing the lease
 - Every skill applies **Workflow check disposition** only to checks owned by its interface; downstream consumers trust exact upstream read-back, advisories never block, and only evidence protecting mutation identity, uniqueness, durable state, or push safety is a Hard gate
 - After a human repairs a **Recoverable blocker** at its owning source, **Same-command recovery** resumes the first unsatisfied idempotent stage; no generic resume command, central repair workflow, or force-bypass flag is introduced
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/run-issue-workflow <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`, whose successful publication then routes the same parent to `/run-issue-workflow <Spec-ID>`

@@ -60,7 +60,7 @@ const copyRunIdentity = (identity) => ({
   decompositionIdentity: identity.decompositionIdentity,
 });
 
-export const createTargetWriterWaitEvidence = ({
+export const createCloseWaitEvidence = ({
   runIdentity,
   grant,
   run,
@@ -89,45 +89,50 @@ export const createTargetWriterWaitEvidence = ({
     })),
 });
 
-export const validateTargetWriterWaitEvidence = (evidence) => {
-  assertExactFields(evidence, evidenceFields, "target-writer pre-wait evidence");
-  validateRunIdentity(evidence.runIdentity, "target-writer pre-wait runIdentity");
-  assertExactFields(evidence.grant, grantFields, "target-writer pre-wait Grant");
-  validateRunIdentity(evidence.grant.runIdentity, "target-writer pre-wait Grant runIdentity");
+export const validateCloseWaitEvidence = (evidence) => {
+  assertExactFields(evidence, evidenceFields, "close-wait pre-wait evidence");
+  validateRunIdentity(evidence.runIdentity, "close-wait pre-wait runIdentity");
+  assertExactFields(evidence.grant, grantFields, "close-wait pre-wait Grant");
+  validateRunIdentity(evidence.grant.runIdentity, "close-wait pre-wait Grant runIdentity");
   if (!Number.isInteger(evidence.grant.maxParallel) || evidence.grant.maxParallel < 1) {
-    throw new TypeError("target-writer pre-wait Grant maxParallel must be a positive integer");
+    throw new TypeError("close-wait pre-wait Grant maxParallel must be a positive integer");
   }
-  assertExactFields(evidence.target, targetFields, "target-writer pre-wait target");
+  assertExactFields(evidence.target, targetFields, "close-wait pre-wait target");
   if (!["CLEAN", "DIRTY", "UNKNOWN"].includes(evidence.target.state)) {
-    throw new TypeError("target-writer pre-wait target state is invalid");
+    throw new TypeError("close-wait pre-wait target state is invalid");
   }
   if (evidence.target.trackerAvailable !== null && typeof evidence.target.trackerAvailable !== "boolean") {
-    throw new TypeError("target-writer pre-wait trackerAvailable must be boolean or null");
+    throw new TypeError("close-wait pre-wait trackerAvailable must be boolean or null");
   }
   if (evidence.target.parentTrackerState !== null && !isText(evidence.target.parentTrackerState)) {
-    throw new TypeError("target-writer pre-wait parentTrackerState must be text or null");
+    throw new TypeError("close-wait pre-wait parentTrackerState must be text or null");
   }
   if (!Number.isInteger(evidence.controlRevision) || evidence.controlRevision < 0) {
-    throw new TypeError("target-writer pre-wait controlRevision must be a non-negative integer");
+    throw new TypeError("close-wait pre-wait controlRevision must be a non-negative integer");
   }
   if (!Array.isArray(evidence.issues) || evidence.issues.length === 0) {
-    throw new TypeError("target-writer pre-wait issues are required");
+    throw new TypeError("close-wait pre-wait issues are required");
   }
   for (const issue of evidence.issues) {
-    assertExactFields(issue, issueFields, "target-writer pre-wait issue");
+    assertExactFields(issue, issueFields, "close-wait pre-wait issue");
     for (const key of ["issueId", "trackerState", "completionState", "worktreeState"]) {
-      if (!isText(issue[key])) throw new TypeError(`target-writer pre-wait issue.${key} is required`);
+      if (!isText(issue[key])) throw new TypeError(`close-wait pre-wait issue.${key} is required`);
     }
     if (issue.candidateReachable !== null && typeof issue.candidateReachable !== "boolean") {
-      throw new TypeError("target-writer pre-wait issue.candidateReachable must be boolean or null");
+      throw new TypeError("close-wait pre-wait issue.candidateReachable must be boolean or null");
     }
   }
   if (new Set(evidence.issues.map(({ issueId }) => issueId)).size !== evidence.issues.length) {
-    throw new TypeError("target-writer pre-wait issues must be unique");
+    throw new TypeError("close-wait pre-wait issues must be unique");
   }
   return evidence;
 };
 
-export const sameTargetWriterWaitEvidence = (left, right) => (
+export const sameCloseWaitEvidence = (left, right) => (
   JSON.stringify(canonicalFact(left)) === JSON.stringify(canonicalFact(right))
 );
+
+// Frozen compatibility aliases for callers that still name the target-writer wait.
+export const createTargetWriterWaitEvidence = createCloseWaitEvidence;
+export const validateTargetWriterWaitEvidence = validateCloseWaitEvidence;
+export const sameTargetWriterWaitEvidence = sameCloseWaitEvidence;

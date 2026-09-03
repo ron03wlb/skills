@@ -1,14 +1,16 @@
 import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
-import { createTargetWriterWaitEvidence } from "./run-target-writer-wait.mjs";
+import { createCloseWaitEvidence } from "./run-target-writer-wait.mjs";
 
 export const FACT_SCHEMA = "dag-run-facts:v1";
 export const STATUS_SCHEMA = "dag-run-status:v1";
 export const RUN_READY_FACT_SCHEMA = "run-ready-handoff-facts:v1";
 export const RUN_READY_RESULT_SCHEMA = "run-ready-handoff:v1";
+export const REPOSITORY_CLOSE_WAIT_TIMEOUT_MS = 30_000;
 export const TARGET_WRITER_WAIT_TIMEOUT_MS = 30_000;
 export const RUN_STATES = Object.freeze([
   "RECONCILING",
   "RUNNING",
+  "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
   "WAITING_FOR_TARGET_WRITER",
   "PAUSING",
   "PAUSED",
@@ -47,6 +49,12 @@ export const REASON_CODES = Object.freeze({
   implementationBlocked: "implementation_blocked",
   dispatchAttemptsExhausted: "dispatch_attempts_exhausted",
   environmentUnresolved: "environment_unresolved",
+  repositoryCloseLeaseConflict: "repository_close_lease_conflict",
+  repositoryCloseLeaseOwnerChanged: "repository_close_lease_owner_changed",
+  repositoryCloseLeaseWaitTimeout: "repository_close_lease_wait_timeout",
+  repositoryCloseLeaseWaitCoordinatorLost: "repository_close_lease_wait_coordinator_lost",
+  repositoryCloseLeaseWaitInterrupted: "repository_close_lease_wait_interrupted",
+  repositoryCloseLeaseEvidenceChanged: "repository_close_lease_evidence_changed",
   closeWriterConflict: "close_writer_conflict",
   targetWriterOwnerChanged: "target_writer_owner_changed",
   targetWriterWaitTimeout: "target_writer_wait_timeout",
@@ -529,6 +537,13 @@ const publicRun = (run, state, maxParallel = 3) => ({
   target: isRecord(run) && isText(run.target) ? run.target : null,
   classification: isRecord(run) && isText(run.classification) ? run.classification : null,
   decompositionIdentity: isRecord(run) && isText(run.decompositionIdentity) ? run.decompositionIdentity : null,
+  repositoryCloseLeaseOperationId: isRecord(run) && isText(run.repositoryCloseLeaseOperationId)
+    ? run.repositoryCloseLeaseOperationId
+    : null,
+  repositoryCloseLeaseState: isRecord(run)
+    && ["ABSENT", "ACTIVE", "UNKNOWN"].includes(run.repositoryCloseLeaseState)
+    ? run.repositoryCloseLeaseState
+    : "ABSENT",
   closeWriterRunId: isRecord(run) && isText(run.closeWriterRunId) ? run.closeWriterRunId : null,
   closeWriterState: isRecord(run) && ["ABSENT", "ACTIVE", "UNKNOWN"].includes(run.closeWriterState)
     ? run.closeWriterState
@@ -636,6 +651,12 @@ export function reduceRun(input) {
     || (input.run.classification === "MULTI" && !isText(input.run.decompositionIdentity))
     || (input.run.classification === "SINGLE" && input.run.decompositionIdentity !== null)
     || typeof input.run.reconciled !== "boolean"
+    || (input.run.repositoryCloseLeaseState !== undefined
+      && !["ABSENT", "ACTIVE", "UNKNOWN"].includes(input.run.repositoryCloseLeaseState))
+    || (input.run.repositoryCloseLeaseState === "ABSENT"
+      && input.run.repositoryCloseLeaseOperationId !== null)
+    || (["ACTIVE", "UNKNOWN"].includes(input.run.repositoryCloseLeaseState)
+      && !isText(input.run.repositoryCloseLeaseOperationId))
     || !["ABSENT", "ACTIVE", "UNKNOWN"].includes(input.run.closeWriterState)
     || (input.run.closeWriterState === "ABSENT" && input.run.closeWriterRunId !== null)
     || (input.run.closeWriterState !== "ABSENT" && !isText(input.run.closeWriterRunId))) {
@@ -687,12 +708,19 @@ export function reduceRun(input) {
   }
   const parentWriterWait = (event) => input.run.classification === "MULTI"
     && event.issueId === input.run.specId
-    && ["target-writer-wait.started", "target-writer-wait.settled"].includes(event.type);
+    && [
+      "repository-close-wait.started",
+      "repository-close-wait.settled",
+      "target-writer-wait.started",
+      "target-writer-wait.settled",
+    ].includes(event.type);
   const outOfScopeJournalEvent = input.journal.find((event) => (
     [
       "dispatch.recorded",
       "retry.recorded",
       "remediation.recorded",
+      "repository-close-wait.started",
+      "repository-close-wait.settled",
       "target-writer-wait.started",
       "target-writer-wait.settled",
     ].includes(event.type)
@@ -935,8 +963,9 @@ export function reduceRun(input) {
       affectedNodes: nodes.filter(({ state }) => state !== "SUCCEEDED").map(({ issueId }) => issueId),
     });
   }
-  const releasedTargetWriterWait = input.journal.some((event) => (
-    event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+  const releasedCloseWait = input.journal.some((event) => (
+    ["repository-close-wait.settled", "target-writer-wait.settled"].includes(event.type)
+    && event.outcome === "RELEASED"
   ));
   const postWaitPacket = (evidence, {
     owningSource = "post-wait owning-source reconciliation",
@@ -963,7 +992,7 @@ export function reduceRun(input) {
           owningSource: "target integration result",
           smallestHumanAction: "Resolve the exact Issue integration conflict without changing its accepted scope.",
         })
-        : releasedTargetWriterWait
+        : releasedCloseWait
           ? postWaitPacket(contradiction.evidence)
         : undefined,
     }));
@@ -983,32 +1012,30 @@ export function reduceRun(input) {
   const normalActions = [];
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
-  const targetCloseWriterForeign = input.run.closeWriterState !== "ABSENT"
-    && input.run.closeWriterRunId !== input.run.runId;
+  const repositoryCloseLeaseState = input.run.repositoryCloseLeaseState ?? "ABSENT";
+  const repositoryCloseLeaseOperationId = input.run.repositoryCloseLeaseOperationId ?? null;
+  const repositoryCloseLeaseOwner = input.run.repositoryCloseLeaseOwner;
+  const repositoryCloseLeaseHealthy = repositoryCloseLeaseState === "ACTIVE"
+    && input.run.repositoryCloseLeaseHealth === "HEALTHY"
+    && isRecord(repositoryCloseLeaseOwner)
+    && repositoryCloseLeaseOwner.operationId === repositoryCloseLeaseOperationId
+    && isText(repositoryCloseLeaseOwner.coordinatorInstanceId)
+    && isText(repositoryCloseLeaseOwner.generation);
+  const repositoryCloseLeaseUncertain = repositoryCloseLeaseState === "UNKNOWN"
+    || (repositoryCloseLeaseState === "ACTIVE" && !repositoryCloseLeaseHealthy);
+  const repositoryCloseLeaseAvailable = repositoryCloseLeaseState === "ABSENT";
   const closeWriterOwner = input.run.closeWriterOwner;
-  const targetCloseWriterHealthy = targetCloseWriterForeign
-    && input.run.closeWriterState === "ACTIVE"
+  const targetCloseWriterHealthy = input.run.closeWriterState === "ACTIVE"
     && input.run.closeWriterHealth === "HEALTHY"
     && isRecord(closeWriterOwner)
     && closeWriterOwner.operationId === input.run.closeWriterRunId
     && isText(closeWriterOwner.coordinatorInstanceId)
     && isText(closeWriterOwner.generation);
-  const targetCloseWriterReclaimable = input.run.closeWriterState === "ACTIVE"
-    && input.run.closeWriterRunId === input.run.runId
-    && input.run.closeWriterHealth === "INACTIVE"
-    && input.run.closeWriterReclaimable === true;
   const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
-    || (targetCloseWriterForeign && !targetCloseWriterHealthy)
-    || (input.run.closeWriterState === "ACTIVE"
-      && input.run.closeWriterRunId === input.run.runId
-      && input.run.closeWriterHealth === "INACTIVE"
-      && !targetCloseWriterReclaimable);
-  const targetCloseWriterOwned = input.run.closeWriterState === "ACTIVE"
-    && input.run.closeWriterRunId === input.run.runId
-    && !targetCloseWriterReclaimable;
-  const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT"
-    || targetCloseWriterReclaimable;
-  if (targetCloseWriterAvailable && closeable.length > 0) {
+    || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterHealthy);
+  const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
+  const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable;
+  if (closeoutAvailable && closeable.length > 0) {
     normalActions.push({ type: "close_issue", issueId: closeable[0] });
   }
   const remediations = retrying.flatMap((issueId) => {
@@ -1030,16 +1057,24 @@ export function reduceRun(input) {
     ...retrying.filter((issueId) => byId.get(issueId).taskState === "TRANSIENT_FAILURE"),
     ...ready,
   ];
-  normalActions.push(...dispatchable.slice(0, Math.max(0, slots - remediations.length)).map((issueId) => ({
+  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length)).map((issueId) => ({
     type: "dispatch_issue",
     issueId,
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
-  })));
+  }));
+  normalActions.push(...dispatchActions);
+  const executionActionsScheduled = remediations.length > 0 || dispatchActions.length > 0;
   const needsParentClose = allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
-  if (needsParentClose && targetCloseWriterAvailable) {
+  if (!executionActionsScheduled && needsParentClose && closeoutAvailable) {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
   }
+  const activeRepositoryCloseWait = input.journal.findLast((event) => (
+    event.type === "repository-close-wait.started"
+    && !input.journal.some((candidate) => (
+      candidate.type === "repository-close-wait.settled" && candidate.waitSequence === event.sequence
+    ))
+  ));
   const activeTargetWriterWait = input.journal.findLast((event) => (
     event.type === "target-writer-wait.started"
     && !input.journal.some((candidate) => (
@@ -1047,14 +1082,27 @@ export function reduceRun(input) {
     ))
   ));
   const waitingIssueId = closeable[0] ?? (needsParentClose ? input.run.specId : null);
-  const preWaitEvidence = createTargetWriterWaitEvidence({
+  const preWaitEvidence = createCloseWaitEvidence({
     runIdentity: input.run,
     grant,
     run: input.run,
     nodes,
     controlRevision,
   });
-  if (targetCloseWriterHealthy && waitingIssueId !== null) {
+  if (!executionActionsScheduled && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
+    normalActions.push({
+      type: "wait_repository_close_lease",
+      issueId: waitingIssueId,
+      owner: {
+        operationId: repositoryCloseLeaseOwner.operationId,
+        coordinatorInstanceId: repositoryCloseLeaseOwner.coordinatorInstanceId,
+        generation: repositoryCloseLeaseOwner.generation,
+      },
+      timeoutMs: REPOSITORY_CLOSE_WAIT_TIMEOUT_MS,
+      preWaitEvidence,
+    });
+  } else if (!executionActionsScheduled && repositoryCloseLeaseAvailable
+    && targetCloseWriterHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_target_writer",
       issueId: waitingIssueId,
@@ -1067,33 +1115,51 @@ export function reduceRun(input) {
       preWaitEvidence,
     });
   }
-  if (activeTargetWriterWait) {
+  const activeCloseWait = activeRepositoryCloseWait ?? activeTargetWriterWait;
+  if (activeCloseWait) {
     normalActions.splice(0, normalActions.length, {
-      type: "wait_target_writer",
-      issueId: activeTargetWriterWait.issueId,
-      owner: { ...activeTargetWriterWait.owner },
-      timeoutMs: activeTargetWriterWait.timeoutMs,
-      preWaitEvidence: activeTargetWriterWait.preWaitEvidence,
+      type: activeCloseWait.type === "repository-close-wait.started"
+        ? "wait_repository_close_lease"
+        : "wait_target_writer",
+      issueId: activeCloseWait.issueId,
+      owner: { ...activeCloseWait.owner },
+      timeoutMs: activeCloseWait.timeoutMs,
+      preWaitEvidence: activeCloseWait.preWaitEvidence,
     });
   }
-  const closeWriterDiagnoses = targetCloseWriterUncertain
+  const repositoryCloseDiagnoses = !executionActionsScheduled && repositoryCloseLeaseUncertain
+    && (closeable.length > 0 || needsParentClose)
+    ? [diagnosis({
+      reasonCode: REASON_CODES.repositoryCloseLeaseConflict,
+      limitationClass: "unresolved-evidence",
+      evidence: [`Repository close lease ${repositoryCloseLeaseOperationId ?? "UNKNOWN"} ownership or liveness is uncertain.`],
+      noAutomaticTransition: "The coordinator never reclaims, releases, or replaces a close-issue leaf lease.",
+      affectedNodes: closeable,
+      allNodes: allNodeIds,
+      resumePredicates: ["repository_close_lease_is_absent_or_healthy"],
+      operatorPacket: createRecoverableOperatorPacket({
+        owningSource: "repository close-lease and liveness read-back",
+        observedEvidence: [`Repository close lease ${repositoryCloseLeaseOperationId ?? "UNKNOWN"} is not safely waitable.`],
+        smallestHumanAction: "Reconcile the exact repository close-lease owner, then retry the same command.",
+        run: { ...input.run, state: "BLOCKED" },
+        nodes,
+      }),
+    })]
+    : [];
+  const closeWriterDiagnoses = !executionActionsScheduled && targetCloseWriterUncertain
     && (closeable.length > 0 || needsParentClose)
     ? [diagnosis({
       reasonCode: REASON_CODES.closeWriterConflict,
       limitationClass: "unresolved-evidence",
-      evidence: targetCloseWriterUncertain
-        ? [`Close-writer liveness for Run ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`]
-        : [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
-      noAutomaticTransition: "Only one close writer may act on one target.",
+      evidence: [`Close-writer liveness for operation ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`],
+      noAutomaticTransition: "The coordinator never reclaims, releases, or replaces a close-issue leaf writer.",
       affectedNodes: closeable,
       allNodes: allNodeIds,
       resumePredicates: ["prove_single_close_writer"],
       operatorPacket: createRecoverableOperatorPacket({
         owningSource: "shared target-writer lock and liveness read-back",
-        observedEvidence: targetCloseWriterUncertain
-          ? [`Close-writer liveness for Run ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`]
-          : [`Run ${input.run.closeWriterRunId} already owns the close writer for target ${input.run.target}.`],
-        smallestHumanAction: "Restore one exact readable target-writer owner and liveness result without releasing another Run's writer.",
+        observedEvidence: [`Close-writer liveness for operation ${input.run.closeWriterRunId} on target ${input.run.target} is unknown.`],
+        smallestHumanAction: "Restore one exact readable target-writer owner and liveness result without releasing another leaf's writer.",
         run: { ...input.run, state: "BLOCKED" },
         nodes,
       }),
@@ -1110,7 +1176,7 @@ export function reduceRun(input) {
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["tracker_read_succeeds"],
-      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
+      operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (input.run.targetState === "DIRTY") {
     const evidence = [`Target ${input.run.target} has uncommitted work.`];
@@ -1121,7 +1187,7 @@ export function reduceRun(input) {
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["target_is_clean"],
-      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
+      operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (input.run.targetState !== "CLEAN") {
     const evidence = [`Target ${input.run.target} cleanliness is uncertain.`];
@@ -1133,7 +1199,7 @@ export function reduceRun(input) {
       affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
       allNodes: allNodeIds,
       resumePredicates: ["target_state_is_known"],
-      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
+      operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   } else if (allSucceeded && input.run.classification === "MULTI"
     && !["OPEN", "CLOSED"].includes(input.run.parentTrackerState)) {
@@ -1146,13 +1212,15 @@ export function reduceRun(input) {
       affectedNodes: [],
       allNodes: allNodeIds,
       resumePredicates: ["parent_tracker_state_is_known"],
-      operatorPacket: releasedTargetWriterWait ? postWaitPacket(evidence) : undefined,
+      operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   }
   const hasContradiction = contradictionDiagnoses.length > 0
+    || repositoryCloseDiagnoses.length > 0
+    || closeWriterDiagnoses.length > 0
     || globalGateDiagnoses.length > 0;
   const hasActiveWork = active.length > 0
-    || (targetCloseWriterOwned && !targetCloseWriterUncertain)
+    || activeRepositoryCloseWait !== undefined
     || activeTargetWriterWait !== undefined;
   const noProgress = !deliverySucceeded && !hasContradiction && normalActions.length === 0 && !hasActiveWork;
   const hasPauseTransition = input.journal.some((event) => (
@@ -1167,15 +1235,17 @@ export function reduceRun(input) {
       ? "BLOCKED"
       : input.run.reconciled === false
         ? "RECONCILING"
-        : activeTargetWriterWait
-          ? "WAITING_FOR_TARGET_WRITER"
+        : activeRepositoryCloseWait
+          ? "WAITING_FOR_REPOSITORY_CLOSE_LEASE"
+          : activeTargetWriterWait
+            ? "WAITING_FOR_TARGET_WRITER"
           : "RUNNING";
   let legalActions = state === "RECONCILING" ? [{ type: "reconcile_run" }] : normalActions;
   const controlDiagnoses = [];
   if (!deliverySucceeded && latestControl?.command === "PAUSE") {
     const pauseSettled = hasPauseTransition && !hasActiveWork;
     state = pauseSettled ? "PAUSED" : "PAUSING";
-    legalActions = activeTargetWriterWait
+    legalActions = activeCloseWait
       ? normalActions
       : !hasPauseTransition && !hasActiveWork
         ? [{ type: "settle_pause", revision: controlRevision }]
@@ -1194,7 +1264,7 @@ export function reduceRun(input) {
   if (!deliverySucceeded && latestControl?.command === "STOP") {
     const stopSettled = hasStopTransition && !hasActiveWork;
     state = stopSettled ? "STOPPED" : "STOPPING";
-    legalActions = activeTargetWriterWait
+    legalActions = activeCloseWait
       ? normalActions
       : !hasStopTransition && !hasActiveWork
         ? [{ type: "settle_stop", revision: controlRevision }]
@@ -1221,6 +1291,7 @@ export function reduceRun(input) {
     PAUSING: ["STOP", "REFRESH"],
     PAUSED: ["RESUME", "STOP", "REFRESH"],
     BLOCKED: ["RESUME", "STOP", "REFRESH"],
+    WAITING_FOR_REPOSITORY_CLOSE_LEASE: ["PAUSE", "STOP", "REFRESH"],
     WAITING_FOR_TARGET_WRITER: ["PAUSE", "STOP", "REFRESH"],
   };
 
@@ -1242,6 +1313,7 @@ export function reduceRun(input) {
     diagnoses: [
       ...globalGateDiagnoses,
       ...contradictionDiagnoses,
+      ...repositoryCloseDiagnoses,
       ...closeWriterDiagnoses,
       ...nodeDiagnoses,
       ...failedDependencyDiagnoses,
@@ -1283,11 +1355,17 @@ export function planControl(status, command, at) {
     };
   }
   const legal = {
-    PAUSE: new Set(["RECONCILING", "RUNNING", "WAITING_FOR_TARGET_WRITER"]),
+    PAUSE: new Set([
+      "RECONCILING",
+      "RUNNING",
+      "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
+      "WAITING_FOR_TARGET_WRITER",
+    ]),
     RESUME: new Set(["PAUSED", "BLOCKED"]),
     STOP: new Set([
       "RECONCILING",
       "RUNNING",
+      "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
       "WAITING_FOR_TARGET_WRITER",
       "PAUSING",
       "PAUSED",

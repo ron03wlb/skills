@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import {
   reduceRunReadyHandoff,
   RUN_READY_FACT_SCHEMA,
@@ -194,7 +195,11 @@ const createWorkflowRuntime = (options) => {
         async read(input) { return (await readHandoffFacts(input)).handoff; },
       },
       writer: {
-        async readHealth({ current }) { return current.facts.run.closeWriterHealth ?? "UNKNOWN"; },
+        async readHealth({ current, leaseKind }) {
+          return leaseKind === "repository-close"
+            ? current.facts.run.repositoryCloseLeaseHealth ?? "UNKNOWN"
+            : current.facts.run.closeWriterHealth ?? "UNKNOWN";
+        },
       },
     },
   });
@@ -700,10 +705,10 @@ test("runtime interface rejects a caller-invented handoff adapter", () => {
   }
 });
 
-test("composed runtime reclaims one exactly proven inactive writer", async () => {
+test("composed runtime leaves inactive leaf-writer recovery to close-issue", async () => {
   const { root, gitCommonDir } = createStoreFixture();
   const staleStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-stale-owner" });
-  staleStore.acquireTargetMutationWriter({
+  const staleWriter = staleStore.acquireTargetMutationWriter({
     target: identity.target,
     operationId: identity.runId,
   });
@@ -775,10 +780,12 @@ test("composed runtime reclaims one exactly proven inactive writer", async () =>
     });
     const result = await runtime.run({ specId: "17", cleanupPreview: true });
 
-    assert.equal(result.status.run.state, "SUCCEEDED");
-    assert.equal(closeAccepted, true);
-    assert.equal(store.readTargetMutationWriterLock(identity.target), null);
+    assert.equal(result.status.run.state, "BLOCKED");
+    assert.equal(result.status.diagnoses.at(-1).reasonCode, "close_writer_conflict");
+    assert.equal(closeAccepted, false);
+    assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, identity.runId);
   } finally {
+    staleWriter.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1401,11 +1408,10 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   }
 });
 
-test("end-to-end closeout contention waits, reacquires, and then closes", async () => {
+test("end-to-end closeout contention uses repository close wait and refreshes evidence before the real close leaf", async () => {
   const { root, store } = createStoreFixture();
-  const competitor = store.acquireTargetMutationWriter({
-    target: identity.target,
-    operationId: "run-other-spec",
+  const competitor = store.acquireRepositoryCloseLease({
+    operationId: `workflow-op-v1-${"c".repeat(64)}`,
   });
   const taskRef = { threadId: "thread-17", hostId: "local" };
   const model = {
@@ -1417,6 +1423,7 @@ test("end-to-end closeout contention waits, reacquires, and then closes", async 
     closeAccepted: false,
   };
   let competitorReleased = false;
+  let leafLeases = null;
   let trackerReads = 0;
   let closeMessageTrackerReads = null;
   let second = 0;
@@ -1438,34 +1445,35 @@ test("end-to-end closeout contention waits, reacquires, and then closes", async 
           : null,
       };
     },
-    async message() {
+    async message(_taskRef, prompt) {
       closeMessageTrackerReads = trackerReads;
+      assert.match(prompt, /\$close-issue.*17/iu);
+      leafLeases = acquireCloseIssueLeases({
+        store,
+        target: identity.target,
+        repositoryId: "github:ron03wlb/skills",
+        specId: identity.specId,
+        approvedPublicationIdentity: identity.approvedScopeHash,
+        issueId: "17",
+      });
+      assert.equal(leafLeases.assertCurrent(), true);
       model.closeAccepted = true;
     },
     async wait() {
       model.trackerState = "CLOSED";
       model.candidateReachable = true;
       model.worktreeState = "ABSENT";
+      assert.equal(leafLeases.assertCurrent(), true);
+      leafLeases.release();
+      leafLeases = null;
       return { coordinatorActive: true, taskSettled: true };
     },
   };
-  const reconcile = async ({ journal }) => {
-    const lock = store.readTargetMutationWriterLock(identity.target);
-    return singleRunCurrent({
+  const reconcile = async ({ journal }) => singleRunCurrent({
       journal,
       model,
-      run: lock === null ? {} : {
-        closeWriterRunId: lock.operationId,
-        closeWriterState: "ACTIVE",
-        closeWriterHealth: "HEALTHY",
-        closeWriterOwner: {
-          operationId: lock.operationId,
-          coordinatorInstanceId: lock.coordinatorInstanceId,
-          generation: lock.generation,
-        },
-      },
+      run: { repositoryCloseLeaseHealth: "HEALTHY" },
     });
-  };
 
   try {
     const runtime = createWorkflowRuntime({
@@ -1484,13 +1492,18 @@ test("end-to-end closeout contention waits, reacquires, and then closes", async 
       },
     });
     const result = await runtime.run({ specId: "17", cleanupPreview: true });
-    const waitEvents = result.journal.filter(({ type }) => type.startsWith("target-writer-wait."));
+    const waitEvents = result.journal.filter(({ type }) => type.startsWith("repository-close-wait."));
 
     assert.equal(result.status.run.state, "SUCCEEDED");
     assert.deepEqual(waitEvents.map(({ outcome }) => outcome ?? null), [null, "RELEASED"]);
     assert.ok(closeMessageTrackerReads >= 3);
-    assert.equal(store.readTargetMutationWriterLock(identity.target), null);
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(store.observeTargetMutationWriter({ target: identity.target }), {
+      state: "ABSENT",
+      owner: null,
+    });
   } finally {
+    leafLeases?.release();
     if (!competitorReleased) competitor.release();
     rmSync(root, { recursive: true, force: true });
   }
@@ -1860,6 +1873,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
   const created = [];
   const closeOrder = [];
   const closeAccepted = new Set();
+  const closeLeases = new Map();
   const taskRefs = new Map();
   const issueByThread = new Map();
   const tracker = {
@@ -1895,7 +1909,16 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
     async message(ref, prompt) {
       const issueId = issueByThread.get(ref.threadId);
       assert.match(prompt, new RegExp(`\\$close-issue.*${issueId}`, "u"));
-      assert.equal(store.readCloseWriter(multiIdentity.target), multiIdentity.runId);
+      const leases = acquireCloseIssueLeases({
+        store,
+        target: multiIdentity.target,
+        repositoryId: "github:ron03wlb/skills",
+        specId: multiIdentity.specId,
+        approvedPublicationIdentity: multiIdentity.approvedScopeHash,
+        issueId,
+      });
+      assert.equal(leases.assertCurrent(), true);
+      closeLeases.set(issueId, leases);
       closeAccepted.add(issueId);
     },
     async wait(refs) {
@@ -1904,9 +1927,13 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
       for (const issueId of issueIds) {
         const node = nodes.get(issueId);
         if (closeAccepted.has(issueId)) {
+          const leases = closeLeases.get(issueId);
+          assert.equal(leases.assertCurrent(), true);
           node.trackerState = "CLOSED";
           node.worktreeState = "ABSENT";
           closeOrder.push(issueId);
+          leases.release();
+          closeLeases.delete(issueId);
         } else {
           node.taskState = "NONE";
           node.completionState = "COMPLETE";
@@ -1941,14 +1968,24 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
     },
   });
   const leaf = {
-    async closeParent({ issueId }) {
+    async closeParent({ issueId, requestEvidence }) {
       assert.equal(issueId, "12");
-      assert.equal(store.readCloseWriter(multiIdentity.target), multiIdentity.runId);
+      assert.equal(requestEvidence.target, multiIdentity.target);
       assert.equal([...nodes.values()].every((node) => (
         node.trackerState === "CLOSED" && node.candidateReachable && node.worktreeState === "ABSENT"
       )), true);
+      const leases = acquireCloseIssueLeases({
+        store,
+        target: multiIdentity.target,
+        repositoryId: "github:ron03wlb/skills",
+        specId: multiIdentity.specId,
+        approvedPublicationIdentity: multiIdentity.approvedScopeHash,
+        issueId,
+      });
+      assert.equal(leases.assertCurrent(), true);
       closeOrder.push("parent:12");
       parentTrackerState = "CLOSED";
+      leases.release();
       return { settled: true };
     },
   };
@@ -1988,8 +2025,10 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
       .filter(({ type }) => type === "dispatch.recorded")
       .map(({ issueId }) => issueId), ["13", "14", "17"]);
     assert.equal(store.readCloseWriter(multiIdentity.target), null);
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
     assert.equal(result.panel.closed, true);
   } finally {
+    for (const leases of closeLeases.values()) leases.release();
     rmSync(root, { recursive: true, force: true });
   }
 });

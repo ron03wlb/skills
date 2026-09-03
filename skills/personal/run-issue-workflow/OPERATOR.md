@@ -16,24 +16,24 @@ Before that authority or any mutation, Entry invokes the owning-source handoff a
 
 After one exact Run is selected and its identity is reconciled, invocation previews and applies the bounded terminal-Run retention sweep before writer acquisition. The selected Run is protected even if cleanup evidence contradicts reconciliation. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
 
-Provide the canonical repository identity and repository owning sources for current Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, producer handoff, target, writer liveness, Codex task, shared leaf, browser, and cleanup evidence. `run-workflow.mjs` passes those sources through repository-owned `run-authority-adapters.mjs`; callers do not implement `handoff.read` or duplicate upstream validation. For a fresh current-profile Run, the adapter derives one deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; caller correlation never defines the Run. Current stored Runs match that key rather than Spec ID alone, while a selected legacy Run keeps its journaled identity for compatibility. The internal adapter also derives one versioned Run-ready fact from existing snapshots plus one checkpoint classification read. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
+Provide the canonical repository identity and repository owning sources for current Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, producer handoff, target, repository-close and target-writer liveness, Codex task, shared leaf, browser, and cleanup evidence. `run-workflow.mjs` passes those sources through repository-owned `run-authority-adapters.mjs`; callers do not implement `handoff.read` or duplicate upstream validation. For a fresh current-profile Run, the adapter derives one deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; caller correlation never defines the Run. Current stored Runs match that key rather than Spec ID alone, while a selected legacy Run keeps its journaled identity for compatibility. The internal adapter also derives one versioned Run-ready fact from existing snapshots plus one checkpoint classification read. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
 
 ## Read the panel
 
 The panel shows the current Run identity and state, published DAG edges, ready and active frontiers, task attempts, close evidence, diagnoses, and legal controls. It is a projection, not authority.
 
-- **Pause** stops new actions after active work and the target mutation writer settle; the same bridge stays open while the Run is paused.
+- **Pause** stops new actions after active workers, closeout waits, and real close leaves settle; the same bridge stays open while the Run is paused.
 - **Resume** in that same panel revises a paused Run and lets reconciliation decide what is now legal.
 - **Stop** cooperatively revokes further work after active operations settle; it does not kill tasks or delete state.
 - **Refresh** reads the newest projection and appends no journal event.
 
 Closing the browser panel has no effect. The bridge closes automatically when the active coordinator returns at a terminal or diagnosed stop. Reopen the workflow explicitly after return; do not treat a stale browser snapshot as evidence.
 
-## Observe target-writer waits
+## Observe closeout waits
 
-Healthy target writer contention projects `WAITING_FOR_TARGET_WRITER` and one bounded, paired journal wait. The start records the exact pre-wait Run, Grant, target, tracker, candidate, completion, worktree, and control-revision evidence. Ready Issue execution continues within that Run's own `max_parallel`; the wait consumes no Issue execution slot and never releases another Run's writer. When the writer releases, the coordinator reacquires and compares every recorded field. Only an unchanged comparison records `RELEASED`; changed or unavailable evidence records `EVIDENCE_CHANGED` and stops before closeout.
+Healthy repository close-lease contention projects `WAITING_FOR_REPOSITORY_CLOSE_LEASE` and one bounded, paired `repository-close-wait.*` journal wait. Compatible healthy target-writer contention retains `WAITING_FOR_TARGET_WRITER` and `target-writer-wait.*`. Each start records the exact pre-wait Run, Grant, target, tracker, candidate, completion, worktree, and control-revision evidence. Ready Issue execution continues within that Run's own `max_parallel` before either wait begins; a wait consumes no Issue execution slot or retry and never releases another leaf's lease. When the owner releases, the coordinator reacquires and compares every recorded field. Only an unchanged comparison records `RELEASED`; changed or unavailable evidence records `EVIDENCE_CHANGED` and stops before closeout.
 
-Unknown owner evidence, timeout, coordinator loss, or changed evidence returns a Recoverable blocker naming the owning source, exact evidence, smallest human action, preserved stages, and the same `/run-issue-workflow` command to retry. Do not steal a lease, close from the pre-wait snapshot, or use elapsed time as reclaim proof.
+Unknown owner evidence, timeout, coordinator loss, or changed evidence returns a Recoverable blocker naming the owning source, exact evidence, smallest human action, preserved stages, and the same `/run-issue-workflow` command to retry. Do not steal, release, reclaim, or delegate either lease; do not close from the pre-wait snapshot or use elapsed time as reclaim proof. The real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.
 
 ## Diagnose before intervening
 

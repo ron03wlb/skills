@@ -5,8 +5,8 @@ import {
   reduceRunReadyHandoff,
 } from "./run-core.mjs";
 import {
-  createTargetWriterWaitEvidence,
-  sameTargetWriterWaitEvidence,
+  createCloseWaitEvidence,
+  sameCloseWaitEvidence,
 } from "./run-target-writer-wait.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
@@ -44,18 +44,12 @@ const ENGINE_WRITER_CONTENTION = new Set([
   "RUN_WRITER_STALE_PROOF_MISMATCH",
   "RUN_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
 ]);
-const CLOSE_WRITER_CONTENTION = new Set([
-  ...RECLAIM_CONTENTION,
-  "TARGET_CLOSE_WRITER_LOCKED",
-  "TARGET_CLOSE_WRITER_RECLAIM_IN_PROGRESS",
-  "TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH",
-  "TARGET_CLOSE_WRITER_OPERATION_ACTIVE_OR_UNPROVEN",
-]);
 const MUTATING_ACTION_TYPES = new Set([
   "dispatch_issue",
   "remediate_environment",
   "close_issue",
   "close_parent",
+  "wait_repository_close_lease",
   "wait_target_writer",
   "settle_pause",
   "settle_stop",
@@ -373,8 +367,7 @@ export function createCoordinator({
     "readEvents",
     "acquireWriter",
     "readWriterLock",
-    "acquireTargetMutationWriter",
-    "readTargetMutationWriterLock",
+    "observeRepositoryCloseLease",
     "observeTargetMutationWriter",
   ]) requireMethod(store, method);
   requireMethod(tracker, "read");
@@ -530,42 +523,6 @@ export function createCoordinator({
     return null;
   };
 
-  const acquireTargetMutationWriter = (current, status) => {
-    try {
-      if (current.closeWriterReclaimProof) {
-        requireMethod(store, "reclaimTargetMutationWriter");
-        return { writer: store.reclaimTargetMutationWriter({
-          target: current.runIdentity.target,
-          operationId: current.runIdentity.runId,
-          staleProof: current.closeWriterReclaimProof,
-        }) };
-      }
-      return { writer: store.acquireTargetMutationWriter({
-        target: current.runIdentity.target,
-        operationId: current.runIdentity.runId,
-      }) };
-    } catch (error) {
-      if (!CLOSE_WRITER_CONTENTION.has(error?.message)) throw error;
-      const owner = store.readTargetMutationWriterLock(current.runIdentity.target);
-      const evidence = [`${error.message}; observed target mutation-writer owner ${JSON.stringify(owner)}.`];
-      return { stopped: diagnosedStop(status, {
-        reasonCode: REASON_CODES.closeWriterConflict,
-        limitationClass: "unresolved-evidence",
-        evidence,
-        noAutomaticTransition: "Target closeout cannot race or replace an active or unproven writer.",
-        affectedNodes: status.nodes.map(({ issueId }) => issueId),
-        resumePredicates: ["target_close_writer_is_absent_or_exactly_reclaimable"],
-        operatorPacket: createRecoverableOperatorPacket({
-          owningSource: "shared target-writer lock and reclaim-proof read-back",
-          observedEvidence: evidence,
-          smallestHumanAction: "Reconcile the exact current target-writer owner and its reclaim proof, then retry the same command.",
-          run: status.run,
-          nodes: status.nodes,
-        }),
-      }) };
-    }
-  };
-
   const closeIssue = async ({ action, current, status }) => {
     let taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) {
@@ -580,27 +537,31 @@ export function createCoordinator({
       taskRef = existing[0];
       if (!isTaskRef(taskRef)) return { stopped: issueLaneMissing(status, action.issueId) };
     }
-    const acquired = acquireTargetMutationWriter(current, status);
-    if (acquired.stopped) return { stopped: acquired.stopped };
-    const closeWriter = acquired.writer;
-    let settled = false;
-    try {
-      const task = await tasks.read(taskRef);
-      const accepted = task?.closeRequest?.state === "ACCEPTED"
-        && task.closeRequest.runId === current.runIdentity.runId
-        && task.closeRequest.issueId === action.issueId;
-      if (!accepted) {
-        await tasks.message(
-          taskRef,
-          `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
-        );
-      }
-      const waited = await tasks.wait([taskRef]);
-      settled = waited?.taskSettled === true;
-      return { active: settled && waited?.coordinatorActive !== false };
-    } finally {
-      if (settled) closeWriter.release();
+    const task = await tasks.read(taskRef);
+    const accepted = task?.closeRequest?.state === "ACCEPTED"
+      && task.closeRequest.runId === current.runIdentity.runId
+      && task.closeRequest.issueId === action.issueId;
+    if (!accepted) {
+      const node = status.nodes.find(({ issueId }) => issueId === action.issueId);
+      const requestEvidence = {
+        runIdentity: current.runIdentity,
+        maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
+        issueId: action.issueId,
+        target: current.runIdentity.target,
+        controlRevision: status.run.controlRevision,
+        trackerState: node.close.trackerState,
+        completionState: node.close.completionState,
+        candidateReachable: node.close.candidateReachable,
+        worktreeState: node.close.worktreeState,
+      };
+      await tasks.message(
+        taskRef,
+        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
+      );
     }
+    const waited = await tasks.wait([taskRef]);
+    const settled = waited?.taskSettled === true;
+    return { active: settled && waited?.coordinatorActive !== false };
   };
 
   const remediateEnvironment = async ({ action, current, writer }) => {
@@ -633,44 +594,74 @@ export function createCoordinator({
 
   const closeParent = async ({ action, current, status }) => {
     requireMethod(leaf, "closeParent");
-    const acquired = acquireTargetMutationWriter(current, status);
-    if (acquired.stopped) return { stopped: acquired.stopped };
-    const closeWriter = acquired.writer;
-    let settled = false;
-    try {
-      const result = await leaf.closeParent({ issueId: action.issueId, runIdentity: current.runIdentity });
-      settled = result?.settled === true;
-      return { settled };
-    } finally {
-      if (settled) closeWriter.release();
-    }
+    const result = await leaf.closeParent({
+      issueId: action.issueId,
+      runIdentity: current.runIdentity,
+      requestEvidence: {
+        runIdentity: current.runIdentity,
+        maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
+        issueId: action.issueId,
+        target: current.runIdentity.target,
+        controlRevision: status.run.controlRevision,
+        childCloseStates: status.nodes.map(({ issueId, close }) => ({ issueId, ...close })),
+      },
+    });
+    return { settled: result?.settled === true };
   };
 
-  const waitForTargetWriter = async ({ action, current, operationIdentity, request, status, writer }) => {
+  const waitForCloseLease = async ({ action, current, operationIdentity, request, status, writer }) => {
+    const repositoryCloseWait = action.type === "wait_repository_close_lease";
+    const waitKind = repositoryCloseWait ? {
+      startedType: "repository-close-wait.started",
+      settledType: "repository-close-wait.settled",
+      label: "repository close lease",
+      readBackSource: "repository close-lease read-back",
+      livenessSource: "repository close-lease and liveness read-back",
+      ownerChanged: REASON_CODES.repositoryCloseLeaseOwnerChanged,
+      timeout: REASON_CODES.repositoryCloseLeaseWaitTimeout,
+      coordinatorLost: REASON_CODES.repositoryCloseLeaseWaitCoordinatorLost,
+      interrupted: REASON_CODES.repositoryCloseLeaseWaitInterrupted,
+      evidenceChanged: REASON_CODES.repositoryCloseLeaseEvidenceChanged,
+      absentPredicate: "repository_close_lease_is_absent_or_healthy",
+      reconcilePredicate: "repository_close_lease_ownership_is_reconciled",
+    } : {
+      startedType: "target-writer-wait.started",
+      settledType: "target-writer-wait.settled",
+      label: "target mutation writer",
+      readBackSource: "shared target-writer lock read-back",
+      livenessSource: "shared target-writer lock and liveness read-back",
+      ownerChanged: REASON_CODES.targetWriterOwnerChanged,
+      timeout: REASON_CODES.targetWriterWaitTimeout,
+      coordinatorLost: REASON_CODES.targetWriterWaitCoordinatorLost,
+      interrupted: REASON_CODES.targetWriterWaitInterrupted,
+      evidenceChanged: REASON_CODES.targetWriterEvidenceChanged,
+      absentPredicate: "target_writer_is_absent_or_healthy",
+      reconcilePredicate: "target_writer_ownership_is_reconciled",
+    };
     const events = store.readEvents(current.runIdentity.runId);
     let recoveryStatus = status;
-    const unsettled = events.findLast((event) => event.type === "target-writer-wait.started"
+    const unsettled = events.findLast((event) => event.type === waitKind.startedType
       && !events.some((candidate) => (
-        candidate.type === "target-writer-wait.settled" && candidate.waitSequence === event.sequence
+        candidate.type === waitKind.settledType && candidate.waitSequence === event.sequence
       )));
     const recovery = {
-      [REASON_CODES.targetWriterOwnerChanged]: {
-        owningSource: "shared target-writer lock read-back",
-        smallestHumanAction: "Reconcile the current target-writer owner without releasing or replacing it.",
+      [waitKind.ownerChanged]: {
+        owningSource: waitKind.readBackSource,
+        smallestHumanAction: `Reconcile the current ${waitKind.label} owner without releasing or replacing it.`,
       },
-      [REASON_CODES.targetWriterWaitTimeout]: {
-        owningSource: "shared target-writer lock and liveness read-back",
-        smallestHumanAction: "Wait for the healthy writer to finish, then retry the same command.",
+      [waitKind.timeout]: {
+        owningSource: waitKind.livenessSource,
+        smallestHumanAction: `Wait for the healthy ${waitKind.label} owner to finish, then retry the same command.`,
       },
-      [REASON_CODES.targetWriterWaitCoordinatorLost]: {
+      [waitKind.coordinatorLost]: {
         owningSource: "active coordinator liveness read-back",
         smallestHumanAction: "Start one active coordinator by retrying the same command.",
       },
-      [REASON_CODES.targetWriterWaitInterrupted]: {
+      [waitKind.interrupted]: {
         owningSource: "append-only coordinator journal read-back",
         smallestHumanAction: "Inspect the settled orphaned wait, then retry the same command.",
       },
-      [REASON_CODES.targetWriterEvidenceChanged]: {
+      [waitKind.evidenceChanged]: {
         owningSource: "post-wait owning-source reconciliation",
         smallestHumanAction: "Restore or accept the changed owning-source evidence, then retry the same command.",
       },
@@ -681,7 +672,7 @@ export function createCoordinator({
         reasonCode,
         limitationClass: "instance-blocker",
         evidence,
-        noAutomaticTransition: "Target closeout cannot continue from stale or exceptional writer-wait evidence.",
+        noAutomaticTransition: `Closeout cannot continue from stale or exceptional ${waitKind.label} wait evidence.`,
         affectedNodes: [action.issueId],
         resumePredicates,
         operatorPacket: createRecoverableOperatorPacket({
@@ -693,7 +684,7 @@ export function createCoordinator({
       }) };
     };
     const appendSettlement = ({ started, outcome, evidence, at = now() }) => writer.append({
-      type: "target-writer-wait.settled",
+      type: waitKind.settledType,
       at,
       waitSequence: started.sequence,
       issueId: started.issueId,
@@ -710,17 +701,17 @@ export function createCoordinator({
         evidence: [`Writer wait ${unsettled.sequence} was left unsettled by a prior coordinator.`],
       });
       return stop(
-        REASON_CODES.targetWriterWaitInterrupted,
+        waitKind.interrupted,
         [
           `Run ${current.runIdentity.runId} recovered unsettled writer wait ${unsettled.sequence}.`,
-          "The Run, Issue completion, and target writer state remain preserved.",
+          `The Run, Issue completion, and ${waitKind.label} state remain preserved.`,
         ],
         ["invoke_same_run_issue_workflow_after_writer_wait_reconciliation"],
       );
     }
 
     const started = writer.append({
-      type: "target-writer-wait.started",
+      type: waitKind.startedType,
       at: now(),
       issueId: action.issueId,
       target: current.runIdentity.target,
@@ -731,7 +722,7 @@ export function createCoordinator({
     const changedEvidenceStop = (evidence) => {
       appendSettlement({ started, outcome: "EVIDENCE_CHANGED", evidence });
       return stop(
-        REASON_CODES.targetWriterEvidenceChanged,
+        waitKind.evidenceChanged,
         evidence,
         ["post_wait_evidence_is_reconciled", "retry_same_run_issue_workflow"],
       );
@@ -740,7 +731,7 @@ export function createCoordinator({
       const trackerResult = await readTracker(request);
       if (!trackerResult.available) {
         return changedEvidenceStop([
-          `The exact competing target writer released, but Tracker read-back failed after probes ${trackerResult.attempts.join(", ")}.`,
+          `The exact competing ${waitKind.label} released, but Tracker read-back failed after probes ${trackerResult.attempts.join(", ")}.`,
         ]);
       }
       let refreshed;
@@ -753,14 +744,14 @@ export function createCoordinator({
         });
         if (operationIdentity) refreshed = bindFreshRunOperation(refreshed, operationIdentity);
         recoveryStatus = writer.rebuildStatus(refreshed.facts);
-        const refreshedEvidence = createTargetWriterWaitEvidence({
+        const refreshedEvidence = createCloseWaitEvidence({
           runIdentity: refreshed.runIdentity,
           grant: refreshed.grant,
           run: refreshed.facts.run,
           nodes: recoveryStatus.nodes,
           controlRevision: recoveryStatus.run.controlRevision,
         });
-        if (!sameTargetWriterWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {
+        if (!sameCloseWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {
           return changedEvidenceStop([
             `Pre-wait evidence ${JSON.stringify(started.preWaitEvidence)}.`,
             `Post-wait evidence ${JSON.stringify(refreshedEvidence)}.`,
@@ -768,13 +759,13 @@ export function createCoordinator({
         }
       } catch (error) {
         return changedEvidenceStop([
-          `The exact competing target writer released, but owning-source reconciliation failed: ${error?.message ?? String(error)}.`,
+          `The exact competing ${waitKind.label} released, but owning-source reconciliation failed: ${error?.message ?? String(error)}.`,
         ]);
       }
       appendSettlement({
         started,
         outcome: "RELEASED",
-        evidence: ["The exact competing target writer is absent and all pre-wait evidence was reacquired unchanged."],
+        evidence: [`The exact competing ${waitKind.label} is absent and all pre-wait evidence was reacquired unchanged.`],
       });
       return { released: true };
     };
@@ -786,21 +777,23 @@ export function createCoordinator({
       appendSettlement({
         started,
         outcome: "OWNER_CHANGED",
-        evidence: [`Target writer changed from ${JSON.stringify(action.owner)} to ${JSON.stringify(observation.owner)} (${observation.state}).`],
+        evidence: [`${waitKind.label} changed from ${JSON.stringify(action.owner)} to ${JSON.stringify(observation.owner)} (${observation.state}).`],
       });
       return stop(
-        REASON_CODES.targetWriterOwnerChanged,
+        waitKind.ownerChanged,
         [
-          `Target ${current.runIdentity.target} writer ownership changed during wait.`,
+          `${waitKind.label} ownership changed during wait for target ${current.runIdentity.target}.`,
           `Observed owning source ${JSON.stringify(observation)}.`,
         ],
-        ["target_writer_ownership_is_reconciled", "retry_same_run_issue_workflow"],
+        [waitKind.reconcilePredicate, "retry_same_run_issue_workflow"],
       );
     };
-    const observeOwner = () => store.observeTargetMutationWriter({
-      target: current.runIdentity.target,
-      expectedOwner: action.owner,
-    });
+    const observeOwner = () => repositoryCloseWait
+      ? store.observeRepositoryCloseLease({ expectedOwner: action.owner })
+      : store.observeTargetMutationWriter({
+        target: current.runIdentity.target,
+        expectedOwner: action.owner,
+      });
     recoveryStatus = writer.rebuildStatus(current.facts);
     let elapsedMs = 0;
     const pollMs = Math.min(1_000, action.timeoutMs);
@@ -815,11 +808,11 @@ export function createCoordinator({
         appendSettlement({
           started,
           outcome: "COORDINATOR_INACTIVE",
-          evidence: ["The active coordinator was lost while the target writer remained owned."],
+          evidence: [`The active coordinator was lost while the ${waitKind.label} remained owned.`],
         });
         return stop(
-          REASON_CODES.targetWriterWaitCoordinatorLost,
-          ["Coordinator liveness became inactive during target-writer wait."],
+          waitKind.coordinatorLost,
+          [`Coordinator liveness became inactive during ${waitKind.label} wait.`],
           ["coordinator_is_active", "retry_same_run_issue_workflow"],
         );
       }
@@ -843,15 +836,15 @@ export function createCoordinator({
       started,
       outcome: "TIMED_OUT",
       at: Date.parse(observedAt) >= Date.parse(minimumTimeoutAt) ? observedAt : minimumTimeoutAt,
-      evidence: [`The exact competing writer remained present for ${action.timeoutMs} milliseconds.`],
+      evidence: [`The exact competing ${waitKind.label} remained present for ${action.timeoutMs} milliseconds.`],
     });
     return stop(
-      REASON_CODES.targetWriterWaitTimeout,
+      waitKind.timeout,
       [
-        `Target ${current.runIdentity.target} writer ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds.`,
+        `${waitKind.label} ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds for target ${current.runIdentity.target}.`,
         "The Run, Issue completion, and target state remain preserved.",
       ],
-      ["target_writer_is_absent_or_healthy", "retry_same_run_issue_workflow"],
+      [waitKind.absentPredicate, "retry_same_run_issue_workflow"],
     );
   };
 
@@ -1047,7 +1040,8 @@ export function createCoordinator({
             const recordedGrant = store.readEvents(runIdentity.runId)
               .findLast(({ type }) => type === "grant.recorded");
             const afterWriterWait = journal.some((event) => (
-              event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+              ["repository-close-wait.settled", "target-writer-wait.settled"].includes(event.type)
+              && event.outcome === "RELEASED"
             ));
             const stopped = authorityDrift({
               status: lastStatus,
@@ -1137,8 +1131,8 @@ export function createCoordinator({
               const outcome = await closeParent({ action, current, status: lastStatus });
               if (outcome.stopped) return outcome.stopped;
               if (!outcome.settled) return lastStatus;
-            } else if (action.type === "wait_target_writer") {
-              const outcome = await waitForTargetWriter({
+            } else if (["wait_repository_close_lease", "wait_target_writer"].includes(action.type)) {
+              const outcome = await waitForCloseLease({
                 action,
                 current,
                 operationIdentity: runOperationIdentity,
@@ -1185,7 +1179,8 @@ export function createCoordinator({
               current: refreshed,
               recordedGrant,
               afterWriterWait: store.readEvents(runIdentity.runId).some((event) => (
-                event.type === "target-writer-wait.settled" && event.outcome === "RELEASED"
+                ["repository-close-wait.settled", "target-writer-wait.settled"].includes(event.type)
+                && event.outcome === "RELEASED"
               )),
             });
             if (authorityStopped) return authorityStopped;

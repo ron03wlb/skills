@@ -1652,7 +1652,8 @@ test("two planning lanes isolate work, revalidate target movement, and serialize
 
 test("the versioned runtime interface publishes the accepted state machines", () => {
   assert.deepEqual(RUN_STATES, [
-    "RECONCILING", "RUNNING", "WAITING_FOR_TARGET_WRITER", "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
+    "RECONCILING", "RUNNING", "WAITING_FOR_REPOSITORY_CLOSE_LEASE", "WAITING_FOR_TARGET_WRITER",
+    "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
   ]);
   assert.deepEqual(NODE_STATES, [
     "PENDING", "READY", "DISPATCHED", "EXECUTING", "RETRYING",
@@ -2227,9 +2228,23 @@ test("a healthy target writer becomes a bounded wait after independent Issue dis
   });
 
   assert.equal(status.run.state, "RUNNING");
-  assert.deepEqual(status.legalActions[0], { type: "dispatch_issue", issueId: "14", attempt: 1 });
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "14", attempt: 1 }]);
+  const afterDispatch = reduceRun({
+    ...facts([
+      { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+      { ...node("14"), taskState: "EXECUTING", worktreeState: "PRESENT" },
+    ]),
+    run: {
+      ...facts([]).run,
+      closeWriterRunId: healthyOwner.operationId,
+      closeWriterState: "ACTIVE",
+      closeWriterHealth: "HEALTHY",
+      closeWriterOwner: healthyOwner,
+    },
+    journal: [grant, dispatchEvent("14")],
+  });
   assert.deepEqual(
-    { ...status.legalActions[1], preWaitEvidence: undefined },
+    { ...afterDispatch.legalActions[0], preWaitEvidence: undefined },
     {
       type: "wait_target_writer",
       issueId: "13",
@@ -2238,18 +2253,90 @@ test("a healthy target writer becomes a bounded wait after independent Issue dis
       preWaitEvidence: undefined,
     },
   );
-  assert.deepEqual(status.legalActions[1].preWaitEvidence.runIdentity, grant.runIdentity);
-  assert.deepEqual(status.legalActions[1].preWaitEvidence.grant, {
+  assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.runIdentity, grant.runIdentity);
+  assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.grant, {
     runIdentity: grant.runIdentity,
     maxParallel: 3,
   });
-  assert.deepEqual(status.legalActions[1].preWaitEvidence.target, {
+  assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.target, {
     state: "CLEAN",
     trackerAvailable: true,
     parentTrackerState: "OPEN",
   });
-  assert.deepEqual(status.legalActions[1].preWaitEvidence.issues.map(({ issueId }) => issueId), ["13", "14"]);
-  assert.equal(status.diagnoses.some(({ reasonCode }) => reasonCode === "close_writer_conflict"), false);
+  assert.deepEqual(afterDispatch.legalActions[0].preWaitEvidence.issues.map(({ issueId }) => issueId), ["13", "14"]);
+  assert.equal(afterDispatch.diagnoses.some(({ reasonCode }) => reasonCode === "close_writer_conflict"), false);
+});
+
+test("repository close contention waits after dispatch and unknown ownership blocks same-command recovery", () => {
+  const owner = {
+    operationId: `workflow-op-v1-${"d".repeat(64)}`,
+    coordinatorInstanceId: "coordinator-other-close",
+    generation: "generation-other-close",
+  };
+  const closeableAndActive = [
+    { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+    { ...node("14"), taskState: "EXECUTING", worktreeState: "PRESENT" },
+  ];
+  const waiting = reduceRun({
+    ...facts(closeableAndActive),
+    run: {
+      ...facts([]).run,
+      repositoryCloseLeaseOperationId: owner.operationId,
+      repositoryCloseLeaseState: "ACTIVE",
+      repositoryCloseLeaseHealth: "HEALTHY",
+      repositoryCloseLeaseOwner: owner,
+    },
+    journal: [grant, dispatchEvent("14")],
+  });
+
+  assert.equal(waiting.run.state, "RUNNING");
+  assert.deepEqual(
+    { ...waiting.legalActions[0], preWaitEvidence: undefined },
+    {
+      type: "wait_repository_close_lease",
+      issueId: "13",
+      owner,
+      timeoutMs: 30_000,
+      preWaitEvidence: undefined,
+    },
+  );
+  const started = {
+    schema: "dag-run-event:v1",
+    sequence: 3,
+    type: "repository-close-wait.started",
+    at: "2026-08-30T00:02:00.000Z",
+    issueId: "13",
+    target: grant.runIdentity.target,
+    owner,
+    timeoutMs: 30_000,
+    preWaitEvidence: waiting.legalActions[0].preWaitEvidence,
+  };
+  const activeWait = reduceRun({
+    ...facts(closeableAndActive),
+    run: {
+      ...facts([]).run,
+      repositoryCloseLeaseOperationId: owner.operationId,
+      repositoryCloseLeaseState: "ACTIVE",
+      repositoryCloseLeaseHealth: "HEALTHY",
+      repositoryCloseLeaseOwner: owner,
+    },
+    journal: [grant, dispatchEvent("14"), started],
+  });
+  assert.equal(activeWait.run.state, "WAITING_FOR_REPOSITORY_CLOSE_LEASE");
+  assert.equal(activeWait.legalActions[0].type, "wait_repository_close_lease");
+
+  const unknown = reduceRun({
+    ...facts([{ ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" }]),
+    run: {
+      ...facts([]).run,
+      repositoryCloseLeaseOperationId: "UNKNOWN",
+      repositoryCloseLeaseState: "UNKNOWN",
+    },
+  });
+  assert.equal(unknown.run.state, "BLOCKED");
+  assert.equal(unknown.diagnoses.at(-1).reasonCode, "repository_close_lease_conflict");
+  assert.deepEqual(unknown.legalActions, []);
+  assert.equal(unknown.diagnoses.at(-1).operatorPacket.retryCommand, "/run-issue-workflow 12");
 });
 
 test("an unsettled target-writer event projects the bounded coordinator wait state", () => {

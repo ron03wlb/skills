@@ -941,7 +941,13 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
 
     assert.equal(status.run.state, "SUCCEEDED");
     assert.deepEqual(createdIssues, ["15"]);
-    assert.deepEqual(parentCloses, [{ issueId: "12", runIdentity: multiIdentity }]);
+    assert.equal(parentCloses.length, 1);
+    assert.deepEqual(
+      { issueId: parentCloses[0].issueId, runIdentity: parentCloses[0].runIdentity },
+      { issueId: "12", runIdentity: multiIdentity },
+    );
+    assert.equal(parentCloses[0].requestEvidence.target, multiIdentity.target);
+    assert.equal(parentCloses[0].requestEvidence.childCloseStates.length, 3);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1334,7 +1340,6 @@ test("re-entry observes an accepted close request instead of sending a duplicate
     worktreeState: "PRESENT",
   };
   let closeRequest = null;
-  let closeWriterReclaimProof = null;
   let messageCalls = 0;
   let waitCalls = 0;
   let clockMinute = 0;
@@ -1361,28 +1366,20 @@ test("re-entry observes an accepted close request instead of sending a duplicate
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
-  const reconcile = async ({ tracker: currentTracker }) => ({
-    ...reconciliation({
+  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
       taskRefs: { 15: taskRef },
       run: { parentTrackerState: currentTracker.trackerState },
       nodes: [{ issueId: "15", blockers: [], ...currentTracker, taskState: "NONE" }],
-    }),
-    closeWriterReclaimProof,
   });
 
   try {
     const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
     const interrupted = await coordinator.run({ specId: "15" });
-    const closeOwner = store.readCloseWriterLock(identity.target);
-    assert.equal(closeOwner.runId, identity.runId);
-    closeWriterReclaimProof = {
-      previousCoordinatorInstanceId: closeOwner.coordinatorInstanceId,
-      previousGeneration: closeOwner.generation,
-      coordinatorState: "INACTIVE",
-      reconciled: true,
-      evidence: ["The prior coordinator stopped after the accepted close request."],
-      abandonedOperationIds: [],
-    };
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(store.observeTargetMutationWriter({ target: identity.target }), {
+      state: "ABSENT",
+      owner: null,
+    });
     const recoveredStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "coordinator-recovered" });
     const recovered = createCoordinator({
       store: recoveredStore,
@@ -1398,13 +1395,17 @@ test("re-entry observes an accepted close request instead of sending a duplicate
     assert.equal(resumed.run.state, "SUCCEEDED");
     assert.equal(messageCalls, 1);
     assert.equal(waitCalls, 2);
-    assert.equal(recoveredStore.readCloseWriterLock(identity.target), null);
+    assert.deepEqual(recoveredStore.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(recoveredStore.observeTargetMutationWriter({ target: identity.target }), {
+      state: "ABSENT",
+      owner: null,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("a competing target mutation writer returns a structured stop before lane messaging", async () => {
+test("uncertain target mutation writer evidence stops before lane messaging", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let clockMinute = 0;
@@ -1431,18 +1432,27 @@ test("a competing target mutation writer returns a structured stop before lane m
     }]),
   );
   const tracker = { async read() { return {}; } };
-  const reconcile = async () => reconciliation({
-    taskRefs: { 15: taskRef },
-    nodes: [{
-      issueId: "15",
-      blockers: [],
-      trackerState: "OPEN",
-      taskState: "NONE",
-      completionState: "COMPLETE",
-      candidateReachable: true,
-      worktreeState: "PRESENT",
-    }],
-  });
+  const reconcile = async () => {
+    const owner = store.readTargetMutationWriterLock(identity.target);
+    return reconciliation({
+      taskRefs: { 15: taskRef },
+      run: {
+        closeWriterRunId: owner.operationId,
+        closeWriterState: "ACTIVE",
+        closeWriterHealth: "UNKNOWN",
+        closeWriterOwner: owner,
+      },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+      }],
+    });
+  };
 
   try {
     const coordinator = createCoordinator({
@@ -1584,6 +1594,288 @@ test("closeout operation identity excludes a second target and uses one order fo
       ["repository:acquired", "target:acquired", "target:released", "repository:released"],
     ]);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("real close leaf owns both leases without coordinator double acquire", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T00:00:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  seed.append({
+    type: "dispatch.recorded",
+    at: "2026-09-03T00:00:01.000Z",
+    issueId: "15",
+    attempt: 1,
+    taskRef,
+  });
+  seed.release();
+  let closed = false;
+  let closeAccepted = false;
+  let coordinatorLeaseCalls = 0;
+  const coordinatorStore = {
+    ...store,
+    acquireRepositoryCloseLease() {
+      coordinatorLeaseCalls += 1;
+      throw new Error("coordinator must not acquire the repository close lease");
+    },
+    acquireTargetMutationWriter() {
+      coordinatorLeaseCalls += 1;
+      throw new Error("coordinator must not acquire the target mutation writer");
+    },
+  };
+  const tasks = {
+    async findIssueLane() { return [taskRef]; },
+    async create() { throw new Error("the existing Issue lane must be reused"); },
+    async read() {
+      return {
+        state: "ACTIVE",
+        closeRequest: closeAccepted
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "15" }
+          : null,
+      };
+    },
+    async message(_taskRef, prompt) {
+      assert.match(prompt, /\$close-issue.*15/iu);
+      assert.match(prompt, /"target":"features\/ron"/u);
+      assert.match(prompt, /"completionState":"COMPLETE"/u);
+      assert.match(prompt, /"worktreeState":"PRESENT"/u);
+      assert.match(prompt, /"controlRevision":0/u);
+      const leases = acquireCloseIssueLeases({
+        store,
+        target: identity.target,
+        repositoryId: "github:ron03wlb/skills",
+        specId: identity.specId,
+        approvedPublicationIdentity: identity.approvedScopeHash,
+        issueId: "15",
+      });
+      assert.equal(leases.assertCurrent(), true);
+      closeAccepted = true;
+      closed = true;
+      leases.release();
+    },
+    async wait() { return { coordinatorActive: true, taskSettled: true }; },
+  };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: closed ? "CLOSED" : "OPEN",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: closed,
+      worktreeState: closed ? "ABSENT" : "PRESENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store: coordinatorStore,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: () => "2026-09-03T00:01:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: identity.specId });
+
+    assert.equal(status.run.state, "SUCCEEDED");
+    assert.equal(coordinatorLeaseCalls, 0);
+    assert.deepEqual(store.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(store.observeTargetMutationWriter({ target: identity.target }), {
+      state: "ABSENT",
+      owner: null,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("repository close wait dispatches within max_parallel before requesting the close leaf", async () => {
+  const { root, store } = createStoreFixture();
+  const closeTaskRef = { threadId: "thread-13", hostId: "local" };
+  const executeTaskRef = { threadId: "thread-14", hostId: "local" };
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-09-03T01:00:00.000Z",
+    runIdentity: multiIdentity,
+    maxParallel: 1,
+  });
+  seed.append({
+    type: "dispatch.recorded",
+    at: "2026-09-03T01:00:01.000Z",
+    issueId: "13",
+    attempt: 1,
+    taskRef: closeTaskRef,
+  });
+  seed.release();
+  const competing = store.acquireRepositoryCloseLease({
+    operationId: `workflow-op-v1-${"b".repeat(64)}`,
+  });
+  let competingReleased = false;
+  let issue14Dispatched = false;
+  const order = [];
+  const tasks = {
+    async findIssueLane({ issueId }) {
+      if (issueId === "13") return [closeTaskRef];
+      if (issueId === "14") return [];
+      throw new Error(`unexpected Issue ${issueId}`);
+    },
+    async create({ issueId }) {
+      assert.equal(issueId, "14");
+      issue14Dispatched = true;
+      order.push("dispatch:14");
+      return executeTaskRef;
+    },
+    async read() { return {}; },
+    async message(_taskRef, prompt) {
+      assert.equal(issue14Dispatched, true, "legal Issue dispatch must precede close waiting");
+      assert.match(prompt, /\$close-issue.*13/iu);
+      order.push("close:13");
+    },
+    async wait() { return { coordinatorActive: false, taskSettled: true }; },
+  };
+  const reconcile = async () => {
+    const repositoryLease = store.observeRepositoryCloseLease();
+    return reconciliation({
+      runIdentity: multiIdentity,
+      maxParallel: 1,
+      taskRefs: { 13: closeTaskRef, ...(issue14Dispatched ? { 14: executeTaskRef } : {}) },
+      run: {
+        repositoryCloseLeaseOperationId: repositoryLease.owner?.operationId ?? null,
+        repositoryCloseLeaseState: repositoryLease.state === "ABSENT" ? "ABSENT" : "ACTIVE",
+        repositoryCloseLeaseHealth: repositoryLease.state === "ABSENT" ? null : "HEALTHY",
+        repositoryCloseLeaseOwner: repositoryLease.owner,
+      },
+      nodes: [
+        {
+          issueId: "13",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: "NONE",
+          completionState: "COMPLETE",
+          candidateReachable: false,
+          worktreeState: "PRESENT",
+        },
+        {
+          issueId: "14",
+          blockers: [],
+          trackerState: "OPEN",
+          taskState: issue14Dispatched ? "EXECUTING" : "NONE",
+          completionState: "NONE",
+          candidateReachable: false,
+          worktreeState: issue14Dispatched ? "PRESENT" : "ABSENT",
+        },
+      ],
+    });
+  };
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: (() => {
+        let second = 2;
+        return () => `2026-09-03T01:00:${String(second++).padStart(2, "0")}.000Z`;
+      })(),
+      sleep: async () => {
+        if (!competingReleased) {
+          competing.release();
+          competingReleased = true;
+        }
+      },
+    });
+    const status = await coordinator.run({ specId: multiIdentity.specId });
+    const waitEvents = store.readEvents(multiIdentity.runId)
+      .filter(({ type }) => type.startsWith("repository-close-wait."));
+
+    assert.equal(status.run.state, "RUNNING", JSON.stringify(status));
+    assert.deepEqual(order, ["dispatch:14", "close:13"]);
+    assert.deepEqual(waitEvents.map(({ type, outcome }) => [type, outcome ?? null]), [
+      ["repository-close-wait.started", null],
+      ["repository-close-wait.settled", "RELEASED"],
+    ]);
+    assert.equal(store.readEvents(multiIdentity.runId)
+      .filter(({ type, issueId }) => type === "dispatch.recorded" && issueId === "14").length, 1);
+  } finally {
+    if (!competingReleased) competing.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("repository close wait times out without consuming retries or reclaiming the leaf lease", async () => {
+  const { root, store } = createStoreFixture();
+  const competitorOperationId = `workflow-op-v1-${"c".repeat(64)}`;
+  const competitor = store.acquireRepositoryCloseLease({ operationId: competitorOperationId });
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  let sleepCalls = 0;
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is forbidden while repository close wait times out`);
+    }]),
+  );
+  const reconcile = async () => {
+    const observation = store.observeRepositoryCloseLease();
+    return reconciliation({
+      taskRefs: { 15: taskRef },
+      run: {
+        repositoryCloseLeaseOperationId: observation.owner.operationId,
+        repositoryCloseLeaseState: "ACTIVE",
+        repositoryCloseLeaseHealth: "HEALTHY",
+        repositoryCloseLeaseOwner: observation.owner,
+      },
+      nodes: [{
+        issueId: "15",
+        blockers: [],
+        trackerState: "OPEN",
+        taskState: "NONE",
+        completionState: "COMPLETE",
+        candidateReachable: false,
+        worktreeState: "PRESENT",
+      }],
+    });
+  };
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: () => "2026-09-03T01:30:00.000Z",
+      sleep: async () => { sleepCalls += 1; },
+    });
+    const status = await coordinator.run({ specId: "15" });
+    const waitEvents = store.readEvents(identity.runId)
+      .filter(({ type }) => type.startsWith("repository-close-wait."));
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_timeout");
+    assert.equal(waitEvents.at(-1).outcome, "TIMED_OUT");
+    assert.equal(sleepCalls, 30);
+    assert.equal(status.nodes[0].task.retryCount, 0);
+    assert.deepEqual(status.diagnoses.at(-1).resumePredicates, [
+      "repository_close_lease_is_absent_or_healthy",
+      "retry_same_run_issue_workflow",
+    ]);
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /repository close-lease/u });
+    assert.equal(
+      status.diagnoses.at(-1).operatorPacket.preservedStages.run.state,
+      "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
+    );
+    assert.equal(store.observeRepositoryCloseLease().owner.operationId, competitorOperationId);
+  } finally {
+    competitor.release();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -2191,7 +2483,7 @@ test("writer release rejects regressed completion and candidate evidence before 
   });
 });
 
-test("a lost close-writer reclaim race returns the same structured stop", async () => {
+test("inactive target-writer evidence stops without coordinator reclaim", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let clockMinute = 0;
@@ -2202,14 +2494,14 @@ test("a lost close-writer reclaim race returns the same structured stop", async 
   seed.release();
   const racingStore = {
     ...store,
-    reclaimTargetMutationWriter() { throw new Error("TARGET_CLOSE_WRITER_STALE_PROOF_MISMATCH"); },
-    readTargetMutationWriterLock() {
-      return {
-        operationId: "run-race-winner",
-        coordinatorInstanceId: "winner",
-        generation: "new-generation",
-      };
+    reclaimTargetMutationWriter() {
+      throw new Error("coordinator must never reclaim the close-issue leaf writer");
     },
+  };
+  const owner = {
+    operationId: "run-race-winner",
+    coordinatorInstanceId: "winner",
+    generation: "new-generation",
   };
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
@@ -2217,27 +2509,23 @@ test("a lost close-writer reclaim race returns the same structured stop", async 
     }]),
   );
   const tracker = { async read() { return {}; } };
-  const reconcile = async () => ({
-    ...reconciliation({
+  const reconcile = async () => reconciliation({
       taskRefs: { 15: taskRef },
+      run: {
+        closeWriterRunId: owner.operationId,
+        closeWriterState: "ACTIVE",
+        closeWriterHealth: "INACTIVE",
+        closeWriterOwner: owner,
+      },
       nodes: [{
         issueId: "15",
         blockers: [],
         trackerState: "OPEN",
         taskState: "NONE",
         completionState: "COMPLETE",
-        candidateReachable: true,
+        candidateReachable: false,
         worktreeState: "PRESENT",
       }],
-    }),
-    closeWriterReclaimProof: {
-      previousCoordinatorInstanceId: "loser",
-      previousGeneration: "old-generation",
-      coordinatorState: "INACTIVE",
-      reconciled: true,
-      evidence: ["The previous close writer appeared stale before the race."],
-      abandonedOperationIds: [],
-    },
   });
 
   try {
@@ -2969,24 +3257,26 @@ test("active engine writer contention remains fenced and returns a structured st
   }
 });
 
-test("parent close re-entry reclaims the same target writer from exact stale proof", async () => {
+test("parent close delegates both leases to the real leaf", async () => {
   const { root, gitCommonDir, store } = createStoreFixture();
   let clockMinute = 0;
   const now = () => `2026-08-30T23:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
   const seed = store.acquireWriter(multiIdentity.runId);
   seed.append({ type: "grant.recorded", at: now(), runIdentity: multiIdentity, maxParallel: 3 });
   seed.release();
-  const abandoned = store.acquireCloseWriter({ target: multiIdentity.target, runId: multiIdentity.runId });
-  const owner = store.readCloseWriterLock(multiIdentity.target);
-  const closeWriterReclaimProof = {
-    previousCoordinatorInstanceId: owner.coordinatorInstanceId,
-    previousGeneration: owner.generation,
-    coordinatorState: "INACTIVE",
-    reconciled: true,
-    evidence: ["The prior parent-close coordinator is inactive."],
-    abandonedOperationIds: [],
-  };
   const recoveredStore = createRunStore({ gitCommonDir, coordinatorInstanceId: "parent-close-recovered" });
+  let coordinatorLeaseCalls = 0;
+  const coordinatorStore = {
+    ...recoveredStore,
+    acquireRepositoryCloseLease() {
+      coordinatorLeaseCalls += 1;
+      throw new Error("coordinator must not acquire the repository close lease");
+    },
+    acquireTargetMutationWriter() {
+      coordinatorLeaseCalls += 1;
+      throw new Error("coordinator must not acquire the target mutation writer");
+    },
+  };
   let parentTrackerState = "OPEN";
   const tracker = { async read() { return { parentTrackerState }; } };
   const tasks = Object.fromEntries(
@@ -2995,14 +3285,25 @@ test("parent close re-entry reclaims the same target writer from exact stale pro
     }]),
   );
   const leaf = {
-    async closeParent({ issueId }) {
+    async closeParent({ issueId, requestEvidence }) {
       assert.equal(issueId, "12");
+      assert.equal(requestEvidence.target, multiIdentity.target);
+      assert.equal(requestEvidence.maxParallel, 3);
+      const leases = acquireCloseIssueLeases({
+        store: recoveredStore,
+        target: multiIdentity.target,
+        repositoryId: "github:ron03wlb/skills",
+        specId: multiIdentity.specId,
+        approvedPublicationIdentity: multiIdentity.approvedScopeHash,
+        issueId,
+      });
+      assert.equal(leases.assertCurrent(), true);
       parentTrackerState = "CLOSED";
+      leases.release();
       return { settled: true };
     },
   };
-  const reconcile = async ({ tracker: currentTracker }) => ({
-    ...reconciliation({
+  const reconcile = async ({ tracker: currentTracker }) => reconciliation({
       runIdentity: multiIdentity,
       run: { parentTrackerState: currentTracker.parentTrackerState },
       nodes: ["13", "14", "15"].map((issueId) => ({
@@ -3014,13 +3315,11 @@ test("parent close re-entry reclaims the same target writer from exact stale pro
         candidateReachable: true,
         worktreeState: "ABSENT",
       })),
-    }),
-    closeWriterReclaimProof,
   });
 
   try {
     const coordinator = createCoordinator({
-      store: recoveredStore,
+      store: coordinatorStore,
       tracker,
       tasks,
       reconcile,
@@ -3031,8 +3330,12 @@ test("parent close re-entry reclaims the same target writer from exact stale pro
     const status = await coordinator.run({ specId: "12" });
 
     assert.equal(status.run.state, "SUCCEEDED");
-    assert.throws(() => abandoned.release());
-    assert.equal(recoveredStore.readCloseWriterLock(multiIdentity.target), null);
+    assert.equal(coordinatorLeaseCalls, 0);
+    assert.deepEqual(recoveredStore.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(recoveredStore.observeTargetMutationWriter({ target: multiIdentity.target }), {
+      state: "ABSENT",
+      owner: null,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

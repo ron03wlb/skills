@@ -3071,7 +3071,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
   assert.match(skill, /node success.*release dependants/iu);
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
-  assert.match(skill, /close_parent.*same target mutation-writer acquire-or-exact-reclaim seam.*Release only after the parent leaf settles/isu);
+  assert.match(skill, /close_parent.*evidence-bound parent-only `close-issue` leaf.*real leaf owns.*repository-then-target lease order/isu);
   assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
   assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
   assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);
@@ -3082,12 +3082,17 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /stale engine writer.*exact reconciled `INACTIVE` owner evidence.*active operation.*fenced and stop/isu);
   assert.match(skill, /accepted `close-issue` follow-up.*task history.*already in flight.*never send the same close request again/isu);
   assert.match(skill, /manual `implementation_complete`.*no journaled task reference.*adopt one uniquely matching.*Zero or multiple.*structured diagnosis.*never creates or guesses/isu);
-  assert.match(skill, /coordinator loss retains durable writer ownership.*stale-owner evidence.*release still waits for task settlement/isu);
-  assert.match(skill, /healthy.*target.*writer.*bounded.*`WAITING_FOR_TARGET_WRITER`.*journal.*execution slot.*release.*reacquire.*tracker.*candidate.*completion.*control revision.*Grant/isu);
-  assert.match(skill, /unknown.*writer ownership.*timeout.*coordinator loss.*changed evidence.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
+  assert.match(skill, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.*coordinator only observes.*never acquires, releases, reclaims, or delegates/isu);
+  assert.match(skill, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*every currently legal Issue dispatch.*repository-close-wait\.started.*repository-close-wait\.settled.*execution slot or retry/isu);
+  assert.match(skill, /healthy target-writer contention retains.*`WAITING_FOR_TARGET_WRITER`.*`target-writer-wait\.\*`/isu);
+  assert.match(skill, /unknown repository-close or target-writer ownership.*timeout.*coordinator loss.*changed evidence.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
+  assert.match(core, /REPOSITORY_CLOSE_WAIT_TIMEOUT_MS\s*=\s*30_000/iu);
+  assert.match(core, /WAITING_FOR_REPOSITORY_CLOSE_LEASE/iu);
+  assert.match(core, /wait_repository_close_lease/iu);
   assert.match(core, /WAITING_FOR_TARGET_WRITER.*wait_target_writer.*TARGET_WRITER_WAIT_TIMEOUT_MS/isu);
   assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
-  assert.match(coordinator, /target-writer-wait\.started.*target-writer-wait\.settled/isu);
+  assert.match(coordinator, /repository-close-wait\.started.*repository-close-wait\.settled.*target-writer-wait\.started.*target-writer-wait\.settled/isu);
+  assert.doesNotMatch(coordinator, /acquireRepositoryCloseLease|acquireTargetMutationWriter|reclaimTargetMutationWriter/iu);
   for (const outcome of ["OWNER_CHANGED", "TIMED_OUT", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
     assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
   }
@@ -3110,10 +3115,12 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(operator, /Fresh Single-Issue.*`to-spec`.*Fresh Multi-Issue.*`to-tickets`.*upstream publication.*operation receipt.*Decomposition.*digest.*mapping.*blocker edges.*frozen.*profile-v1.*`READY`.*`INCOMPLETE`.*exact `\/to-spec <Spec-ID>` or `\/to-tickets <Spec-ID>`.*`UNKNOWN`.*stable diagnosis/isu);
   assert.match(operator, /Neither state applies cleanup.*writer.*Grant.*panel.*task or leaf.*cleanup preview.*read-only/isu);
   assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
-  assert.match(operator, /healthy.*writer.*`WAITING_FOR_TARGET_WRITER`.*bounded.*journal.*Issue execution.*release.*reacquire/isu);
+  assert.match(operator, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*healthy target-writer contention.*`WAITING_FOR_TARGET_WRITER`.*Issue execution.*`max_parallel`.*no Issue execution slot or retry.*reacquires/isu);
+  assert.match(operator, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer/isu);
   assert.match(operator, /Unknown owner.*timeout.*coordinator loss.*changed evidence.*owning source.*smallest human action.*same `\/run-issue-workflow`/isu);
-  assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
-  assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*target-writer wait starts and settlements/isu);
+  assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
+  assert.match(read("CONTEXT.md"), /real `close-issue` leaf alone acquires the repository close lease and then.*Target mutation serialization.*coordinator observes both.*never acquires, releases, reclaims, or delegates/isu);
+  assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*repository-close or target-writer wait starts and settlements/isu);
   assert.match(operator, /exact Run.*identity is reconciled.*retention sweep.*selected Run is protected.*Zero or ambiguous no-argument.*only previews.*cleanupPreview: true.*without deletion/isu);
   assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
   for (const name of ["status-succeeded", "status-diagnosed", "status-waiting"]) {

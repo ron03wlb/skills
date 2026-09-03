@@ -7,9 +7,11 @@
     "target": "features/ron",
     "classification": "SINGLE",
     "decompositionIdentity": null,
-    "closeWriterRunId": "run-other-spec",
-    "closeWriterState": "ACTIVE",
-    "state": "WAITING_FOR_TARGET_WRITER",
+    "repositoryCloseLeaseOperationId": "workflow-op-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "repositoryCloseLeaseState": "ACTIVE",
+    "closeWriterRunId": null,
+    "closeWriterState": "ABSENT",
+    "state": "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
     "maxParallel": 3,
     "controlRevision": 0,
     "controlCommand": null
@@ -37,10 +39,10 @@
   "frontier": { "ready": [], "active": [], "closeable": ["17"] },
   "legalActions": [
     {
-      "type": "wait_target_writer",
+      "type": "wait_repository_close_lease",
       "issueId": "17",
       "owner": {
-        "operationId": "run-other-spec",
+        "operationId": "workflow-op-v1-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "coordinatorInstanceId": "coordinator-other-spec",
         "generation": "generation-other-spec"
       },

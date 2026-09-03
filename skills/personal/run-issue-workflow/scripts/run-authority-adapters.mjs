@@ -26,6 +26,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
   requireMethod(sources.checkpoint, "read", "Checkpoint");
   requireMethod(sources.handoff, "read", "Handoff");
   requireMethod(sources.writer, "readHealth", "Target-writer");
+  requireMethod(store, "observeRepositoryCloseLease", "Run store");
   requireMethod(store, "observeTargetMutationWriter", "Run store");
 
   const tracker = {
@@ -59,6 +60,24 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
       throw new TypeError("Target owning source returned an unsupported ownership state");
     }
 
+    const repositoryCloseLeaseObservation = store.observeRepositoryCloseLease();
+    const repositoryCloseLeaseOwner = repositoryCloseLeaseObservation.owner;
+    const repositoryCloseLeaseHealth = repositoryCloseLeaseObservation.state === "ABSENT"
+      ? null
+      : repositoryCloseLeaseObservation.state === "UNKNOWN"
+        ? "UNKNOWN"
+        : await sources.writer.readHealth({
+          request,
+          tracker: trackerSnapshot,
+          current,
+          leaseKind: "repository-close",
+          owner: repositoryCloseLeaseOwner,
+        });
+    if (repositoryCloseLeaseHealth !== null
+      && !["HEALTHY", "INACTIVE", "UNKNOWN"].includes(repositoryCloseLeaseHealth)) {
+      throw new TypeError("Repository close-lease owning source must return HEALTHY, INACTIVE, or UNKNOWN");
+    }
+
     const writerObservation = store.observeTargetMutationWriter({ target: current.runIdentity.target });
     const writerOwner = writerObservation.owner;
     const writerHealth = writerObservation.state === "ABSENT"
@@ -69,6 +88,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
           request,
           tracker: trackerSnapshot,
           current,
+          leaseKind: "target-mutation",
           owner: writerOwner,
         });
     if (writerHealth !== null && !["HEALTHY", "INACTIVE", "UNKNOWN"].includes(writerHealth)) {
@@ -96,6 +116,14 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         run: {
           ...current.facts.run,
           targetState: target.state,
+          repositoryCloseLeaseOperationId: repositoryCloseLeaseObservation.state === "ABSENT"
+            ? null
+            : repositoryCloseLeaseOwner?.operationId ?? "UNKNOWN",
+          repositoryCloseLeaseState: repositoryCloseLeaseObservation.state === "ABSENT"
+            ? "ABSENT"
+            : repositoryCloseLeaseObservation.state === "UNKNOWN" ? "UNKNOWN" : "ACTIVE",
+          repositoryCloseLeaseHealth,
+          repositoryCloseLeaseOwner,
           closeWriterRunId: writerObservation.state === "ABSENT" ? null : writerOwner?.operationId ?? "UNKNOWN",
           closeWriterState: writerObservation.state === "ABSENT"
             ? "ABSENT"
