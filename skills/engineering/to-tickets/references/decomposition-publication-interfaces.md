@@ -15,8 +15,9 @@ Use these repository-configured adapters for a current ordinary Multi-Issue deco
 
 ## Tracker adapter
 
-- `tracker.discoverChildren` returns every tracker-supported identity source for the expected Decomposition keys without mutation.
-- `tracker.publishChild` creates one missing canonical child; `tracker.publishRelation` creates only one expected absent native parent or blocking relation. Each call returns an immutable Issue or relation identity after exact read-back.
+- `tracker.discoverChildren` returns every tracker-supported identity source for the expected Decomposition keys without mutation, plus the selected `blockingRepresentation`: exactly `body` or `native`. A missing, unreadable, or unsupported representation is `UNKNOWN`; producer policy stops before child, relation, label, or parent-record mutation and asks for one explicit `body` or `native` repair.
+- `tracker.publishChild` creates one missing canonical child, including its canonical `## Blocked by` body section. `tracker.publishRelation` creates only one expected absent native parent relation or a blocking relation in `native` representation; it is never the body-mode blocker publisher. Each call returns an immutable Issue or relation identity after exact read-back.
+- Ordinary child read-back returns the canonical body blocker edges in stable tracker-identity order. In `native` representation it additionally returns the native blocking relation evidence; body-mode read-back never infers a native relation.
 - `tracker.readDecomposition` returns zero or one exact `decomposition:v1` record identity, exact body digest, key mapping, and blocker edges. `tracker.publishDecomposition` appends only the already-rendered record, then reads it back.
 - `tracker.readReadyState` returns every mapped child's open/closed and ready-label state. `tracker.writeReadyState` applies only the state derived from published blockers and returns the complete frontier after read-back.
 

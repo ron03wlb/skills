@@ -26,6 +26,16 @@ A complete, read-back Issue decomposition gains one Decomposition publication re
 
 `to-tickets` consumes the published Planning Seal without rerunning upstream planning or creating a successor. Changes to behavior, acceptance, target, or exclusions return to `to-spec`; child publication never silently expands or edits the parent.
 
+For GitLab, setup records `Blocking representation: body` for new configuration unless an operator has manually proven and declared `native`. Every child always carries the canonical `## Blocked by` section and `decomposition:v1` keeps the same logical directed edges.
+
+| Configuration or state | Portable guarantee |
+| --- | --- |
+| `body` | The body graph is authoritative; no native blocking relation is published. |
+| `native` | The same body graph remains authoritative, and native mode verifies matching native evidence. |
+| Missing setting | The representation is `UNKNOWN` and requires an explicit repair before publication. HTTP 400 never picks a mode. |
+| Prior partial native failure | Verified recovery may use configured body only when evidence is consistent; otherwise publication fails closed. |
+
+
 ## It's working if
 
 - A retry reuses matching child keys instead of creating duplicates.

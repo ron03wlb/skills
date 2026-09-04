@@ -809,6 +809,35 @@ test("to-tickets reconciles one Issue decomposition before tracker mutation", ()
   assert.match(tickets, /prior partial-publication state.*exact child.*key.*expected relation.*Complete.*only an absent native relationship.*conflicting relation.*stops without mutation/isu);
 });
 
+
+test("to-tickets keeps GitLab blocker representation portable and fail-closed", () => {
+  const tickets = readToTicketsContract();
+  const interfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  const gitlab = read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md");
+  const docs = read("docs/engineering/to-tickets.md");
+  const childContract = tickets.match(/<child-contract>(.*?)<\/child-contract>/su)?.[1] ?? "";
+
+  assert.match(gitlab, /^Blocking representation: body$/mu);
+  assert.match(gitlab, /new GitLab tracker configuration.*`Blocking representation: body`.*without.*setup question.*mutation probe/isu);
+  assert.match(gitlab, /existing GitLab configuration.*without this field.*`UNKNOWN`.*before child.*relation.*label.*parent-record mutation.*explicit `body` or `native` repair/isu);
+  assert.match(gitlab, /generic HTTP 400.*never changes.*declared-native.*Recoverable blocker/isu);
+  assert.match(interfaces, /discoverChildren.*`blockingRepresentation`.*exactly `body` or `native`.*missing.*`UNKNOWN`/isu);
+  assert.match(interfaces, /publishChild.*canonical `## Blocked by`.*publishRelation.*native parent.*blocking relation in `native` representation.*never.*body-mode blocker publisher/isu);
+  assert.match(interfaces, /Ordinary child read-back.*canonical body blocker edges.*stable tracker-identity order.*`native`.*native blocking relation evidence/isu);
+  assert.match(tickets, /canonical child body.*`## Blocked by`.*`body` or `native`.*`blocked` label.*`relates_to`.*`ready-for-agent`.*published logical graph/isu);
+  assert.match(childContract, /Render one stable Issue reference per bullet in canonical tracker-identity order.*With no blocker, render exactly:\s+None\./isu);
+  assert.match(tickets, /newly configured `body` representation.*only before `decomposition\.read_back`.*prior partial native failure.*child identity.*Decomposition key.*canonical body.*expected logical blocker edge.*no conflicting native relation.*no `decomposition:v1` record/isu);
+  assert.match(tickets, /Completed-stage adoption.*missing bound evidence.*body or edge mismatch.*conflicting native relation.*parent-record evidence.*stops without repair or duplicate mutation/isu);
+  assert.match(tickets, /`body` representation.*no native blocking relation.*`native` representation.*native blocking relation/isu);
+  assert.match(tickets, /canonical body edges and `decomposition:v1`.*complete directed graph.*both representations.*native evidence.*additional only in `native`/isu);
+  assert.doesNotMatch(interfaces, /publishBlocker|readBlockingRepresentation|writeBlockerRepresentation/u);
+  assert.doesNotMatch(tickets, /new checkpoint stage|producer profile|Run-coordinator compatibility branch/iu);
+  assert.match(docs, /GitLab.*`Blocking representation: body`.*canonical `## Blocked by`/isu);
+  assert.match(docs, /\| `body` \|.*no native blocking relation/iu);
+  assert.match(docs, /\| `native` \|.*native mode verifies/iu);
+  assert.match(docs, /\| Missing setting \|.*`UNKNOWN`.*explicit repair.*HTTP 400.*never picks a mode.*\| Prior partial native failure \|.*Verified recovery.*configured body.*evidence is consistent.*publication fails closed/isu);
+});
+
 test("to-tickets publishes one recoverable decomposition record and the exact ready frontier", () => {
   const tickets = readToTicketsContract();
 

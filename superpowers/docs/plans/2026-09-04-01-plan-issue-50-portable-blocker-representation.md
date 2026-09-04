@@ -1,22 +1,27 @@
 # Issue #50 portable blocker representation
 
-**Goal:** Deliver GitHub Issue #50 only through its Codex-native Single-Issue Run, preserving the approved `to-spec` authority and exact tracker scope.
+**Goal:** Implement GitLab body/native blocker-representation support for `to-tickets` without changing the published Issue scope or unrelated workflow ownership.
 
-**Why planning is required:** This is an external-state workflow that may create a Run Grant, start a dedicated Issue task, integrate a candidate, and close a Tracker Issue.
+**Why planning is required:** The change modifies a promoted, cross-tracker workflow contract, its recovery semantics, public documentation, and executable contract tests.
 
-**Acceptance:** The live Issue, Planning Seal, approved scope, current `to-spec` publication/handoff, target state, and stored Run identity reduce to `READY` before any workflow mutation. One dedicated #50 lane may implement only the approved scope; its candidate is integrated and the Issue is closed only through the relevant leaf contracts. The Run ends with an evidence-backed terminal or diagnosed state, without push, deployment, external prerequisite execution, scope expansion, or changes to pre-existing untracked files.
+**Acceptance:** AC-1 through AC-5 of GitHub Issue #50 are covered by the changed contracts and executable assertions; the canonical child body and logical blocker graph remain the sole portable authority; `to-tickets/SKILL.md` remains 846 words; the isolated worktree is clean at a committed, reviewed candidate. No integration, Issue closure, push, deployment, new tracker mutation probe, relation/label authority, checkpoint stage, producer profile, or Run-coordinator behavior is added.
 
-### Outcome 1: Bind and authorize the exact Run
-- Work: Read GitHub Issue #50 and repository-owned checkpoint, handoff, journal, target, worktree, completion, and writer evidence; bind the immutable Single-Issue identity only if the Run-ready reduction is `READY`.
-- Risks/open questions: Missing, stale, or contradictory upstream publication/handoff must fail closed; no cleanup, Grant, task, or tracker mutation is legal until then.
-- Verify: `gh issue view 50 --repo ron03wlb/skills --comments --json number,title,body,state,labels,comments,url`
+### Outcome 1: Declare explicit GitLab capability selection
+- Work: Update GitLab configuration guidance and decomposition publication interfaces so `blockingRepresentation` is an exact `body` or `native` read-back fact. New configuration defaults to body; an existing missing or failed declared-native selection stops before mutation.
+- Risks/open questions: An HTTP 400, native relation failure, or unreadable configuration must never silently change mode.
+- Verify: `node --test --test-name-pattern "GitLab tracker guidance|blocking representation" tests/ron-workflow/skill-contracts.test.mjs`
 
-### Outcome 2: Execute the authorized Issue lane
-- Work: Create or adopt exactly one dedicated #50 task/worktree through `execute-issue`; retain the approved blocker-representation scope and run its focused and repository-required checks.
-- Risks/open questions: The lane may not push, broaden scope, resolve unrelated working-tree state, or treat implementation completion as close authority.
-- Verify: The `execute-issue` leaf records an evidence-bound `implementation_complete` result for #50.
+### Outcome 2: Make the logical blocker graph portable
+- Work: Define canonical `## Blocked by` body rendering, body/native reconciliation, native-only relation publishing, and the narrow pre-`decomposition.read_back` body-mode adoption/rejection rules in owner-local decomposition contracts.
+- Risks/open questions: Parent/sub-issue behavior, `relates_to`, and `blocked` labels remain outside scope; conflicts and completed stages fail closed without duplicate child publication.
+- Verify: `node --test --test-name-pattern "to-tickets|blocker representation" tests/ron-workflow/skill-contracts.test.mjs`
 
-### Outcome 3: Close and prove the Run
-- Work: Serialize `close-issue` only after candidate reachability, exact worktree absence, completion evidence, and close authority are read back; report the final status or a stable diagnosed stop.
-- Risks/open questions: Closeout requires the close lease and target writer. Any changed or unavailable evidence stops without a retry that duplicates work.
-- Verify: Live Tracker read-back, target ancestry, worktree absence, append-only Run journal, and final workflow status agree.
+### Outcome 3: Synchronize public documentation and proof
+- Work: Update the human-facing `to-tickets` documentation and focused executable contracts, including success and failure cases required by AC-1 through AC-5.
+- Risks/open questions: The required plan is a workflow artifact; it must remain execution-owned and is not a product-contract exemption.
+- Verify: `node --test tests/ron-workflow/skill-contracts.test.mjs`
+
+### Outcome 4: Produce a reviewable completion candidate
+- Work: Commit the scoped candidate, run `code-review` against the execution baseline, repair only confirmed in-scope findings, and write/read back one `implementation_complete` record.
+- Risks/open questions: A review, scope, target, or execution-identity conflict stops without integration, cleanup, Issue closure, push, or deployment.
+- Verify: `git diff --check` and final baseline-to-candidate review evidence.

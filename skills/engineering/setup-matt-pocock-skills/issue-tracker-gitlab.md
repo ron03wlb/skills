@@ -2,6 +2,8 @@
 
 Issues and PRDs for this repo live as GitLab issues. Use the [`glab`](https://gitlab.com/gitlab-org/cli) CLI for all operations.
 
+Blocking representation: body
+
 ## Conventions
 
 - **Create an issue**: `glab issue create --title "..." --description "..."`. Use a heredoc for multi-line descriptions. Pass `--description -` to open an editor.
@@ -14,6 +16,12 @@ Issues and PRDs for this repo live as GitLab issues. Use the [`glab`](https://gi
 - **Merge requests**: GitLab calls PRs "merge requests". Use `glab mr create`, `glab mr view`, `glab mr note`, etc. — the same shape as `gh pr ...` with `mr` in place of `pr` and `note`/`--message` in place of `comment`/`--body`.
 
 Infer the repo from `git remote -v` — `glab` does this automatically when run inside a clone.
+
+## `to-tickets` blocker representation
+
+New GitLab tracker configuration declares `Blocking representation: body` without a setup question or mutation probe. It makes the canonical child `## Blocked by` body section the blocker representation for `to-tickets`; a manually proven native implementation may explicitly declare `native` instead. An existing GitLab configuration without this field is `UNKNOWN`: stop before child, relation, label, or parent-record mutation and request one explicit `body` or `native` repair.
+
+Discovery never tests native capability by creating a relation. A generic HTTP 400 never changes the configured representation; declared-native relation write or read-back failure remains a Recoverable blocker. This `to-tickets` setting does not alter parent/sub-issue handling or the separate `/wayfinder` conventions below.
 
 ## Merge requests as a triage surface
 
