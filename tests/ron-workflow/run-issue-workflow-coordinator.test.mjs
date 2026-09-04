@@ -55,6 +55,12 @@ const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
   ...overrides,
 });
 
+const closeRequestIdentityFrom = (prompt) => {
+  const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\./u);
+  assert.ok(match, "close request prompt must carry its evidence identity");
+  return match[1];
+};
+
 const withCloseAuthorityEvidence = (node) => node.completionState === "COMPLETE"
   ? { ...node, closeAuthorityEvidence: node.closeAuthorityEvidence ?? closeAuthorityEvidenceFor(node.issueId) }
   : node;
@@ -348,6 +354,7 @@ test("a Single-Issue Run creates one lane and closes only after implementation c
   const created = [];
   const messages = [];
   let taskMode = "execute";
+  let closeRequestIdentity = null;
   let clockMinute = 0;
   const now = () => `2026-08-30T00:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
 
@@ -366,6 +373,7 @@ test("a Single-Issue Run creates one lane and closes only after implementation c
     },
     async message(taskRef, message) {
       messages.push({ taskRef, message });
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       taskMode = "close";
       taskStates.set(taskRef.threadId, "EXECUTING");
     },
@@ -380,7 +388,11 @@ test("a Single-Issue Run creates one lane and closes only after implementation c
         trackerState.worktreeState = "ABSENT";
       }
       taskStates.set(taskRefs[0].threadId, "SETTLED");
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        ...(taskMode === "close" ? { closeRequestIdentity } : {}),
+      };
     },
   };
 
@@ -438,6 +450,7 @@ test("a transient failure retries the same reachable Issue lane", async () => {
   seed.release();
 
   let mode = "retry";
+  let closeRequestIdentity = null;
   const tasks = {
     async findIssueLane() {
       throw new Error("retry must not search for a replacement while the task is resumable");
@@ -452,6 +465,7 @@ test("a transient failure retries the same reachable Issue lane", async () => {
     async message(actual, message) {
       assert.deepEqual(actual, taskRef);
       messages.push(message);
+      if (/close-issue/iu.test(message)) closeRequestIdentity = closeRequestIdentityFrom(message);
       trackerState.taskState = "EXECUTING";
     },
     async wait() {
@@ -465,7 +479,11 @@ test("a transient failure retries the same reachable Issue lane", async () => {
         trackerState.worktreeState = "ABSENT";
       }
       trackerState.taskState = "NONE";
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        ...(closeRequestIdentity ? { closeRequestIdentity } : {}),
+      };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -569,6 +587,7 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
 
   let created = 0;
   let mode = "execute";
+  let closeRequestIdentity = null;
   const tasks = {
     async findIssueLane() {
       return [];
@@ -589,6 +608,7 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
     async message(actual, message) {
       assert.deepEqual(actual, replacementTaskRef);
       assert.match(message, /close-issue/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       mode = "close";
       trackerState.taskState = "EXECUTING";
     },
@@ -601,7 +621,11 @@ test("a replacement lane requires exact prior-task inactive evidence", async () 
         trackerState.candidateReachable = true;
         trackerState.worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        ...(mode === "close" ? { closeRequestIdentity } : {}),
+      };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -734,6 +758,7 @@ test("the exact Windows Gradle remediation carries its dispatch attempt", async 
   seed.release();
 
   let mode = "execute";
+  let closeRequestIdentity = null;
   const remediationCalls = [];
   const tasks = {
     async findIssueLane() { throw new Error("remediation must not replace the task"); },
@@ -742,6 +767,7 @@ test("the exact Windows Gradle remediation carries its dispatch attempt", async 
     async message(actual, message) {
       assert.deepEqual(actual, taskRef);
       assert.match(message, /close-issue/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       mode = "close";
       trackerState.taskState = "EXECUTING";
     },
@@ -754,7 +780,11 @@ test("the exact Windows Gradle remediation carries its dispatch attempt", async 
         trackerState.candidateReachable = true;
         trackerState.worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        ...(mode === "close" ? { closeRequestIdentity } : {}),
+      };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -822,6 +852,7 @@ test("re-entry adopts a settled task and partial close after coordinator loss", 
   let taskState = "NONE";
   let created = 0;
   let closeMessages = 0;
+  let closeRequestIdentity = null;
   let coordinatorActive = false;
   let clockMinute = 0;
   const now = () => `2026-08-30T06:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
@@ -836,6 +867,7 @@ test("re-entry adopts a settled task and partial close after coordinator loss", 
     async message(actual, message) {
       assert.deepEqual(actual, taskRef);
       assert.match(message, /close-issue/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       closeMessages += 1;
       taskState = "EXECUTING";
     },
@@ -843,7 +875,7 @@ test("re-entry adopts a settled task and partial close after coordinator loss", 
       if (!coordinatorActive) return { coordinatorActive: false };
       trackerState.trackerState = "CLOSED";
       taskState = "NONE";
-      return { coordinatorActive: true, taskSettled: true };
+      return { coordinatorActive: true, taskSettled: true, closeRequestIdentity };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -895,6 +927,7 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
   let taskMode = "execute";
   const createdIssues = [];
   const parentCloses = [];
+  let closeRequestIdentity = null;
   let clockMinute = 0;
   const now = () => `2026-08-30T07:${String(clockMinute++).padStart(2, "0")}:00.000Z`;
   const tasks = {
@@ -908,6 +941,7 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
     async message(actual, message) {
       assert.deepEqual(actual, taskRef);
       assert.match(message, /close-issue.*15/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       taskMode = "close";
       taskState = "EXECUTING";
     },
@@ -921,7 +955,11 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
         trackerState.nodes[15].candidateReachable = true;
         trackerState.nodes[15].worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        ...(taskMode === "close" ? { closeRequestIdentity } : {}),
+      };
     },
   };
   const tracker = {
@@ -936,7 +974,7 @@ test("a Multi-Issue Run releases published blockers and closes the parent last",
     async closeParent(input) {
       parentCloses.push(input);
       trackerState.parentTrackerState = "CLOSED";
-      return { settled: true };
+      return { settled: true, requestIdentity: input.requestIdentity };
     },
   };
   const reconcile = async ({ tracker: currentTracker, journal }) => {
@@ -1337,6 +1375,147 @@ test("ambiguous Codex Issue lanes fail closed with a structured diagnosis", asyn
   }
 });
 
+test("stale accepted close request blocks instead of reusing or duplicating closeout", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-08-30T12:59:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  seed.append({
+    type: "dispatch.recorded",
+    at: "2026-08-30T12:59:01.000Z",
+    issueId: "15",
+    attempt: 1,
+    taskRef,
+  });
+  seed.release();
+  let messageCalls = 0;
+  let waitCalls = 0;
+  const tasks = {
+    async findIssueLane() { throw new Error("no dispatch is legal"); },
+    async create() { throw new Error("no dispatch is legal"); },
+    async read() {
+      return {
+        state: "ACTIVE",
+        closeRequest: {
+          state: "ACCEPTED",
+          runId: identity.runId,
+          issueId: "15",
+          requestIdentity: `sha256:${"f".repeat(64)}`,
+        },
+      };
+    },
+    async message() { messageCalls += 1; },
+    async wait() { waitCalls += 1; return { coordinatorActive: false }; },
+  };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T13:00:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "close_request_evidence_changed");
+    assert.equal(messageCalls, 0);
+    assert.equal(waitCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("settled close response must match the current request identity", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-08-30T12:59:00.000Z",
+    runIdentity: identity,
+    maxParallel: 3,
+  });
+  seed.append({
+    type: "dispatch.recorded",
+    at: "2026-08-30T12:59:01.000Z",
+    issueId: "15",
+    attempt: 1,
+    taskRef,
+  });
+  seed.release();
+  let closeRequest = null;
+  let waitCalls = 0;
+  const tasks = {
+    async findIssueLane() { throw new Error("no dispatch is legal"); },
+    async create() { throw new Error("no dispatch is legal"); },
+    async read() { return { state: "ACTIVE", closeRequest }; },
+    async message(_taskRef, prompt) {
+      const requestIdentity = closeRequestIdentityFrom(prompt);
+      closeRequest = { state: "ACCEPTED", runId: identity.runId, issueId: "15", requestIdentity };
+    },
+    async wait() {
+      waitCalls += 1;
+      return waitCalls === 1
+        ? {
+            coordinatorActive: true,
+            taskSettled: true,
+            closeRequestIdentity: `sha256:${"e".repeat(64)}`,
+          }
+        : { coordinatorActive: false };
+    },
+  };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{
+      issueId: "15",
+      blockers: [],
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+    }],
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      now: () => "2026-08-30T13:00:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: "15" });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "close_request_evidence_changed");
+    assert.equal(waitCalls, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("re-entry observes an accepted close request instead of sending a duplicate", async () => {
   const { root, gitCommonDir, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
@@ -1359,9 +1538,10 @@ test("re-entry observes an accepted close request instead of sending a duplicate
     async findIssueLane() { throw new Error("no dispatch is legal"); },
     async create() { throw new Error("no dispatch is legal"); },
     async read() { return { state: "ACTIVE", closeRequest }; },
-    async message() {
+    async message(_taskRef, prompt) {
       messageCalls += 1;
-      closeRequest = { runId: identity.runId, issueId: "15", state: "ACCEPTED" };
+      const requestIdentity = closeRequestIdentityFrom(prompt);
+      closeRequest = { runId: identity.runId, issueId: "15", state: "ACCEPTED", requestIdentity };
     },
     async wait() {
       waitCalls += 1;
@@ -1369,7 +1549,11 @@ test("re-entry observes an accepted close request instead of sending a duplicate
       trackerState.trackerState = "CLOSED";
       trackerState.candidateReachable = true;
       trackerState.worktreeState = "ABSENT";
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        closeRequestIdentity: closeRequest.requestIdentity,
+      };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -1625,6 +1809,7 @@ test("real close leaf owns both leases without coordinator double acquire", asyn
   seed.release();
   let closed = false;
   let closeAccepted = false;
+  let closeRequestIdentity = null;
   let coordinatorLeaseCalls = 0;
   const coordinatorStore = {
     ...store,
@@ -1644,7 +1829,7 @@ test("real close leaf owns both leases without coordinator double acquire", asyn
       return {
         state: "ACTIVE",
         closeRequest: closeAccepted
-          ? { state: "ACCEPTED", runId: identity.runId, issueId: "15" }
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "15", requestIdentity: closeRequestIdentity }
           : null,
       };
     },
@@ -1656,6 +1841,7 @@ test("real close leaf owns both leases without coordinator double acquire", asyn
       assert.match(prompt, /"completionState":"COMPLETE"/u);
       assert.match(prompt, /"worktreeState":"PRESENT"/u);
       assert.match(prompt, /"controlRevision":0/u);
+      closeRequestIdentity = closeRequestIdentityFrom(prompt);
       const leases = acquireCloseIssueLeases({
         store,
         target: identity.target,
@@ -1669,7 +1855,7 @@ test("real close leaf owns both leases without coordinator double acquire", asyn
       closed = true;
       leases.release();
     },
-    async wait() { return { coordinatorActive: true, taskSettled: true }; },
+    async wait() { return { coordinatorActive: true, taskSettled: true, closeRequestIdentity }; },
   };
   const reconcile = async () => reconciliation({
     taskRefs: { 15: taskRef },
@@ -1731,6 +1917,7 @@ test("repository close wait dispatches within max_parallel before requesting the
   });
   let competingReleased = false;
   let issue14Dispatched = false;
+  let closeRequestIdentity = null;
   const order = [];
   const tasks = {
     async findIssueLane({ issueId }) {
@@ -1748,9 +1935,10 @@ test("repository close wait dispatches within max_parallel before requesting the
     async message(_taskRef, prompt) {
       assert.equal(issue14Dispatched, true, "legal Issue dispatch must precede close waiting");
       assert.match(prompt, /\$close-issue.*13/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(prompt);
       order.push("close:13");
     },
-    async wait() { return { coordinatorActive: false, taskSettled: true }; },
+    async wait() { return { coordinatorActive: false, taskSettled: true, closeRequestIdentity }; },
   };
   const reconcile = async () => {
     const repositoryLease = store.observeRepositoryCloseLease();
@@ -1909,6 +2097,7 @@ test("real close leaf request follows max_parallel dispatch when both leases are
   });
   seed.release();
   let issue14Dispatched = false;
+  let closeRequestIdentity = null;
   const order = [];
   const tasks = {
     async findIssueLane({ issueId }) {
@@ -1929,9 +2118,10 @@ test("real close leaf request follows max_parallel dispatch when both leases are
       assert.match(prompt, new RegExp(`"targetHead":"${"a".repeat(40)}"`, "u"));
       assert.match(prompt, new RegExp(`"candidateCommit":"${"b".repeat(40)}"`, "u"));
       assert.match(prompt, /"completionBodySha256":"sha256:d{64}"/u);
+      closeRequestIdentity = closeRequestIdentityFrom(prompt);
       order.push("close:13");
     },
-    async wait() { return { coordinatorActive: false, taskSettled: true }; },
+    async wait() { return { coordinatorActive: false, taskSettled: true, closeRequestIdentity }; },
   };
   const reconcile = async () => reconciliation({
     runIdentity: multiIdentity,
@@ -2048,6 +2238,7 @@ test("a healthy competing writer waits for release and reacquires authority befo
   let competingReleased = false;
   let waitPolls = 0;
   let closed = false;
+  let closeRequestIdentity = null;
   let reconciliations = 0;
   let closeMessageReconciliation = null;
   const tracker = { async read() { return {}; } };
@@ -2055,10 +2246,13 @@ test("a healthy competing writer waits for release and reacquires authority befo
     async findIssueLane() { return [taskRef]; },
     async create() { throw new Error("the existing Issue lane must be reused"); },
     async read() { return {}; },
-    async message() { closeMessageReconciliation = reconciliations; },
+    async message(_taskRef, prompt) {
+      closeMessageReconciliation = reconciliations;
+      closeRequestIdentity = closeRequestIdentityFrom(prompt);
+    },
     async wait() {
       closed = true;
-      return { taskSettled: true, coordinatorActive: true };
+      return { taskSettled: true, coordinatorActive: true, closeRequestIdentity };
     },
   };
   const reconcile = async () => {
@@ -3187,6 +3381,7 @@ test("manual implementation completion adopts one existing lane for serialized c
   let clockMinute = 0;
   let laneReads = 0;
   let messages = 0;
+  let closeRequestIdentity = null;
   const now = () => `2026-08-30T20:${String(clockMinute++).padStart(2, "0")}:45.000Z`;
   const seed = store.acquireWriter(identity.runId);
   seed.append({ type: "grant.recorded", at: now(), runIdentity: identity, maxParallel: 3 });
@@ -3202,12 +3397,13 @@ test("manual implementation completion adopts one existing lane for serialized c
     async message(actual, message) {
       assert.deepEqual(actual, adoptedTaskRef);
       assert.match(message, /close-issue/iu);
+      closeRequestIdentity = closeRequestIdentityFrom(message);
       messages += 1;
     },
     async wait() {
       trackerState.trackerState = "CLOSED";
       trackerState.worktreeState = "ABSENT";
-      return { coordinatorActive: true, taskSettled: true };
+      return { coordinatorActive: true, taskSettled: true, closeRequestIdentity };
     },
   };
   const tracker = { async read() { return { ...trackerState }; } };
@@ -3376,6 +3572,61 @@ test("active engine writer contention remains fenced and returns a structured st
   }
 });
 
+test("settled parent close response must match the current request identity", async () => {
+  const { root, store } = createStoreFixture();
+  const seed = store.acquireWriter(multiIdentity.runId);
+  seed.append({
+    type: "grant.recorded",
+    at: "2026-08-30T22:59:00.000Z",
+    runIdentity: multiIdentity,
+    maxParallel: 3,
+  });
+  seed.release();
+  let parentTrackerState = "OPEN";
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+      throw new Error(`${name} is unnecessary after every child succeeded`);
+    }]),
+  );
+  const leaf = {
+    async closeParent() {
+      parentTrackerState = "CLOSED";
+      return { settled: true, requestIdentity: `sha256:${"e".repeat(64)}` };
+    },
+  };
+  const reconcile = async () => reconciliation({
+    runIdentity: multiIdentity,
+    run: { parentTrackerState },
+    nodes: ["13", "14", "15"].map((issueId) => ({
+      issueId,
+      blockers: [],
+      trackerState: "CLOSED",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: true,
+      worktreeState: "ABSENT",
+    })),
+  });
+
+  try {
+    const coordinator = createCoordinator({
+      store,
+      tracker: { async read() { return { parentTrackerState }; } },
+      tasks,
+      reconcile,
+      leaf,
+      now: () => "2026-08-30T23:00:00.000Z",
+      sleep: async () => {},
+    });
+    const status = await coordinator.run({ specId: multiIdentity.specId });
+
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "close_request_evidence_changed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("parent close delegates both leases to the real leaf", async () => {
   const { root, gitCommonDir, store } = createStoreFixture();
   let clockMinute = 0;
@@ -3404,7 +3655,7 @@ test("parent close delegates both leases to the real leaf", async () => {
     }]),
   );
   const leaf = {
-    async closeParent({ issueId, requestEvidence }) {
+    async closeParent({ issueId, requestIdentity, requestEvidence }) {
       assert.equal(issueId, "12");
       assert.equal(requestEvidence.target, multiIdentity.target);
       assert.equal(requestEvidence.maxParallel, 3);
@@ -3423,7 +3674,7 @@ test("parent close delegates both leases to the real leaf", async () => {
       assert.equal(leases.assertCurrent(), true);
       parentTrackerState = "CLOSED";
       leases.release();
-      return { settled: true };
+      return { settled: true, requestIdentity };
     },
   };
   const reconcile = async ({ tracker: currentTracker }) => reconciliation({

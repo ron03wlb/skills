@@ -295,7 +295,7 @@ The active control engine's ephemeral `127.0.0.1` HTTP interface, protected by o
 _Avoid_: Public API, daemon database, command console
 
 **DAG run journal**:
-The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, bounded-remediation records, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
+The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, bounded-remediation records, closeout-wait observations, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
 _Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint
 
 **DAG status snapshot**:

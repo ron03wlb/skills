@@ -58,6 +58,7 @@ export const REASON_CODES = Object.freeze({
   repositoryCloseLeaseWaitCoordinatorLost: "repository_close_lease_wait_coordinator_lost",
   repositoryCloseLeaseWaitInterrupted: "repository_close_lease_wait_interrupted",
   repositoryCloseLeaseEvidenceChanged: "repository_close_lease_evidence_changed",
+  closeRequestEvidenceChanged: "close_request_evidence_changed",
   closeWriterConflict: "close_writer_conflict",
   targetWriterOwnerChanged: "target_writer_owner_changed",
   targetWriterWaitTimeout: "target_writer_wait_timeout",

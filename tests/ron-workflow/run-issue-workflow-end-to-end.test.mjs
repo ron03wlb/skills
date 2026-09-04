@@ -75,6 +75,12 @@ const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
   ...overrides,
 });
 
+const closeRequestIdentityFrom = (prompt) => {
+  const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\./u);
+  assert.ok(match, "close request prompt must carry its evidence identity");
+  return match[1];
+};
+
 const withCloseAuthorityEvidence = (node) => node.completionState === "COMPLETE"
   ? { ...node, closeAuthorityEvidence: node.closeAuthorityEvidence ?? closeAuthorityEvidenceFor(node.issueId) }
   : node;
@@ -741,6 +747,7 @@ test("composed runtime leaves inactive leaf-writer recovery to close-issue", asy
   };
   const taskRef = { threadId: "thread-17", hostId: "local" };
   let closeAccepted = false;
+  let closeRequestIdentity = null;
   let closed = false;
   const tasks = {
     async findIssueLane() { return [taskRef]; },
@@ -749,14 +756,17 @@ test("composed runtime leaves inactive leaf-writer recovery to close-issue", asy
       return {
         state: "SETTLED",
         closeRequest: closeAccepted
-          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17", requestIdentity: closeRequestIdentity }
           : null,
       };
     },
-    async message() { closeAccepted = true; },
+    async message(_taskRef, prompt) {
+      closeRequestIdentity = closeRequestIdentityFrom(prompt);
+      closeAccepted = true;
+    },
     async wait() {
       closed = true;
-      return { coordinatorActive: true, taskSettled: true };
+      return { coordinatorActive: true, taskSettled: true, closeRequestIdentity };
     },
   };
   const reconcile = async ({ journal }) => {
@@ -1240,6 +1250,7 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
     candidateReachable: false,
     worktreeState: "PRESENT",
     closeAccepted: false,
+    closeRequestIdentity: null,
   };
   const executionIssueIds = ["821", "822"];
   const executionModel = new Map(executionIssueIds.map((issueId) => [issueId, "NONE"]));
@@ -1268,20 +1279,30 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
         return {
           state: "SETTLED",
           closeRequest: closeModel.closeAccepted
-            ? { state: "ACCEPTED", runId: singleRunOperationKey, issueId: "17" }
+            ? {
+                state: "ACCEPTED",
+                runId: singleRunOperationKey,
+                issueId: "17",
+                requestIdentity: closeModel.closeRequestIdentity,
+              }
             : null,
         };
       },
-      async message() {
+      async message(_taskRef, prompt) {
         assert.deepEqual(created, executionIssueIds, "the other Run must dispatch while closeout is waiting");
         closeMessageTrackerReads = trackerReads;
+        closeModel.closeRequestIdentity = closeRequestIdentityFrom(prompt);
         closeModel.closeAccepted = true;
       },
       async wait() {
         closeModel.trackerState = "CLOSED";
         closeModel.candidateReachable = true;
         closeModel.worktreeState = "ABSENT";
-        return { coordinatorActive: true, taskSettled: true };
+        return {
+          coordinatorActive: true,
+          taskSettled: true,
+          closeRequestIdentity: closeModel.closeRequestIdentity,
+        };
       },
     },
     reconcile: async ({ journal }) => {
@@ -1442,6 +1463,7 @@ test("end-to-end closeout contention uses repository close wait and refreshes ev
     candidateReachable: false,
     worktreeState: "PRESENT",
     closeAccepted: false,
+    closeRequestIdentity: null,
   };
   let competitorReleased = false;
   let leafLeases = null;
@@ -1462,13 +1484,19 @@ test("end-to-end closeout contention uses repository close wait and refreshes ev
       return {
         state: "SETTLED",
         closeRequest: model.closeAccepted
-          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          ? {
+              state: "ACCEPTED",
+              runId: identity.runId,
+              issueId: "17",
+              requestIdentity: model.closeRequestIdentity,
+            }
           : null,
       };
     },
     async message(_taskRef, prompt) {
       closeMessageTrackerReads = trackerReads;
       assert.match(prompt, /\$close-issue.*17/iu);
+      model.closeRequestIdentity = closeRequestIdentityFrom(prompt);
       leafLeases = acquireCloseIssueLeases({
         store,
         target: identity.target,
@@ -1487,7 +1515,11 @@ test("end-to-end closeout contention uses repository close wait and refreshes ev
       assert.equal(leafLeases.assertCurrent(), true);
       leafLeases.release();
       leafLeases = null;
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        closeRequestIdentity: model.closeRequestIdentity,
+      };
     },
   };
   const reconcile = async ({ journal }) => singleRunCurrent({
@@ -1539,6 +1571,7 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
     candidateReachable: false,
     worktreeState: "ABSENT",
     closeAccepted: false,
+    closeRequestIdentity: null,
   };
   const calls = { created: 0, closeMessages: 0, browser: 0 };
   const taskRef = { threadId: "thread-17", hostId: "local" };
@@ -1562,7 +1595,12 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
       return {
         state: "SETTLED",
         closeRequest: model.closeAccepted
-          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          ? {
+              state: "ACCEPTED",
+              runId: identity.runId,
+              issueId: "17",
+              requestIdentity: model.closeRequestIdentity,
+            }
           : null,
       };
     },
@@ -1570,6 +1608,7 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
       assert.deepEqual(ref, taskRef);
       assert.match(prompt, /\$close-issue.*17/u);
       calls.closeMessages += 1;
+      model.closeRequestIdentity = closeRequestIdentityFrom(prompt);
       model.closeAccepted = true;
     },
     async wait() {
@@ -1582,7 +1621,11 @@ test("end-to-end Single-Issue runtime opens the panel and retains terminal inspe
         model.trackerState = "CLOSED";
         model.worktreeState = "ABSENT";
       }
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        closeRequestIdentity: model.closeAccepted ? model.closeRequestIdentity : undefined,
+      };
     },
   };
   const reconcile = async ({ journal }) => singleRunCurrent({ journal, model });
@@ -1894,6 +1937,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
   const created = [];
   const closeOrder = [];
   const closeAccepted = new Set();
+  const closeRequestIdentities = new Map();
   const closeLeases = new Map();
   const taskRefs = new Map();
   const issueByThread = new Map();
@@ -1923,13 +1967,19 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
       return {
         state: "SETTLED",
         closeRequest: closeAccepted.has(issueId)
-          ? { state: "ACCEPTED", runId: multiIdentity.runId, issueId }
+          ? {
+              state: "ACCEPTED",
+              runId: multiIdentity.runId,
+              issueId,
+              requestIdentity: closeRequestIdentities.get(issueId),
+            }
           : null,
       };
     },
     async message(ref, prompt) {
       const issueId = issueByThread.get(ref.threadId);
       assert.match(prompt, new RegExp(`\\$close-issue.*${issueId}`, "u"));
+      closeRequestIdentities.set(issueId, closeRequestIdentityFrom(prompt));
       const leases = acquireCloseIssueLeases({
         store,
         target: multiIdentity.target,
@@ -1945,6 +1995,8 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
     async wait(refs) {
       largestWaitBatch = Math.max(largestWaitBatch, refs.length);
       const issueIds = refs.map(({ threadId }) => issueByThread.get(threadId));
+      const closingIssueIds = issueIds.filter((issueId) => closeAccepted.has(issueId));
+      assert.ok(closingIssueIds.length <= 1, "repository close lease permits one active close request");
       for (const issueId of issueIds) {
         const node = nodes.get(issueId);
         if (closeAccepted.has(issueId)) {
@@ -1962,7 +2014,13 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
           node.worktreeState = "PRESENT";
         }
       }
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        closeRequestIdentity: closingIssueIds.length === 1
+          ? closeRequestIdentities.get(closingIssueIds[0])
+          : undefined,
+      };
     },
   };
   const reconcile = async ({ journal }) => ({
@@ -1993,7 +2051,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
     },
   });
   const leaf = {
-    async closeParent({ issueId, requestEvidence }) {
+    async closeParent({ issueId, requestIdentity, requestEvidence }) {
       assert.equal(issueId, "12");
       assert.equal(requestEvidence.target, multiIdentity.target);
       assert.equal(requestEvidence.targetState, "CLEAN");
@@ -2015,7 +2073,7 @@ test("end-to-end Multi-Issue runtime releases blockers and closes the parent las
       closeOrder.push("parent:12");
       parentTrackerState = "CLOSED";
       leases.release();
-      return { settled: true };
+      return { settled: true, requestIdentity };
     },
   };
   let initialPanelStatus;
@@ -2071,6 +2129,7 @@ test("end-to-end no-argument recovery adopts interrupted manual and partial-clos
     candidateReachable: false,
     worktreeState: "ABSENT",
     closeAccepted: false,
+    closeRequestIdentity: null,
   };
   const taskRef = { threadId: "thread-17-recovery", hostId: "local" };
   let created = 0;
@@ -2096,22 +2155,39 @@ test("end-to-end no-argument recovery adopts interrupted manual and partial-clos
       return {
         state: "SETTLED",
         closeRequest: model.closeAccepted
-          ? { state: "ACCEPTED", runId: identity.runId, issueId: "17" }
+          ? {
+              state: "ACCEPTED",
+              runId: identity.runId,
+              issueId: "17",
+              requestIdentity: model.closeRequestIdentity,
+            }
           : null,
       };
     },
-    async message() {
+    async message(_taskRef, prompt) {
       closeMessages += 1;
-      throw new Error("accepted partial close must not be sent again");
+      model.closeRequestIdentity = closeRequestIdentityFrom(prompt);
+      model.closeAccepted = true;
     },
     async wait() {
+      if (model.completionState === "NONE") {
+        model.taskState = "NONE";
+        model.completionState = "COMPLETE";
+        model.candidateReachable = true;
+        model.worktreeState = "PRESENT";
+        return { coordinatorActive: true, taskSettled: true };
+      }
       if (!interrupted) {
         interrupted = true;
         return { coordinatorActive: false, taskSettled: false };
       }
       model.trackerState = "CLOSED";
       model.worktreeState = "ABSENT";
-      return { coordinatorActive: true, taskSettled: true };
+      return {
+        coordinatorActive: true,
+        taskSettled: true,
+        closeRequestIdentity: model.closeRequestIdentity,
+      };
     },
   };
   const reconcile = async ({ journal }) => singleRunCurrent({ journal, model });
@@ -2135,16 +2211,10 @@ test("end-to-end no-argument recovery adopts interrupted manual and partial-clos
     assert.equal(first.panel.closed, true);
     assert.equal(created, 1);
 
-    model.taskState = "NONE";
-    model.completionState = "COMPLETE";
-    model.candidateReachable = true;
-    model.worktreeState = "PRESENT";
-    model.closeAccepted = true;
-
     const resumed = await runtime.run({});
     assert.equal(resumed.status.run.state, "SUCCEEDED", JSON.stringify(resumed.status));
     assert.equal(created, 1);
-    assert.equal(closeMessages, 0);
+    assert.equal(closeMessages, 1, "recovery must reuse the accepted evidence-bound request");
     assert.equal(panelOpens, 2);
     assert.equal(resumed.journal.filter(({ type }) => type === "dispatch.recorded").length, 1);
     assert.equal(resumed.journal.filter(({ type }) => type === "grant.recorded").length, 2);

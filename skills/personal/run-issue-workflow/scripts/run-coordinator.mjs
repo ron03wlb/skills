@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
 import {
   createRecoverableOperatorPacket,
@@ -57,6 +59,17 @@ const MUTATING_ACTION_TYPES = new Set([
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTaskRef = (value) => value && isText(value.threadId) && isText(value.hostId);
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort()
+      .map((key) => [key, canonicalize(value[key])]));
+  }
+  return value;
+};
+const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
+  .update(JSON.stringify(canonicalize(evidence)))
+  .digest("hex")}`;
 
 const requireMethod = (owner, name) => {
   if (typeof owner?.[name] !== "function") throw new TypeError(`Coordinator adapter requires ${name}()`);
@@ -224,6 +237,19 @@ const diagnosedStop = (status, {
     }],
   };
 };
+
+const closeRequestEvidenceChanged = (status, { issueId, expected, observed }) => diagnosedStop(status, {
+  reasonCode: REASON_CODES.closeRequestEvidenceChanged,
+  limitationClass: "unresolved-evidence",
+  evidence: [
+    `Issue ${issueId} close request identity changed; expected ${expected}, observed ${observed ?? "missing"}.`,
+  ],
+  noAutomaticTransition: "A stale or unbound close request cannot authorize closeout.",
+  affectedNodes: status.nodes.some((node) => node.issueId === issueId)
+    ? [issueId]
+    : status.nodes.map(({ issueId: childIssueId }) => childIssueId),
+  resumePredicates: ["close_request_identity_is_reconciled", "retry_same_run_issue_workflow"],
+});
 
 const trackerUnavailable = (request, attempts, status) => {
   if (!status && request.runIdentity) {
@@ -537,34 +563,55 @@ export function createCoordinator({
       taskRef = existing[0];
       if (!isTaskRef(taskRef)) return { stopped: issueLaneMissing(status, action.issueId) };
     }
+    const node = status.nodes.find(({ issueId }) => issueId === action.issueId);
+    const sourceNode = current.facts.nodes.find(({ issueId }) => issueId === action.issueId);
+    const requestEvidence = {
+      runIdentity: current.runIdentity,
+      maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
+      issueId: action.issueId,
+      target: current.runIdentity.target,
+      targetState: current.facts.run.targetState,
+      targetHead: current.facts.run.targetHead,
+      controlRevision: status.run.controlRevision,
+      trackerState: node.close.trackerState,
+      completionState: node.close.completionState,
+      candidateReachable: node.close.candidateReachable,
+      worktreeState: node.close.worktreeState,
+      authorityEvidence: sourceNode.closeAuthorityEvidence,
+    };
+    const requestIdentity = closeRequestIdentityFor(requestEvidence);
     const task = await tasks.read(taskRef);
-    const accepted = task?.closeRequest?.state === "ACCEPTED"
+    const acceptedForLane = task?.closeRequest?.state === "ACCEPTED"
       && task.closeRequest.runId === current.runIdentity.runId
       && task.closeRequest.issueId === action.issueId;
-    if (!accepted) {
-      const node = status.nodes.find(({ issueId }) => issueId === action.issueId);
-      const sourceNode = current.facts.nodes.find(({ issueId }) => issueId === action.issueId);
-      const requestEvidence = {
-        runIdentity: current.runIdentity,
-        maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
-        issueId: action.issueId,
-        target: current.runIdentity.target,
-        targetState: current.facts.run.targetState,
-        targetHead: current.facts.run.targetHead,
-        controlRevision: status.run.controlRevision,
-        trackerState: node.close.trackerState,
-        completionState: node.close.completionState,
-        candidateReachable: node.close.candidateReachable,
-        worktreeState: node.close.worktreeState,
-        authorityEvidence: sourceNode.closeAuthorityEvidence,
+    if (task?.closeRequest?.state === "ACCEPTED"
+      && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity)) {
+      return {
+        stopped: closeRequestEvidenceChanged(status, {
+          issueId: action.issueId,
+          expected: requestIdentity,
+          observed: task.closeRequest.requestIdentity,
+        }),
       };
+    }
+    const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
+    if (!accepted) {
       await tasks.message(
         taskRef,
-        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
+        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
       );
     }
     const waited = await tasks.wait([taskRef]);
     const settled = waited?.taskSettled === true;
+    if (settled && waited.closeRequestIdentity !== requestIdentity) {
+      return {
+        stopped: closeRequestEvidenceChanged(status, {
+          issueId: action.issueId,
+          expected: requestIdentity,
+          observed: waited.closeRequestIdentity,
+        }),
+      };
+    }
     return { active: settled && waited?.coordinatorActive !== false };
   };
 
@@ -598,27 +645,39 @@ export function createCoordinator({
 
   const closeParent = async ({ action, current, status }) => {
     requireMethod(leaf, "closeParent");
+    const requestEvidence = {
+      runIdentity: current.runIdentity,
+      maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
+      issueId: action.issueId,
+      target: current.runIdentity.target,
+      targetState: current.facts.run.targetState,
+      targetHead: current.facts.run.targetHead,
+      parentTrackerState: current.facts.run.parentTrackerState,
+      parentTrackerIdentity: current.facts.run.parentTrackerIdentity,
+      controlRevision: status.run.controlRevision,
+      childCloseStates: status.nodes.map(({ issueId, close }) => ({
+        issueId,
+        ...close,
+        authorityEvidence: current.facts.nodes
+          .find((node) => node.issueId === issueId).closeAuthorityEvidence,
+      })),
+    };
+    const requestIdentity = closeRequestIdentityFor(requestEvidence);
     const result = await leaf.closeParent({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
-      requestEvidence: {
-        runIdentity: current.runIdentity,
-        maxParallel: current.grant.maxParallel ?? DEFAULT_MAX_PARALLEL,
-        issueId: action.issueId,
-        target: current.runIdentity.target,
-        targetState: current.facts.run.targetState,
-        targetHead: current.facts.run.targetHead,
-        parentTrackerState: current.facts.run.parentTrackerState,
-        parentTrackerIdentity: current.facts.run.parentTrackerIdentity,
-        controlRevision: status.run.controlRevision,
-        childCloseStates: status.nodes.map(({ issueId, close }) => ({
-          issueId,
-          ...close,
-          authorityEvidence: current.facts.nodes
-            .find((node) => node.issueId === issueId).closeAuthorityEvidence,
-        })),
-      },
+      requestIdentity,
+      requestEvidence,
     });
+    if (result?.settled === true && result.requestIdentity !== requestIdentity) {
+      return {
+        stopped: closeRequestEvidenceChanged(status, {
+          issueId: action.issueId,
+          expected: requestIdentity,
+          observed: result.requestIdentity,
+        }),
+      };
+    }
     return { settled: result?.settled === true };
   };
 
