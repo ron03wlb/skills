@@ -422,6 +422,10 @@ _Avoid_: Tracker Issue ID, Issue title, execution command
 The minimal versioned parent record written and read back only after one **Issue decomposition** is fully published. It binds the parent, Planning Seal, target, exact **Decomposition key** to Issue mapping, and blocking edges so parent closeout can prove completeness without making the record a child identity authority.
 _Avoid_: Child identity source, mutable implementation plan, push-ready receipt
 
+**Tracker relation capability**:
+The configured **Issue tracker** adapter's declared ability to publish and read back a directed parent or blocker edge. Native relations are used when supported; otherwise canonical Issue body references and the **Decomposition publication record** carry the same edge, while labels may project state but never define **DAG scheduling authority**.
+_Avoid_: Required native link, blocker label, inferred relation
+
 **External blocker**:
 An existing readable **Issue** outside one **Issue decomposition** whose open state prevents a child from entering the dependency-ready frontier. `/to-tickets` verifies the reference but never creates, edits, or closes that Issue.
 _Avoid_: Sibling blocker, guessed dependency, cross-Spec mutation
