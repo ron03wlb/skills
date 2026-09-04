@@ -85,7 +85,7 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     {
       entry: "skills/engineering/to-tickets/SKILL.md",
       references: ["skills/engineering/to-tickets/references/decomposition-contract.md"],
-      trigger: /read \[the decomposition contract\]\(references\/decomposition-contract\.md\) only when reconciling/iu,
+      trigger: /read \[the decomposition contract\]\(references\/decomposition-contract\.md\) only when starting, resuming, reconciling/iu,
     },
     {
       entry: "skills/personal/run-issue-workflow/SKILL.md",
@@ -99,10 +99,11 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     {
       entry: "skills/engineering/execute-issue/SKILL.md",
       references: [
+        "skills/engineering/execute-issue/references/operation-identity.md",
         "skills/engineering/execute-issue/references/manual-prerequisites.md",
         "skills/engineering/execute-issue/references/completion-evidence.md",
       ],
-      trigger: /Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
+      trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
     },
   ];
 
@@ -111,29 +112,39 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     for (const reference of references) assert.equal(existsSync(reference), true, `${reference} is missing`);
   }
 
-  for (const { entry, owner, detail } of [
+  const contractPaths = [
+    ...boundaries.flatMap(({ entry, references }) => [entry, ...references]),
+    "skills/engineering/to-tickets/references/decomposition-publication-interfaces.md",
+  ];
+
+  for (const { owner, detail } of [
     {
-      entry: "skills/engineering/ask-matt/SKILL.md",
       owner: "skills/engineering/ask-matt/references/workflow-routes.md",
       detail: "If a frozen coverage failure finds eligible direct target contributions",
     },
     {
-      entry: "skills/engineering/to-tickets/SKILL.md",
       owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
       detail: "With no current record, write exactly one",
     },
     {
-      entry: "skills/personal/run-issue-workflow/SKILL.md",
+      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
+      detail: "First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt",
+    },
+    {
       owner: "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
       detail: "A current producer never owns target dirt",
     },
     {
-      entry: "skills/engineering/execute-issue/SKILL.md",
       owner: "skills/engineering/execute-issue/references/completion-evidence.md",
-      detail: "Concurrent first completions may publish multiple payload-identical physical adoption records",
+      detail: "Concurrent first `workflow_artifacts_contract_adopted:v1` completions may publish multiple payload-identical physical adoption records",
+    },
+    {
+      owner: "skills/engineering/execute-issue/references/operation-identity.md",
+      detail: "Before the first prospective completion in one exact repository, tracker, Spec, and Issue-target scope",
     },
   ]) {
-    assert.equal(read(entry).includes(detail), false, `${entry} duplicates ${detail}`);
+    const observedOwners = contractPaths.filter((path) => read(path).includes(detail));
+    assert.deepEqual(observedOwners, [owner], `${detail} must have exactly one workflow contract owner`);
     assert.equal(read(owner).split(detail).length - 1, 1, `${owner} must singly own ${detail}`);
   }
 });
@@ -926,6 +937,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   assert.match(execute, /legacy.*manual_prerequisite_complete:v1.*only.*legacy non-generated artifact.*cannot authorize.*generated/isu);
   assert.match(execute, /reuse.*same Issue topic branch and worktree.*Prerequisite candidate.*ancestor.*final implementation candidate/isu);
   assert.match(execute, /fresh.*Issue.*Spec.*target.*Planning Seal.*candidate.*blob.*branch.*worktree.*blocker.*scope.*ancestry.*Return only.*original lane/isu);
+  assert.match(execute, /completion-time.*re-read every consumed Manual.*attestation.*tracker-native immutable identity.*Issue.*outcome.*v2.*Prerequisite candidate.*blob.*artifact.*ancestor.*v1.*exact legacy non-generated artifact path.*read back unchanged/isu);
 
   assert.match(execute, /Late prerequisite discovery.*coherent checkpoint commits.*behavior.*Acceptance Criteria.*target.*exclusions.*schema outcome.*ownership.*unchanged.*automatically invoke.*`pre-execute-issue`/isu);
   assert.match(execute, /Scope change.*`\/to-spec` or `\/to-tickets`.*without artifact preparation.*silent expansion/isu);
@@ -1456,7 +1468,7 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   assert.match(execute, /first prospective completion.*repository.*tracker.*parent or linked Spec.*Issue target branch.*Spec and its exact child histories.*local-file tracker histories.*logical `workflow_artifacts_contract_adopted:v1`/isu);
   assert.match(execute, /Spec and its exact child histories.*local-file tracker histories.*freeze.*valid completion.*without `workflowArtifacts`.*`legacyCompletionFrontier`.*empty list.*Issue.*immutable completion-note identity.*durable local record locator.*SHA-256.*exact note body/isu);
   assert.match(execute, /Do not infer order across parent and child histories.*completion without `workflowArtifacts`.*legacy only.*exact identity.*body digest.*frozen frontier/isu);
-  assert.match(execute, /Concurrent first completions.*payload-identical physical adoption records.*collapse.*idempotently.*logical record.*never append another.*exact payload.*visible/isu);
+  assert.match(execute, /Concurrent first `workflow_artifacts_contract_adopted:v1` completions.*payload-identical physical adoption records.*collapse.*idempotently.*logical record.*never append another.*exact payload.*visible/isu);
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {

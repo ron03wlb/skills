@@ -1,6 +1,16 @@
 # Decomposition contract
 
-Read this reference only after `to-tickets` has consumed the exact upstream handoff, validated the Planning Seal, and bound its producer transaction. This file solely owns child rendering, identity reconciliation, partial publication recovery, the parent record payload, ready-state publication, and the composite Run handoff.
+Read this reference only after `to-tickets` has consumed the exact upstream handoff and validated the Planning Seal. This file solely owns transaction profiles and stages, compatibility behavior, child rendering, identity reconciliation, partial publication recovery, the parent record payload, ready-state publication, the composite Run handoff, and their recovery matrices.
+
+## Start or resume the producer transaction
+
+First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt. That compatibility branch has frozen exact resume behavior: continue its existing plan, checkpoint commit, attestation, decomposition, ready-state, and handoff stages at the first unsatisfied stage. Do not migrate, copy, rewrite, delete, or recreate it, and never use its behavior to shape a fresh operation.
+
+A fresh ordinary decomposition uses `to-tickets@v2`. Call `bindProducerCheckpointOperationIdentity` and `createProducerOperationCheckpoint` for repository, Spec, approved publication identity or hash, producer `to-tickets`, and stage `decomposition`; bind the same transaction to tracker identity, profile `v2`, target, observed baseline, consumed Planning Seal, Multi-Issue classification, approved-scope identity, upstream publication identity, and upstream handoff identity. Caller correlation never defines authority. Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`.
+
+The current profile has no target operational-plan file, plan-content stage, checkpoint commit, shared-writer acquisition, prospective `direct_target_contribution:v1` record, or attestation stage. Target-checkout dirt is preserved and is not transaction authority; only a ref, upstream, tracker, Planning Seal, or operation identity conflict that risks the wrong mutation is a Hard gate.
+
+Only one exact matching transaction may resume at its first unsatisfied stage. Re-read every completed receipt and require every bound identity to match. A missing transaction with observed downstream mutation, duplicate exact operation, mismatched receipt, out-of-order stage, conflicting upstream publication or handoff, or ambiguous adapter result stops without regeneration, overwrite, duplicate mutation, rollback, or unrelated attribution. Completed transaction receipts remain immutable; do not mark them consumed, archive them, or delete them automatically.
 
 ## Reconcile executable Issues
 

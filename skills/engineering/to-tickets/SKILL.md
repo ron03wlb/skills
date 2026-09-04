@@ -36,19 +36,11 @@ New public behavior, acceptance, target, or exclusion is a Spec revision: stop, 
 
 ## 4. Start or resume the decomposition producer transaction
 
-Before transaction creation or tracker mutation, read [`references/decomposition-publication-interfaces.md`](references/decomposition-publication-interfaces.md) and use only its upstream, checkpoint, tracker, and handoff adapters.
+Before transaction creation or tracker mutation, read [`references/decomposition-publication-interfaces.md`](references/decomposition-publication-interfaces.md) and use only its upstream, checkpoint, tracker, and handoff adapters. Then read [the decomposition contract](references/decomposition-contract.md) only when starting, resuming, reconciling, or completing the producer transaction. That reference solely owns transaction profiles and stages, compatibility branches, publication payloads, and recovery matrices.
 
-First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt. That compatibility branch has frozen exact resume behavior: continue its existing plan, checkpoint commit, attestation, decomposition, ready-state, and handoff stages at the first unsatisfied stage. Do not migrate, copy, rewrite, delete, or recreate it, and never use its behavior to shape a fresh operation.
-
-A fresh ordinary decomposition uses `to-tickets@v2`. Call `bindProducerCheckpointOperationIdentity` and `createProducerOperationCheckpoint` for repository, Spec, approved publication identity or hash, producer `to-tickets`, and stage `decomposition`; bind the same transaction to tracker identity, profile `v2`, target, observed baseline, consumed Planning Seal, Multi-Issue classification, approved-scope identity, upstream publication identity, and upstream handoff identity. Caller correlation never defines authority. Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`.
-
-The current profile has no target operational-plan file, plan-content stage, checkpoint commit, shared-writer acquisition, prospective `direct_target_contribution:v1` record, or attestation stage. Target-checkout dirt is preserved and is not transaction authority; only a ref, upstream, tracker, Planning Seal, or operation identity conflict that risks the wrong mutation is a Hard gate.
-
-Only one exact matching transaction may resume at its first unsatisfied stage. Re-read every completed receipt and require every bound identity to match. A missing transaction with observed downstream mutation, duplicate exact operation, mismatched receipt, out-of-order stage, conflicting upstream publication or handoff, or ambiguous adapter result stops without regeneration, overwrite, duplicate mutation, rollback, or unrelated attribution. Completed transaction receipts remain immutable; do not mark them consumed, archive them, or delete them automatically.
+Use its exact adapter-bound operation and continue only from the first valid unsatisfied stage. Any authority, identity, ordering, or adapter ambiguity is a Hard gate before the next mutation; preserve completed receipts and partial state.
 
 ## 5. Reconcile and Publish Executable Issues
-
-After the transaction is bound, read [the decomposition contract](references/decomposition-contract.md) only when reconciling existing children, completing a recorded partial publication, publishing missing children, writing the Decomposition publication record, updating ready state, or appending the composite Run handoff. That reference is the single owner of those payloads, compatibility branches, and recovery matrices.
 
 Apply its preflight before mutation, then perform its child, relation, parent-record, ready-state, and handoff read-backs in order through the adapters above. A Hard gate stops before the next mutation; a Recoverable blocker reports the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-tickets` retry. Advisories never change authority.
 

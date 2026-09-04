@@ -45,6 +45,6 @@ Confirm findings against source, tests, standards, and Spec. Repair every in-sco
 
 ## 4. Complete
 
-Rerun final verification. Require clean Standards and Spec, a clean Issue worktree at the reviewed candidate, and every consumed v2 Prerequisite candidate still reachable with matching blob and path. Then read [implementation completion evidence](references/completion-evidence.md) only when adopting compatibility records or writing `implementation_complete`; it solely owns both payloads.
+Rerun final verification. Require clean Standards and Spec, a clean Issue worktree at the reviewed candidate, and every consumed Manual prerequisite attestation to pass the reference's completion-time fresh read-back. Then read [implementation completion evidence](references/completion-evidence.md) only when adopting workflow-artifact compatibility or writing `implementation_complete`; it solely owns those payloads.
 
 Write and read back exactly one completion note, then stop. Execution never integrates, removes a worktree, closes the Issue, pushes, or deploys. A human or coordinator with the same valid Grant separately invokes `/close-issue`.
