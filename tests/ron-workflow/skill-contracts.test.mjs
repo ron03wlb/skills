@@ -650,6 +650,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   }
 
   const ticketsInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  const ticketsContract = read("skills/engineering/to-tickets/references/decomposition-contract.md");
   const ticketsSeal = tickets.indexOf("Validate the consumed Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish Executable Issues", ticketsSeal);
   assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate its consumed seal before publish");
@@ -658,7 +659,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   assert.match(tickets, /public behavior, acceptance, target, or exclusion.*stop.*tell the human to invoke `\/to-spec`/isu);
   assert.match(tickets, /do not modify.*parent/isu);
   assert.match(ticketsInterfaces, /upstream adapter.*checkpoint adapter.*tracker adapter.*handoff adapter/isu);
-  assert.match(ticketsInterfaces, /to-tickets@v2.*decomposition\.read_back.*ready_state\.read_back.*handoff\.completed/isu);
+  assert.match(ticketsContract, /to-tickets@v2.*decomposition\.read_back.*ready_state\.read_back.*handoff\.completed/isu);
   const childContract = tickets.match(/<child-contract>(.*?)<\/child-contract>/su)?.[1] ?? "";
   assert.match(childContract, /Parent.*Decomposition key.*What to build/su, "canonical child contract omits stable identity");
   assert.match(childContract, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, "canonical child contract has an incomplete Planning baseline");
