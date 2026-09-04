@@ -25,6 +25,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 
 ## Other starting points
 
+- A new software project without a governing Spec → personal `/start-project` for discovery; it hands off through `/grill-with-docs` when a Planning handoff packet is still missing, then `/to-spec`.
 - A personal daily reflection → `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 - Raw request → `/triage`; reproduced failure → `/diagnosing-bugs`.
 - Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source research → `/research`.

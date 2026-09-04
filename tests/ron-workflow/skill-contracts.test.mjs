@@ -444,6 +444,49 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("promoted README invocation groups match each skill's invocation policy", () => {
+  const reference = read("README.md").split(/^## Reference$/mu)[1];
+  assert.notEqual(reference, undefined, "top-level README needs its Reference index");
+
+  for (const { path, content, prefix } of [
+    { path: "README.md", content: reference, prefix: "" },
+    ...["engineering", "productivity"].map((bucket) => ({
+      path: `skills/${bucket}/README.md`,
+      content: read(`skills/${bucket}/README.md`),
+      prefix: `skills/${bucket}/`,
+    })),
+  ]) {
+    const indexed = [];
+    let group;
+    for (const line of content.split("\n")) {
+      const heading = line.match(/^(?:## |\*\*)(User-invoked|Model-invoked)(?:\*\*)?$/u);
+      if (heading) group = heading[1];
+      for (const match of line.matchAll(/\]\(\.\/([^)]*\/SKILL\.md)\)/gu)) {
+        const skillPath = `${prefix}${match[1]}`;
+        const expectedGroup = /^disable-model-invocation:\s*true$/mu.test(read(skillPath))
+          ? "User-invoked"
+          : "Model-invoked";
+        assert.equal(group, expectedGroup, `${path} lists ${skillPath} in the wrong invocation group`);
+        indexed.push(skillPath);
+      }
+    }
+    const expected = JSON.parse(read(".claude-plugin/plugin.json")).skills
+      .map((path) => `${path.slice(2)}/SKILL.md`)
+      .filter((path) => path.startsWith(prefix));
+    assert.deepEqual(indexed.sort(), expected.sort(), `${path} must classify every promoted skill once`);
+  }
+});
+
+test("every bucket README indexes exactly its current skills", () => {
+  for (const bucket of ["engineering", "productivity", "misc", "personal", "in-progress", "deprecated"]) {
+    const directory = `skills/${bucket}`;
+    const expected = readdirSync(directory).filter((name) => existsSync(`${directory}/${name}/SKILL.md`));
+    const indexed = [...read(`${directory}/README.md`).matchAll(/\]\(\.\/([^/]+)\/SKILL\.md\)/gu)]
+      .map((match) => match[1]);
+    assert.deepEqual(indexed.sort(), expected.sort(), `${directory}/README.md has missing, stale, or duplicate skills`);
+  }
+});
+
 test("daily-journal is a model-invoked personal skill without promotion", () => {
   const skillPath = "skills/personal/daily-journal/SKILL.md";
   const metadataPath = "skills/personal/daily-journal/agents/openai.yaml";

@@ -44,6 +44,14 @@ The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://
 
 ## Other routes and phase boundaries
 
+For a new software project without a governing Spec, the personal `/start-project` skill gathers product, risk, architecture, and cost evidence. Its handoff depends on the available planning evidence:
+
+- An existing matching Planning handoff packet goes to [to-spec](https://aihero.dev/skills-to-spec).
+- Without that packet, [grill-with-docs](https://aihero.dev/skills-grill-with-docs) establishes the planning lane and supplies it.
+- A published Tracker Spec keeps its recorded next command.
+
+`start-project` remains a personal skill, outside the promoted plugin.
+
 For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 
 Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) is the reference for skills and other agent-facing documents.

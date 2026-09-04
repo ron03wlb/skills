@@ -1,6 +1,6 @@
 ## What it does
 
-`grill-me` takes a **loose idea** and interviews you until you can commit to it. You do not need a worked-out plan to start: producing one is what the [session](https://www.aihero.dev/ai-coding-dictionary/session) is for. It asks one question at a time and waits for your answer, so each decision is settled before a dependent question appears.
+`grill-me` takes a **loose idea** and interviews you until you can commit to it. You do not need a worked-out plan to start: producing one is what the [session](https://www.aihero.dev/ai-coding-dictionary/session) is for. It asks a round of questions whose prerequisites are already settled, then waits for your answers. Independent decisions can share a round; dependent questions wait until the answers they need are available.
 
 It is **[stateless](https://www.aihero.dev/ai-coding-dictionary/stateless)**. It writes no files and leaves no workspace behind. The only thing it leaves is a sharper version of the idea, in your own head.
 
@@ -59,7 +59,7 @@ More than for most skills. Grilling leans on the [model](https://www.aihero.dev/
 ## It's working if
 
 - You disagree with something. A session with no pushback from you is a session you didn't need.
-- Questions arrive one at a time, and each later question clearly builds on what you already settled.
+- Questions arrive in numbered rounds with recommendations, and none requires guessing an answer you have not yet given.
 - You end up somewhere you didn't expect, because a question surfaced a decision you had been making implicitly.
 - At the end you could defend each choice to someone who wasn't there.
 

@@ -28,6 +28,12 @@ The delegation is unguarded, and the background agent can spawn a further backgr
 
 Where the file lands is decided by the repo, not by the skill: it matches whatever convention already exists for notes, and if there is none it picks somewhere sensible and tells you where. It writes one file per run.
 
+## When a source page is blocked
+
+Blocked-page recovery looks for a usable copy or another route to the same primary source. Archives come first, followed by a live reader when configured, then first-party APIs or feeds and browser access. The recovery guide and bundled script help reject redirect stubs and bot-check pages that look like successful fetches.
+
+Recovered evidence keeps its provenance. An archived copy is cited with its snapshot date; live retrieval is identified as live. A historical snapshot can explain past behavior, but current prices or availability still need current evidence. If no usable source is recovered, the finding remains unresolved.
+
 ## Common questions
 
 **It spawned a second research agent. Is that meant to happen?**

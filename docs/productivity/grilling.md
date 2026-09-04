@@ -1,8 +1,8 @@
 ## What it does
 
-`grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks down the decision tree branch by branch, resolving the dependencies between decisions one at a time until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share the same understanding.
+`grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks a decision tree in rounds until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share the same understanding.
 
-It asks **one question at a time** and waits for your answer before the next — never a bulk list, which is bewildering. Each question comes with the agent's own recommended answer, and any question the codebase can settle it explores instead of asking you. It won't start enacting the plan until you confirm the shared understanding has been reached.
+Each round contains only questions whose prerequisites are already settled: the current **frontier**. Independent decisions can appear together; a question that depends on an unanswered one waits for a later round. Each question comes with a recommended answer. Facts available from the codebase are explored instead of asked, and implementation waits for your confirmation that the shared understanding has been reached.
 
 ## When to reach for it
 
@@ -12,7 +12,12 @@ Reach for it when a plan or design still has soft spots and you want them surfac
 
 ## The decision tree
 
-The mental model is a **decision tree**: every plan branches into decisions, and decisions depend on each other. `grilling` descends that tree one node at a time, so an early answer can reshape which questions come next. That is why the questions arrive singly and in dependency order — a firehose of parallel questions loses the structure that makes the interview converge on a shared understanding.
+The mental model is a **decision tree**: every plan branches into decisions, and decisions depend on each other. After you answer a round, `grilling` recomputes the frontier. A pending background fact-finding task holds only the decisions that depend on it; other ready questions can proceed.
+
+The calling skill can narrow the round:
+
+- [grill-me](https://aihero.dev/skills-grill-me) uses the full available frontier.
+- [grill-with-docs](https://aihero.dev/skills-grill-with-docs) keeps its explicit limit of one material decision at a time while recording accepted domain changes.
 
 ## Pulled out on purpose
 
@@ -22,7 +27,7 @@ Keeping the technique in one place means you can also reach for it directly when
 
 ## It's working if
 
-- Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) asks one material question and includes a recommended answer.
+- Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) numbers the currently answerable questions and recommends an answer for each, within the calling skill's decision limit.
 - Later questions follow the dependencies created by answers already settled.
 - Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) are looked up, while decisions still come back to you.
 - No implementation starts until you confirm the shared understanding.
