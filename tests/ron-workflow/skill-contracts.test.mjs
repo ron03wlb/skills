@@ -18,6 +18,151 @@ const readVerifyTargetContract = () => [
   read("skills/engineering/verify-target-before-push/references/aggregate-verification-interfaces.md"),
   read("skills/engineering/verify-target-before-push/references/aggregate-recovery-interfaces.md"),
 ].join("\n");
+const readAskMattContract = () => [
+  read("skills/engineering/ask-matt/SKILL.md"),
+  read("skills/engineering/ask-matt/references/workflow-routes.md"),
+].join("\n");
+const readToTicketsContract = () => [
+  read("skills/engineering/to-tickets/SKILL.md"),
+  read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md"),
+  read("skills/engineering/to-tickets/references/decomposition-contract.md"),
+].join("\n");
+const readRunIssueWorkflowContract = () => [
+  read("skills/personal/run-issue-workflow/SKILL.md"),
+  read("skills/personal/run-issue-workflow/references/run-ready-handoff.md"),
+  read("skills/personal/run-issue-workflow/references/coordinator-lifecycle.md"),
+  read("skills/personal/run-issue-workflow/references/recovery.md"),
+].join("\n");
+const readExecuteIssueContract = () => [
+  read("skills/engineering/execute-issue/SKILL.md"),
+  read("skills/engineering/execute-issue/references/operation-identity.md"),
+  read("skills/engineering/execute-issue/references/manual-prerequisites.md"),
+  read("skills/engineering/execute-issue/references/completion-evidence.md"),
+].join("\n");
+
+const workflowEntryBudgets = Object.freeze([
+  {
+    role: "Router",
+    maxWords: 700,
+    paths: ["skills/engineering/ask-matt/SKILL.md"],
+  },
+  {
+    role: "Operational",
+    maxWords: 1_500,
+    paths: [
+      "skills/engineering/to-spec/SKILL.md",
+      "skills/engineering/to-tickets/SKILL.md",
+      "skills/personal/run-issue-workflow/SKILL.md",
+      "skills/engineering/execute-issue/SKILL.md",
+      "skills/engineering/close-issue/SKILL.md",
+    ],
+  },
+]);
+
+test("Router and Operational Skill entry word budgets name every exact file and count", () => {
+  const measurements = workflowEntryBudgets.flatMap(({ role, maxWords, paths }) => paths.map((path) => ({
+    role,
+    path,
+    maxWords,
+    words: read(path).trim().split(/\s+/u).length,
+  })));
+  const overages = measurements.filter(({ maxWords, words }) => words > maxWords);
+
+  assert.deepEqual(
+    overages,
+    [],
+    overages.map(({ role, path, maxWords, words }) => `${role} ${path}: ${words} words > ${maxWords}`).join("\n"),
+  );
+});
+
+test("moved workflow detail has an exact conditional owner-local reference and single owner", () => {
+  const boundaries = [
+    {
+      entry: "skills/engineering/ask-matt/SKILL.md",
+      references: ["skills/engineering/ask-matt/references/workflow-routes.md"],
+      trigger: /Read \[workflow route details\]\(references\/workflow-routes\.md\) only when selecting/iu,
+    },
+    {
+      entry: "skills/engineering/to-tickets/SKILL.md",
+      references: ["skills/engineering/to-tickets/references/decomposition-contract.md"],
+      trigger: /read \[the decomposition contract\]\(references\/decomposition-contract\.md\) only when starting, resuming, reconciling/iu,
+    },
+    {
+      entry: "skills/personal/run-issue-workflow/SKILL.md",
+      references: [
+        "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
+        "skills/personal/run-issue-workflow/references/coordinator-lifecycle.md",
+        "skills/personal/run-issue-workflow/references/recovery.md",
+      ],
+      trigger: /read \[the Run-ready handoff contract\]\(references\/run-ready-handoff\.md\).*Only `READY` may continue.*read \[the coordinator lifecycle\]\(references\/coordinator-lifecycle\.md\) only when.*Read \[Run recovery\]\(references\/recovery\.md\) only after/isu,
+    },
+    {
+      entry: "skills/engineering/execute-issue/SKILL.md",
+      references: [
+        "skills/engineering/execute-issue/references/operation-identity.md",
+        "skills/engineering/execute-issue/references/manual-prerequisites.md",
+        "skills/engineering/execute-issue/references/completion-evidence.md",
+      ],
+      trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
+    },
+  ];
+
+  for (const { entry, references, trigger } of boundaries) {
+    assert.match(read(entry), trigger, `${entry} omits an exact conditional-load trigger`);
+    for (const reference of references) assert.equal(existsSync(reference), true, `${reference} is missing`);
+  }
+
+  const contractPaths = [
+    ...boundaries.flatMap(({ entry, references }) => [entry, ...references]),
+    "skills/engineering/to-tickets/references/decomposition-publication-interfaces.md",
+  ];
+
+  for (const { owner, detail } of [
+    {
+      owner: "skills/engineering/ask-matt/references/workflow-routes.md",
+      detail: "If a frozen coverage failure finds eligible direct target contributions",
+    },
+    {
+      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
+      detail: "With no current record, write exactly one",
+    },
+    {
+      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
+      detail: "First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt",
+    },
+    {
+      owner: "skills/engineering/to-tickets/references/decomposition-publication-interfaces.md",
+      detail: "A fresh `to-tickets@v2` operation gets its operation identity receipt",
+    },
+    {
+      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
+      detail: "Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`",
+    },
+    {
+      owner: "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
+      detail: "A current producer never owns target dirt",
+    },
+    {
+      owner: "skills/engineering/execute-issue/references/completion-evidence.md",
+      detail: "Concurrent first `workflow_artifacts_contract_adopted:v1` completions may publish multiple payload-identical physical adoption records",
+    },
+    {
+      owner: "skills/engineering/execute-issue/references/operation-identity.md",
+      detail: "Before the first prospective completion in one exact repository, tracker, Spec, and Issue-target scope",
+    },
+  ]) {
+    const observedOwners = contractPaths.filter((path) => read(path).includes(detail));
+    assert.deepEqual(observedOwners, [owner], `${detail} must have exactly one workflow contract owner`);
+    assert.equal(read(owner).split(detail).length - 1, 1, `${owner} must singly own ${detail}`);
+  }
+
+  const decompositionInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  assert.doesNotMatch(
+    decompositionInterfaces,
+    /transaction-v1|to-tickets@v1|frozen exact resume behavior|Its ordered stages are `decomposition\.read_back`, `ready_state\.read_back`, and `handoff\.completed`/isu,
+    "the adapter interface must not duplicate the decomposition contract's profile, compatibility, or ordered-stage rules",
+  );
+});
 
 const createGitFixture = (prefix) => {
   const repo = mkdtempSync(join(tmpdir(), prefix));
@@ -75,8 +220,8 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   const executionInterfaces = read("skills/engineering/execute-issue/references/operation-identity.md");
   const closeInterfaces = read("skills/engineering/close-issue/references/operation-identity.md");
   const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/operation-identity.md");
-  const run = read("skills/personal/run-issue-workflow/SKILL.md");
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const run = readRunIssueWorkflowContract();
+  const execute = readExecuteIssueContract();
   const close = read("skills/engineering/close-issue/SKILL.md");
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   const runOperator = read("skills/personal/run-issue-workflow/OPERATOR.md");
@@ -363,13 +508,13 @@ test("code review advisory and confirmed code review finding route to Aggregate 
   const review = read("skills/engineering/code-review/SKILL.md");
   const reviewDocs = read("docs/engineering/code-review.md");
   const reviewMetadata = read("skills/engineering/code-review/agents/openai.yaml");
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const execute = readExecuteIssueContract();
   const executeDocs = read("docs/engineering/execute-issue.md");
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
-  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const router = readAskMattContract();
   const routerDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(review, /Coordinator.*classif(?:y|ies).*observation.*Confirmed code review finding.*Code review advisory/isu);
@@ -441,13 +586,13 @@ test("Wiki is one independent user-invoked documentation control", () => {
 });
 test("planning lanes revalidate relevant facts before tracker work becomes executable", () => {
   const spec = read("skills/engineering/to-spec/SKILL.md");
-  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const tickets = readToTicketsContract();
   const implement = read("skills/engineering/implement/SKILL.md");
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const execute = readExecuteIssueContract();
   const context = read("CONTEXT.md");
   const specDocs = read("docs/engineering/to-spec.md");
   const ticketsDocs = read("docs/engineering/to-tickets.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
   const deliveryAdr = read("docs/adr/0022-use-issue-native-execution-and-closeout.md");
   const successorAdrPath = "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md";
@@ -505,6 +650,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   }
 
   const ticketsInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  const ticketsContract = read("skills/engineering/to-tickets/references/decomposition-contract.md");
   const ticketsSeal = tickets.indexOf("Validate the consumed Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish Executable Issues", ticketsSeal);
   assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate its consumed seal before publish");
@@ -513,7 +659,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   assert.match(tickets, /public behavior, acceptance, target, or exclusion.*stop.*tell the human to invoke `\/to-spec`/isu);
   assert.match(tickets, /do not modify.*parent/isu);
   assert.match(ticketsInterfaces, /upstream adapter.*checkpoint adapter.*tracker adapter.*handoff adapter/isu);
-  assert.match(ticketsInterfaces, /to-tickets@v2.*decomposition\.read_back.*ready_state\.read_back.*handoff\.completed/isu);
+  assert.match(ticketsContract, /to-tickets@v2.*decomposition\.read_back.*ready_state\.read_back.*handoff\.completed/isu);
   const childContract = tickets.match(/<child-contract>(.*?)<\/child-contract>/su)?.[1] ?? "";
   assert.match(childContract, /Parent.*Decomposition key.*What to build/su, "canonical child contract omits stable identity");
   assert.match(childContract, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, "canonical child contract has an incomplete Planning baseline");
@@ -579,7 +725,7 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
   const metadata = read("skills/engineering/to-spec/agents/openai.yaml");
   const docs = read("docs/engineering/to-spec.md");
   const template = read("skills/engineering/to-spec/references/single-issue-template.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
   const implement = read("skills/engineering/implement/SKILL.md");
   const implementDocs = read("docs/engineering/implement.md");
@@ -624,7 +770,7 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
 });
 
 test("to-tickets consumes the completed to-spec handoff through a minimal current producer", () => {
-  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const tickets = readToTicketsContract();
 
   const upstream = tickets.indexOf("Consume the completed to-spec handoff");
   const checkpoint = tickets.indexOf("Start or resume the decomposition producer transaction", upstream);
@@ -637,7 +783,7 @@ test("to-tickets consumes the completed to-spec handoff through a minimal curren
 
   assert.match(tickets, /completed `to-spec`.*handoff.*producer.*parent.*tracker identity.*target.*Planning Seal.*classification.*approved-scope identity.*publication identity/isu);
   assert.match(tickets, /read.*upstream.*owning source.*once.*never rerun.*generation.*review.*validation/isu);
-  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*repository.*Spec.*producer.*operation identity.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
+  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*owner-derived operation identity receipt.*tracker identity.*profile `v2`.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
   assert.match(tickets, /ordered stages.*`decomposition\.read_back`.*`ready_state\.read_back`.*`handoff\.completed`/isu);
   assert.match(tickets, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
   assert.match(tickets, /existing valid incomplete.*transaction-v1.*`to-tickets@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
@@ -646,7 +792,7 @@ test("to-tickets consumes the completed to-spec handoff through a minimal curren
 });
 
 test("to-tickets reconciles one Issue decomposition before tracker mutation", () => {
-  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const tickets = readToTicketsContract();
 
   assert.match(tickets, /immutable `<Spec-ID>\/<NN>` Decomposition key.*titles are never identity/isu);
   const discovery = tickets.indexOf("Discover every tracker-supported identity source");
@@ -664,7 +810,7 @@ test("to-tickets reconciles one Issue decomposition before tracker mutation", ()
 });
 
 test("to-tickets publishes one recoverable decomposition record and the exact ready frontier", () => {
-  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const tickets = readToTicketsContract();
 
   const allEvidence = tickets.indexOf("After every expected child and blocker edge passes read-back");
   const recordPublication = tickets.indexOf("Reconcile the parent publication record");
@@ -683,7 +829,7 @@ test("to-tickets publishes one recoverable decomposition record and the exact re
 });
 
 test("to-tickets appends one composite handoff and routes only the parent Run", () => {
-  const tickets = read("skills/engineering/to-tickets/SKILL.md");
+  const tickets = readToTicketsContract();
 
   const recordReadBack = tickets.indexOf("Read the written or reused record back once");
   const readyReadBack = tickets.indexOf("Read every resulting child ready state back once", recordReadBack);
@@ -702,10 +848,10 @@ test("to-tickets appends one composite handoff and routes only the parent Run", 
 });
 
 test("re-entrant to-tickets behavior stays synchronized across promoted surfaces", () => {
-  const skill = read("skills/engineering/to-tickets/SKILL.md");
+  const skill = readToTicketsContract();
   const docs = read("docs/engineering/to-tickets.md");
   const metadata = read("skills/engineering/to-tickets/agents/openai.yaml");
-  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const router = readAskMattContract();
   const routerDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(skill, /^description: Consume one Multi-Issue Spec handoff.*minimal.*composite Run handoff\.$/mu);
@@ -728,7 +874,7 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
   const preExecute = read("skills/engineering/pre-execute-issue/SKILL.md");
   const preExecuteMetadata = read("skills/engineering/pre-execute-issue/agents/openai.yaml");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.doesNotMatch(preExecute, /^disable-model-invocation:/mu);
@@ -781,7 +927,7 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
 
 
 test("execute-issue routes exact prerequisites and preserves content-bound attestations", () => {
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const execute = readExecuteIssueContract();
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   const executeDocs = read("docs/engineering/execute-issue.md");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
@@ -792,7 +938,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   const closeDocs = read("docs/engineering/close-issue.md");
   const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
-  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const router = readAskMattContract();
   const routerDocs = read("docs/engineering/ask-matt.md");
   const context = read("CONTEXT.md");
 
@@ -807,6 +953,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
   assert.match(execute, /legacy.*manual_prerequisite_complete:v1.*only.*legacy non-generated artifact.*cannot authorize.*generated/isu);
   assert.match(execute, /reuse.*same Issue topic branch and worktree.*Prerequisite candidate.*ancestor.*final implementation candidate/isu);
   assert.match(execute, /fresh.*Issue.*Spec.*target.*Planning Seal.*candidate.*blob.*branch.*worktree.*blocker.*scope.*ancestry.*Return only.*original lane/isu);
+  assert.match(execute, /completion-time.*re-read every consumed Manual.*attestation.*tracker-native immutable identity.*Issue.*outcome.*v2.*Prerequisite candidate.*blob.*artifact.*ancestor.*v1.*exact legacy non-generated artifact path.*read back unchanged/isu);
 
   assert.match(execute, /Late prerequisite discovery.*coherent checkpoint commits.*behavior.*Acceptance Criteria.*target.*exclusions.*schema outcome.*ownership.*unchanged.*automatically invoke.*`pre-execute-issue`/isu);
   assert.match(execute, /Scope change.*`\/to-spec` or `\/to-tickets`.*without artifact preparation.*silent expansion/isu);
@@ -837,7 +984,7 @@ test("prepare-prerequisite-artifact enforces prerequisite adapter Operator SQL a
   const skill = read(`skills/engineering/${name}/SKILL.md`);
   const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
   const docs = read(`docs/engineering/${name}.md`);
-  const router = read("skills/engineering/ask-matt/SKILL.md");
+  const router = readAskMattContract();
   const routerDocs = read("docs/engineering/ask-matt.md");
 
   assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
@@ -924,7 +1071,7 @@ test("prospective checkpoint attestation is frozen-profile-only and preserves re
   const skill = read(`skills/engineering/${name}/SKILL.md`);
   const metadata = read(`skills/engineering/${name}/agents/openai.yaml`);
   const docs = read(`docs/engineering/${name}.md`);
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(skill, /two exact caller routes.*confirmation-gated recovery.*producer-owned prospective/isu);
@@ -1003,7 +1150,7 @@ test("closed Issue evidence reconciliation is narrow and restarts fresh target v
   const verify = readVerifyTargetContract();
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(verify, /after.*freeze.*member.*before.*ordinary completion-evidence rejection.*one.*closed affected Issue/isu);
@@ -1135,7 +1282,7 @@ test("historical command placeholder reconciliation is exact and fresh-entry onl
   const helper = read("skills/engineering/record-closed-issue-reconciliation/SKILL.md");
   const helperMetadata = read("skills/engineering/record-closed-issue-reconciliation/agents/openai.yaml");
   const helperDocs = read("docs/engineering/record-closed-issue-reconciliation.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(verify, /exactly one.*unambiguous.*historical placeholder.*otherwise valid.*immutable completion.*repository-required full-suite command/isu);
@@ -1278,7 +1425,7 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
   const verify = readVerifyTargetContract();
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   const mattDocs = read("docs/engineering/ask-matt.md");
 
   assert.match(verify, /^description:.*confirmation-gated.*recovery.*without pushing/mu);
@@ -1323,21 +1470,21 @@ test("target coverage recovery is confirmation-gated and restarts aggregate veri
 
 
 test("workflowArtifacts classify required Issue-owned documentation without bypassing evidence", () => {
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const execute = readExecuteIssueContract();
   const review = read("skills/engineering/code-review/SKILL.md");
   const close = [
     read("skills/engineering/close-issue/SKILL.md"),
     read("skills/engineering/close-issue/references/completion-evidence.md"),
   ].join("\n");
   const verify = readVerifyTargetContract();
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
 
   assert.match(execute, /`workflowArtifacts`.*explicit empty list.*repository-relative.*path.*requirement source.*purpose/isu);
   assert.match(execute, /declared path.*Execution baseline.*candidate diff.*prospective.*code-review/isu);
   assert.match(execute, /first prospective completion.*repository.*tracker.*parent or linked Spec.*Issue target branch.*Spec and its exact child histories.*local-file tracker histories.*logical `workflow_artifacts_contract_adopted:v1`/isu);
   assert.match(execute, /Spec and its exact child histories.*local-file tracker histories.*freeze.*valid completion.*without `workflowArtifacts`.*`legacyCompletionFrontier`.*empty list.*Issue.*immutable completion-note identity.*durable local record locator.*SHA-256.*exact note body/isu);
   assert.match(execute, /Do not infer order across parent and child histories.*completion without `workflowArtifacts`.*legacy only.*exact identity.*body digest.*frozen frontier/isu);
-  assert.match(execute, /Concurrent first completions.*payload-identical physical adoption records.*collapse.*idempotently.*logical record.*never append another.*exact payload.*visible/isu);
+  assert.match(execute, /Concurrent first `workflow_artifacts_contract_adopted:v1` completions.*payload-identical physical adoption records.*collapse.*idempotently.*logical record.*never append another.*exact payload.*visible/isu);
   assert.match(review, /prospective `workflowArtifacts` declaration.*Standards.*Spec/isu);
   assert.match(review, /repository- or skill-required.*non-contract.*extension.*public-contract.*routing.*Acceptance Criteria.*governance.*runtime.*ambiguous.*unowned/isu);
   for (const consumer of [close, verify]) {
@@ -1607,7 +1754,7 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
 
 
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
-  const execute = read("skills/engineering/execute-issue/SKILL.md");
+  const execute = readExecuteIssueContract();
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   assert.doesNotMatch(execute, /^disable-model-invocation:\s*true$/mu);
   assert.doesNotMatch(executeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
@@ -2950,7 +3097,7 @@ test("installed route keeps payload and recovery detail behind one cross-seam co
 });
 
 test("router exposes the Issue worktree flow and independent controls", () => {
-  const matt = read("skills/engineering/ask-matt/SKILL.md");
+  const matt = readAskMattContract();
   assert.match(matt, /`\/wiki`/u);
   assert.match(matt, /`\/remove-ron`/u);
   assert.match(matt, /`\/pre-execute-issue/u);
@@ -3030,7 +3177,9 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.equal(existsSync(coordinatorPath), true);
   assert.equal(existsSync(operatorPath), true);
 
-  const skill = read(skillPath);
+  const skill = readRunIssueWorkflowContract();
+  const skillEntry = read(skillPath);
+  const lifecycle = read("skills/personal/run-issue-workflow/references/coordinator-lifecycle.md");
   const metadata = read(metadataPath);
   const runtime = read(runtimePath);
   const authorityAdapters = read(authorityAdaptersPath);
@@ -3069,6 +3218,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /Never create a duplicate live lane/iu);
   assert.match(skill, /`execute-issue` owns its dedicated Issue worktree/iu);
   assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
+  assert.match(skillEntry, /Release dependants only after the candidate is reachable from the Issue target branch.*exact worktree is absent.*Issue is closed/isu);
+  assert.match(lifecycle, /reacquire.*candidate reachability from the Issue target branch.*Only candidate reachability from the Issue target branch.*release dependants/isu);
   assert.match(skill, /node success.*release dependants/iu);
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
   assert.match(skill, /close_parent.*evidence-bound parent-only `close-issue` leaf.*real leaf owns.*repository-then-target lease order/isu);
@@ -3146,13 +3297,17 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/README.md",
     "skills/engineering/to-spec/SKILL.md",
     "skills/engineering/to-tickets/SKILL.md",
+    "skills/engineering/to-tickets/references/decomposition-contract.md",
     "docs/engineering/to-spec.md",
     "docs/engineering/to-tickets.md",
     "skills/engineering/ask-matt/SKILL.md",
+    "skills/engineering/ask-matt/references/workflow-routes.md",
     "skills/engineering/wiki/SKILL.md",
     "skills/engineering/remove-ron/SKILL.md",
     "skills/engineering/pre-execute-issue/SKILL.md",
     "skills/engineering/execute-issue/SKILL.md",
+    "skills/engineering/execute-issue/references/manual-prerequisites.md",
+    "skills/engineering/execute-issue/references/completion-evidence.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
     "skills/engineering/push-target/SKILL.md",
@@ -3165,6 +3320,10 @@ test("changed delivery documentation remains structurally valid", () => {
     "docs/adr/0021-focus-ron-on-local-issue-delivery.md",
     "docs/adr/0022-use-issue-native-execution-and-closeout.md",
     "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md",
+    "skills/personal/run-issue-workflow/SKILL.md",
+    "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
+    "skills/personal/run-issue-workflow/references/coordinator-lifecycle.md",
+    "skills/personal/run-issue-workflow/references/recovery.md",
   ]) {
     for (const match of read(path).matchAll(/\]\(([^)]+)\)/gu)) {
       const destination = match[1].replace(/^<|>$/gu, "");

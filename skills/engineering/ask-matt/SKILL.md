@@ -10,41 +10,29 @@ Route the user's situation; do not perform the routed work.
 
 ## Build flow
 
-1. Use `/grill-with-docs` to bind one proposed Spec and target to the current task's isolated planning worktree, settle the codebase-backed idea, and record accepted vocabulary or ADRs there. Without a codebase, use `/grill-me`.
-2. Use `/to-spec` in the same task to revalidate only relevant Planning facts against the latest target, create or reuse its Planning Seal, publish through the minimal operation-scoped producer transaction, and append its immutable handoff. `to-spec` is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue.
-3. Follow the published command:
-   - Single-Issue Tracker Spec → `/run-issue-workflow <Spec-ID>`.
-   - Multi-Issue Tracker Spec → `/to-tickets <Spec-ID>` to consume the completed `to-spec` handoff, use its minimal operation-scoped transaction, publish the Decomposition publication record and composite handoff, then `/run-issue-workflow <Spec-ID>`.
-   Fresh `to-spec` and `to-tickets` operations create no target operational-plan checkpoint or prospective contribution record. Frozen legacy and profile-v1 producer operations retain exact resume behavior and may invoke model-invoked `/attest-target-contribution` only at their existing checkpoint stage; the helper needs no second confirmation and returns only the immutable record identity.
-4. After the exact Issue is published, `execute-issue` automatically invokes `pre-execute-issue` in the same authorized lane when one exact declared or unchanged-scope late prerequisite lacks a matching attestation. It creates or reuses the Issue worktree, invokes `prepare-prerequisite-artifact` when needed, presents the committed Operator SQL for human execution, and returns the content-bound v2 identity to the original lane after fresh checks. Direct `/pre-execute-issue <Issue-ID>` remains available but stops after attestation read-back and never resumes implementation by itself.
-5. Each clean completion note records required non-contract `workflowArtifacts` with source and purpose, or an empty list; scope classification grants no coverage or verification authority. Use `/close-issue` with the Issue ID. It alone acquires the repository close lease before the target mutation writer, merges the exact candidate into the recorded Issue target branch, removes the clean worktree, and closes the Issue; retries resume from observable state. Planning lanes and Issue worktrees may run concurrently; only a Planning Seal write and closeout hold the target mutation writer. The repository lease permits one closeout per Git common dir. Use the same command on a Multi-Issue parent only after every exact child is closed and reachable.
-6. Before push, the human invokes `/verify-target-before-push <target>` in local-ahead mode to derive members from completion notes. For already-pushed work, the human supplies an explicit merge request, pull request, or exact range. Both modes run aggregate review and verification once; only local-ahead may emit push readiness. Across execution and aggregate review, only an exact-evidence **Confirmed code review finding** blocks; a **Code review advisory** remains visible without repair or waiver authority. A Confirmed aggregate finding defaults to a new human-created **Aggregate repair Issue** on the same target, while verification never creates or executes it, repairs product code, reopens an earlier Issue, or edits a completion note. If and only if a frozen coverage failure finds eligible direct target contributions, the workflow shows the complete exact record draft and waits for one human confirmation, invokes `/attest-target-contribution`, then discards the failed gate and starts fresh from Entry. If frozen member derivation instead finds one eligible closed historical completion-evidence failure, it proves one exact remedy, shows the complete reconciliation draft, waits for exact human confirmation, invokes `/record-closed-issue-reconciliation`, and starts fresh from Entry. If it finds one eligible historical command placeholder, it proves the descendant Issue's exact full-suite command and a freshly frozen target pass; a current-only pass does not qualify. It then obtains exact human confirmation, invokes the same `/record-closed-issue-reconciliation` helper, and starts fresh from Entry with the mapped command in the aggregate set. No separate manual attestation command is required. No separate manual reconciliation command is required. Push remains separate.
-7. After a passing local-ahead `/verify-target-before-push` writes current `push_ready`, the human invokes `/push-target <target>`. It fetches the unique configured upstream, rejects any drift, performs one ordinary non-force push of the exact verified target, and reads the exact remote ref back. It never pulls, merges, rebases, force-pushes, retries, deploys, or pushes another ref.
+1. Use `/grill-with-docs` to settle a codebase-backed idea in an isolated planning lane; without a codebase, use `/grill-me`.
+2. Use `/to-spec` in that same lane. It revalidates or writes the Planning Seal, is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue, and publishes the exact next command.
+3. Follow that command: a Single-Issue Tracker Spec uses `/run-issue-workflow`; invoke it as `/run-issue-workflow <Spec-ID>`. A Multi-Issue Tracker Spec uses `/to-tickets`; invoke it as `/to-tickets <Spec-ID>` and then `/run-issue-workflow <Spec-ID>`. An approved Standalone Spec or explicit direct current-branch task uses `/implement`.
+4. `/execute-issue <Issue-ID>` is the exact implementation leaf for direct human invocation or an authorized coordinator. It automatically invokes `pre-execute-issue` in the same lane when one exact declared Manual prerequisite lacks a valid attestation. Direct `/pre-execute-issue <Issue-ID>` stops after attestation read-back.
+5. `/close-issue <Issue-ID>` integrates the exact candidate into the recorded Issue target branch, removes its clean worktree, and closes it. Issue worktrees may run concurrently; target mutation stays serialized. Use the same command for a Multi-Issue parent only after every exact child is closed and reachable.
+6. Before push, invoke `/verify-target-before-push <target>`. Local-ahead derives members from completion notes; already-pushed work uses an explicit range. Both run aggregate review and verification once. A passing local-ahead run writes `push_ready`; then `/push-target <target>` performs one ordinary non-force push and reads the remote ref back.
 
-Published Tracker Specs route through the separately installed authorized coordinator, while direct human invocation of the individual `execute-issue` and `close-issue` leaves remains available. The coordinator may use one valid **DAG Run Grant** to invoke those leaves without per-Issue approval. It does not create or broaden leaf authority: each leaf revalidates the Grant and keeps its existing implementation, closeout, tracker, worktree, push, deploy, prerequisite, and scope boundaries. The Codex-only coordinator is neither promoted nor packaged by this shared skill set.
+The public Issue leaves are `/execute-issue` and `/close-issue`; the model-only prerequisite helper is not a public route.
 
-`prepare-prerequisite-artifact` is model-invoked and not a public route. It accepts only an active prerequisite-preparation handoff that already binds one exact Issue artifact and repository adapter, builds a fail-closed Operator SQL candidate, and returns content identity without external execution or attestation.
+Read [workflow route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
 
-A Single-Issue Tracker Spec uses `/run-issue-workflow`; a Multi-Issue Tracker Spec uses `/to-tickets`; an approved Standalone Spec or explicit direct current-branch task uses `/implement`. `/execute-issue` remains the exact Issue leaf used by a direct human invocation or a valid coordinator Grant, not the next command published by `to-spec`. Expected plan paths are not an allowlist: execution follows necessary dependencies while unchanged Acceptance Criteria remain authoritative.
-
-Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration even when review was not explicitly requested.
+Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration.
 
 ## Other starting points
 
-- Raw incoming bugs or requests → `/triage`; a hard reproduced failure → `/diagnosing-bugs`.
-- A huge effort whose route is still unknown → `/wayfinder`, then return to `/to-spec` after decisions settle.
-- A runnable design question → `/prototype`; source research → `/research`.
-- Architecture health → `/improve-codebase-architecture`; terminology → `/domain-modeling`; module seams → `/codebase-design`.
+- Raw request → `/triage`; reproduced failure → `/diagnosing-bugs`.
+- Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source research → `/research`.
+- Architecture → `/improve-codebase-architecture`; terminology → `/domain-modeling`; module seams → `/codebase-design`.
 
 ## Independent controls
 
-- `/wiki` edits and reviews the repository Wiki independently of Issue delivery.
-- `/remove-ron` removes only the retired repository-local Ron footprint.
-- `/confirm-understanding` calibrates a mental model against named evidence.
-- `/explain-decision` compares one live choice without changing workflow state; `/grilling` pressure-tests a plan or decision without writing docs.
-- `/to-questionnaire` turns a decision blocked on another person's knowledge into a questionnaire for that person.
-- `/wait-what` re-pitches the last message when it did not land, using plain English and the repository's ubiquitous language.
-- `/handoff` moves context to a fresh session; `/teach` runs a stateful learning workspace; `/writing-for-agents` is the reference for skills and other documents consumed by agents.
-- `/resolving-merge-conflicts` handles an already in-progress merge or rebase conflict.
+- `/wiki` manages repository Wiki work; `/remove-ron` removes only the retired repository-local Ron footprint.
+- `/confirm-understanding` calibrates a mental model; `/explain-decision` compares one live choice; `/grilling` pressure-tests a plan without changing workflow state.
+- `/to-questionnaire`, `/wait-what`, `/handoff`, `/teach`, and `/writing-for-agents` handle their named collaboration need. `/resolving-merge-conflicts` handles an in-progress merge or rebase conflict.
 
-Use `/setup-matt-pocock-skills` once when tracker, labels, or domain-doc layout is not configured.
+Use `/setup-matt-pocock-skills` when tracker, labels, or domain-doc layout is not configured.
