@@ -3033,6 +3033,7 @@ test("installed route diagnostics expose owning seams without setup authority", 
   const setup = read("skills/engineering/setup-matt-pocock-skills/SKILL.md");
   const diagnosticsPath = "skills/engineering/setup-matt-pocock-skills/installed-workflow-diagnostics.md";
   const setupDocs = read("docs/engineering/setup-matt-pocock-skills.md");
+  const setupMetadata = read("skills/engineering/setup-matt-pocock-skills/agents/openai.yaml");
 
   assert.equal(existsSync(diagnosticsPath), true, "setup must ship its installed-workflow diagnostic contract");
   const diagnostics = read(diagnosticsPath);
@@ -3045,6 +3046,9 @@ test("installed route diagnostics expose owning seams without setup authority", 
     "producer handoff",
     "target reader",
     "shared target writer",
+    "deterministic operation identity",
+    "repository close lease",
+    "per-Run execution capacity",
     "public skill surfaces",
   ]) {
     assert.match(diagnostics, new RegExp(seam, "iu"), `missing installed ${seam} diagnostic`);
@@ -3056,7 +3060,9 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-local.md"), /no separate label registry.*non-empty.*unique.*Status/isu);
   assert.match(setupDocs, /installed workflow diagnostics/iu);
   assert.match(setupDocs, /read-only/iu);
+  assert.match(setupDocs, /deterministic operation identity.*repository close lease.*per-Run execution capacity/isu);
   assert.match(setupDocs, /missing or unknown seam.*owning source/isu);
+  assert.match(setupMetadata, /short_description: "[^"]*diagnos[^"]*workflow[^"]*"/iu);
 
   assert.match(read("skills/engineering/to-spec/SKILL.md"), /references\/spec-publication-interfaces\.md/u);
   assert.match(read("skills/engineering/to-tickets/SKILL.md"), /references\/decomposition-publication-interfaces\.md/u);
@@ -3076,7 +3082,7 @@ test("installed route keeps payload and recovery detail behind one cross-seam co
   const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
   const installedScenario = endToEndTests.slice(
     endToEndTests.indexOf('test("installed route'),
-    endToEndTests.indexOf('test("end-to-end closeout contention'),
+    endToEndTests.indexOf('test("installed route proves real close leaf concurrency'),
   );
 
   assert.equal(existsSync(recoveryPath), true, "aggregate recovery must have one owner-local reference");
@@ -3094,6 +3100,35 @@ test("installed route keeps payload and recovery detail behind one cross-seam co
   }
   assert.match(installedScenario, /reasonCode: "TARGET_MOVED"[^]*targetReconfirmed/iu);
   assert.doesNotMatch(installedScenario, /runReadyHandoff:\s*readyHandoffFor/iu);
+});
+
+test("installed route proof uses real close leaves and filesystem stores across repositories", () => {
+  const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
+  const start = endToEndTests.indexOf(
+    'test("installed route proves real close leaf concurrency and same-command resume recovery"',
+  );
+  const end = endToEndTests.indexOf('test("end-to-end closeout contention', start);
+
+  assert.notEqual(start, -1, "the installed real-close scenario must exist");
+  assert.ok(end > start, "the installed real-close scenario must have one bounded fixture");
+  const scenario = endToEndTests.slice(start, end);
+  for (const requiredSeam of [
+    "createStoreFixture",
+    "createRunStore",
+    "createWorkflowRuntime",
+    "acquireCloseIssueLeases",
+    "Promise.all",
+    "maxParallel",
+    "repository_close_lease_wait_timeout",
+    "retryCount",
+    "operationId",
+  ]) {
+    assert.match(scenario, new RegExp(requiredSeam, "u"), `installed real-close proof omits ${requiredSeam}`);
+  }
+  assert.match(scenario, /different targets.*same Git common directory/isu);
+  assert.match(scenario, /different Git common directories.*overlap/isu);
+  assert.match(scenario, /same command.*fresh evidence/isu);
+  assert.doesNotMatch(scenario, /\.acquireRepositoryCloseLease\(/u);
 });
 
 test("router exposes the Issue worktree flow and independent controls", () => {

@@ -1450,6 +1450,465 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
   }
 });
 
+test("installed route proves real close leaf concurrency and same-command resume recovery", async () => {
+  const repositoryA = createStoreFixture();
+  const repositoryB = createStoreFixture();
+  const repositoryIdA = "github:example/installed-a";
+  const repositoryIdB = "github:example/installed-b";
+  const runIdentityFor = ({ repositoryId, specId, target, classification = "SINGLE" }) => {
+    const approvedScopeHash = `sha256:${specId.padStart(64, "0")}`;
+    return {
+      runId: deriveWorkflowOperationIdentity({
+        repositoryId,
+        specId,
+        approvedPublicationIdentity: approvedScopeHash,
+        producer: "run-issue-workflow",
+        stage: "run",
+        issueId: null,
+      }).key,
+      specId,
+      approvedScopeHash,
+      target,
+      classification,
+      decompositionIdentity: classification === "MULTI" ? `decomposition:${specId}` : null,
+    };
+  };
+  const runs = {
+    closeA1: runIdentityFor({ repositoryId: repositoryIdA, specId: "91", target: "features/one" }),
+    closeA2: runIdentityFor({ repositoryId: repositoryIdA, specId: "92", target: "features/two" }),
+    closeB: runIdentityFor({ repositoryId: repositoryIdB, specId: "93", target: "features/three" }),
+    executeA: runIdentityFor({
+      repositoryId: repositoryIdA,
+      specId: "94",
+      target: "features/four",
+      classification: "MULTI",
+    }),
+    executeB: runIdentityFor({
+      repositoryId: repositoryIdB,
+      specId: "95",
+      target: "features/five",
+      classification: "MULTI",
+    }),
+  };
+  const stores = {
+    closeA1: createRunStore({
+      gitCommonDir: repositoryA.gitCommonDir,
+      coordinatorInstanceId: "installed-coordinator-a1",
+    }),
+    closeA2: createRunStore({
+      gitCommonDir: repositoryA.gitCommonDir,
+      coordinatorInstanceId: "installed-coordinator-a2",
+    }),
+    closeB: createRunStore({
+      gitCommonDir: repositoryB.gitCommonDir,
+      coordinatorInstanceId: "installed-coordinator-b",
+    }),
+    leafA1: createRunStore({
+      gitCommonDir: repositoryA.gitCommonDir,
+      coordinatorInstanceId: "real-close-leaf-a1",
+    }),
+    leafA2: createRunStore({
+      gitCommonDir: repositoryA.gitCommonDir,
+      coordinatorInstanceId: "real-close-leaf-a2",
+    }),
+    leafB: createRunStore({
+      gitCommonDir: repositoryB.gitCommonDir,
+      coordinatorInstanceId: "real-close-leaf-b",
+    }),
+    executeA: createRunStore({
+      gitCommonDir: repositoryA.gitCommonDir,
+      coordinatorInstanceId: "installed-execute-a",
+    }),
+    executeB: createRunStore({
+      gitCommonDir: repositoryB.gitCommonDir,
+      coordinatorInstanceId: "installed-execute-b",
+    }),
+  };
+  const trace = [];
+  let releaseHeldLeaves;
+  const heldLeavesReleased = new Promise((resolve) => { releaseHeldLeaves = resolve; });
+  const acquired = {};
+  const acquiredPromises = {};
+  for (const label of ["closeA1", "closeB"]) {
+    acquiredPromises[label] = new Promise((resolve) => { acquired[label] = resolve; });
+  }
+
+  const createCloseHarness = ({
+    label,
+    store,
+    leafStore,
+    runIdentity,
+    repositoryId,
+    issueId,
+    holdLeaf = false,
+    sleep = async () => {},
+  }) => {
+    const taskRef = { threadId: `thread-${issueId}`, hostId: "local" };
+    const seed = store.acquireWriter(runIdentity.runId);
+    seed.append({
+      type: "grant.recorded",
+      at: "2026-09-04T00:00:00.000Z",
+      runIdentity,
+      maxParallel: 1,
+    });
+    seed.append({
+      type: "dispatch.recorded",
+      at: "2026-09-04T00:00:01.000Z",
+      issueId,
+      attempt: 1,
+      taskRef,
+    });
+    seed.release();
+    const model = {
+      trackerState: "OPEN",
+      taskState: "NONE",
+      completionState: "COMPLETE",
+      candidateReachable: false,
+      worktreeState: "PRESENT",
+      closeAccepted: false,
+      closeRequestIdentity: null,
+    };
+    let leafLeases = null;
+    let closeMessages = 0;
+    let trackerReads = 0;
+    let trackerReadsAtMessage = null;
+    let second = 2;
+    const now = () => new Date(Date.UTC(2026, 8, 4, 0, 0, second++)).toISOString();
+    const coordinatorStore = {
+      ...store,
+      acquireRepositoryCloseLease() {
+        throw new Error("the installed coordinator must not acquire the repository close lease");
+      },
+      acquireTargetMutationWriter() {
+        throw new Error("the installed coordinator must not acquire the target mutation writer");
+      },
+    };
+    const tracker = {
+      async read() {
+        trackerReads += 1;
+        return { issueId, state: model.trackerState };
+      },
+    };
+    const tasks = {
+      async findIssueLane() { return [taskRef]; },
+      async create() { throw new Error("completed Issue must reuse its installed lane"); },
+      async read() {
+        return {
+          state: "SETTLED",
+          closeRequest: model.closeAccepted
+            ? {
+                state: "ACCEPTED",
+                runId: runIdentity.runId,
+                issueId,
+                requestIdentity: model.closeRequestIdentity,
+              }
+            : null,
+        };
+      },
+      async message(_taskRef, prompt) {
+        closeMessages += 1;
+        trackerReadsAtMessage = trackerReads;
+        assert.match(prompt, new RegExp(`\\$close-issue.*${issueId}`, "u"));
+        assert.match(prompt, new RegExp(`"target":"${runIdentity.target}"`, "u"));
+        assert.match(prompt, /"completionState":"COMPLETE"/u);
+        assert.match(prompt, /"worktreeState":"PRESENT"/u);
+        model.closeRequestIdentity = closeRequestIdentityFrom(prompt);
+        leafLeases = acquireCloseIssueLeases({
+          store: leafStore,
+          target: runIdentity.target,
+          repositoryId,
+          specId: runIdentity.specId,
+          approvedPublicationIdentity: runIdentity.approvedScopeHash,
+          issueId,
+        });
+        trace.push({
+          event: "acquire",
+          label,
+          at: now(),
+          operationId: leafLeases.operationId,
+          repositoryLeaseOwner: leafStore.observeRepositoryCloseLease().owner,
+          targetWriterOperationId: leafStore.readTargetMutationWriterLock(runIdentity.target)?.operationId ?? null,
+        });
+        acquired[label]?.();
+        model.closeAccepted = true;
+      },
+      async wait() {
+        if (holdLeaf) await heldLeavesReleased;
+        model.trackerState = "CLOSED";
+        model.candidateReachable = true;
+        model.worktreeState = "ABSENT";
+        assert.equal(leafLeases.assertCurrent(), true);
+        trace.push({
+          event: "release",
+          label,
+          at: now(),
+          operationId: leafLeases.operationId,
+          repositoryLeaseOwner: leafStore.observeRepositoryCloseLease().owner,
+          targetWriterOperationId: leafStore.readTargetMutationWriterLock(runIdentity.target)?.operationId ?? null,
+        });
+        leafLeases.release();
+        leafLeases = null;
+        return {
+          coordinatorActive: true,
+          taskSettled: true,
+          closeRequestIdentity: model.closeRequestIdentity,
+        };
+      },
+    };
+    const reconcile = async ({ journal }) => {
+      const repositoryLease = store.observeRepositoryCloseLease();
+      return {
+        runIdentity,
+        grant: { runIdentity, maxParallel: 1 },
+        planningSeal: selectedPlanningSeal,
+        runReadyHandoff: readyHandoffFor(runIdentity),
+        taskRefs: { [issueId]: taskRef },
+        facts: {
+          schema: "dag-run-facts:v1",
+          run: {
+            ...runIdentity,
+            reconciled: true,
+            trackerAvailable: true,
+            targetState: "CLEAN",
+            targetHead: "a".repeat(40),
+            repositoryCloseLeaseOperationId: repositoryLease.owner?.operationId ?? null,
+            repositoryCloseLeaseState: repositoryLease.state === "ABSENT" ? "ABSENT" : "ACTIVE",
+            repositoryCloseLeaseHealth: repositoryLease.state === "ABSENT" ? null : "HEALTHY",
+            repositoryCloseLeaseOwner: repositoryLease.owner,
+            closeWriterRunId: null,
+            closeWriterState: "ABSENT",
+            parentTrackerState: "OPEN",
+            parentTrackerIdentity: null,
+          },
+          nodes: [withCloseAuthorityEvidence({ issueId, blockers: [], ...model })],
+          contradictions: [],
+        },
+      };
+    };
+    const runtime = () => createWorkflowRuntime({
+      store: coordinatorStore,
+      tracker,
+      tasks,
+      reconcile,
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now,
+      sleep,
+    });
+    return {
+      runtime,
+      snapshot: () => ({ closeMessages, trackerReads, trackerReadsAtMessage, leafLeases }),
+      release: () => leafLeases?.release(),
+    };
+  };
+
+  const createExecutionHarness = ({ store, runIdentity, issueIds, maxParallel }) => {
+    const model = new Map(issueIds.map((issueId) => [issueId, "NONE"]));
+    const created = [];
+    const runtime = createWorkflowRuntime({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks: {
+        async findIssueLane() { return []; },
+        async create({ issueId }) {
+          created.push(issueId);
+          model.set(issueId, "DISPATCHED");
+          return { threadId: `thread-${issueId}`, hostId: "local" };
+        },
+        async read() { return { state: "RUNNING" }; },
+        async message() { throw new Error("execution-only Run must not request closeout"); },
+        async wait() { return { coordinatorActive: false, taskSettled: false }; },
+      },
+      reconcile: async ({ journal }) => {
+        const repositoryLease = store.observeRepositoryCloseLease();
+        return {
+          runIdentity,
+          grant: { runIdentity, maxParallel },
+          planningSeal: selectedPlanningSeal,
+          runReadyHandoff: readyHandoffFor(runIdentity),
+          taskRefs: Object.fromEntries(journal
+            .filter(({ type }) => type === "dispatch.recorded")
+            .map(({ issueId, taskRef }) => [issueId, taskRef])),
+          facts: {
+            schema: "dag-run-facts:v1",
+            run: {
+              ...runIdentity,
+              reconciled: true,
+              trackerAvailable: true,
+              targetState: "CLEAN",
+              targetHead: "a".repeat(40),
+              repositoryCloseLeaseOperationId: repositoryLease.owner?.operationId ?? null,
+              repositoryCloseLeaseState: repositoryLease.state === "ABSENT" ? "ABSENT" : "ACTIVE",
+              repositoryCloseLeaseHealth: repositoryLease.state === "ABSENT" ? null : "HEALTHY",
+              repositoryCloseLeaseOwner: repositoryLease.owner,
+              closeWriterRunId: null,
+              closeWriterState: "ABSENT",
+              parentTrackerState: "OPEN",
+              parentTrackerIdentity: `github-issue:${runIdentity.specId}:version:1`,
+            },
+            nodes: issueIds.map((issueId) => ({
+              issueId,
+              blockers: [],
+              trackerState: "OPEN",
+              taskState: model.get(issueId),
+              completionState: "NONE",
+              candidateReachable: false,
+              worktreeState: model.get(issueId) === "NONE" ? "ABSENT" : "PRESENT",
+            })),
+            contradictions: [],
+          },
+        };
+      },
+      browser: { async open() {} },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-04T00:01:00.000Z",
+      sleep: async () => {},
+    });
+    return { runtime, created };
+  };
+
+  let closeA1;
+  let closeA2;
+  let closeB;
+  try {
+    closeA1 = createCloseHarness({
+      label: "closeA1",
+      store: stores.closeA1,
+      leafStore: stores.leafA1,
+      runIdentity: runs.closeA1,
+      repositoryId: repositoryIdA,
+      issueId: "91",
+      holdLeaf: true,
+    });
+    let closeA2SleepCalls = 0;
+    closeA2 = createCloseHarness({
+      label: "closeA2",
+      store: stores.closeA2,
+      leafStore: stores.leafA2,
+      runIdentity: runs.closeA2,
+      repositoryId: repositoryIdA,
+      issueId: "92",
+      sleep: async () => { closeA2SleepCalls += 1; },
+    });
+    closeB = createCloseHarness({
+      label: "closeB",
+      store: stores.closeB,
+      leafStore: stores.leafB,
+      runIdentity: runs.closeB,
+      repositoryId: repositoryIdB,
+      issueId: "93",
+      holdLeaf: true,
+    });
+    const executionA = createExecutionHarness({
+      store: stores.executeA,
+      runIdentity: runs.executeA,
+      issueIds: ["941", "942"],
+      maxParallel: 1,
+    });
+    const executionB = createExecutionHarness({
+      store: stores.executeB,
+      runIdentity: runs.executeB,
+      issueIds: ["951", "952", "953"],
+      maxParallel: 2,
+    });
+
+    const heldClosePromises = {
+      closeA1: closeA1.runtime().run({ specId: runs.closeA1.specId, cleanupPreview: true }),
+      closeB: closeB.runtime().run({ specId: runs.closeB.specId, cleanupPreview: true }),
+    };
+    const acquisitionOrFailure = (label) => Promise.race([
+      acquiredPromises[label],
+      heldClosePromises[label].then(() => {
+        throw new Error(`${label} settled before acquiring its close leases`);
+      }),
+    ]);
+    await Promise.all([acquisitionOrFailure("closeA1"), acquisitionOrFailure("closeB")]);
+    assert.notEqual(
+      stores.closeA1.observeRepositoryCloseLease().state,
+      "ABSENT",
+      "different Git common directories overlap while both real leaves hold authority",
+    );
+    assert.notEqual(stores.closeB.observeRepositoryCloseLease().state, "ABSENT");
+    assert.equal(
+      stores.closeA1.observeRepositoryCloseLease().owner.coordinatorInstanceId,
+      "real-close-leaf-a1",
+    );
+    assert.equal(
+      stores.closeB.observeRepositoryCloseLease().owner.coordinatorInstanceId,
+      "real-close-leaf-b",
+    );
+
+    const [blockedCloseA2, executionResultA, executionResultB] = await Promise.all([
+      closeA2.runtime().run({ specId: runs.closeA2.specId, cleanupPreview: true }),
+      executionA.runtime.run({ specId: runs.executeA.specId, cleanupPreview: true }),
+      executionB.runtime.run({ specId: runs.executeB.specId, cleanupPreview: true }),
+    ]);
+    const readsAfterTimeout = closeA2.snapshot().trackerReads;
+
+    assert.equal(blockedCloseA2.status.run.state, "BLOCKED");
+    assert.equal(blockedCloseA2.status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_timeout");
+    assert.equal(blockedCloseA2.status.nodes[0].task.retryCount, 0);
+    assert.equal(closeA2.snapshot().closeMessages, 0);
+    assert.equal(closeA2SleepCalls, 30);
+    assert.equal(executionResultA.status.run.maxParallel, 1);
+    assert.equal(executionResultB.status.run.maxParallel, 2);
+    assert.deepEqual(executionA.created, ["941"]);
+    assert.deepEqual(executionB.created, ["951", "952"]);
+
+    releaseHeldLeaves();
+    const [closedA1, closedB] = await Promise.all([
+      heldClosePromises.closeA1,
+      heldClosePromises.closeB,
+    ]);
+    assert.equal(closedA1.status.run.state, "SUCCEEDED");
+    assert.equal(closedB.status.run.state, "SUCCEEDED");
+
+    const resumedCloseA2 = await closeA2.runtime().run({
+      specId: runs.closeA2.specId,
+      cleanupPreview: true,
+    });
+    assert.equal(resumedCloseA2.status.run.state, "SUCCEEDED");
+    assert.equal(
+      resumedCloseA2.status.run.runId,
+      blockedCloseA2.status.run.runId,
+      "the same command reuses the Run identity after fresh evidence",
+    );
+    assert.ok(closeA2.snapshot().trackerReadsAtMessage > readsAfterTimeout);
+    assert.equal(closeA2.snapshot().closeMessages, 1);
+    assert.deepEqual(new Set(resumedCloseA2.journal
+      .filter(({ type }) => type === "grant.recorded")
+      .map(({ runIdentity }) => runIdentity.runId)), new Set([runs.closeA2.runId]));
+    assert.ok(
+      trace.findIndex(({ event, label }) => event === "release" && label === "closeA1")
+        < trace.findIndex(({ event, label }) => event === "acquire" && label === "closeA2"),
+      "different targets in the same Git common directory acquire in legal order",
+    );
+    const operationIds = trace
+      .filter(({ event }) => event === "acquire")
+      .map(({ operationId }) => operationId);
+    assert.equal(new Set(operationIds).size, 3, "different repository, Spec, and Issue inputs keep distinct operationId values");
+    for (const event of trace.filter(({ event }) => event === "acquire")) {
+      assert.match(event.at, /^2026-09-04T/u);
+      assert.equal(event.repositoryLeaseOwner.operationId, event.operationId);
+      assert.match(event.repositoryLeaseOwner.coordinatorInstanceId, /^real-close-leaf-/u);
+      assert.equal(event.targetWriterOperationId, event.operationId);
+    }
+    assert.deepEqual(stores.closeA1.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(stores.closeA2.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.deepEqual(stores.closeB.observeRepositoryCloseLease(), { state: "ABSENT", owner: null });
+    assert.equal(stores.closeA1.readTargetMutationWriterLock(runs.closeA1.target), null);
+    assert.equal(stores.closeA2.readTargetMutationWriterLock(runs.closeA2.target), null);
+    assert.equal(stores.closeB.readTargetMutationWriterLock(runs.closeB.target), null);
+  } finally {
+    closeA1?.release();
+    closeA2?.release();
+    closeB?.release();
+    releaseHeldLeaves?.();
+    rmSync(repositoryA.root, { recursive: true, force: true });
+    rmSync(repositoryB.root, { recursive: true, force: true });
+  }
+});
+
 test("end-to-end closeout contention uses repository close wait and refreshes evidence before the real close leaf", async () => {
   const { root, store } = createStoreFixture();
   const competitor = store.acquireRepositoryCloseLease({

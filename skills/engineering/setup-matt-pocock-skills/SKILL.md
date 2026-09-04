@@ -11,7 +11,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
-- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, and separately installed producer/Run adapter seams
+- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, and separately installed producer/Run adapter seams
 
 This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
 

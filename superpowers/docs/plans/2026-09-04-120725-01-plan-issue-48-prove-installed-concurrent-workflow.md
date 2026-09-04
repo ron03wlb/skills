@@ -1,0 +1,19 @@
+# Prove the installed concurrent workflow at real seams
+
+**Goal:** Add one focused installed-route proof that demonstrates per-Run execution concurrency, repository-scoped close serialization, cross-repository close overlap, deterministic retry identity, and recoverable close contention through the real filesystem stores and close leaf.
+**Why planning is required:** Issue #48 changes High-risk concurrency and workflow-contract verification whose false positives could authorize overlapping Git closeout mutation or hide stalled Issue execution.
+**Acceptance:** The Issue target, Planning Seal, blockers, and dedicated worktree remain exact; tests exercise only the published installed coordinator, filesystem stores, and `close-issue` lease boundary; same-repository close leaves never overlap while different repositories can; each Run retains its own `max_parallel`; a bounded wait consumes no Issue retry or execution slot and the same command resumes only after fresh evidence; deterministic identities neither collide nor duplicate work; affected public diagnostics and contract surfaces agree; every test-first slice, final focused and full suite, both review axes, diff inspection, clean worktree, and completion-note read-back pass. Any scope, target, ownership, Planning Seal, tracker, or baseline drift stops without integration, close, push, or deploy.
+
+### Outcome 1: Prove real installed concurrency boundaries
+- Work: Extend the end-to-end workflow test with temporary Git repositories, filesystem-backed stores, installed runtime composition, and the real `close-issue` lease adapter. Observe coordinator requests, lease ownership intervals, dispatch counters, and settlement order for different targets in one repository and an independent repository.
+- Risks/open questions: Keep the proof at public adapters and observable state; do not reproduce coordinator or lease validation logic in the fixture or build a combinatorial scenario matrix.
+- Verify: `rtk node --test --test-name-pattern="installed route.*real close leaf|same repository|different repositories|two Spec Runs" tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs`
+
+### Outcome 2: Prove deterministic recovery without consuming execution capacity
+- Work: Exercise a bounded repository-close timeout and same-command resume against the exact Run identity, with fresh tracker, target, candidate, completion, worktree, control, and Grant read-back. Assert that concurrent ready Issues still dispatch within their own Run limits and that timeout adds neither Issue retry nor duplicate close request.
+- Verify: `rtk node --test --test-name-pattern="deterministic identity|close timeout|same-command resume|real close leaf" tests/ron-workflow/run-issue-workflow-core.test.mjs tests/ron-workflow/run-issue-workflow-coordinator.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs`
+
+### Outcome 3: Keep installed contracts coherent and complete the evidence gate
+- Work: Extend Skill-contract and setup-diagnostic coverage only where the new proof exposes a missing owner or observable seam; verify installed junction targets without repairing them; review the baseline-to-candidate diff along independent Standards and Spec axes and repair only confirmed in-scope findings.
+- Risks/open questions: Personal `run-issue-workflow` remains outside promoted docs/plugin packaging, and this Issue must not move authority between Skills or add a global execution pool, durable close queue, scheduler, push, or deployment behavior.
+- Verify: `rtk node --test tests/ron-workflow/run-issue-workflow-core.test.mjs tests/ron-workflow/run-issue-workflow-coordinator.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs tests/ron-workflow/skill-contracts.test.mjs`, `rtk node --test tests/ron-workflow/*.test.mjs`, and `rtk git diff --check`
