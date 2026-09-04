@@ -3114,9 +3114,12 @@ test("installed route proof uses real close leaves and filesystem stores across 
   const scenario = endToEndTests.slice(start, end);
   for (const requiredSeam of [
     "createStoreFixture",
-    "createRunStore",
-    "createWorkflowRuntime",
-    "acquireCloseIssueLeases",
+    "symlinkSync",
+    "realpathSync",
+    "pathToFileURL",
+    "createInstalledRunStore",
+    "createInstalledWorkflowRuntime",
+    "acquireInstalledCloseIssueLeases",
     "Promise.all",
     "maxParallel",
     "repository_close_lease_wait_timeout",

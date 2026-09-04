@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import {
@@ -20,7 +21,7 @@ import {
   deriveWorkflowOperationIdentity,
 } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
-const createStoreFixture = () => {
+const createStoreFixture = (createStore = createRunStore) => {
   const root = mkdtempSync(join(tmpdir(), "dag-runtime-"));
   execFileSync("git", ["init", "-b", "features/ron"], { cwd: root, stdio: "ignore" });
   const common = execFileSync("git", ["rev-parse", "--git-common-dir"], {
@@ -28,7 +29,7 @@ const createStoreFixture = () => {
     encoding: "utf8",
   }).trim();
   const gitCommonDir = resolve(root, common);
-  return { root, gitCommonDir, store: createRunStore({ gitCommonDir, coordinatorInstanceId: "runtime-e2e" }) };
+  return { root, gitCommonDir, store: createStore({ gitCommonDir, coordinatorInstanceId: "runtime-e2e" }) };
 };
 
 const identity = {
@@ -180,7 +181,7 @@ const currentReadyHandoffFor = (runIdentity) => {
 const defaultRunReadyHandoffAdapter = {
   async read({ current }) { return current.runReadyHandoff; },
 };
-const createWorkflowRuntime = (options) => {
+const createWorkflowRuntime = (options, runtimeSource = createWorkflowRuntimeSource) => {
   const {
     tracker,
     selector,
@@ -193,7 +194,7 @@ const createWorkflowRuntime = (options) => {
     if (!handoffFacts.has(input.current)) handoffFacts.set(input.current, await handoff.read(input));
     return handoffFacts.get(input.current);
   };
-  return createWorkflowRuntimeSource({
+  return runtimeSource({
     ...runtimeOptions,
     authoritySources: {
       repository: { async readIdentity() { return "github:ron03wlb/skills"; } },
@@ -1451,14 +1452,39 @@ test("installed route composes concurrent Spec operations, Runs, writer wait, an
 });
 
 test("installed route proves real close leaf concurrency and same-command resume recovery", async () => {
-  const repositoryA = createStoreFixture();
-  const repositoryB = createStoreFixture();
+  const installedRoot = mkdtempSync(join(tmpdir(), "installed-workflow-skills-"));
+  const installedTargets = {
+    "close-issue": resolve("skills/engineering/close-issue"),
+    "run-issue-workflow": resolve("skills/personal/run-issue-workflow"),
+  };
+  for (const [name, target] of Object.entries(installedTargets)) {
+    symlinkSync(target, join(installedRoot, name), "junction");
+    const resolvedLink = realpathSync(join(installedRoot, name));
+    const resolvedTarget = realpathSync(target);
+    assert.equal(
+      process.platform === "win32" ? resolvedLink.toLowerCase() : resolvedLink,
+      process.platform === "win32" ? resolvedTarget.toLowerCase() : resolvedTarget,
+      `${name} must resolve through the installed skill link`,
+    );
+  }
+  const [installedCloseLeaf, installedRunStore, installedRunWorkflow, installedOperationIdentity] = await Promise.all([
+    import(pathToFileURL(join(installedRoot, "close-issue/scripts/close-lease.mjs")).href),
+    import(pathToFileURL(join(installedRoot, "run-issue-workflow/scripts/run-store.mjs")).href),
+    import(pathToFileURL(join(installedRoot, "run-issue-workflow/scripts/run-workflow.mjs")).href),
+    import(pathToFileURL(join(installedRoot, "run-issue-workflow/scripts/workflow-operation-identity.mjs")).href),
+  ]);
+  const acquireInstalledCloseIssueLeases = installedCloseLeaf.acquireCloseIssueLeases;
+  const createInstalledRunStore = installedRunStore.createRunStore;
+  const createInstalledWorkflowRuntime = installedRunWorkflow.createWorkflowRuntime;
+  const deriveInstalledWorkflowOperationIdentity = installedOperationIdentity.deriveWorkflowOperationIdentity;
+  const repositoryA = createStoreFixture(createInstalledRunStore);
+  const repositoryB = createStoreFixture(createInstalledRunStore);
   const repositoryIdA = "github:example/installed-a";
   const repositoryIdB = "github:example/installed-b";
   const runIdentityFor = ({ repositoryId, specId, target, classification = "SINGLE" }) => {
     const approvedScopeHash = `sha256:${specId.padStart(64, "0")}`;
     return {
-      runId: deriveWorkflowOperationIdentity({
+      runId: deriveInstalledWorkflowOperationIdentity({
         repositoryId,
         specId,
         approvedPublicationIdentity: approvedScopeHash,
@@ -1491,35 +1517,35 @@ test("installed route proves real close leaf concurrency and same-command resume
     }),
   };
   const stores = {
-    closeA1: createRunStore({
+    closeA1: createInstalledRunStore({
       gitCommonDir: repositoryA.gitCommonDir,
       coordinatorInstanceId: "installed-coordinator-a1",
     }),
-    closeA2: createRunStore({
+    closeA2: createInstalledRunStore({
       gitCommonDir: repositoryA.gitCommonDir,
       coordinatorInstanceId: "installed-coordinator-a2",
     }),
-    closeB: createRunStore({
+    closeB: createInstalledRunStore({
       gitCommonDir: repositoryB.gitCommonDir,
       coordinatorInstanceId: "installed-coordinator-b",
     }),
-    leafA1: createRunStore({
+    leafA1: createInstalledRunStore({
       gitCommonDir: repositoryA.gitCommonDir,
       coordinatorInstanceId: "real-close-leaf-a1",
     }),
-    leafA2: createRunStore({
+    leafA2: createInstalledRunStore({
       gitCommonDir: repositoryA.gitCommonDir,
       coordinatorInstanceId: "real-close-leaf-a2",
     }),
-    leafB: createRunStore({
+    leafB: createInstalledRunStore({
       gitCommonDir: repositoryB.gitCommonDir,
       coordinatorInstanceId: "real-close-leaf-b",
     }),
-    executeA: createRunStore({
+    executeA: createInstalledRunStore({
       gitCommonDir: repositoryA.gitCommonDir,
       coordinatorInstanceId: "installed-execute-a",
     }),
-    executeB: createRunStore({
+    executeB: createInstalledRunStore({
       gitCommonDir: repositoryB.gitCommonDir,
       coordinatorInstanceId: "installed-execute-b",
     }),
@@ -1572,6 +1598,16 @@ test("installed route proves real close leaf concurrency and same-command resume
     let closeMessages = 0;
     let trackerReads = 0;
     let trackerReadsAtMessage = null;
+    const evidenceReads = {
+      tracker: 0,
+      target: 0,
+      candidate: 0,
+      completion: 0,
+      worktree: 0,
+      control: 0,
+      grant: 0,
+    };
+    let evidenceReadsAtMessage = null;
     let second = 2;
     const now = () => new Date(Date.UTC(2026, 8, 4, 0, 0, second++)).toISOString();
     const coordinatorStore = {
@@ -1586,6 +1622,7 @@ test("installed route proves real close leaf concurrency and same-command resume
     const tracker = {
       async read() {
         trackerReads += 1;
+        evidenceReads.tracker += 1;
         return { issueId, state: model.trackerState };
       },
     };
@@ -1608,12 +1645,13 @@ test("installed route proves real close leaf concurrency and same-command resume
       async message(_taskRef, prompt) {
         closeMessages += 1;
         trackerReadsAtMessage = trackerReads;
+        evidenceReadsAtMessage = { ...evidenceReads };
         assert.match(prompt, new RegExp(`\\$close-issue.*${issueId}`, "u"));
         assert.match(prompt, new RegExp(`"target":"${runIdentity.target}"`, "u"));
         assert.match(prompt, /"completionState":"COMPLETE"/u);
         assert.match(prompt, /"worktreeState":"PRESENT"/u);
         model.closeRequestIdentity = closeRequestIdentityFrom(prompt);
-        leafLeases = acquireCloseIssueLeases({
+        leafLeases = acquireInstalledCloseIssueLeases({
           store: leafStore,
           target: runIdentity.target,
           repositoryId,
@@ -1657,6 +1695,19 @@ test("installed route proves real close leaf concurrency and same-command resume
     };
     const reconcile = async ({ journal }) => {
       const repositoryLease = store.observeRepositoryCloseLease();
+      evidenceReads.target += 1;
+      evidenceReads.candidate += 1;
+      evidenceReads.completion += 1;
+      evidenceReads.worktree += 1;
+      evidenceReads.control += 1;
+      const controlRevision = journal.findLast(({ type }) => type === "control.revised")?.revision ?? 0;
+      const recordedGrant = journal.findLast(({ type }) => type === "grant.recorded");
+      assert.equal(controlRevision, 0);
+      if (recordedGrant) {
+        evidenceReads.grant += 1;
+        assert.equal(recordedGrant.runIdentity.runId, runIdentity.runId);
+        assert.equal(recordedGrant.maxParallel, 1);
+      }
       return {
         runIdentity,
         grant: { runIdentity, maxParallel: 1 },
@@ -1694,10 +1745,17 @@ test("installed route proves real close leaf concurrency and same-command resume
       cleanup: { async listRuns() { return []; } },
       now,
       sleep,
-    });
+    }, createInstalledWorkflowRuntime);
     return {
       runtime,
-      snapshot: () => ({ closeMessages, trackerReads, trackerReadsAtMessage, leafLeases }),
+      snapshot: () => ({
+        closeMessages,
+        trackerReads,
+        trackerReadsAtMessage,
+        evidenceReads: { ...evidenceReads },
+        evidenceReadsAtMessage: evidenceReadsAtMessage === null ? null : { ...evidenceReadsAtMessage },
+        leafLeases,
+      }),
       release: () => leafLeases?.release(),
     };
   };
@@ -1763,7 +1821,7 @@ test("installed route proves real close leaf concurrency and same-command resume
       cleanup: { async listRuns() { return []; } },
       now: () => "2026-09-04T00:01:00.000Z",
       sleep: async () => {},
-    });
+    }, createInstalledWorkflowRuntime);
     return { runtime, created };
   };
 
@@ -1844,10 +1902,20 @@ test("installed route proves real close leaf concurrency and same-command resume
       executionB.runtime.run({ specId: runs.executeB.specId, cleanupPreview: true }),
     ]);
     const readsAfterTimeout = closeA2.snapshot().trackerReads;
+    const evidenceReadsAfterTimeout = closeA2.snapshot().evidenceReads;
 
     assert.equal(blockedCloseA2.status.run.state, "BLOCKED");
-    assert.equal(blockedCloseA2.status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_timeout");
+    const timeoutDiagnosis = blockedCloseA2.status.diagnoses.at(-1);
+    assert.equal(timeoutDiagnosis.reasonCode, "repository_close_lease_wait_timeout");
     assert.equal(blockedCloseA2.status.nodes[0].task.retryCount, 0);
+    assert.equal(blockedCloseA2.status.nodes[0].close.completionState, "COMPLETE");
+    assert.equal(blockedCloseA2.status.nodes[0].close.candidateReachable, false);
+    assert.equal(blockedCloseA2.status.nodes[0].close.worktreeState, "PRESENT");
+    const timedOutWait = blockedCloseA2.journal.findLast(({ type }) => type === "repository-close-wait.started");
+    assert.equal(timedOutWait.owner.operationId, trace.find(({ event, label }) => (
+      event === "acquire" && label === "closeA1"
+    )).operationId);
+    assert.match(timeoutDiagnosis.operatorPacket.observedEvidence.join(" "), /repository close lease/iu);
     assert.equal(closeA2.snapshot().closeMessages, 0);
     assert.equal(closeA2SleepCalls, 30);
     assert.equal(executionResultA.status.run.maxParallel, 1);
@@ -1874,6 +1942,12 @@ test("installed route proves real close leaf concurrency and same-command resume
       "the same command reuses the Run identity after fresh evidence",
     );
     assert.ok(closeA2.snapshot().trackerReadsAtMessage > readsAfterTimeout);
+    for (const seam of Object.keys(evidenceReadsAfterTimeout)) {
+      assert.ok(
+        closeA2.snapshot().evidenceReadsAtMessage[seam] > evidenceReadsAfterTimeout[seam],
+        `${seam} evidence must be read again before the resumed close request`,
+      );
+    }
     assert.equal(closeA2.snapshot().closeMessages, 1);
     assert.deepEqual(new Set(resumedCloseA2.journal
       .filter(({ type }) => type === "grant.recorded")
@@ -1906,6 +1980,7 @@ test("installed route proves real close leaf concurrency and same-command resume
     releaseHeldLeaves?.();
     rmSync(repositoryA.root, { recursive: true, force: true });
     rmSync(repositoryB.root, { recursive: true, force: true });
+    rmSync(installedRoot, { recursive: true, force: true });
   }
 });
 
