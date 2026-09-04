@@ -131,6 +131,14 @@ test("moved workflow detail has an exact conditional owner-local reference and s
       detail: "First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt",
     },
     {
+      owner: "skills/engineering/to-tickets/references/decomposition-publication-interfaces.md",
+      detail: "A fresh `to-tickets@v2` operation gets its operation identity receipt",
+    },
+    {
+      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
+      detail: "Its ordered stages are `decomposition.read_back`, `ready_state.read_back`, and `handoff.completed`",
+    },
+    {
       owner: "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
       detail: "A current producer never owns target dirt",
     },
@@ -147,6 +155,13 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     assert.deepEqual(observedOwners, [owner], `${detail} must have exactly one workflow contract owner`);
     assert.equal(read(owner).split(detail).length - 1, 1, `${owner} must singly own ${detail}`);
   }
+
+  const decompositionInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
+  assert.doesNotMatch(
+    decompositionInterfaces,
+    /transaction-v1|to-tickets@v1|frozen exact resume behavior|Its ordered stages are `decomposition\.read_back`, `ready_state\.read_back`, and `handoff\.completed`/isu,
+    "the adapter interface must not duplicate the decomposition contract's profile, compatibility, or ordered-stage rules",
+  );
 });
 
 const createGitFixture = (prefix) => {
@@ -767,7 +782,7 @@ test("to-tickets consumes the completed to-spec handoff through a minimal curren
 
   assert.match(tickets, /completed `to-spec`.*handoff.*producer.*parent.*tracker identity.*target.*Planning Seal.*classification.*approved-scope identity.*publication identity/isu);
   assert.match(tickets, /read.*upstream.*owning source.*once.*never rerun.*generation.*review.*validation/isu);
-  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*repository.*Spec.*producer.*operation identity.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
+  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*owner-derived operation identity receipt.*tracker identity.*profile `v2`.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
   assert.match(tickets, /ordered stages.*`decomposition\.read_back`.*`ready_state\.read_back`.*`handoff\.completed`/isu);
   assert.match(tickets, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
   assert.match(tickets, /existing valid incomplete.*transaction-v1.*`to-tickets@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
@@ -3162,6 +3177,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.equal(existsSync(operatorPath), true);
 
   const skill = readRunIssueWorkflowContract();
+  const skillEntry = read(skillPath);
+  const lifecycle = read("skills/personal/run-issue-workflow/references/coordinator-lifecycle.md");
   const metadata = read(metadataPath);
   const runtime = read(runtimePath);
   const authorityAdapters = read(authorityAdaptersPath);
@@ -3200,6 +3217,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /Never create a duplicate live lane/iu);
   assert.match(skill, /`execute-issue` owns its dedicated Issue worktree/iu);
   assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
+  assert.match(skillEntry, /Release dependants only after the candidate is reachable from the Issue target branch.*exact worktree is absent.*Issue is closed/isu);
+  assert.match(lifecycle, /reacquire.*candidate reachability from the Issue target branch.*Only candidate reachability from the Issue target branch.*release dependants/isu);
   assert.match(skill, /node success.*release dependants/iu);
   assert.match(skill, /All-child node success triggers.*parent-only close/iu);
   assert.match(skill, /close_parent.*same target mutation-writer acquire-or-exact-reclaim seam.*Release only after the parent leaf settles/isu);

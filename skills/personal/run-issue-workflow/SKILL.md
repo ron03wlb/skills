@@ -33,7 +33,7 @@ The happy path is ordered:
 1. Reconcile every tracker, Git/worktree, completion, task, journal, and writer source.
 2. Dispatch dependency-ready Issues without exceeding `max_parallel`; every Issue has one lane, and `execute-issue` owns its dedicated Issue worktree.
 3. Treat valid `implementation_complete` as authority to serialize `close-issue`, not as node success.
-4. Release dependants only after the candidate is reachable, the exact worktree is absent, and the Issue is closed.
+4. Release dependants only after the candidate is reachable from the Issue target branch, the exact worktree is absent, and the Issue is closed.
 5. For Multi-Issue, invoke parent-only close after all-child node success; for Single-Issue, finish after its sole node succeeds.
 
 Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur only through the lifecycle reference and runtime reducers. Use [OPERATOR.md](OPERATOR.md) for invocation, intervention, recovery, and inspection. Examples are display fixtures, never authority.
