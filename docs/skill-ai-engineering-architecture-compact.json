@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Skills for Real Engineers｜AI 工程架構",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/ron03wlb/skills",
+      "revision": "dc44c58f5f006eac1517fe7dc513cf3b6eb5102b"
+    },
+    "viewBox": [1200, 950],
+    "views": [
+      {
+        "id": "engineering-core",
+        "label": "工程主幹",
+        "focus": ["engineer", "agent", "ask_matt", "engineering", "workflow_state", "github_issues"],
+        "note": "需求由 agent 接收，ask-matt 路由至工程 skills，再以工作流狀態與 Issue 進行可追溯交付。"
+      },
+      {
+        "id": "quality-and-context",
+        "label": "品質與脈絡",
+        "focus": ["ask_matt", "productivity", "engineering", "guardrails", "evidence"],
+        "note": "協作 skills 先協助對齊；model-invoked skills 將 TDD、review 與 source evidence 帶入工程路徑。"
+      },
+      {
+        "id": "installation",
+        "label": "安裝方式",
+        "focus": ["agent", "distribution", "target_repo"],
+        "note": "Claude plugin 是受管理 bundle；skills.sh 將可編輯 files 複製至目標 repository。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "engineer",
+      "type": "external",
+      "label": "工程師",
+      "sublabel": "需求、限制與驗收",
+      "pos": [40, 260],
+      "size": [150, 76],
+      "sources": [{ "path": "README.md", "line": 18, "label": "repo purpose" }]
+    },
+    {
+      "id": "agent",
+      "type": "frontend",
+      "label": "Coding Agent",
+      "sublabel": "Claude Code／Codex 等",
+      "pos": [250, 260],
+      "size": [160, 76],
+      "sources": [{ "path": "README.md", "line": 43, "label": "agent installation" }]
+    },
+    {
+      "id": "ask_matt",
+      "type": "backend",
+      "label": "ask-matt",
+      "sublabel": "使用者路由器",
+      "tag": "user-invoked",
+      "pos": [470, 260],
+      "size": [150, 76],
+      "sources": [{ "path": "skills/engineering/ask-matt/SKILL.md", "line": 9, "label": "route contract" }]
+    },
+    {
+      "id": "engineering",
+      "type": "backend",
+      "label": "Engineering skills",
+      "sublabel": "規劃、實作、審查、交付",
+      "tag": "promoted bucket",
+      "pos": [650, 260],
+      "size": [180, 76],
+      "sources": [{ "path": "README.md", "line": 171, "label": "engineering catalog" }]
+    },
+    {
+      "id": "workflow_state",
+      "type": "database",
+      "label": "Planning & workflow state",
+      "sublabel": "Spec、Run handoff、receipts",
+      "pos": [870, 260],
+      "size": [170, 76],
+      "sources": [{ "path": "skills/engineering/ask-matt/SKILL.md", "line": 11, "label": "build flow" }]
+    },
+    {
+      "id": "github_issues",
+      "type": "external",
+      "label": "GitHub Issues",
+      "sublabel": "tracker 與 Issue lifecycle",
+      "pos": [1070, 260],
+      "size": [130, 76],
+      "sources": [{ "path": "CLAUDE.md", "line": 28, "label": "issue tracker" }]
+    },
+    {
+      "id": "productivity",
+      "type": "frontend",
+      "label": "Productivity skills",
+      "sublabel": "對齊、教學、交接、決策",
+      "tag": "promoted bucket",
+      "pos": [460, 455],
+      "size": [180, 76],
+      "sources": [{ "path": "README.md", "line": 208, "label": "productivity catalog" }]
+    },
+    {
+      "id": "guardrails",
+      "type": "security",
+      "label": "Model-invoked discipline",
+      "sublabel": "TDD、review、diagnosis 等",
+      "tag": "reusable guardrails",
+      "pos": [650, 455],
+      "size": [180, 76],
+      "sources": [{ "path": "README.md", "line": 191, "label": "model-invoked catalog" }]
+    },
+    {
+      "id": "evidence",
+      "type": "database",
+      "label": "Evidence & source docs",
+      "sublabel": "CONTEXT.md、ADR、tests",
+      "pos": [870, 455],
+      "size": [170, 76],
+      "sources": [{ "path": "CLAUDE.md", "line": 36, "label": "domain docs" }]
+    },
+    {
+      "id": "distribution",
+      "type": "cloud",
+      "label": "安裝選項",
+      "sublabel": "Claude plugin 或 skills.sh",
+      "pos": [250, 820],
+      "size": [190, 76],
+      "sources": [{ "path": ".claude-plugin/plugin.json", "line": 1, "label": "plugin manifest" }]
+    },
+    {
+      "id": "target_repo",
+      "type": "external",
+      "label": "目標 Repository",
+      "sublabel": "agent 設定與實際工程工作",
+      "pos": [530, 820],
+      "size": [190, 76],
+      "sources": [{ "path": "README.md", "line": 57, "label": "per-repo setup" }]
+    }
+  ],
+  "connections": [
+    { "id": "engineer-to-agent", "from": "engineer", "to": "agent", "label": "需求與驗收", "labelAt": [220, 245], "variant": "emphasis" },
+    { "id": "agent-to-router", "from": "agent", "to": "ask_matt", "label": "挑選能力", "labelAt": [440, 245] },
+    { "id": "router-to-engineering", "from": "ask_matt", "to": "engineering", "label": "工程工作", "labelAt": [650, 245] },
+    { "id": "router-to-productivity", "from": "ask_matt", "to": "productivity", "label": "協作／學習", "labelAt": [590, 400], "fromSide": "bottom", "toSide": "top" },
+    { "id": "engineering-to-state", "from": "engineering", "to": "workflow_state", "label": "receipt", "labelAt": [850, 245] },
+    { "id": "state-to-issues", "from": "workflow_state", "to": "github_issues", "variant": "emphasis" },
+    { "id": "engineering-to-guardrails", "from": "engineering", "to": "guardrails", "label": "TDD／review", "labelAt": [825, 400], "variant": "security", "fromSide": "bottom", "toSide": "top" },
+    { "id": "guardrails-to-evidence", "from": "guardrails", "to": "evidence", "label": "source + tests", "labelAt": [890, 435], "variant": "security" },
+    { "id": "state-to-evidence", "from": "workflow_state", "to": "evidence", "label": "workflow evidence", "labelAt": [1150, 400], "fromSide": "bottom", "toSide": "top", "variant": "dashed" },
+    { "id": "agent-to-distribution", "from": "agent", "to": "distribution", "label": "安裝選項", "labelAt": [390, 560], "fromSide": "bottom", "toSide": "top", "variant": "dashed" },
+    { "id": "distribution-to-target", "from": "distribution", "to": "target_repo", "label": "plugin 或 skills.sh", "labelAt": [485, 800], "variant": "emphasis" }
+  ]
+}
