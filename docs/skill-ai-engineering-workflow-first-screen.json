@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Skills for Real Engineers｜AI 工程工作流程",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "viewBox": [1120, 580],
+    "views": [
+      {
+        "id": "standard-delivery",
+        "label": "標準交付路徑",
+        "focus": ["request", "ask_matt", "align", "to_spec", "execute", "close", "verify", "push"],
+        "note": "從工程需求進入，經過對齊、Spec、Issue 執行、closeout、驗證到安全 push。"
+      },
+      {
+        "id": "planning",
+        "label": "先對齊，再實作",
+        "focus": ["request", "ask_matt", "align", "to_spec"],
+        "note": "ask-matt 只負責路由；grill 和 to-spec 先收斂需求與執行邊界。"
+      },
+      {
+        "id": "evidence-gate",
+        "label": "品質與證據閘門",
+        "focus": ["execute", "close", "verify", "push"],
+        "note": "精確 candidate、aggregation verification 與 remote read-back 讓交付可被追溯。"
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "engineer", "label": "工程師" },
+    { "id": "agent", "label": "User-invoked 路由與工程執行" },
+    { "id": "delivery", "label": "交付與證據" }
+  ],
+  "phases": [
+    { "id": "intake", "label": "理解需求", "fromCol": 0, "toCol": 1 },
+    { "id": "planning", "label": "對齊與規劃", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "delivery-phase", "label": "執行、驗證、交付", "fromCol": 4, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["request", "ask_matt", "align", "to_spec", "execute", "close", "verify", "push"],
+  "semanticChecks": {
+    "allowedRoots": ["request"],
+    "allowedTerminals": ["push"],
+    "requiredPaths": [
+      { "from": "request", "to": "push" },
+      { "from": "to_spec", "to": "close" },
+      { "from": "execute", "to": "verify" }
+    ]
+  },
+  "nodes": [
+    { "id": "request", "lane": "engineer", "col": 0, "type": "external", "label": "工程需求", "sublabel": "約束與驗收", "tag": "human intent", "width": 132 },
+    { "id": "ask_matt", "lane": "agent", "col": 1, "type": "frontend", "label": "/ask-matt", "sublabel": "route", "tag": "router", "width": 132 },
+    { "id": "align", "lane": "agent", "col": 2, "type": "backend", "label": "對齊需求", "sublabel": "settle intent", "tag": "grill", "width": 132 },
+    { "id": "to_spec", "lane": "agent", "col": 3, "type": "backend", "label": "/to-spec", "sublabel": "Seal + command", "tag": "classify scope", "width": 132 },
+    { "id": "execute", "lane": "agent", "col": 4, "type": "backend", "label": "/execute-issue", "sublabel": "build + verify", "tag": "exact Issue leaf", "width": 132 },
+    { "id": "close", "lane": "delivery", "col": 4, "type": "backend", "label": "/close-issue", "sublabel": "integrate + close", "tag": "idempotent closeout", "width": 132 },
+    { "id": "verify", "lane": "delivery", "col": 5, "type": "security", "label": "/verify-target", "sublabel": "review → ready", "tag": "evidence gate", "width": 132 },
+    { "id": "push", "lane": "engineer", "col": 5, "type": "cloud", "label": "/push-target", "sublabel": "remote read-back", "tag": "published", "width": 132 }
+  ],
+  "edges": [
+    { "id": "request-router", "from": "request", "to": "ask_matt", "label": "route", "variant": "emphasis", "role": "main" },
+    { "id": "router-align", "from": "ask_matt", "to": "align", "label": "align", "variant": "default", "role": "main" },
+    { "id": "align-spec", "from": "align", "to": "to_spec", "label": "context", "variant": "emphasis", "role": "main" },
+    { "id": "spec-execute", "from": "to_spec", "to": "execute", "label": "Run", "variant": "emphasis", "role": "main" },
+    { "id": "execute-close", "from": "execute", "to": "close", "label": "candidate", "variant": "default", "role": "main" },
+    { "id": "close-verify", "from": "close", "to": "verify", "label": "target", "variant": "emphasis", "role": "main" },
+    { "id": "verify-push", "from": "verify", "to": "push", "label": "ready", "variant": "emphasis", "role": "main" }
+  ]
+}
