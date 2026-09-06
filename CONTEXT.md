@@ -18,6 +18,24 @@ A `wayfinder` unit — a child **Issue** of a `wayfinder:map` holding a *questio
 **Triage role**:
 A canonical state-machine label applied to an **Issue** during triage (e.g. `needs-triage`, `ready-for-afk`). Each role maps to a real label string in the **Issue tracker** via `docs/agents/triage-labels.md`.
 
+### Needs clarification
+
+**Needs Goal**:
+The user-confirmed outcome that a needs clarification seeks, together with observable success criteria and material constraints. A proposed solution or activity is not itself the goal, and an agent's suggested goal revision remains unconfirmed until the user accepts it.
+_Avoid_: Requested feature as goal, agent-inferred true need, silently revised objective
+
+**Proposal Logic Chain**:
+The explicit reasoning that connects a proposed action through intermediate changes to a **Needs Goal**. Material links distinguish supporting facts, user preferences, and unverified assumptions rather than treating a plausible explanation as established causation.
+_Avoid_: Feature list, proof by assertion, hidden dependency
+
+**Fundamental Alternative**:
+A candidate way to reach the same **Needs Goal** by addressing an upstream cause or removing an unnecessary intermediate step in a **Proposal Logic Chain**. Being more direct is a hypothesis to compare against the same success criteria and constraints, not evidence that the candidate is better.
+_Avoid_: More abstract proposal, presumed root cause, agent-selected replacement goal
+
+**Needs Summary**:
+The conversation's reviewable account of the problem, **Needs Goal**, users and scenarios, scope, constraints, success criteria, **Proposal Logic Chain**, assumptions, alternatives, selection rationale, and unresolved questions with proposed validation. User confirmation establishes shared understanding; the summary is neither a **Tracker Spec** nor authority to execute work.
+_Avoid_: Executable contract, implementation approval, unqualified readiness claim
+
 ### Understanding calibration
 
 **Evidence Set**:
