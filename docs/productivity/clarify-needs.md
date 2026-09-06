@@ -17,7 +17,7 @@ Type `/clarify-needs`, or the [agent](https://www.aihero.dev/ai-coding-dictionar
 
 A Proposal Logic Chain makes the connection from action to goal visible. If you propose a reminder bot to prevent missed decisions, it asks what reminders would change and what supports that link. A sample in which four of five missed decisions lack an owner suggests an upstream hypothesis; it does not prove the cause.
 
-A Fundamental Alternative might use an owner-and-decision convention in your existing tool. Both options face the same success criteria and limits, such as asynchronous work without paid tools or after-hours notifications. A more direct approach still has trade-offs. New evidence or a changed goal reopens the relevant reasoning, while settled answers carry forward.
+A Fundamental Alternative might use an owner-and-decision convention in your existing tool. Both options face the same success criteria and constraints, such as no paid tools or after-hours notifications, while accounting for preferences such as asynchronous work. A more direct approach still has trade-offs. New evidence or a changed goal reopens the relevant reasoning, while settled answers carry forward.
 
 ## It's working if
 

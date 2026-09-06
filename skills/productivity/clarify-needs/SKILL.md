@@ -15,7 +15,7 @@ Advance one important decision per turn. Ask only about gaps that could material
 
 ## Examine the Proposal Logic Chain
 
-For each major proposal under comparison, show a concise **Proposal Logic Chain**: action → intermediate change → problem improvement → Needs Goal. At material links, distinguish supporting facts, user preferences, and unverified assumptions. A correlation, missing evidence, or plausible story leaves causation unproved.
+For each major proposal under comparison, show a concise **Proposal Logic Chain**: action → intermediate change → problem improvement → Needs Goal. At material links, distinguish supporting facts, user preferences, and unverified assumptions. Keep preferences negotiable unless the user explicitly confirms them as hard constraints, including when summarizing or comparing options. A correlation, missing evidence, or plausible story leaves causation unproved.
 
 Recheck first principles when a proposal forms, a contradiction appears, new evidence arrives, and before settling the summary. Examine which links are necessary, which intermediate steps could disappear, what upstream cause might explain the problem, and whether a constraint is only an existing practice. Keep root-cause hypotheses open to counterexamples.
 
