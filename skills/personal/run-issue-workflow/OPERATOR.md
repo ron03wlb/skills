@@ -26,6 +26,8 @@ For an explicitly approved installation, use `scripts/install-workflow.mjs <trus
 
 Start through the resolved public skill's `scripts/installed-entry.mjs` using [the active host driver](references/codex-host-driver.md). The Grant records that package version. A later global update leaves ongoing Runs on their original retained version. Unavailable or modified content returns recovery information without changing the Run or installing anything. An old Run without proven version information stays preserved for compatibility reconciliation.
 
+Abrupt installer termination can leave its installation lock. The same command reports the exact preserved lock path before any mutation. Prove no active installer owns it, preserve and move only that lock aside, then retry the identical installation. The retry validates any durable pending intent and retained package; unknown ownership or content stays preserved. This operator repair is separate from Run, repository-close and target-writer leases, which installation never reclaims.
+
 The driver carries tool results without printing full task histories into the model context. Final evidence includes available command/tool counts and elapsed time; token usage and unobserved human intervention counts remain `unavailable`. Tests with substituted CLI or host responses are local component evidence only. A delivery baseline requires actual installed-entry Git, tracker and task read-back.
 
 ## Read the panel

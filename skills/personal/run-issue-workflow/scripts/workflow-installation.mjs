@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
-  existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
-  realpathSync, renameSync, rmSync, symlinkSync, writeFileSync,
+  existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
+  realpathSync, renameSync, rmSync, rmdirSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -152,11 +152,16 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   for (const required of [`${skillPath}/SKILL.md`, `${skillPath}/scripts/installed-entry.mjs`]) {
     if (!files.some(({ path }) => path === required)) throw new Error(`Workflow package lacks ${required}`);
   }
-  mkdirSync(join(cacheDirectory, "versions"), { recursive: true });
+  const versionsDirectory = join(cacheDirectory, "versions");
+  const createdVersionsDirectory = !existsSync(versionsDirectory);
   const staging = join(cacheDirectory, `prepare-${randomUUID()}`);
-  mkdirSync(staging);
+  const pendingPreparation = join(cacheDirectory, `installation-pending.${randomUUID()}`);
   let backup = null;
+  let createdRoot = null;
+  let pendingWritten = false;
   try {
+    mkdirSync(versionsDirectory, { recursive: true });
+    mkdirSync(staging);
     const archive = execFileSync("git", ["-C", sourceRepository, "archive", sourceCommit, "skills"], { maxBuffer: 32 * 1024 * 1024 });
     execFileSync("tar", ["-x", "-C", staging], { input: archive });
     for (const file of files) file.sha256 = sha256(readFileSync(join(staging, file.path)));
@@ -165,13 +170,15 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     const root = join(cacheDirectory, "versions", id);
     writeFileSync(join(staging, ".workflow-version.json"), `${JSON.stringify({ schema: "codex-workflow-version:v1", version, files })}\n`);
     if (existsSync(root)) verifyPackage(root, version);
-    else renameSync(staging, root);
+    else { renameSync(staging, root); createdRoot = root; }
     mkdirSync(dirname(skillDirectory), { recursive: true });
     if (previousTarget !== null && resolve(dirname(skillDirectory), readlinkSync(skillDirectory)) !== previousTarget) {
       throw new Error("Installed link changed during installation");
     }
     backup = previousTarget === null ? null : `${skillDirectory}.before-${randomUUID()}`;
-    writeFileSync(recoveryPath, `${JSON.stringify({ skillDirectory, previousTarget, backup, previousCurrent: catalog.current, version, root })}\n`, { flag: "wx", mode: 0o600 });
+    writeFileSync(pendingPreparation, `${JSON.stringify({ skillDirectory, previousTarget, backup, previousCurrent: catalog.current, version, root })}\n`, { flag: "wx", mode: 0o600 });
+    linkSync(pendingPreparation, recoveryPath); // Publish a complete intent exclusively.
+    pendingWritten = true;
     if (previousTarget !== null) {
       renameSync(skillDirectory, backup);
     }
@@ -197,13 +204,23 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     throw error;
   } finally {
     rmSync(staging, { recursive: true, force: true });
+    rmSync(pendingPreparation, { force: true });
+    // Before durable intent, only this invocation's unpublished preparation can be removed.
+    if (!pendingWritten && !existsSync(recoveryPath)) {
+      if (createdRoot) rmSync(createdRoot, { recursive: true });
+      if (createdVersionsDirectory && existsSync(versionsDirectory) && readdirSync(versionsDirectory).length === 0) rmdirSync(versionsDirectory);
+    }
   }
 }
 
 export function installWorkflow(options) {
   const lock = `${resolve(options.cacheDirectory)}.install-lock`;
   mkdirSync(dirname(lock), { recursive: true });
-  mkdirSync(lock); // Existing/abandoned installation intent is preserved, never stolen.
+  try { mkdirSync(lock); }
+  catch (error) {
+    if (error.code === "EEXIST") throw new Error(`Installation lock is preserved: ${lock}. Prove no active installer owns this exact lock, then preserve and move it aside and retry the same exact install command. Package, pending intent, and public entry have not been changed by this attempt.`);
+    throw error;
+  }
   try { return installUnlocked(options); }
   finally { rmSync(lock, { recursive: true }); }
 }

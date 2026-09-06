@@ -102,6 +102,7 @@ test("the exact install command recovers repeated interruptions before the catal
   const git = (...args) => execFileSync("git", ["-C", sourceRepository, ...args], { encoding: "utf8" }).trim();
   const originalRename = fs.renameSync;
   const originalSymlink = fs.symlinkSync;
+  const originalWrite = fs.writeFileSync;
   try {
     git("init", "-b", "main");
     writeFileSync(join(sourceRepository, entry), "console.log('installed');\n");
@@ -109,6 +110,41 @@ test("the exact install command recovers repeated interruptions before the catal
     git("add", "skills");
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "entry");
     const sourceCommit = git("rev-parse", "HEAD");
+    const earlyOptions = { sourceRepository, sourceCommit, cacheDirectory: join(root, "early-cache"), skillDirectory: join(root, "early-entry") };
+    fs.writeFileSync = (path, ...args) => {
+      if (path.startsWith(join(earlyOptions.cacheDirectory, "installation-pending."))) {
+        originalWrite(path, "{partial");
+        throw new Error("Interrupted before durable intent");
+      }
+      return originalWrite(path, ...args);
+    };
+    syncBuiltinESMExports();
+    assert.throws(() => installWorkflow(earlyOptions), /Interrupted before durable intent/u);
+    assert.deepEqual(fs.readdirSync(earlyOptions.cacheDirectory), []);
+    fs.writeFileSync = originalWrite; syncBuiltinESMExports();
+    installWorkflow(earlyOptions);
+    assert.equal(selectWorkflowVersion({ cacheDirectory: earlyOptions.cacheDirectory }).state, "AVAILABLE");
+    const killedOptions = { sourceRepository, sourceCommit, cacheDirectory: join(root, "killed-cache"), skillDirectory: join(root, "killed-entry") };
+    const installerUrl = new URL("../../skills/personal/run-issue-workflow/scripts/workflow-installation.mjs", import.meta.url).href;
+    const killedScript = `
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      import { installWorkflow } from ${JSON.stringify(installerUrl)};
+      const originalLink = fs.linkSync;
+      fs.linkSync = (...args) => { originalLink(...args); process.kill(process.pid, 'SIGKILL'); };
+      syncBuiltinESMExports();
+      installWorkflow(${JSON.stringify(killedOptions)});
+    `;
+    assert.throws(() => execFileSync(process.execPath, ["--input-type=module", "-e", killedScript], { stdio: "ignore" }), (error) => error.signal === "SIGKILL");
+    const killedLock = `${killedOptions.cacheDirectory}.install-lock`;
+    const killedPending = readFileSync(join(killedOptions.cacheDirectory, "installation-pending.json"), "utf8");
+    assert.throws(() => installWorkflow(killedOptions), (error) => error.message.includes(killedLock) && /Prove no active installer.*preserve and move.*same exact install/u.test(error.message));
+    assert.equal(readFileSync(join(killedOptions.cacheDirectory, "installation-pending.json"), "utf8"), killedPending);
+    assert.equal(fs.existsSync(killedOptions.skillDirectory), false);
+    // The child is reaped: apply the explicitly named operator repair, preserving its lock.
+    fs.renameSync(killedLock, `${killedLock}.preserved`);
+    assert.equal(installWorkflow(killedOptions).recovered, true);
+    assert.equal(selectWorkflowVersion({ cacheDirectory: killedOptions.cacheDirectory }).state, "AVAILABLE");
     for (const previousEntry of [false, true]) {
       const cacheDirectory = join(root, `cache-${previousEntry}`);
       const skillDirectory = join(root, `entry-${previousEntry}`);
@@ -136,7 +172,7 @@ test("the exact install command recovers repeated interruptions before the catal
       assert.equal(fs.existsSync(join(cacheDirectory, "installation-pending.json")), false);
     }
   } finally {
-    fs.renameSync = originalRename; fs.symlinkSync = originalSymlink; syncBuiltinESMExports();
+    fs.renameSync = originalRename; fs.symlinkSync = originalSymlink; fs.writeFileSync = originalWrite; syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
   }
 });
