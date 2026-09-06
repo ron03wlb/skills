@@ -48,7 +48,10 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     if (issue.pull_request || !issue.node_id) throw authorityConflict("Tracker locator is not an Issue");
     numbers.set(issue.node_id, number);
     const comments = api(`repos/${repositoryName}/issues/${number}/comments?per_page=100`);
-    return { ...issue, comments, records: readWorkflowRecords(comments) };
+    let records;
+    try { records = readWorkflowRecords(comments); }
+    catch (error) { throw authorityConflict(error.message); }
+    return { ...issue, comments, records };
   };
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {

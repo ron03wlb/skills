@@ -82,6 +82,19 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Tracker locator is not an Issue/u.test(error.message));
     delete fixture.pull_request;
     writeFileSync(fixturePath, JSON.stringify(fixture));
+    for (const invalidComment of [
+      { ...originalComments[0], body: "```workflow-record\ninvalid JSON\n```" },
+      { ...originalComments[0], body: `${originalComments[0].body}\n${originalComments[0].body}` },
+      { ...originalComments[0], author_association: "NONE" },
+      { ...originalComments[0], node_id: undefined },
+    ]) {
+      fixture.comments = [invalidComment, originalComments[1]];
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
+        error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /workflow (?:record|note)/iu.test(error.message));
+    }
+    fixture.comments = originalComments;
+    writeFileSync(fixturePath, JSON.stringify(fixture));
     const current = await owner.sources.reconciliation.read({ tracker: snapshot, journal: [], request: {} });
     assert.equal(reduceRunReadyHandoff(current.runReadyAuthority).state, "READY");
     assert.equal(current.facts.run.targetHead, seal);
