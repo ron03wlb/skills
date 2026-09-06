@@ -6,6 +6,8 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
+import { validateWorkflowVersion } from "./run-journal.mjs";
+
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const skillPath = "skills/personal/run-issue-workflow";
 const versionFields = ["id", "sourceCommit", "sourceRepository", "protocolVersion"];
@@ -13,6 +15,15 @@ const sameVersion = (left, right) => versionFields.every((field) => left?.[field
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 const safePath = (path) => typeof path === "string" && path.startsWith("skills/")
   && !path.split(/[\\/]/u).some((part) => ["", ".", ".."].includes(part));
+
+function validateCatalog(catalog) {
+  if (catalog?.schema !== "codex-workflow-installation:v1" || !Array.isArray(catalog.versions)) throw new Error("Unknown installation metadata");
+  for (const version of catalog.versions) validateWorkflowVersion(version);
+  if (new Set(catalog.versions.map(({ id }) => id)).size !== catalog.versions.length
+    || (catalog.current === null ? catalog.versions.length !== 0 : !catalog.versions.some(({ id }) => id === catalog.current))) {
+    throw new Error("Ambiguous installation version catalog");
+  }
+}
 
 function verifyPackage(root, version) {
   if (lstatSync(root).isSymbolicLink()) throw new Error("Package directory is a link");
@@ -41,7 +52,7 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   let version = recordedVersion ?? null;
   try {
     const catalog = readJson(join(cacheDirectory, "installation.json"));
-    if (catalog.schema !== "codex-workflow-installation:v1") throw new Error("Unknown workflow installation");
+    validateCatalog(catalog);
     version ??= catalog.versions.find(({ id }) => id === catalog.current);
     if (!version || !catalog.versions.some((known) => sameVersion(known, version))) {
       throw new Error("Recorded workflow version is not in the trusted installation");
@@ -71,9 +82,9 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   }
   const catalog = existsSync(catalogPath) ? readJson(catalogPath)
     : { schema: "codex-workflow-installation:v1", current: null, versions: [] };
-  if (catalog.schema !== "codex-workflow-installation:v1" || !Array.isArray(catalog.versions)) {
-    throw new Error("Unknown installation metadata");
-  }
+  validateCatalog(catalog);
+  const recoveryPath = join(cacheDirectory, "installation-pending.json");
+  if (existsSync(recoveryPath)) throw new Error(`Prior installation needs read-back; preserve and inspect ${recoveryPath}`);
   let previousTarget = null;
   try {
     if (!lstatSync(skillDirectory).isSymbolicLink()) throw new Error("Unknown installed skill; preserve it");
@@ -110,8 +121,9 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     if (previousTarget !== null && resolve(dirname(skillDirectory), readlinkSync(skillDirectory)) !== previousTarget) {
       throw new Error("Installed link changed during installation");
     }
+    backup = previousTarget === null ? null : `${skillDirectory}.before-${randomUUID()}`;
+    writeFileSync(recoveryPath, `${JSON.stringify({ skillDirectory, previousTarget, backup, version, root })}\n`, { flag: "wx", mode: 0o600 });
     if (previousTarget !== null) {
-      backup = `${skillDirectory}.before-${randomUUID()}`;
       renameSync(skillDirectory, backup);
     }
     const versions = catalog.versions.some((known) => sameVersion(known, version))
@@ -123,7 +135,17 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     symlinkSync(join(root, skillPath), skillDirectory, "dir");
     verifyPackage(root, version);
     if (realpathSync(skillDirectory) !== realpathSync(join(root, skillPath))) throw new Error("Installed entry read-back differs");
+    rmSync(recoveryPath);
     return { version, root, skillDirectory, cacheDirectory, backup };
+  } catch (error) {
+    let restoredPreviousEntry = false;
+    if (backup && existsSync(backup)) {
+      try { symlinkSync(previousTarget, skillDirectory, "dir"); restoredPreviousEntry = true; }
+      catch (restoreError) { if (restoreError.code !== "EEXIST") error.restoreFailure = restoreError.message; }
+    }
+    error.recovery = { recoveryPath, backup, restoredPreviousEntry, action: "Inspect these preserved paths and the public link before retrying; never overwrite an unknown entry." };
+    error.message += `; installation recovery: ${JSON.stringify(error.recovery)}`;
+    throw error;
   } finally {
     rmSync(staging, { recursive: true, force: true });
   }

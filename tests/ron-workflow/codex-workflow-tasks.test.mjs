@@ -28,6 +28,7 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.deepEqual(await resumed.findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
     assert.deepEqual(await resumed.create({ issueId: "I_1", runIdentity }), ref);
     assert.equal(creates, 1);
+    assert.equal((await resumed.read(ref)).state, "RESUMABLE");
     assert.match(prompt, /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

@@ -22,7 +22,7 @@ export async function runCodexWorkflow({ repository, specId, runIdentity, workfl
   let tasks;
   const taskSource = { read: (...args) => tasks.read(...args) };
   let store;
-  const storeSource = { listRunIds: () => store.listRunIds(), readStatus: (...args) => store.readStatus(...args), readEvents: (...args) => store.readEvents(...args) };
+  const storeSource = { listRunIds: () => store.listRunIds(), readStatus: (...args) => store.readStatus(...args), readEvents: (...args) => store.readEvents(...args), readWriterLock: (...args) => store.readWriterLock(...args), readHostTask: (...args) => store.readHostTask(...args) };
   const owners = createGitHubWorkflowSources({ repository, repositoryName: configuration.repository, store: storeSource, tasks: taskSource });
   store = createRunStore({ gitCommonDir: owners.gitCommonDir });
   const selectedIssue = await owners.readIssue(specId);
@@ -30,7 +30,7 @@ export async function runCodexWorkflow({ repository, specId, runIdentity, workfl
   const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, authoritySources: owners.sources,
     controls: host.controls,
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
-    cleanup: { async listRuns() { return []; } },
+    cleanup: { listRuns: owners.readCleanupRuns },
     now: () => new Date().toISOString(), sleep: (ms) => setTimeout(ms),
     leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence }) {
       const dispatch = store.readEvents(identity.runId).findLast(({ type }) => type === "dispatch.recorded");

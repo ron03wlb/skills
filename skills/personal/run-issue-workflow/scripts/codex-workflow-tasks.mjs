@@ -28,8 +28,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const evidence = JSON.parse(match[2]);
       closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId };
     }
-    return { state: type === "active" ? "RUNNING" : type === "idle" ? "SETTLED" : "UNKNOWN",
-      closeRequest, snapshot, cwd: snapshot.thread.cwd };
+    const retryPrompt = userTexts(snapshot).find((text) => text.includes("Retry request: "));
+    const retryMatch = retryPrompt?.match(/Retry request: (\{.+\})$/u);
+    const retryRequest = retryMatch ? { state: "ACCEPTED", ...JSON.parse(retryMatch[1]) } : undefined;
+    return { state: type === "active" ? "RUNNING" : type === "idle" ? "RESUMABLE" : "UNKNOWN",
+      closeRequest, retryRequest, snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
@@ -98,7 +101,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (target.threadId && target.cursor) cursors.set(target.threadId, target.cursor);
       }
       const states = await Promise.all(taskRefs.map(read));
-      return { coordinatorActive: !host.disconnected, taskSettled: states.every(({ state }) => state === "SETTLED"),
+      return { coordinatorActive: !host.disconnected, taskSettled: states.every(({ state }) => state === "RESUMABLE"),
         ...(states.length === 1 && states[0].closeRequest ? { closeRequestIdentity: states[0].closeRequest.requestIdentity } : {}) };
     },
   };

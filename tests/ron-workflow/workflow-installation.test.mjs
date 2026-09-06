@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -51,7 +52,25 @@ test("an installed entry update preserves a running workflow's exact executable 
     git("init", "-b", "main");
     const first = installWorkflow({ sourceRepository, sourceCommit: commit("v1"), cacheDirectory, skillDirectory });
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
-    const second = installWorkflow({ sourceRepository, sourceCommit: commit("v2"), cacheDirectory, skillDirectory });
+    const secondCommit = commit("v2");
+    const originalSymlink = fs.symlinkSync;
+    let failed = false;
+    fs.symlinkSync = (...args) => {
+      if (!failed && args[1] === skillDirectory) { failed = true; throw new Error("Simulated new-entry failure"); }
+      return originalSymlink(...args);
+    };
+    syncBuiltinESMExports();
+    try {
+      assert.throws(() => installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory }), (error) => {
+        assert.equal(error.recovery.restoredPreviousEntry, true);
+        assert.equal(JSON.parse(readFileSync(error.recovery.recoveryPath)).previousTarget, first.root + "/skills/personal/run-issue-workflow");
+        return /Simulated new-entry failure.*installation recovery/u.test(error.message);
+      });
+    } finally { fs.symlinkSync = originalSymlink; syncBuiltinESMExports(); }
+    assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
+    // Test-owned recovery: the preserved intent was inspected and the public old entry proved intact.
+    rmSync(join(cacheDirectory, "installation-pending.json"));
+    const second = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
     assert.notEqual(first.version.id, second.version.id);
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v2");
     const resumed = selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version });
@@ -77,6 +96,10 @@ test("installation preserves an unknown local skill before touching its contents
     const skillDirectory = join(root, "unknown-skill");
     mkdirSync(skillDirectory); writeFileSync(join(skillDirectory, "SKILL.md"), "user-owned\n");
     assert.throws(() => installWorkflow({ sourceRepository: root, sourceCommit, cacheDirectory: join(root, "cache"), skillDirectory }), /Unknown installed skill/u);
+    assert.equal(readFileSync(join(skillDirectory, "SKILL.md"), "utf8"), "user-owned\n");
+    const cacheDirectory = join(root, "bad-catalog"); mkdirSync(cacheDirectory);
+    writeFileSync(join(cacheDirectory, "installation.json"), JSON.stringify({ schema: "codex-workflow-installation:v1", current: "../../outside", versions: [{ id: "../../outside", sourceCommit, sourceRepository: root, protocolVersion: 1 }] }));
+    assert.throws(() => installWorkflow({ sourceRepository: root, sourceCommit, cacheDirectory, skillDirectory }), /version/u);
     assert.equal(readFileSync(join(skillDirectory, "SKILL.md"), "utf8"), "user-owned\n");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

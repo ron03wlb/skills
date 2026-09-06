@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { reduceRun } from "./run-core.mjs";
 import { bodyDigest, readWorkflowRecords } from "./github-workflow-records.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, deriveExecuteIssueOperationIdentity, assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
@@ -127,11 +128,11 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const completion = latest?.record.kind === "implementation_complete" ? latest : null;
       const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id]) : null;
       const node = { issueId: issue.node_id, blockers: snapshot.blockers.get(issue.node_id),
-        trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "SETTLED" ? "NONE" : task ? "UNKNOWN" : "NONE",
+        trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: latest?.record.kind === "implementation_blocked" ? "BLOCKED" : completion ? "COMPLETE" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
       if (task?.state === "UNKNOWN") throw new Error(`Issue #${issue.number} task state is unknown`);
-      if (task?.state === "SETTLED" && !latest) node.taskState = "FAILED";
+      if (task?.state === "RESUMABLE" && !latest) node.taskState = "TRANSIENT_FAILURE";
       if (completion) {
         const record = completion.record;
         if (record.issueId !== issue.node_id || record.specId !== authority.specId || record.target !== authority.target
@@ -165,8 +166,42 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         targetState: target.state, targetHead: target.head, closeWriterRunId: null, closeWriterState: "ABSENT",
         parentTrackerState: snapshot.spec.state.toUpperCase(), parentTrackerIdentity: snapshot.spec.node_id }, nodes, contradictions: [] } };
   };
+  const readCleanupRuns = async () => {
+    const evidence = [];
+    for (const runId of store.listRunIds()) {
+      const row = { runId, specId: `unknown:${runId}`, state: "UNKNOWN", terminalAt: null, engineLock: "UNKNOWN", activeTasks: "UNKNOWN" };
+      try {
+        const journal = store.readEvents(runId);
+        const grant = journal.findLast(({ type }) => type === "grant.recorded");
+        if (!grant) { evidence.push(row); continue; }
+        row.specId = grant.runIdentity.specId;
+        row.engineLock = store.readWriterLock(runId) === null ? "RELEASED" : "HELD";
+        // The projection is only a cheap candidate filter; it never proves terminal state.
+        if (!["SUCCEEDED", "STOPPED"].includes(store.readStatus(runId)?.run.state)) { evidence.push(row); continue; }
+        const request = { specId: row.specId, runIdentity: grant.runIdentity };
+        const snapshot = await trackerRead(request);
+        if (snapshot.authority.approvedScopeHash !== grant.runIdentity.approvedScopeHash) { evidence.push(row); continue; }
+        const current = await reconciliationRead({ tracker: snapshot, journal, request });
+        const states = await Promise.all(Object.values(current.taskRefs).map((ref) => tasks.read(ref)));
+        const unresolvedIntent = snapshot.issues.some((issue) => !current.taskRefs[issue.node_id] && store.readHostTask({ runId, issueId: issue.node_id }));
+        row.activeTasks = unresolvedIntent ? "UNKNOWN" : states.some(({ state }) => state === "RUNNING") ? "PRESENT"
+          : states.every(({ state }) => state === "RESUMABLE") ? "ABSENT" : "UNKNOWN";
+        row.state = reduceRun({ ...current.facts, journal }).run.state;
+        const completedTimes = states.map(({ snapshot: task }) => task?.turns?.[0]?.completedAt);
+        if (row.state === "SUCCEEDED") {
+          const times = [snapshot.spec, ...snapshot.issues].map(({ closed_at }) => Date.parse(closed_at));
+          if (times.every(Number.isFinite)) row.terminalAt = new Date(Math.max(...times)).toISOString();
+        } else if (row.state === "STOPPED" && completedTimes.every((time) => Number.isFinite(time))) {
+          const stop = journal.findLast(({ type, command }) => type === "control.revised" && command === "STOP");
+          if (stop) row.terminalAt = new Date(Math.max(Date.parse(stop.at), ...completedTimes.map((time) => time < 1e12 ? time * 1000 : time))).toISOString();
+        }
+      } catch { /* Unreadable owning evidence is retained as UNKNOWN, never an empty inventory. */ }
+      evidence.push(row);
+    }
+    return evidence;
+  };
   return {
-    gitCommonDir, issueNumber, readIssue, targetRead, metrics: () => ({ commandCalls }),
+    gitCommonDir, issueNumber, readIssue, targetRead, readCleanupRuns, metrics: () => ({ commandCalls }),
     sources: {
       repository: { readIdentity: async () => repositoryId }, tracker: { read: trackerRead },
       reconciliation: { read: reconciliationRead }, target: { read: async ({ current }) => targetRead(current.runIdentity.target) },

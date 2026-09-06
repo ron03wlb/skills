@@ -473,7 +473,7 @@ export function createCoordinator({
         if (!accepted) {
           await tasks.message(
             priorDispatch.taskRef,
-            `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
+            `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Retry request: ${JSON.stringify({runId: current.runIdentity.runId, issueId: action.issueId, attempt: action.attempt})}`,
           );
         }
       } else if (task?.state === "INACTIVE" && Array.isArray(task.inactiveEvidence)
