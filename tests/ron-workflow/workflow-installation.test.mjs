@@ -70,9 +70,14 @@ test("an installed entry update preserves a running workflow's exact executable 
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
     assert.equal(selectWorkflowVersion({ cacheDirectory }).state, "UNAVAILABLE");
     assert.equal(selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version }).state, "AVAILABLE");
-    // Test-owned recovery: the preserved intent was inspected and the public old entry proved intact.
-    rmSync(join(cacheDirectory, "installation-pending.json"));
+    // An intervening unknown entry must survive the same-command recovery attempt.
+    fs.unlinkSync(skillDirectory); fs.symlinkSync(sourceRepository, skillDirectory);
+    assert.throws(() => installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory }), /public link.*now points/u);
+    assert.equal(fs.readlinkSync(skillDirectory), sourceRepository);
+    fs.unlinkSync(skillDirectory); fs.symlinkSync(first.root + "/skills/personal/run-issue-workflow", skillDirectory);
     const second = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
+    assert.equal(second.recovered, true);
+    assert.equal(fs.existsSync(join(cacheDirectory, "installation-pending.json")), false);
     assert.notEqual(first.version.id, second.version.id);
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v2");
     const resumed = selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version });
@@ -85,6 +90,53 @@ test("an installed entry update preserves a running workflow's exact executable 
     assert.match(unavailable.reason, /content/u);
     assert.match(readFileSync(join(resumed.root, entry), "utf8"), /tampered/u);
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the exact install command recovers repeated interruptions before the catalog or backup exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "workflow-install-recovery-"));
+  const sourceRepository = join(root, "source");
+  const entry = "skills/personal/run-issue-workflow/scripts/installed-entry.mjs";
+  mkdirSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts"), { recursive: true });
+  const git = (...args) => execFileSync("git", ["-C", sourceRepository, ...args], { encoding: "utf8" }).trim();
+  const originalRename = fs.renameSync;
+  const originalSymlink = fs.symlinkSync;
+  try {
+    git("init", "-b", "main");
+    writeFileSync(join(sourceRepository, entry), "console.log('installed');\n");
+    writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), "Workflow entry\n");
+    git("add", "skills");
+    git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "entry");
+    const sourceCommit = git("rev-parse", "HEAD");
+    for (const previousEntry of [false, true]) {
+      const cacheDirectory = join(root, `cache-${previousEntry}`);
+      const skillDirectory = join(root, `entry-${previousEntry}`);
+      if (previousEntry) fs.symlinkSync(sourceRepository, skillDirectory);
+      const options = { sourceRepository, sourceCommit, cacheDirectory, skillDirectory, replaceLinkTarget: sourceRepository };
+      fs.renameSync = (from, to) => {
+        if (previousEntry ? from === skillDirectory : to === join(cacheDirectory, "installation.json")) throw new Error("Interrupted initial installation");
+        return originalRename(from, to);
+      };
+      syncBuiltinESMExports();
+      assert.throws(() => installWorkflow(options), /Interrupted initial installation/u);
+      fs.renameSync = originalRename;
+      fs.symlinkSync = (...args) => {
+        if (args[1] === skillDirectory) throw new Error("Interrupted recovery");
+        return originalSymlink(...args);
+      };
+      syncBuiltinESMExports();
+      assert.throws(() => installWorkflow(options), /Interrupted recovery/u);
+      fs.symlinkSync = originalSymlink; syncBuiltinESMExports();
+      const recovered = installWorkflow(options);
+      assert.equal(recovered.recovered, true);
+      assert.equal(selectWorkflowVersion({ cacheDirectory }).state, "AVAILABLE");
+      assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "installed");
+      if (previousEntry) assert.equal(fs.readlinkSync(recovered.backup), sourceRepository);
+      assert.equal(fs.existsSync(join(cacheDirectory, "installation-pending.json")), false);
+    }
+  } finally {
+    fs.renameSync = originalRename; fs.symlinkSync = originalSymlink; syncBuiltinESMExports();
     rmSync(root, { recursive: true, force: true });
   }
 });

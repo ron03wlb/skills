@@ -69,6 +69,52 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   }
 }
 
+function recoverInstallation({ recoveryPath, sourceRepository, sourceCommit, cacheDirectory, skillDirectory, catalog }) {
+  const pending = readJson(recoveryPath);
+  validateWorkflowVersion(pending.version);
+  const { version, previousTarget, backup, previousCurrent } = pending;
+  const root = join(cacheDirectory, "versions", version.id);
+  const nextTarget = join(root, skillPath);
+  const linkTarget = (path) => {
+    try {
+      if (!lstatSync(path).isSymbolicLink()) throw new Error(`Expected a preserved symbolic link: ${path}`);
+      return resolve(dirname(path), readlinkSync(path));
+    } catch (error) { if (error.code === "ENOENT") return null; throw error; }
+  };
+  const fail = (reason) => { throw new Error(`Installation recovery: ${reason}. Preserve ${recoveryPath}; restore the named original evidence and retry the same exact installation.`); };
+  if (pending.skillDirectory !== skillDirectory || pending.root !== root
+    || version.sourceCommit !== sourceCommit || version.sourceRepository !== sourceRepository
+    || !(previousCurrent === null || /^[a-f0-9]{64}$/u.test(previousCurrent))) {
+    fail(`retry source ${version.sourceRepository} at ${version.sourceCommit} for ${pending.skillDirectory}; requested identity differs`);
+  }
+  if (![previousCurrent, version.id].includes(catalog.current)) fail(`catalog current ${catalog.current} differs from the recorded installation`);
+  const observed = linkTarget(skillDirectory);
+  if (![null, previousTarget, nextTarget].includes(observed)) fail(`public link ${skillDirectory} now points to ${observed}`);
+  let backupTarget = null;
+  if (previousTarget !== null) {
+    if (typeof backup !== "string" || !backup.startsWith(`${skillDirectory}.before-`)
+      || !/^[a-f0-9-]{36}$/u.test(backup.slice(`${skillDirectory}.before-`.length))) fail("backup locator differs");
+    backupTarget = linkTarget(backup);
+    if (backupTarget !== previousTarget && !(backupTarget === null && observed === previousTarget)) fail(`backup ${backup} does not preserve ${previousTarget}`);
+  } else if (backup !== null) fail("unexpected backup for an initially absent entry");
+  verifyPackage(root, version);
+  if (observed !== nextTarget) {
+    if (observed !== null) {
+      // Keep both the original backup and any restored link; never overwrite a concurrent entry.
+      renameSync(skillDirectory, backupTarget === null ? backup : `${skillDirectory}.before-${randomUUID()}`);
+    }
+    symlinkSync(nextTarget, skillDirectory, "dir");
+  }
+  const versions = catalog.versions.some((known) => sameVersion(known, version)) ? catalog.versions : [...catalog.versions, version];
+  const temporaryCatalog = join(cacheDirectory, `installation.json.${randomUUID()}`);
+  writeFileSync(temporaryCatalog, `${JSON.stringify({ ...catalog, current: version.id, versions })}\n`, { mode: 0o600 });
+  renameSync(temporaryCatalog, join(cacheDirectory, "installation.json"));
+  if (realpathSync(skillDirectory) !== realpathSync(nextTarget)) fail("public entry read-back differs");
+  verifyPackage(root, version);
+  rmSync(recoveryPath);
+  return { version, root, skillDirectory, cacheDirectory, backup, recovered: true };
+}
+
 function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skillDirectory, replaceLinkTarget }) {
   sourceRepository = realpathSync(sourceRepository);
   cacheDirectory = resolve(cacheDirectory);
@@ -78,16 +124,16 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     throw new Error("Install requires one exact trusted source commit");
   }
   const catalogPath = join(cacheDirectory, "installation.json");
+  const recoveryPath = join(cacheDirectory, "installation-pending.json");
   if (existsSync(cacheDirectory) && lstatSync(cacheDirectory).isSymbolicLink()
     || existsSync(catalogPath) && !lstatSync(catalogPath).isFile()) throw new Error("Unknown linked installation metadata; preserve it");
-  if (existsSync(cacheDirectory) && !existsSync(catalogPath) && readdirSync(cacheDirectory).length > 0) {
+  if (existsSync(cacheDirectory) && !existsSync(catalogPath) && !existsSync(recoveryPath) && readdirSync(cacheDirectory).length > 0) {
     throw new Error("Unknown installation directory; preserve its contents");
   }
   const catalog = existsSync(catalogPath) ? readJson(catalogPath)
     : { schema: "codex-workflow-installation:v1", current: null, versions: [] };
   validateCatalog(catalog);
-  const recoveryPath = join(cacheDirectory, "installation-pending.json");
-  if (existsSync(recoveryPath)) throw new Error(`Prior installation needs read-back; preserve and inspect ${recoveryPath}`);
+  if (existsSync(recoveryPath)) return recoverInstallation({ recoveryPath, sourceRepository, sourceCommit, cacheDirectory, skillDirectory, catalog });
   let previousTarget = null;
   try {
     if (!lstatSync(skillDirectory).isSymbolicLink()) throw new Error("Unknown installed skill; preserve it");
@@ -125,7 +171,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
       throw new Error("Installed link changed during installation");
     }
     backup = previousTarget === null ? null : `${skillDirectory}.before-${randomUUID()}`;
-    writeFileSync(recoveryPath, `${JSON.stringify({ skillDirectory, previousTarget, backup, version, root })}\n`, { flag: "wx", mode: 0o600 });
+    writeFileSync(recoveryPath, `${JSON.stringify({ skillDirectory, previousTarget, backup, previousCurrent: catalog.current, version, root })}\n`, { flag: "wx", mode: 0o600 });
     if (previousTarget !== null) {
       renameSync(skillDirectory, backup);
     }
