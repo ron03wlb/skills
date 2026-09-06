@@ -3678,6 +3678,56 @@ test("settled parent close response must match the current request identity", as
   }
 });
 
+for (const { name, coordinatorActive, mode, expectedState, expectedCalls } of [
+  { name: "healthy parent close continues across native wait timeouts", coordinatorActive: true, expectedState: "SUCCEEDED", expectedCalls: 3 },
+  { name: "parent close yields after coordinator loss", coordinatorActive: false, expectedState: "RUNNING", expectedCalls: 1 },
+  { name: "unfinished parent close without liveness evidence still yields", expectedState: "RUNNING", expectedCalls: 1 },
+  { name: "parent close step yields while the host remains active", coordinatorActive: true, mode: "step", expectedState: "RUNNING", expectedCalls: 1 },
+]) {
+  test(name, async () => {
+    const { root, store } = createStoreFixture();
+    const seed = store.acquireWriter(multiIdentity.runId);
+    seed.append({ type: "grant.recorded", at: "2026-08-30T23:00:00.000Z", runIdentity: multiIdentity, maxParallel: 3 });
+    seed.release();
+    let parentTrackerState = "OPEN";
+    const requests = [];
+    const tasks = Object.fromEntries(
+      ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
+        throw new Error(`${name} is unnecessary after every child succeeded`);
+      }]),
+    );
+    const leaf = {
+      async closeParent({ requestIdentity, step }) {
+        assert.equal(step, mode === "step");
+        requests.push(requestIdentity);
+        if (requests.length <= 2) return { settled: false, coordinatorActive };
+        parentTrackerState = "CLOSED";
+        return { settled: true, requestIdentity };
+      },
+    };
+    const reconcile = async ({ tracker }) => reconciliation({
+      runIdentity: multiIdentity,
+      run: { parentTrackerState: tracker.parentTrackerState },
+      nodes: ["13", "14", "15"].map((issueId) => ({
+        issueId, blockers: [], trackerState: "CLOSED", taskState: "NONE",
+        completionState: "COMPLETE", candidateReachable: true, worktreeState: "ABSENT",
+      })),
+    });
+    try {
+      const coordinator = createCoordinator({
+        store, tasks, leaf, reconcile,
+        tracker: { async read() { return { parentTrackerState }; } },
+        now: () => "2026-08-30T23:00:00.000Z", sleep: async () => {},
+      });
+      const status = await coordinator.run({ specId: multiIdentity.specId, ...(mode ? { mode } : {}) });
+      assert.equal(status.run.state, expectedState);
+      assert.equal(requests.length, expectedCalls);
+      assert.equal(new Set(requests).size, 1, "pending waits preserve the exact close request");
+      assert.equal(store.readWriterLock(multiIdentity.runId), null);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
 test("parent close delegates both leases to the real leaf", async () => {
   const { root, gitCommonDir, store } = createStoreFixture();
   let clockMinute = 0;

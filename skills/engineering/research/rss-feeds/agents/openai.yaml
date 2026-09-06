@@ -1,0 +1,3 @@
+interface:
+  display_name: "RSS Feeds"
+  short_description: "Read RSS, Atom and JSON feeds and discover feed URLs"

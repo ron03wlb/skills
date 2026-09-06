@@ -48,7 +48,8 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
       if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent || continuation.needed) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${effectiveIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`);
       if (step) return { settled: false };
       const waited = await tasks.wait([dispatch.taskRef]);
-      return { settled: waited.taskSettled, requestIdentity: acceptedEquivalent && waited.closeRequestIdentity === task.closeRequest.requestIdentity ? requestIdentity : waited.closeRequestIdentity };
+      return { settled: waited.taskSettled, coordinatorActive: waited.coordinatorActive,
+        requestIdentity: acceptedEquivalent && waited.closeRequestIdentity === task.closeRequest.requestIdentity ? requestIdentity : waited.closeRequestIdentity };
     } },
   });
   let latest;

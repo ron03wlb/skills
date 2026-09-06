@@ -752,7 +752,7 @@ export function createCoordinator({
         }),
       };
     }
-    return { settled: result?.settled === true };
+    return { active: step || (result?.coordinatorActive ?? result?.settled) === true };
   };
 
   const waitForCloseLease = async ({ action, current, operationIdentity, request, status, writer }) => {
@@ -1329,7 +1329,7 @@ export function createCoordinator({
             } else if (action.type === "close_parent") {
               const outcome = await closeParent({ action, current, status: lastStatus, step: request.mode === "step" });
               if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
-              if (!outcome.settled && request.mode !== "step") return lastStatus;
+              if (!outcome.active) return lastStatus;
             } else if (["wait_repository_close_lease", "wait_target_writer"].includes(action.type)) {
               const outcome = await waitForCloseLease({
                 action,
