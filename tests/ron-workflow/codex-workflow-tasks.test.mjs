@@ -17,7 +17,10 @@ test("a lost task creation response reuses its exact discovered lane without a s
   let prompt;
   const host = { async call(name, args) {
     if (name.endsWith("create_thread")) { creates++; prompt = args.prompt; assert.equal(args.target.environment.type, "worktree"); throw new Error("response lost"); }
-    if (name.endsWith("list_threads")) return { threads: [{ id: ref.threadId, hostId: "local", projectId: "project", kind: "codex" }] };
+    if (name.endsWith("list_threads")) {
+      assert.ok(args.limit <= 50, "current host limits list_threads to 50");
+      return { threads: [{ id: ref.threadId, hostId: "local", projectId: "project", kind: "codex" }] };
+    }
     if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: "local", preview: prompt, status: { type: "idle" }, cwd: root }, turns: [] };
     throw new Error(`Unexpected ${name}`);
   } };

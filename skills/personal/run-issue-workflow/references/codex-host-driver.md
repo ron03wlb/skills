@@ -6,6 +6,8 @@ Launch the installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID
 
 Run this unchanged tick in `functions.exec`. It returns compact status only; full tool payloads remain transport data and are not reprinted into the coordinator context. An explicit text control is set with `store("workflow.control", "PAUSE")` (or `RESUME`, `STOP`, `REFRESH`) before the next tick. Continue ticks while the host session exists, reporting meaningful progress at least once a minute. If the app or coordinator disconnects, the entry stops dispatching and releases its writer after 90 seconds without a heartbeat. Worker tasks may still finish their already-dispatched work.
 
+The current host accepts at most 50 non-pinned tasks in `list_threads`. The driver bounds that read-only parameter for retained versions that requested more. It does not change Run identity, task creation, or evidence; an unresolved creation intent still prevents a duplicate task.
+
 ```js
 const lane = load("workflow.host");
 if (!lane?.sessionId) throw new Error("No active installed workflow session");
@@ -40,7 +42,9 @@ while ((lane.sessionId || lane.buffer.includes("\n")) && Date.now() < until) {
     throw new Error("Installed host requested an unavailable or unsupported tool");
   }
   let response;
-  try { response = {id:message.id,result:await tools[message.name](message.arguments)}; }
+  const argumentsForHost = message.name === "mcp__codex_app__list_threads" && message.arguments.limit > 50
+    ? {...message.arguments, limit:50} : message.arguments;
+  try { response = {id:message.id,result:await tools[message.name](argumentsForHost)}; }
   catch (error) { response = {id:message.id,error:error.message}; }
   accept(await tools.write_stdin({session_id:lane.sessionId, chars:JSON.stringify(response)+"\n", yield_time_ms:1000, max_output_tokens:16000}));
 }

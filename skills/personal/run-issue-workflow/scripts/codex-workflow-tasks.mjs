@@ -41,7 +41,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (refs.has(key)) return [refs.get(key)];
     const intent = store.readHostTask({ runId: runIdentity.runId, issueId });
     if (!intent) return [];
-    const listing = await call("list_threads", { limit: 100 });
+    const listing = await call("list_threads", { limit: 50 });
     const found = [];
     for (const task of [...(listing.pinnedThreads ?? []), ...(listing.threads ?? [])]) {
       if (task.kind !== "codex" || task.projectId !== project.projectId || task.hostId !== project.hostId) continue;
