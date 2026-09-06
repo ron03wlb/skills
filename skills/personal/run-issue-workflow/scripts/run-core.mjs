@@ -319,15 +319,7 @@ export function reduceRunReadyHandoff(input) {
       ["supply_valid_run_ready_facts"],
     );
   }
-  if (input.targetState === "DIRTY") {
-    return unknownRunReady(
-      input,
-      "target_dirty_without_owner",
-      [`Target ${authority.target} is dirty without one exact incomplete producer owner.`],
-      ["target_is_clean_or_exact_incomplete_owner_is_proven"],
-    );
-  }
-  if (input.targetState !== "CLEAN") {
+  if (!["CLEAN", "DIRTY"].includes(input.targetState)) {
     return unknownRunReady(
       input,
       "target_state_uncertain",
@@ -335,12 +327,12 @@ export function reduceRunReadyHandoff(input) {
       ["target_state_is_known"],
     );
   }
-  if (input.targetOwnership !== "NONE") {
+  if (input.targetOwnership !== (input.targetState === "DIRTY" ? "UNOWNED" : "NONE")) {
     return unknownRunReady(
       input,
       "target_ownership_conflict",
-      [`Clean target ${authority.target} has contradictory ownership state ${input.targetOwnership}.`],
-      ["clean_target_has_no_dirty_owner"],
+      [`Target ${authority.target} has contradictory ownership state ${input.targetOwnership}.`],
+      ["target_ownership_matches_current_state"],
     );
   }
   if (!checkpointOwnsScope || checkpoint.firstUnsatisfiedStage !== null
@@ -1015,6 +1007,19 @@ export function reduceRun(input) {
           ? postWaitPacket(contradiction.evidence)
         : undefined,
     }));
+  const isolated = new Set();
+  for (const item of contradictionDiagnoses) {
+    const affected = new Set(item.affectedNodes);
+    let previousSize;
+    do {
+      previousSize = affected.size;
+      for (const node of nodes) if (node.blockers.some(id => affected.has(id))) affected.add(node.issueId);
+    } while (affected.size !== previousSize);
+    item.affectedNodes = [...affected].sort(compareIds);
+    item.unaffectedNodes = allNodeIds.filter(id => !affected.has(id));
+    for (const id of affected) isolated.add(id);
+  }
+  for (const node of nodes) if (isolated.has(node.issueId)) node.state = "BLOCKED";
   const ready = nodes.filter(({ state }) => state === "READY").map(({ issueId }) => issueId);
   const retrying = nodes.filter(({ state }) => state === "RETRYING").map(({ issueId }) => issueId);
   const active = normalizedNodes
@@ -1053,7 +1058,7 @@ export function reduceRun(input) {
   const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
     || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterHealthy);
   const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
-  const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable;
+  const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable && input.run.targetState === "CLEAN";
   const remediations = retrying.flatMap((issueId) => {
     const node = byId.get(issueId);
     if (node.taskState !== "ENVIRONMENT_FAILURE") return [];
@@ -1108,7 +1113,7 @@ export function reduceRun(input) {
     nodes: normalizedNodes,
     controlRevision,
   });
-  if (!executionActionsScheduled && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
+  if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_repository_close_lease",
       issueId: waitingIssueId,
@@ -1120,7 +1125,7 @@ export function reduceRun(input) {
       timeoutMs: REPOSITORY_CLOSE_WAIT_TIMEOUT_MS,
       preWaitEvidence,
     });
-  } else if (!executionActionsScheduled && repositoryCloseLeaseAvailable
+  } else if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseAvailable
     && targetCloseWriterHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_target_writer",
@@ -1202,8 +1207,8 @@ export function reduceRun(input) {
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.targetDirty,
       evidence,
-      noAutomaticTransition: "Target-wide mutation must stop while the target is dirty.",
-      affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
+      noAutomaticTransition: "Integration waits for the target to be clean; independent Issue worktrees may continue.",
+      affectedNodes: closeable,
       allNodes: allNodeIds,
       resumePredicates: ["target_is_clean"],
       operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
@@ -1235,10 +1240,11 @@ export function reduceRun(input) {
       operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   }
-  const hasContradiction = contradictionDiagnoses.length > 0
+  const hasContradiction = contradictionDiagnoses.some(({ affectedNodes }) => affectedNodes.length === 0)
+    || (isolated.size > 0 && normalActions.length === 0 && active.every(id => isolated.has(id)))
     || repositoryCloseDiagnoses.length > 0
     || closeWriterDiagnoses.length > 0
-    || globalGateDiagnoses.length > 0;
+    || globalGateDiagnoses.some(({ reasonCode }) => reasonCode !== REASON_CODES.targetDirty);
   const hasActiveWork = active.length > 0
     || activeRepositoryCloseWait !== undefined
     || activeTargetWriterWait !== undefined;

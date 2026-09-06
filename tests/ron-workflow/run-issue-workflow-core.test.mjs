@@ -724,6 +724,7 @@ test("Run-ready handoff returns stable UNKNOWN diagnoses for unowned or contradi
   const dirty = runReadyFacts();
   dirty.targetState = "DIRTY";
   dirty.targetOwnership = "UNOWNED";
+  assert.equal(reduceRunReadyHandoff(dirty).state, "READY", "known target dirt does not invalidate completed planning authority");
 
   const wrongProducer = runReadyFacts({ classification: "MULTI" });
   wrongProducer.handoff.producerCommand = "to-spec";
@@ -746,7 +747,6 @@ test("Run-ready handoff returns stable UNKNOWN diagnoses for unowned or contradi
   ambiguous.checkpoint.state = "MULTIPLE";
 
   for (const [input, reasonCode] of [
-    [dirty, "target_dirty_without_owner"],
     [wrongProducer, "producer_handoff_identity_conflict"],
     [missingHandoff, "producer_handoff_missing"],
     [legacyPlan, "legacy_plan_only"],
@@ -1889,7 +1889,7 @@ test("a failed branch blocks only its descendants while independent work remains
   assert.equal(status.diagnoses.find(({ reasonCode }) => reasonCode === "failed_dependency")?.affectedNodes[0], "15");
 });
 
-test("explicit contradictions fail closed with a structured stop diagnosis", () => {
+test("explicit contradictions stop the affected Issue with a structured diagnosis", () => {
   const status = reduceRun({
     ...facts([node("13"), node("14")]),
     contradictions: [{
@@ -1899,8 +1899,8 @@ test("explicit contradictions fail closed with a structured stop diagnosis", () 
     }],
   });
 
-  assert.equal(status.run.state, "BLOCKED");
-  assert.deepEqual(status.legalActions, []);
+  assert.equal(status.run.state, "RUNNING");
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "14", attempt: 1 }]);
   assert.deepEqual(status.diagnoses[0], {
     reasonCode: "evidence_contradiction",
     limitationClass: "unresolved-evidence",
@@ -2687,7 +2687,6 @@ test("reconciliation, tracker, target, and parent gates fail closed at their own
 
   const gates = [
     [{ trackerAvailable: false }, "tracker_unavailable"],
-    [{ targetState: "DIRTY" }, "target_dirty"],
     [{ targetState: "UNKNOWN" }, "target_state_uncertain"],
   ];
   for (const [runFacts, reasonCode] of gates) {
@@ -2712,6 +2711,28 @@ test("reconciliation, tracker, target, and parent gates fail closed at their own
 
   const parentOpen = reduceRun(facts([completedChild]));
   assert.deepEqual(parentOpen.legalActions, [{ type: "close_parent", issueId: "12" }]);
+});
+
+test("target dirt blocks integration while independent Issue execution continues", () => {
+  const input = facts([
+    { ...node("13"), completionState: "COMPLETE", worktreeState: "PRESENT" },
+    node("14"), node("15", ["13"]),
+  ]);
+  input.run.targetState = "DIRTY";
+  const status = reduceRun(input);
+  assert.equal(status.run.state, "RUNNING");
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "14", attempt: 1 }]);
+  assert.deepEqual(status.diagnoses.find(d => d.reasonCode === "target_dirty").affectedNodes, ["13"]);
+});
+
+test("contradictory Issue evidence isolates its dependants and preserves independent progress", () => {
+  const input = facts([node("13"), node("14", ["13"]), node("15")]);
+  input.contradictions = [{ code: "candidate_owner_changed", reasonCode: "evidence_contradiction", evidence: ["Issue 13 candidate ownership conflicts"], affectedNodes: ["13"] }];
+  const status = reduceRun(input);
+  assert.equal(status.run.state, "RUNNING");
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "15", attempt: 1 }]);
+  assert.equal(status.nodes.find(n => n.issueId === "13").state, "BLOCKED");
+  assert.equal(status.nodes.find(n => n.issueId === "14").state, "BLOCKED");
 });
 
 function pausedJournal(pause) {
