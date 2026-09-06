@@ -28,7 +28,7 @@ Start through the resolved public skill's `scripts/installed-entry.mjs` using [t
 
 Abrupt installer termination can leave its installation lock. The same command reports the exact preserved lock path before any mutation. Prove no active installer owns it, preserve and move only that lock aside, then retry the identical installation. The retry validates any durable pending intent and retained package; unknown ownership or content stays preserved. This operator repair is separate from Run, repository-close and target-writer leases, which installation never reclaims.
 
-The driver carries tool results without printing full task histories into the model context. Final evidence includes available command/tool counts and elapsed time; token usage and unobserved human intervention counts remain `unavailable`. Tests with substituted CLI or host responses are local component evidence only. A delivery baseline requires actual installed-entry Git, tracker and task read-back.
+The active driver yields between bounded ticks and sends heartbeats while one native request is pending. It forwards each request once, retains explicit Run controls, and drains terminal output if the host exits. It carries tool results without printing full task histories into the model context. Final evidence includes available command/tool counts and elapsed time; token usage and unobserved human intervention counts remain `unavailable`. Tests with substituted CLI or host responses are local component evidence only. A delivery baseline requires actual installed-entry Git, tracker and task read-back.
 
 ## Read the panel
 
@@ -100,4 +100,4 @@ An explicit `/run-issue-workflow <Spec-A>,<Spec-B>` uses separate Runs/Grants an
 
 Failed dispatch, repair or close actions retain at most three attempts for the same owning-source progress in the Run journal. A native lane identity by itself does not reset that budget. New observed progress or an explicit Resume permits recovery; a process restart alone does not. Before a selected batch assigns any worker slot, it discovers and adopts existing creation intents or reserves their uncertain activity.
 
-The [live evidence checkpoint](../../../docs/agents/workflow-live-evidence.md) distinguishes installed observations, local regression tests and still-pending delivery cases. It also records cost coverage and unavailable measurements; skill word counts are not token-cost evidence.
+The [live evidence](../../../docs/agents/workflow-live-evidence.md) distinguishes completed validation Runs, local regression tests and observed recovery interventions. It also records cost coverage and unavailable measurements; skill word counts are not token-cost evidence.
