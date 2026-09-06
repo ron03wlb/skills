@@ -6,9 +6,6 @@ Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/
 
 ## When to reach for it
 
-- Read-only design or tracker-only settled scope: no planning worktree.
-- Accepted glossary or ADR writes: create the isolated lane first, then pass its exact ownership to `to-spec`.
-
 You invoke this by typing `/grill-with-docs`; the agent will not reach for it on its own.
 
 Reach for it at the start of a change, in a repo, when the plan is still fuzzy and the words for the thing are not settled yet. It is the single-session tool. Which grilling skill you want depends on what is in front of you:
@@ -34,7 +31,7 @@ It also needs two other skills present: [grilling](https://aihero.dev/skills-gri
 One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target without a shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry.
 
 - Accepted document writes stay in the exact registered worktree; preserve it through partial publication and dispose only that clean worktree after successful `to-spec` handoff read-back.
-- Tracker-only scope uses an explicit empty accepted-change list; no worktree is created or retained.
+- Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree is created or retained.
 
 ## The paper trail
 

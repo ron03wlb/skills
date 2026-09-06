@@ -6,9 +6,6 @@ The router does not re-decide delivery shape. [to-spec](https://aihero.dev/skill
 
 ## When to reach for it
 
-- Read-only design or tracker-only settled scope: no planning worktree.
-- Accepted glossary or ADR writes: create the isolated lane first, then pass its exact ownership to `to-spec`.
-
 You invoke this by typing `/ask-matt` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it when you do not know where to enter or resume a flow. If you already know the exact skill, invoke it directly.
@@ -30,6 +27,11 @@ Fresh `to-spec` and `to-tickets` operations create no target operational-plan ch
 [prepare-prerequisite-artifact](https://aihero.dev/skills-prepare-prerequisite-artifact) is model-invoked and not a public starting route. From an exact active prerequisite-preparation handoff, it uses the repository adapter to build one validated, independently reviewed, fail-closed Operator SQL candidate without executing it or touching an external [environment](https://www.aihero.dev/ai-coding-dictionary/environment).
 
 Each new execution completion note records exact required non-contract `workflowArtifacts` with sources and purposes, or an empty list; this classifies scope without supplying coverage or verification authority. Each completed Issue is then locally integrated and closed through [close-issue](https://aihero.dev/skills-close-issue). The close leaf acquires one repository close lease before its exact target mutation writer, so one closeout runs per Git common dir while Issue worktrees and unrelated planning remain concurrent. Advancing the target does not invalidate other completions. The same command closes a Multi-Issue parent only after every exact child is closed and reachable. Before push, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) uses local-ahead completion-note reachability; already-pushed work requires an explicit merge request, pull request, or exact range. Both modes run the aggregate gate once. Across execution and target verification, only an exact-evidence **Confirmed code review finding** blocks; a **Code review advisory** remains visible without repair or waiver authority. A Confirmed aggregate finding points to a new human-created **Aggregate repair Issue** on the same target, and verification never creates or executes it, repairs product code, reopens an earlier Issue, or edits a completion note. After a coverage failure containing only eligible direct target contributions, it shows the complete exact record draft, obtains one human confirmation, invokes [attest-target-contribution](https://aihero.dev/skills-attest-target-contribution), and starts fresh from Entry. For one eligible closed historical completion-evidence failure, it proves one exact remedy, shows the complete reconciliation draft, obtains exact human confirmation, invokes [record-closed-issue-reconciliation](https://aihero.dev/skills-record-closed-issue-reconciliation), and likewise starts fresh from Entry. For one eligible historical command placeholder, it proves a descendant Issue recorded the exact full-suite command passing, reruns that command on the frozen target, obtains exact confirmation through the same helper, and starts fresh from Entry with the literal command in the aggregate set. Neither helper pushes, and no recovery adds a separate manual command. After a passing local-ahead gate writes current `push_ready`, the human invokes [push-target](https://aihero.dev/skills-push-target); it fetches the unique configured upstream, performs one ordinary non-force push of the exact verified target, and reads the exact remote ref back before reporting delivery.
+
+The planning surface follows the accepted changes:
+
+- Read-only design or tracker-only settled scope: no planning worktree.
+- Accepted glossary or ADR writes: use the isolated lane and pass its exact ownership to `to-spec`.
 
 Planning lanes and Issue worktrees may run concurrently. Only accepted Planning Seal writes and closeout hold the target mutation writer; closeout additionally holds the repository close lease, while ordinary lane work and tracker publication hold neither.
 

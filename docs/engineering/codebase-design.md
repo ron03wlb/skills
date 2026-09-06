@@ -6,18 +6,14 @@ It is a reference, not a process. There is no loop to run, no artifact it produc
 
 ## When to reach for it
 
-- Module or public-interface design: use this skill.
-- Existing-term lookup or routine implementation: proceed directly.
-
 Type `/codebase-design`, or the agent reaches for it automatically when a design task fits.
-
-Reach for it when you already know which code you're redesigning and you need to think about its shape: where the seam goes, how small the interface can get, whether an extraction is earning its keep. It is also what you reach for to settle an argument about what a word means.
 
 Several skills sit close to it. Which one you want depends on what the actual problem is:
 
 | The problem | The skill |
 |---|---|
 | The shape of one module: its interface, its seam, its depth | `codebase-design` |
+| Existing-term lookup or routine implementation | Proceed directly |
 | The *words of the domain*: "account" means three things, two people mean different things by "cancellation" | [domain-modeling](https://aihero.dev/skills-domain-modeling) |
 | You don't yet know *which* module to redesign | [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) (the survey that finds candidates) |
 | You want the design argued with, not just named | [grilling](https://aihero.dev/skills-grilling) |

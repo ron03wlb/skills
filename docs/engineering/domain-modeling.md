@@ -8,9 +8,6 @@ It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to bo
 
 Type `/domain-modeling`, or the agent selects it when its trigger fits.
 
-- Changes to domain concepts, glossary definitions, or architectural decisions: use this skill.
-- Existing-term lookup or incidental wording edit: proceed directly.
-
  In practice, automatic invocation is the weakest part of the skill: when `grill-with-docs` or `wayfinder` say to load it, [models](https://www.aihero.dev/ai-coding-dictionary/model) frequently load `grilling` and skip this one. If a [grilling](https://www.aihero.dev/ai-coding-dictionary/grilling) session runs and `CONTEXT.md` is untouched at the end, that is what happened; invoke it by name alongside the other skill.
 
 Reach for it when the *words* are the problem:
@@ -22,7 +19,7 @@ Reach for it when the *words* are the problem:
 | You just made a hard-to-reverse architectural choice | `domain-modeling`: it offers an ADR, if the choice clears the bar |
 | The module's *shape* is the problem: where the seam goes, how deep the interface is | [codebase-design](https://aihero.dev/skills-codebase-design) |
 | You want the whole plan interrogated before you build | [grill-with-docs](https://aihero.dev/skills-grill-with-docs), which drives this skill underneath |
-| You want a term looked up, not changed | Nothing. Read `CONTEXT.md`. It is a file. |
+| Existing-term lookup or incidental wording edit | Proceed directly; read the relevant `CONTEXT.md` entry when needed |
 
 ## Prerequisites
 

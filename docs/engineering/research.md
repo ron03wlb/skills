@@ -6,14 +6,9 @@ It does not answer you in the conversation. The output is a file, written where 
 
 ## When to reach for it
 
-- Source comparison with a durable cited repository note: use this skill.
-- Quick fact lookup: continue directly.
-- Useful independent local work can continue: delegate the bounded research.
-- No useful parallel work: complete the research directly.
+Type `/research`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when its trigger fits.
 
-Type `/research`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task needs source comparison and a durable cited note.
-
-Reach for it when the next step is *finding something out* from outside the working directory (how a third-party API behaves, what a spec actually says, whether a version claim holds), and you'd rather not stall your own thread doing the reading. What you need decides which skill:
+What you need to find out decides which skill:
 
 | What you need | Reach for |
 | --- | --- |
@@ -28,7 +23,10 @@ The line between `research` and `grill-with-docs` is the **shelf life of what co
 
 ## Delegated legwork
 
-The defining output is one cited repository note. When delegation is useful, one **background agent** owns the bounded reading and file while the caller continues independent work. The caller remains responsible for interpreting the findings.
+Choose the working mode from the available parallel work:
+
+- Useful independent work can continue: one **background agent** owns the bounded reading and file; the caller interprets the findings.
+- No useful parallel work, or no delegation support: complete the research directly.
 
 A delegated researcher performs its task directly and does not create nested research agents.
 
@@ -45,8 +43,6 @@ Recovered evidence keeps its provenance. An archived copy is cited with its snap
 **It spawned a second research agent. Is that meant to happen?**
 
 No. The current instruction contract gives one researcher ownership of the note and forbids nested delegation. The historical duplicate-agent reports motivated that guardrail; they are not the current intended behavior.
-
-If the host cannot delegate, the caller can perform the bounded research directly. Report the actual mode rather than claiming a background task ran.
 
 **Where should the file live, and should I commit it?**
 
