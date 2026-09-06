@@ -57,6 +57,14 @@ Known permissions and SQL prerequisites belong before Run-ready, through plannin
 
 ## Other routes and phase boundaries
 
+Choose the conversation by the gap in front of you:
+
+- Vague needs or a solution-first idea: [clarify-needs](https://aihero.dev/skills-clarify-needs) confirms the goal, examines proposals from first principles, and converges on a Needs Summary when the evidence is sufficient.
+- A plan to pressure-test through its decision tree: [grilling](https://aihero.dev/skills-grilling).
+- Understanding to calibrate against specified evidence: [confirm-understanding](https://aihero.dev/skills-confirm-understanding).
+
+A Needs Summary creates shared understanding. Explicit authorization already given for subsequent work carries forward to the applicable flow.
+
 For a new software project without a governing Spec, the personal `/start-project` skill gathers product, risk, architecture, and cost evidence. Its handoff depends on the available planning evidence:
 
 - An existing matching Planning handoff packet goes to [to-spec](https://aihero.dev/skills-to-spec).
