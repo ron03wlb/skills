@@ -2,6 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runBatch } from "../../skills/personal/run-issue-workflow/scripts/run-batch.mjs";
 
+test("disconnect before the first observation preserves every selected Spec without claiming success", async () => {
+  const result = await runBatch({
+    lanes: ["a", "b"].map(specId => ({ specId, async run() { assert.fail("Disconnected entry must not observe or dispatch"); } })),
+    connected: () => false,
+    sleep: async () => assert.fail("Disconnected entry must not wait"),
+  });
+  assert.equal(result.state, "PRESERVED");
+  assert.deepEqual(result.runs.map(status => [status.run.specId, status.run.state]), [["a", "UNAVAILABLE"], ["b", "UNAVAILABLE"]]);
+  assert.ok(result.runs.every(status => status.capacityUnknown && status.legalActions.length === 0));
+});
+
 test("selected Specs take turns, share worker capacity, and keep blocked and close-only lanes independent", async () => {
   const starts = [];
   let workers = 0;

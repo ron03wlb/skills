@@ -7,8 +7,9 @@ import { bodyDigest, readWorkflowRecords, legacyCompletionAllowed } from "./gith
 import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, deriveExecuteIssueOperationIdentity, assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 
+const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
 const one = (values, label) => {
-  if (values.length !== 1) throw new Error(`${label}: expected one exact record, observed ${values.length}`);
+  if (values.length !== 1) throw authorityConflict(`${label}: expected one exact record, observed ${values.length}`);
   return values[0];
 };
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
@@ -36,7 +37,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     if (!numbers.has(locator)) {
       const response = JSON.parse(command("gh", ["api", "graphql", "-f", "query=query($id: ID!) { node(id: $id) { ... on Issue { id number repository { nameWithOwner } } } }", "-f", `id=${locator}`]));
       const node = response.data?.node;
-      if (node?.repository?.nameWithOwner !== repositoryName || !node.number) throw new Error("Issue node is outside the configured repository");
+      if (node?.repository?.nameWithOwner !== repositoryName || !node.number) throw authorityConflict("Issue node is outside the configured repository");
       numbers.set(locator, node.number);
     }
     return numbers.get(locator);
@@ -44,10 +45,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
   const readIssue = async (locator) => {
     const number = await issueNumber(locator);
     const issue = api(`repos/${repositoryName}/issues/${number}`)[0];
-    if (issue.pull_request || !issue.node_id) throw new Error("Tracker locator is not an Issue");
+    if (issue.pull_request || !issue.node_id) throw authorityConflict("Tracker locator is not an Issue");
     numbers.set(issue.node_id, number);
     const comments = api(`repos/${repositoryName}/issues/${number}/comments?per_page=100`);
-    return { ...issue, comments, records: readWorkflowRecords(comments) };
+    let records;
+    try { records = readWorkflowRecords(comments); }
+    catch (error) { throw authorityConflict(error.message); }
+    return { ...issue, comments, records };
   };
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {
@@ -84,7 +88,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     const digest = bodyDigest(spec.body);
     const publication = one(spec.records.filter(({ record }) => record.kind === "spec_publication" && record.authority?.approvedScopeHash === digest), "Current approved Spec publication");
     let authority = publication.record.authority;
-    if (authority.specId !== spec.node_id || publication.record.repositoryId !== repositoryId) throw new Error("Spec publication identity differs");
+    if (authority.specId !== spec.node_id || publication.record.repositoryId !== repositoryId) throw authorityConflict("Spec publication identity differs");
     const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
     const handoff = one(spec.records.filter(({ record }) => record.kind === "producer_handoff" && record.approvedScopeHash === digest && record.producerCommand === expectedProducer), "Current producer handoff");
     const decomposition = authority.classification === "MULTI"
@@ -92,7 +96,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     if (decomposition) authority = { ...authority, decompositionIdentity: decomposition.identity };
     const mapping = decomposition?.record.decompositionMapping ?? null;
     const ids = authority.classification === "SINGLE" ? [spec.node_id] : Object.values(mapping ?? {});
-    if (ids.length === 0 || new Set(ids).size !== ids.length) throw new Error("Decomposition has no unique Issue mapping");
+    if (ids.length === 0 || new Set(ids).size !== ids.length) throw authorityConflict("Decomposition has no unique Issue mapping");
     const issueErrors = new Map();
     const issues = await Promise.all(ids.map(async id => {
       try { return id === spec.node_id ? spec : await readIssue(id); }

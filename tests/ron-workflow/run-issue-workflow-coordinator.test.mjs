@@ -733,6 +733,31 @@ test("tracker recovery uses 5 and 15 second probes without consuming Issue retry
   }
 });
 
+test("a read-back authority conflict stops immediately without network probes or task actions", async () => {
+  const { root, store } = createStoreFixture();
+  const sleeps = [];
+  let reads = 0;
+  const unusedTasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map(name => [name, async () => {
+      assert.fail(`${name} must not run for conflicting scope`);
+    }]),
+  );
+  try {
+    const coordinator = createCoordinator({ store, tasks: unusedTasks,
+      tracker: { async read() { reads++; throw Object.assign(new Error("Current approved Spec publication: expected one exact record, observed 0"), { code: "WORKFLOW_AUTHORITY_CONFLICT" }); } },
+      reconcile: async () => assert.fail("conflicting authority cannot reconcile"),
+      now: () => "2026-09-06T09:00:00.000Z", sleep: async delay => sleeps.push(delay),
+    });
+    const status = await coordinator.run({ specId: "15" });
+    assert.equal(status.run.state, "BLOCKED");
+    assert.equal(status.diagnoses[0].reasonCode, "tracker_authority_conflict");
+    assert.match(status.diagnoses[0].evidence[0], /expected one exact record, observed 0/u);
+    assert.equal(reads, 1);
+    assert.deepEqual(sleeps, []);
+    assert.deepEqual(store.readEvents(identity.runId), []);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("tracker exhaustion probes 5, 15, and 30 seconds and takes no workflow action", async () => {
   const { root, store } = createStoreFixture();
   const sleeps = [];

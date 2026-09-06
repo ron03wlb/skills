@@ -16,7 +16,7 @@ const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (i
     : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 
-export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout }) {
+export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
   const refs = new Map();
   const cursors = new Map();
   const call = async (name, args) => {
@@ -66,7 +66,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const final = (snapshot.turns?.[0]?.items ?? []).findLast(item => item.type === "agentMessage" && item.phase === "final_answer")?.text;
     const closeResultMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
     const closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
-    return { state: type === "active" ? "RUNNING" : type === "idle" ? "RESUMABLE" : "UNKNOWN",
+    const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
+    return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
       closeRequest, retryRequest, repairRequest, closeResult, snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
@@ -88,23 +89,32 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
     const intent = store.readHostTask({ runId: runIdentity.runId, issueId });
     if (!intent) return [];
-    const listing = await call("list_threads", { limit: 50 });
     const found = [];
-    for (const task of [...(listing.pinnedThreads ?? []), ...(listing.threads ?? [])]) {
-      if (task.kind !== "codex" || task.projectId !== project.projectId || task.hostId !== project.hostId) continue;
-      const ref = { threadId: task.id, hostId: task.hostId };
-      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt));
-      if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
-    }
-    if (found.length === 0 && project.path && project.hostId === "local") {
+    if (project.path && project.hostId === "local") {
       const since = intent.createdAt ?? store.readEvents(runIdentity.runId).find(({ type }) => type === "grant.recorded")?.at;
       const common = (cwd) => realpathSync(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
-      for (const hint of await discoverLocalCodexTasks({ prompt: intent.prompt, since })) {
+      for (const hint of await discoverTasks({ prompt: intent.prompt, since })) {
         const ref = { threadId: hint.threadId, hostId: hint.hostId };
         const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt));
         const cwd = snapshot.thread.cwd;
-        if (cwd === hint.cwd && common(cwd) === common(project.path) && userTexts(snapshot).includes(intent.prompt)) found.push(ref);
+        if (cwd !== hint.cwd || common(cwd) !== common(project.path) || !userTexts(snapshot).includes(intent.prompt)) {
+          throw new Error("Native discovered task ownership is unproven");
+        }
+        found.push(ref);
       }
+      if (found.length) {
+        if (found.length === 1) refs.set(key, found[0]);
+        return found;
+      }
+    }
+    const listing = await call("list_threads", { limit: 50 });
+    for (const task of [...(listing.pinnedThreads ?? []), ...(listing.threads ?? [])]) {
+      if (task.kind !== "codex" || task.projectId !== project.projectId || task.hostId !== project.hostId) continue;
+      // This intent creates a worktree. A task in the saved checkout cannot own it.
+      if (project.path && task.cwd === project.path) continue;
+      const ref = { threadId: task.id, hostId: task.hostId };
+      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt));
+      if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
     }
     if (found.length === 0) throw new Error("TASK_CREATION_UNRESOLVED: preserve the recorded intent and inspect the host; do not create another task");
     if (found.length === 1) refs.set(key, found[0]);
@@ -113,6 +123,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const create = async ({ issueId, runIdentity }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const number = await issueNumber(issueId);
+    if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
     const prompt = `${key}\nUse the installed workflow's exact skill at ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to execute Issue #${number}.\nRead the current Issue and only its required linked scope. Run Grant: ${JSON.stringify(runIdentity)}. Read its grant.recorded event from the repository Git common directory before any mutation.\nUse this task's existing Git worktree as the sole Issue lane after verifying its common directory, target ancestry and ownership. Record this worktree and branch; do not create a second worktree. Target: ${runIdentity.target}. Complete implementation, required verification, independent review and implementation_complete read-back, then stop. A later close request owns integration and closure. No push or deployment. All workflow skills and references must come from ${packageRoot}/skills for this Run's pinned version.`;
     const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, prompt });
     if (!reservation.created) {
