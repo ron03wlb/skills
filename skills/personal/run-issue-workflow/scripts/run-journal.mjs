@@ -7,6 +7,7 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
   "runtime.observed",
   "repair.recorded",
+  "action.failed",
   "control.revised",
   "dispatch.recorded",
   "retry.recorded",
@@ -29,6 +30,7 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
+  ["action.failed", new Set(["type", "at", "issueId", "actionType", "progressIdentity", "attempt", "evidence"])],
   ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
   ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion"])],
@@ -132,6 +134,13 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
   assertExactFields(event, allowedFields, `${event.type} event`);
   requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
+    case "action.failed":
+      requireText(event.issueId, "failed action Issue");
+      if (!["dispatch_issue", "repair_issue", "close_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.progressIdentity)) throw new TypeError("Failed action requires exact progress identity");
+      requirePositiveInteger(event.attempt, "failed action attempt", 3);
+      requireText(event.evidence, "failed action evidence");
+      break;
     case "repair.recorded":
       requireText(event.issueId, "repair Issue");
       requirePositiveInteger(event.wave, "repair wave", 10);
@@ -254,6 +263,11 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
         throw new TypeError("A renewed grant must preserve its workflow version");
       }
     }
+  }
+  if (event.type === "action.failed") {
+    const previous = events.filter(item => item.type === event.type && item.issueId === event.issueId
+      && item.actionType === event.actionType && item.progressIdentity === event.progressIdentity);
+    if (event.attempt !== previous.length + 1) throw new TypeError("Failed action attempts must preserve their monotonic progress budget");
   }
   if (event.type === "repair.recorded") {
     const previous = events.filter(item => item.type === "repair.recorded" && item.issueId === event.issueId);

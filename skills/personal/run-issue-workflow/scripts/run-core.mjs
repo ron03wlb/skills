@@ -734,6 +734,8 @@ export function reduceRun(input) {
     ].includes(event.type);
   const outOfScopeJournalEvent = input.journal.find((event) => (
     [
+      "action.failed",
+      "repair.recorded",
       "dispatch.recorded",
       "retry.recorded",
       "remediation.recorded",

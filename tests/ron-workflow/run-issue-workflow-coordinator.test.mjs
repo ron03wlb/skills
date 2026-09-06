@@ -9,6 +9,8 @@ import {
   createCoordinator as createCoordinatorRuntime,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
+import { runBatch } from "../../skills/personal/run-issue-workflow/scripts/run-batch.mjs";
+import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -3009,7 +3011,7 @@ test("no-argument entry resumes one exact non-terminal Run", async () => {
   }
 });
 
-test("re-entry observes an accepted retry request before journaling the next attempt", async () => {
+test("same-command recovery and re-entry observe accepted retry before journaling the next attempt", async () => {
   const { root, store } = createStoreFixture();
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let retryRequest = null;
@@ -3050,7 +3052,7 @@ test("re-entry observes an accepted retry request before journaling the next att
 
   try {
     const coordinator = createCoordinator({ store, tracker, tasks, reconcile, now, sleep: async () => {} });
-    await assert.rejects(coordinator.run({ specId: "15" }), /coordinator lost/u);
+    assert.equal((await coordinator.run({ specId: "15" })).run.state, "RUNNING");
     const resumed = await coordinator.run({ specId: "15" });
     const dispatches = store.readEvents(identity.runId).filter(({ type }) => type === "dispatch.recorded");
 
@@ -3869,4 +3871,69 @@ test("an ambiguous Issue lane isolates its dependants while the same Run dispatc
     await createCoordinator(options).run({ specId: "12", mode: "step" });
     assert.deepEqual(creates, ["14", "13"], "fresh unique ownership unblocks only the original Issue without new approval");
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+
+test("batch first-round capacity includes unjournaled native creation intents in later lanes", async () => {
+  for (const existingIdentity of [multiIdentity, { ...multiIdentity, classification: "SINGLE", decompositionIdentity: null }]) {
+  for (const existing of [["first"], ["first", "second"]]) {
+  const { root, store } = createStoreFixture();
+  let creates = 0;
+  let connected = true;
+  const prompt = "the exact previously accepted creation prompt";
+  store.reserveHostTask({ runId: existingIdentity.runId, issueId: "13", prompt });
+  const tasks = createCodexWorkflowTasks({ store, project: { projectId: "project", hostId: "local" }, packageRoot: "/package", issueNumber: async id => id,
+    host: { async call(name, args) {
+      if (name.endsWith("list_threads")) return { threads: existing.map(id => ({ id, kind: "codex", projectId: "project", hostId: "local" })) };
+      if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", status: { type: "active" } }, turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] }] };
+      if (name.endsWith("create_thread")) { creates++; return { threadId: "new", hostId: "local" }; }
+      throw new Error(`Unexpected ${name}`);
+    } }, sleep: async () => {} });
+  const options = { store, tasks, tracker: { read: async () => ({}) }, now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+  const lane = (runIdentity, issueId) => ({ specId: runIdentity.specId, run: request => createCoordinator({ ...options,
+    reconcile: async ({ journal }) => reconciliation({ runIdentity, nodes: [{ issueId, blockers: [], trackerState: "OPEN", taskState: journal.some(event => event.type === "dispatch.recorded") ? "EXECUTING" : "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" }] }),
+  }).run({ ...request, specId: runIdentity.specId }) });
+  try {
+    const result = await runBatch({ lanes: [lane(identity, "15"), lane(existingIdentity, "13")], maxWorkers: existing.length,
+      connected: () => connected, sleep: async () => { connected = false; } });
+    assert.equal(creates, 0, "the later ambiguous lane already occupies both shared slots");
+    const observed = result.runs.find(status => status.run.specId === "12").nodes[0].task;
+    if (existing.length === 2) assert.equal(observed.reservedWorkers, 2);
+    else {
+      assert.equal(observed.state, "EXECUTING");
+      assert.equal(store.readEvents(existingIdentity.runId).filter(event => event.type === "dispatch.recorded").length, 1);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+  }
+});
+
+test("failed close and repair actions exhaust one durable budget across fresh coordinators", async () => {
+  for (const repair of [false, true]) {
+    const { root, store } = createStoreFixture();
+    const ref = { threadId: "original", hostId: "local" };
+    let messages = 0;
+    let candidate = "b".repeat(40);
+    const options = { store, tracker: { read: async () => ({}) }, tasks: {
+      findIssueLane: async () => [ref], read: async () => ({ state: "RESUMABLE" }),
+      create: async () => { throw new Error("No replacement"); }, wait: async () => { throw new Error("No wait"); },
+      message: async () => { messages++; throw new Error("Task message retry budget exhausted after native read-back"); },
+    }, reconcile: async () => reconciliation({ runIdentity: multiIdentity, taskRefs: { 13: ref }, nodes: [
+      { issueId: "13", blockers: [], trackerState: "OPEN", taskState: "NONE", completionState: "COMPLETE", candidateReachable: false, worktreeState: "PRESENT", closeAuthorityEvidence: closeAuthorityEvidenceFor("13", { candidateCommit: candidate }), ...(repair ? { closeConflict: { candidate, targetHead: "a".repeat(40) } } : {}) },
+      { issueId: "14", blockers: ["13"], trackerState: "OPEN", taskState: "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" },
+    ] }), now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+    try {
+      const writer = store.acquireWriter(multiIdentity.runId);
+      writer.append({ type: "grant.recorded", at: options.now(), runIdentity: multiIdentity, maxParallel: 3 });
+      writer.append({ type: "dispatch.recorded", at: options.now(), issueId: "13", attempt: 1, taskRef: ref }); writer.release();
+      let status;
+      for (let entry = 0; entry < 8; entry++) status = await createCoordinator(options).run({ specId: "12", mode: "step" });
+      assert.equal(messages, 3, "a unique existing lane does not reset the failed action budget");
+      assert.deepEqual(status.diagnoses.find(item => item.reasonCode === "issue_action_retry_exhausted").affectedNodes, ["13", "14"]);
+      assert.equal(store.readEvents(multiIdentity.runId).filter(event => event.type === "action.failed").length, 3);
+      candidate = "c".repeat(40);
+      await createCoordinator(options).run({ specId: "12", mode: "step" });
+      assert.equal(messages, 4, "a freshly reviewed changed candidate supplies new owning-source progress");
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

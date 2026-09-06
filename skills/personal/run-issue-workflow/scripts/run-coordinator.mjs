@@ -310,7 +310,10 @@ const issueLaneAmbiguous = (status, issueId, laneCount) => ({ ...diagnosedStop(s
   noAutomaticTransition: "Ambiguous task identity cannot authorize dispatch, retry, or closeout.",
   affectedNodes: [issueId],
   resumePredicates: ["one_exact_issue_lane_is_proven"],
-}), reservationCount: laneCount || status.run.maxParallel });
+}), reservationCount: laneCount || status.run.maxParallel,
+  nodes: status.nodes.map(node => node.issueId === issueId
+    ? { ...node, task: { ...node.task, reservedWorkers: laneCount || status.run.maxParallel } } : node),
+});
 
 const issueLaneMissing = (status, issueId) => diagnosedStop(status, {
   reasonCode: "issue_lane_missing",
@@ -989,10 +992,21 @@ export function createCoordinator({
         run: Object.fromEntries(RUN_IDENTITY_KEYS.map(key => [key, facts.run[key]])),
         node: facts.nodes.find(node => node.issueId === issueId),
       }));
+      const actionProgressIdentity = (facts, issueId) => {
+        const resume = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised" && event.command === "RESUME");
+        return `sha256:${createHash("sha256").update(JSON.stringify([actionFactsIdentity(facts, issueId), resume?.revision ?? 0])).digest("hex")}`;
+      };
+      const failedActions = facts => store.readEvents(facts.run.runId).filter(event => event.type === "action.failed"
+        && event.progressIdentity === actionProgressIdentity(facts, event.issueId));
       const rebuildStatus = (facts) => {
         const control = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised");
         const local = [];
         const reservations = new Map();
+        for (const failure of failedActions(facts).filter(event => event.attempt === 3)) {
+          local.push({ code: "issue_action_retry_exhausted", reasonCode: "issue_action_retry_exhausted",
+            affectedNodes: [failure.issueId], evidence: [`${failure.actionType} exhausted three attempts without owning-source progress: ${failure.evidence}`] });
+          if (failure.actionType === "dispatch_issue") reservations.set(failure.issueId, 1);
+        }
         for (const [key, entry] of actionStops) {
           if (entry.runId !== facts.run.runId) continue;
           if (entry.factsIdentity !== actionFactsIdentity(facts, entry.issueId)
@@ -1014,7 +1028,7 @@ export function createCoordinator({
       };
       const refreshActionStops = async current => {
         for (const [key, entry] of actionStops) {
-          if (entry.runId !== current.runIdentity.runId || !["issue_lane_ambiguous", "issue_lane_missing", "issue_action_unresolved"].includes(entry.diagnosis.reasonCode)) continue;
+          if (entry.runId !== current.runIdentity.runId || !["issue_lane_ambiguous", "issue_lane_missing"].includes(entry.diagnosis.reasonCode)) continue;
           try {
             const found = await tasks.findIssueLane({ issueId: entry.issueId, runIdentity: current.runIdentity });
             if (Array.isArray(found) && (found.length === 1 || found.length === 0 && entry.diagnosis.reasonCode === "issue_lane_ambiguous")) actionStops.delete(key);
@@ -1232,6 +1246,24 @@ export function createCoordinator({
             continue;
           }
 
+          // Creation may have reached the host before its dispatch receipt. Reconcile every
+          // pending intent before a batch snapshot can advertise free worker capacity.
+          if (tasks.observePendingCreations) {
+            const pending = await tasks.observePendingCreations({ runIdentity, issueIds: current.facts.nodes.map(node => node.issueId) });
+            let adopted = false;
+            for (const observation of pending) {
+              if (observation.refs?.length === 1 && isTaskRef(observation.refs[0])) {
+                writer.append({ type: "dispatch.recorded", at: now(), issueId: observation.issueId, attempt: 1, taskRef: observation.refs[0] });
+                actionStops.delete(`${runIdentity.runId}:${observation.issueId}`);
+                adopted = true;
+              } else {
+                const stopped = issueLaneAmbiguous(rebuildStatus(current.facts), observation.issueId, observation.refs?.length ?? 0);
+                if (observation.error) stopped.diagnoses.at(-1).evidence.push(observation.error);
+                if (!isolateActionStop(stopped, { issueId: observation.issueId }, current)) return stopped;
+              }
+            }
+            if (adopted) continue;
+          }
           await refreshActionStops(current);
           lastStatus = rebuildStatus(current.facts);
           for (const pending of request.controlQueue?.splice(0) ?? []) {
@@ -1321,12 +1353,12 @@ export function createCoordinator({
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
             } catch (error) {
-              if (current.runIdentity.classification !== "MULTI" || !["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
+              if (!["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
               lastStatus = rebuildStatus(current.facts); // A fenced writer must throw before any continuation.
-              const stopped = diagnosedStop(lastStatus, { reasonCode: "issue_action_unresolved", evidence: [error.message],
-                affectedNodes: [action.issueId], noAutomaticTransition: "Read the owning task before retrying this unresolved action.", resumePredicates: ["exact_issue_action_is_reconciled"] });
-              stopped.reservationCount = action.type === "dispatch_issue" ? 1 : 0;
-              if (!isolateActionStop(stopped, action, current)) throw error;
+              const progressIdentity = actionProgressIdentity(current.facts, action.issueId);
+              const attempt = failedActions(current.facts).filter(event => event.issueId === action.issueId && event.actionType === action.type).length + 1;
+              writer.append({ type: "action.failed", at: now(), issueId: action.issueId, actionType: action.type, progressIdentity, attempt, evidence: error.message });
+              if (attempt < 3) await sleep([1000, 5000][attempt - 1]);
               break;
             }
           }

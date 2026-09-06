@@ -147,6 +147,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   };
   return {
     findIssueLane, create, read,
+    async observePendingCreations({ runIdentity, issueIds }) {
+      const observations = [];
+      const dispatched = new Set(store.readEvents(runIdentity.runId).filter(event => event.type === "dispatch.recorded").map(event => event.issueId));
+      for (const issueId of issueIds) {
+        if (dispatched.has(issueId) || !store.readHostTask({ runId: runIdentity.runId, issueId })) continue;
+        try { observations.push({ issueId, refs: await findIssueLane({ issueId, runIdentity }) }); }
+        catch (error) { observations.push({ issueId, error: error.message }); }
+      }
+      return observations;
+    },
     async message(ref, prompt) {
       const issue = prompt.match(/(?:close|retry|repair) (?:parent )?Issue (I_[A-Za-z0-9_-]+)/u);
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
