@@ -10,9 +10,9 @@ You invoke this by typing `/implement` — the [agent](https://www.aihero.dev/ai
 
 Reach for it when you intentionally want direct current-branch work and no tracker integration lifecycle. Use [to-spec](https://aihero.dev/skills-to-spec) when the scope needs a Tracker Spec or its published route.
 
-## Pre-agreed seams
+## Test-driven slices
 
-`implement` uses [tdd](https://aihero.dev/skills-tdd) at the already selected public seams, runs focused checks throughout and the required full suite at the end, then invokes [code-review](https://aihero.dev/skills-code-review) against its fixed baseline.
+`implement` uses [tdd](https://aihero.dev/skills-tdd) to select existing public interfaces from the approved behavior, runs focused checks throughout and the required full suite at the end, then invokes [code-review](https://aihero.dev/skills-code-review) against its fixed baseline. Existing approval is enough to start the behavioral test.
 
 It creates no Issue worktree, integration receipt, tracker closure, push, or deployment state.
 
