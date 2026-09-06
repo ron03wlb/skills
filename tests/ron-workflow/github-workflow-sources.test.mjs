@@ -53,6 +53,35 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Current approved Spec publication/u.test(error.message));
     fixture.body = body;
     writeFileSync(fixturePath, JSON.stringify(fixture));
+    for (const [changedAuthority, repositoryId] of [
+      [{ ...authority, specId: "I_foreign" }, "github:example/repo"],
+      [authority, "github:other/repo"],
+    ]) {
+      fixture.comments[0].body = renderWorkflowRecord({ kind: "spec_publication", repositoryId, authority: changedAuthority });
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
+        error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Spec publication identity differs/u.test(error.message));
+    }
+    fixture.comments[0].body = renderWorkflowRecord({ kind: "spec_publication", repositoryId: "github:example/repo", authority });
+    writeFileSync(fixturePath, JSON.stringify(fixture));
+    const originalComments = structuredClone(fixture.comments);
+    for (const mapping of [{}, { one: "I_2", two: "I_2" }]) {
+      fixture.comments = [
+        { ...originalComments[0], body: renderWorkflowRecord({ kind: "spec_publication", repositoryId: "github:example/repo", authority: { ...authority, classification: "MULTI" } }) },
+        { ...originalComments[1], body: renderWorkflowRecord({ ...handoff, classification: "MULTI", producerCommand: "to-tickets" }) },
+        { node_id: "IC_decomposition", author_association: "OWNER", body: renderWorkflowRecord({ kind: "decomposition:v1", parent: "I_1", approvedScopeHash: authority.approvedScopeHash, decompositionMapping: mapping }) },
+      ];
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
+        error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Decomposition has no unique Issue mapping/u.test(error.message));
+    }
+    fixture.comments = originalComments;
+    fixture.pull_request = {};
+    writeFileSync(fixturePath, JSON.stringify(fixture));
+    await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
+      error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Tracker locator is not an Issue/u.test(error.message));
+    delete fixture.pull_request;
+    writeFileSync(fixturePath, JSON.stringify(fixture));
     const current = await owner.sources.reconciliation.read({ tracker: snapshot, journal: [], request: {} });
     assert.equal(reduceRunReadyHandoff(current.runReadyAuthority).state, "READY");
     assert.equal(current.facts.run.targetHead, seal);
