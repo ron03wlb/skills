@@ -1,22 +1,22 @@
 ---
 name: to-spec
-description: Publish one settled Spec from its isolated planning lane through optimistic baseline revalidation and an exact Run handoff.
+description: Publish one settled Spec with relevant baseline revalidation and an exact Run handoff; isolate accepted planning-document writes.
 disable-model-invocation: true
 ---
 
 # To Spec
 
-Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and prefer existing high-level verification seams.
+Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and use existing verification seams.
 
-The configured issue tracker, triage labels, current Workflow checkpoint profiles, concrete publication adapters, and shared Target mutation writer must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Never create or repair those authority seams here.
+The configured issue tracker, triage labels, current Workflow checkpoint profiles, concrete publication adapters must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Accepted glossary or ADR writes additionally require the shared Target mutation writer. Never repair these authority seams here.
 
 ## 1. Consume the planning lane handoff
 
-Require the active settled-context task's **Spec workflow lane** handoff. It binds one Codex task, one proposed Tracker Spec, one target, the starting baseline, the isolated planning worktree, and every accepted glossary or ADR exact path or hunk with its content identity. Require that worktree to remain registered to the same task and target. A missing handoff is a Recoverable blocker; a mismatched task, proposed Spec, target, worktree, baseline, path, hunk, content identity, or ownership claim is a Hard gate before mutation.
+Consume the settled scope, repository and proposed or existing Tracker Spec identity, target, baseline, source facts, and an explicit accepted glossary or ADR change list. A tracker-only publication with an empty list needs no planning worktree or lane handoff. Revision mode must read the existing tracker identity and version; missing scope or conflicting source, version, or identity stops before mutation.
 
-Read any referenced Spec body, comments, prior partial-publication report, and exact matching producer transaction. An existing Spec uses `revision` mode: update the same tracker Spec and do not create a duplicate. Otherwise use `primary` mode and reserve or reuse exactly one draft identity through the tracker adapter after the lane and Planning baseline gates below.
+For accepted document writes, require the active settled-context task's **Spec workflow lane** handoff: one Codex task, one proposed Tracker Spec, one target, baseline, isolated planning worktree, and accepted glossary or ADR exact path or hunk with its content identity. Verify its registration and ownership. A missing required handoff is a Recoverable blocker; any mismatched bound identity or ownership claim is a Hard gate before mutation.
 
-Multiple planning lanes may target the same branch. Consume only this task's lane; never use a shared planning checkout, global workflow lock, another lane's accepted decisions, or unrelated worktree state as publication evidence.
+Read any referenced Spec body, comments, prior partial-publication report, and exact matching producer transaction. An existing Spec uses `revision` mode: update the same tracker Spec and do not create a duplicate. Otherwise use `primary` mode and reserve or reuse exactly one draft identity through the tracker adapter before the planning adapter needs its version token; reservation authorizes no document write or final publication. Then apply the Planning baseline and document-write gates below.
 
 ## 2. Draft the classified contract
 
@@ -25,7 +25,7 @@ Multiple planning lanes may target the same branch. Consume only this task's lan
 - **Single-Issue**: one cohesive outcome fits one Issue worktree, execution context, reviewed candidate, and closeout.
 - **Multi-Issue**: there are independently executable outcomes or blocking edges, or the work cannot safely fit one execution, review, and closeout cycle.
 
-File count, module count, risk, or apparent size alone never decides. Classify automatically from the settled requirements and repository evidence. Only material ambiguity that could change the route permits one blocking question with a recommendation; never default from uncertainty.
+Size and risk alone never decide. Classify automatically from the settled requirements and repository evidence. Only material ambiguity that could change the route permits one blocking question with a recommendation; never default from uncertainty.
 
 User Outcomes are optional actor/value context, at most three, and never define done.
 
@@ -38,11 +38,11 @@ After classification, read only the matching template: `references/single-issue-
 
 ## 3. Revalidate the Planning baseline and select the Planning Seal
 
-Immediately before publication or an accepted-decision Planning Seal write, call the planning adapter to re-read only the relevant glossary, ADR, and source facts against the latest target ref. Compare those facts with the lane's starting baseline and accepted content; do not rerun unrelated planning, review, generation, or repository-wide diagnostics.
+Immediately before publication or an accepted-decision Planning Seal write, call the planning adapter using `readPlanningBaseline` from `scripts/planning-entry.mjs` to re-read only the relevant glossary, ADR, and source facts against the latest target ref. Compare those facts with the settled source baseline and accepted content; do not rerun unrelated planning, review, generation, or repository-wide diagnostics.
 
 - Compatible target movement binds the latest baseline for this lane and continues.
 - Relevant semantic drift returns a Recoverable blocker containing the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-spec` retry after renewed human confirmation. Preserve the lane and do not merge the changed decision silently.
-- A missing, ambiguous, unreadable, or conflicting target or lane identity is a Hard gate.
+- A missing, ambiguous, unreadable, or conflicting target or required lane identity is a Hard gate.
 
 If there is no accepted glossary or ADR delta, reuse the latest baseline as the Planning Seal and create no empty commit. If there is one exact accepted delta, acquire the shared Target mutation writer, re-read the target ref and relevant facts, and materialize only those accepted paths or hunks as one scoped Planning Seal. Read the target ref, commit diff, and lane content identities back before releasing the writer. If the writer is healthy but occupied, wait only within its configured bound; timeout, unknown ownership, or content drift returns a Recoverable blocker without lease stealing. Preserve unrelated staged, unstaged, untracked, target, and lane work.
 
@@ -58,7 +58,7 @@ First search the exact operation for an existing valid incomplete transaction-v1
 
 A fresh ordinary publication uses `to-spec@v2`. Call `bindProducerCheckpointOperationIdentity` and `createProducerOperationCheckpoint` to bind one exact operation-scoped transaction and owner-derived receipt to repository, Spec, approved publication identity or hash, producer `to-spec`, stage `publication`, tracker identity, profile `v2`, target, latest baseline, Planning Seal, classification, and approved-scope identity. Its ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`. Advance the first stage only after the Planning Seal adapter's exact receipt reads back.
 
-The current profile has no target operational-plan, plan-content, checkpoint-commit, or prospective-attestation stage. Target-checkout dirt outside the exact accepted Planning Seal write is preserved and is not transaction authority; only a ref, lane, or adapter identity conflict that risks the wrong mutation is a Hard gate.
+The current profile has no target operational-plan stages. Preserve target dirt; only a ref, required lane, or adapter identity conflict that risks the wrong mutation is a Hard gate.
 
 Only one exact matching transaction may resume at its first unsatisfied stage. Re-read every completed receipt and require all bound identities to match. A missing transaction with observed downstream mutation, duplicate operation, mismatched receipt, out-of-order stage, or ambiguous adapter result stops without duplicate publication or attribution of unrelated work.
 
@@ -78,4 +78,4 @@ A **Recoverable blocker** names the owning source, observed evidence, smallest h
 
 An **advisory** cannot affect identity, attribution, durable state, or published behavior. Keep it visible; advisories never block, mutate authority, or become a waiver.
 
-On any partial failure, report the lane, Planning Seal, latest observed baseline, tracker identity, transaction identity, immutable receipts, and first unsatisfied stage that exist. Preserve the planning worktree until successful handoff read-back. This skill never starts a Run, implements, decomposes, integrates, pushes, deploys, rolls back, or mutates another lane.
+On partial failure, report existing identities, immutable receipts, and the first unsatisfied stage. Preserve any owned planning worktree until successful handoff read-back. This skill authorizes publication only, not execution, integration, push, deploy, rollback, or another lane's mutation.

@@ -1,8 +1,8 @@
 ## What it does
 
-`to-spec` turns the settled work in one isolated planning lane into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), then publishes one immutable downstream handoff.
+`to-spec` turns settled scope, using an isolated planning lane only for accepted glossary or ADR writes, into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), then publishes one immutable downstream handoff.
 
-It does not restart the interview, commit an operational plan, or create prospective contribution evidence for ordinary publication. It revalidates the lane against the latest target and uses a minimal operation-scoped transaction so concurrent lanes do not share a planning checkout or block one another. Its concrete producer adapter derives the deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; primary reservation temporarily uses only the proposed-Spec identity, then binds the reserved tracker identity before publication. The generic checkpoint store persists opaque IDs and never interprets producer semantics.
+It does not restart the interview, commit an operational plan, or create prospective contribution evidence for ordinary publication. It revalidates relevant source facts against the latest target and uses a minimal operation-scoped transaction so concurrent lanes do not share a planning checkout or block one another. Its concrete producer adapter derives the deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; primary reservation temporarily uses only the proposed-Spec identity, then binds the reserved tracker identity before publication. The generic checkpoint store persists opaque IDs and never interprets producer semantics.
 
 ## When to reach for it
 
@@ -12,7 +12,9 @@ Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-
 
 ## Prerequisites
 
-[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, triage labels, publication adapters, Workflow checkpoint store, and shared Target mutation writer. The active task must own the isolated planning worktree and its exact handoff.
+Tracker-only publication requires the settled scope, source identities, existing tracker identity/version for a revision, and an explicit empty accepted-change list. It needs no planning worktree or lane handoff. Actual glossary or ADR writes require the exact registered isolated lane and shared target writer. The owner-local planning adapter enforces this distinction before publication; compare-and-set still protects the tracker version.
+
+[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, triage labels, publication adapters, Workflow checkpoint store. Accepted document writes additionally require the shared Target mutation writer and the active task's exact isolated worktree handoff.
 
 ## One optimistic publication
 

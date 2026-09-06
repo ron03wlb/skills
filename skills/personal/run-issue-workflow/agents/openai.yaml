@@ -1,6 +1,6 @@
 interface:
   display_name: "Run Issue Workflow"
   short_description: "Run one Spec DAG with leaf-owned close leases"
-  default_prompt: "Use $run-issue-workflow to reduce this exact Tracker Spec's immediate-upstream handoff to READY, INCOMPLETE, or UNKNOWN through repository-owned authority adapters, bind a fresh Run to its deterministic owner-derived identity, then run its concurrent Issue DAG with per-Run max_parallel, real close-leaf lease ownership, bounded repository-close or target-writer waits, fresh post-wait reconciliation, and the automatic Pause, Resume, and Stop panel."
+  default_prompt: "Use $run-issue-workflow to complete the selected Spec DAG and report its terminal result or exact blocker."
 policy:
   allow_implicit_invocation: false

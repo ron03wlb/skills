@@ -1,11 +1,11 @@
 # Domain Docs
 
-This is a single-context repository. Engineering skills consume the root glossary and system ADRs before changing the workflow contract.
+This is a single-context repository. When a task depends on domain vocabulary or changes a workflow contract, search the root glossary and relevant ADRs first.
 
 ## Before exploring
 
-- Read `CONTEXT.md` at the repository root.
-- Read relevant decisions under `docs/adr/`.
+- Search task-relevant terms in `CONTEXT.md` and `docs/adr/`; read the matching definitions and governing decisions.
+- Expand the read only when those passages refer to another material rule or leave the task ambiguous. Simple questions and typo edits need no full glossary or ADR load.
 - If either location is absent, proceed silently; `/domain-modeling` creates domain artifacts only when the conversation resolves durable language or decisions.
 
 ## Vocabulary

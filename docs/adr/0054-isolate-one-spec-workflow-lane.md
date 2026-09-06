@@ -4,7 +4,7 @@ status: accepted
 
 # Isolate one Spec workflow lane
 
-Each concurrently planned delivery uses one **Spec workflow lane** bound to exactly one proposed Tracker Spec and target: one Codex task owns one isolated planning worktree, and the published Spec later owns one **DAG Run**. Multiple lanes may grill, publish, and execute against the same target without a global multi-Spec coordinator or shared planning checkout. Issue execution remains concurrent inside each Run and across Runs; only actual Planning Seal and integration writes use the shared target writer.
+Each concurrently planned delivery binds one proposed Tracker Spec, target, and owning Codex task. An isolated planning worktree is required only when writing accepted glossary or ADR changes; read-only design and tracker-only publication use their settled scope, source identities, tracker version, and relevant baseline revalidation without creating a worktree. The owner-local planning producer enforces both branches, and actual Planning Seal writes retain the shared target writer. This revision follows Issue #53: isolation protects file ownership where writes occur, while tracker compare-and-set protects publication. The published Spec later owns one **DAG Run**; multiple scopes may publish and execute against the same target.
 
 Target movement does not invalidate an active grilling session. Before publication or a Planning Seal write, **Planning baseline revalidation** reads the latest relevant glossary, ADR, and source facts. A semantically compatible delta may bind the latest baseline; relevant drift stops only that lane for renewed human confirmation. It never silently merges a changed decision or freezes unrelated target work.
 

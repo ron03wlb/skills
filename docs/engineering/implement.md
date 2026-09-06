@@ -22,6 +22,8 @@ It creates no Issue worktree, integration receipt, tracker closure, push, or dep
 - Focused checks, the required full suite, and review pass before one scoped commit is created.
 - No Issue worktree, tracker mutation, push, or deployment appears in the result.
 
+Completion means the approved behavior and applicable verification pass, required review has no Confirmed finding, and the intended commit and remaining limitations are reported.
+
 ## Where it fits
 
 `implement` is the direct-branch executor for Standalone Specs. Tracker Specs instead follow the command published by [to-spec](https://aihero.dev/skills-to-spec); their exact Issue leaves still use [execute-issue](https://aihero.dev/skills-execute-issue) and [close-issue](https://aihero.dev/skills-close-issue). See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.

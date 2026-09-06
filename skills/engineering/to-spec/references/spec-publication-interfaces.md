@@ -4,9 +4,13 @@ Use these repository-configured adapters for a current ordinary Spec publication
 
 ## Planning adapter
 
-- `planning.readBaseline` reads the lane identity, target ref, original baseline, accepted glossary or ADR paths or hunks and content identities, plus the latest versions of only the relevant glossary, ADR, and source facts. It returns `COMPATIBLE` with the latest target SHA or `DRIFTED` with the changed fact and owning path.
+- `planning.readBaseline` calls owner-local `scripts/planning-entry.mjs`'s `readPlanningBaseline({ request, adapter })`. The request binds `repositoryId`, proposed or existing `specId`, `target`, `baseline`, `approvedScopeIdentity`, `trackerVersion` (a reservation version in primary mode), `relevantFacts` keyed by source locator, and explicit `acceptedChanges` entries with repository-relative `path` and `contentIdentity` (an exact accepted patch may include its hunk identity). `adapter.readCurrent` reads the selected tracker identity/version/scope, current target `head`, and relevant source facts from their owners; it must not echo request fields as proof. Identity/version disagreement throws before publication, and a changed source returns `DRIFTED` with the owning source.
+- An empty `acceptedChanges` list returns `COMPATIBLE` with the latest target SHA without reading or creating a lane. For actual glossary or ADR writes, `request.lane` binds `taskId` and `worktree`; `adapter.readLane` proves Git registration, isolation from the target checkout, repository/Spec/target/baseline ownership, and exact accepted content. Missing or conflicting proof stops. The result's `requiresPlanningLane` selects the write boundary; it grants no commit or publication authority.
+- Resolve primary reservation before this read when its version does not exist yet, using the immutable proposed-Spec identity and the existing reservation adapter. Reservation grants no document write or published-scope authority. The tracker adapter still compare-and-sets the latest version at publication; the planning result does not replace that check.
 - `planningSeal.read` returns the exact target, Planning Seal SHA and `created`, `successor`, or `reused` state.
 - `planningSeal.write` accepts one `COMPATIBLE` baseline, one exact accepted glossary or ADR patch, and the shared Target mutation writer lease. It returns the target ref and one read-back Planning Seal commit containing only that patch.
+
+The shared Target mutation writer is needed only by `planningSeal.write`; tracker-only publication reuses the current seal without a writer or worktree.
 
 ## Checkpoint adapter
 

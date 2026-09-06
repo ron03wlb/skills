@@ -6,13 +6,15 @@ The router does not re-decide delivery shape. [to-spec](https://aihero.dev/skill
 
 ## When to reach for it
 
+Read-only design and tracker-only settled scope need no planning worktree. Create the isolated lane before accepted glossary or ADR writes, then pass that exact ownership to `to-spec`.
+
 You invoke this by typing `/ask-matt` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
 Reach for it when you do not know where to enter or resume a flow. If you already know the exact skill, invoke it directly.
 
 ## The delivery route
 
-Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs), which gives one task an isolated planning worktree for one proposed Spec and target, to [to-spec](https://aihero.dev/skills-to-spec). `to-spec` revalidates relevant facts against the latest target, commits or reuses the Planning Seal, and publishes one immutable handoff through its minimal operation-scoped transaction:
+Codebase-backed ideas normally move from [grill-with-docs](https://aihero.dev/skills-grill-with-docs), which binds one task to one proposed Spec and target and isolates accepted document writes, to [to-spec](https://aihero.dev/skills-to-spec). `to-spec` revalidates relevant facts against the latest target, commits or reuses the Planning Seal, and publishes one immutable handoff through its minimal operation-scoped transaction:
 
 - Single-Issue Tracker Spec → `/run-issue-workflow <Spec-ID>`.
 - Multi-Issue Tracker Spec → [to-tickets](https://aihero.dev/skills-to-tickets) to consume the completed `to-spec` handoff, use its minimal operation-scoped transaction, publish the Decomposition publication record and composite handoff, then `/run-issue-workflow <Spec-ID>`.

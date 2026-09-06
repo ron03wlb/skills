@@ -270,16 +270,6 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   ]) {
     assert.match(read(path), /deterministic.*operation identity.*immutable/isu, `${path} omits deterministic operation identity`);
   }
-  for (const path of [
-    "skills/engineering/to-spec/agents/openai.yaml",
-    "skills/engineering/to-tickets/agents/openai.yaml",
-    "skills/personal/run-issue-workflow/agents/openai.yaml",
-    "skills/engineering/execute-issue/agents/openai.yaml",
-    "skills/engineering/close-issue/agents/openai.yaml",
-    "skills/engineering/verify-target-before-push/agents/openai.yaml",
-  ]) {
-    assert.match(read(path), /deterministic|owner-derived/iu, `${path} omits operation identity behavior`);
-  }
   assert.match(read("CONTEXT.md"), /Producer operation identity.*versioned.*canonical repository.*stable Spec.*approved publication.*workflow stage.*stable Issue.*caller correlation.*never.*authority/isu);
 });
 
@@ -571,10 +561,8 @@ test("code-review owns requested and material-risk review activation", () => {
 test("code review advisory and confirmed code review finding route to Aggregate repair Issue during target verification", () => {
   const review = read("skills/engineering/code-review/SKILL.md");
   const reviewDocs = read("docs/engineering/code-review.md");
-  const reviewMetadata = read("skills/engineering/code-review/agents/openai.yaml");
   const execute = readExecuteIssueContract();
   const executeDocs = read("docs/engineering/execute-issue.md");
-  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   const verify = readVerifyTargetContract();
   const verifyDocs = read("docs/engineering/verify-target-before-push.md");
   const verifyMetadata = read("skills/engineering/verify-target-before-push/agents/openai.yaml");
@@ -587,7 +575,7 @@ test("code review advisory and confirmed code review finding route to Aggregate 
   assert.match(review, /advisory.*never.*persistent dismissal.*tracker waiver.*Git note.*SHA allowlist/isu);
   assert.match(review, /Standards.*Spec.*separate.*classif/isu);
 
-  for (const consumer of [execute, executeDocs, executeMetadata]) {
+  for (const consumer of [execute, executeDocs]) {
     assert.match(consumer, /Confirmed code review finding/iu);
     assert.match(consumer, /Code review advisory/iu);
   }
@@ -606,7 +594,7 @@ test("code review advisory and confirmed code review finding route to Aggregate 
     assert.match(consumer, /Aggregate repair Issue/iu);
   }
 
-  for (const consumer of [reviewDocs, reviewMetadata]) {
+  for (const consumer of [reviewDocs]) {
     assert.match(consumer, /Confirmed code review finding/iu);
     assert.match(consumer, /Code review advisory/iu);
   }
@@ -1021,7 +1009,6 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
 
 test("execute-issue routes exact prerequisites and preserves content-bound attestations", () => {
   const execute = readExecuteIssueContract();
-  const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
   const executeDocs = read("docs/engineering/execute-issue.md");
   const preExecuteDocs = read("docs/engineering/pre-execute-issue.md");
   const close = [
@@ -1058,7 +1045,7 @@ test("execute-issue routes exact prerequisites and preserves content-bound attes
     assert.match(consumer, /v1.*legacy non-generated artifact.*generated.*stop/isu);
   }
 
-  assert.match(executeMetadata, /exact.*prerequisite.*same authorized lane.*content-bound.*completion/isu);
+  assert.match(execute, /exact.*prerequisite.*same.*lane/isu);
   assert.match(executeDocs, /automatically.*pre-execute-issue.*same.*lane.*content-bound.*candidate.*blob.*outcome/isu);
   assert.match(preExecuteDocs, /execute-issue.*automatically.*one exact unresolved Manual prerequisite/isu);
   assert.match(plainMarkdown(preExecuteDocs), /Issue or linked Spec.*exact.*artifact.*unchanged-scope late-discovery handoff/isu);
@@ -1594,11 +1581,11 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
   assert.match(matt, /completion note.*`workflowArtifacts`.*scope classification.*coverage.*verification/isu);
 
   for (const name of ["execute-issue", "code-review", "close-issue", "verify-target-before-push"]) {
-    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflowArtifacts/u, `${name} metadata omits workflowArtifacts`);
+    assert.match(read(`skills/engineering/${name}/SKILL.md`), /workflowArtifacts|completion evidence|completion-evidence/u, `${name} entry must expose artifact evidence`);
     assert.match(read(`docs/engineering/${name}.md`), /workflowArtifacts/u, `${name} docs omit workflowArtifacts`);
   }
   for (const name of ["execute-issue", "close-issue", "verify-target-before-push"]) {
-    assert.match(read(`skills/engineering/${name}/agents/openai.yaml`), /workflow_artifacts_contract_adopted:v1/u, `${name} metadata omits adoption evidence`);
+    // Adoption authority is checked on the owning contract above, not duplicated in the picker prompt.
     assert.match(read(`docs/engineering/${name}.md`), /workflow_artifacts_contract_adopted:v1/u, `${name} docs omit adoption evidence`);
   }
   assert.match(read("docs/engineering/ask-matt.md"), /workflowArtifacts/u);
@@ -1862,7 +1849,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /code-review/u);
   assert.match(execute, /Standards/u);
   assert.match(execute, /Spec/u);
-  assert.match(execute, /10 repair waves per invocation/iu);
+  assert.match(execute, /10 repair waves for the same Issue operation across retries/iu);
   assert.match(execute, /Issue target branch.*only default merge destination/isu);
   assert.match(execute, /Any number of Issue worktrees may execute concurrently/iu);
   assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
@@ -1932,7 +1919,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(closeDocs, /three.*merge.*remove.*close/isu);
   assert.match(closeDocs, /dirty target.*make.*target.*clean.*retr(?:y|ies).*`\/close-issue <Issue-ID>`.*does not rerun.*execution.*full suite/isu);
   assert.match(closeDocs, /repository close lease.*same Git common dir.*repository.*target.*order.*reverse/isu);
-  assert.match(closeMetadata, /repository close lease.*target mutation writer.*order/isu);
+  assert.match(close, /repository close lease.*target mutation writer.*order/isu);
   assert.doesNotMatch(closeDocs, /preservation|closeout receipt|integration receipt/iu);
   assert.match(close, /If the worktree is already absent, this action is satisfied/iu);
   const alreadyClosed = close.match(/If it is already closed,[^\n]+/u)?.[0] ?? "";
@@ -3319,7 +3306,8 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   const operator = read(operatorPath);
   assert.match(skill, /^disable-model-invocation:\s*true$/mu);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
-  assert.match(metadata, /READY.*INCOMPLETE.*UNKNOWN.*automatic.*Pause.*Resume.*Stop.*panel/isu);
+  assert.match(skill, /READY.*INCOMPLETE.*UNKNOWN/isu);
+  assert.match(skill, /Pause.*Resume.*Stop/isu);
   assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*producer handoff.*READY.*concurrent.*bounded.*writer.*panel/isu);
   assert.match(skill, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skill, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
@@ -3478,4 +3466,29 @@ test("current packaging validation is Codex-native", () => {
   }
   assert.match(read("CLAUDE.md"), /node --test tests\/ron-workflow\/skill-contracts\.test\.mjs/u);
   assert.match(read("CLAUDE.md"), /codex exec --ignore-user-config --ephemeral --sandbox read-only/u);
+});
+
+
+test("task prompts stay compact while their owners retain detailed authority", () => {
+  for (const path of [
+    "skills/engineering/code-review", "skills/engineering/execute-issue",
+    "skills/engineering/close-issue", "skills/personal/run-issue-workflow",
+  ]) {
+    const name = path.split("/").at(-1);
+    const prompt = read(`${path}/agents/openai.yaml`).match(/default_prompt: "([^\n]+)"/u)?.[1];
+    assert.ok(prompt?.includes(`$${name}`), `${name} prompt must invoke its owner`);
+    assert.ok(prompt.split(/\s+/u).length <= 40, `${name} picker prompt repeats the workflow`);
+    assert.doesNotMatch(prompt, /workflowArtifacts|legacyCompletionFrontier|contract_adopted|operationIdentity/u);
+  }
+});
+
+test("planning isolation belongs to accepted document writes, not tracker-only publication", () => {
+  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const interfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
+  assert.match(spec, /tracker-only publication.*empty list.*no planning worktree or lane handoff/isu);
+  assert.match(spec, /readPlanningBaseline.*scripts\/planning-entry\.mjs/isu);
+  assert.match(interfaces, /adapter\.readCurrent.*must not echo request fields/isu);
+  assert.match(interfaces, /adapter\.readLane.*Git registration.*isolation.*ownership.*accepted content/isu);
+  assert.match(read("skills/engineering/to-tickets/SKILL.md"), /requires no planning worktree/iu);
+  assert.match(read("skills/engineering/execute-issue/SKILL.md"), /retry never resets the budget/iu);
 });

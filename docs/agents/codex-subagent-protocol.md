@@ -51,7 +51,7 @@
 - 子代理回報失敗、過期或不完整，表示沒有可用結果，而不是原始任務不可能完成。協調代理可縮小範圍後重試一次、自行完成，或回報尚未排除的限制。
 - 子代理輸出只是協調代理的輸入，不是最終事實。協調代理必須閱讀引用來源或差異，並在回報成功前執行所聲稱的聚焦檢查。
 - baseline 或 candidate SHA 改變時，必須中止相關代理並丟棄 stale results。
-- 不得平行實作不同 Issues，也不得預先實作下一個 Issue。
+- 單一 Issue invocation 不延伸至其他 Issue；有效 Run Grant 可依各 Issue 專屬 task／worktree 並行執行。
 
 ## Agent Orchestration State Machine
 
@@ -68,7 +68,7 @@
 
 每個委派都必須綁定 `wave_id`、`issue_id`、適用時的 `candidate_sha`、ownership、model 與 reasoning effort。
 
-不得為填滿名額而建立代理。`execute-issue` 直接呼叫既有 Matt `code-review`，由它分開回報 Standards 與 Spec。`close-issue` 在 target refresh 未改變候選時可沿用 execution review，改變時重跑雙軸審查。獨立 `/wiki` 使用自己的 semantic review，不加入 Issue code review。Reviewer 衝突由協調代理檢查證據，不採多數決。
+不得為填滿名額而建立代理。`execute-issue` 直接呼叫既有 Matt `code-review`，由它分開回報 Standards 與 Spec。`close-issue` 消費 unchanged candidate 的 execution review；候選修復仍由 `execute-issue` 擁有。獨立 `/wiki` 使用自己的 semantic review，不加入 Issue code review。Reviewer 衝突由協調代理檢查證據，不採多數決。
 
 ## 模型路由
 
@@ -120,11 +120,11 @@ Codex 子代理共用儲存庫檔案系統。因此，除非每個可寫入代�
 
 ### Issue review orchestration
 
-`execute-issue` 直接使用既有 Matt `code-review`，不維護另一套 reviewer profile。固定 candidate 後，Standards 與 Spec 兩軸必須都沒有經協調代理確認的 finding。
+`execute-issue` 直接使用既有 Matt `code-review`，不維護另一套 reviewer profile。固定 candidate 後，Standards 與 Spec 兩軸必須都沒有經協調代理確認的 finding。高風險 review 保留獨立 reviewer 證據；低風險 requested review 可單一代理分別執行適用軸線。
 
-`execute-issue` 在一次 invocation 內最多進行十個 material repair waves。每個 wave 修正所有已確認且仍在 Issue 或 linked Spec 範圍內的 finding、執行受影響驗證、建立新 candidate，然後完整重跑 Matt `code-review`。工具失敗、重複 finding 與不受證據支持的 finding 不計次。scope、acceptance、public seam、target 或 exclusion 改變，或第十次後仍有 finding，保留目前進度並停止。新的明確 invocation 重新取得十次上限，不寫 durable counter。
+`execute-issue` 的同一 Issue operation 跨 invocation 最多進行十個 material repair waves。每個 wave 修正所有已確認且仍在 Issue 或 linked Spec 範圍內的 finding、執行受影響驗證、建立新 candidate，然後完整重跑 Matt `code-review`。工具失敗、重複 finding 與不受證據支持的 finding 不計次。scope、acceptance、public seam、target 或 exclusion 改變，或第十次後仍有 finding，保留目前進度並停止。每次修復開始前，將累計次數寫入既有 Issue progress evidence 並讀回。重試及 conflict repair 沿用該次數；無法證明先前次數時不得當成零。
 
-`close-issue` 不修產品碼。Target refresh 改變 candidate 時重跑 verification 與 Standards/Spec review；未改變則沿用 execution review。任何 confirmed finding 都讓 Issue 保持 open，回到獨立 `execute-issue`。
+`close-issue` 不修產品碼、不刷新 candidate、不重跑 execution 驗證與 review；它只核對 completion 身分與當下整合條件。需要修復時，由原 `execute-issue` lane 在原範圍內產生新候選。
 
 獨立 `/wiki` 不使用 Issue execution review。它由 fresh read-only reviewer 比對 Wiki diff 與 committed `HEAD` code/tests，並在 deterministic validation 後回報 semantic findings。
 
@@ -142,11 +142,11 @@ Codex 子代理共用儲存庫檔案系統。因此，除非每個可寫入代�
 
 ### `execute-issue`
 
-預設由單一協調代理直接實作。只有議題已完整指定，且隔離工作樹擁有權能實質保護既有工作時，才使用執行子代理。委派前，協調代理記錄 Issue、linked Spec、原始 target、baseline、工作樹路徑、驗收條件與整合檢查。`tdd` 與 Matt `code-review` 的 Standards/Spec 雙軸仍是必要流程；執行子代理的自我回報不可取代任何一項。每個 coherent slice 通過相關驗證後可建立 local checkpoint commit；review 失敗可在同一次 invocation 的十個 repair waves 內修復並完整重審。最後只寫入 compact completion note，不改變 Issue closure state，也不自動呼叫 `close-issue`。
+預設由單一協調代理直接實作。只有議題已完整指定，且隔離工作樹擁有權能實質保護既有工作時，才使用執行子代理。委派前，協調代理記錄 Issue、linked Spec、原始 target、baseline、工作樹路徑、驗收條件與整合檢查。有適當行為接縫時採用 `tdd`；Matt `code-review` 保留 Standards/Spec 結果與適用的獨立證據；執行子代理的自我回報不可取代任何一項。每個 coherent slice 通過相關驗證後可建立 local checkpoint commit；review 失敗可在同一 operation 累計十個 repair waves 內修復並完整重審。最後只寫入 compact completion note，不改變 Issue closure state，也不自動呼叫 `close-issue`。
 
 ### `close-issue`
 
-讀取 completion note 後，把最新 local target merge 進 candidate，不 rebase。Conflict、scope expansion 或 confirmed finding 都停止並保持 Issue open。Refresh 後的候選通過重審時先更新 completion note，再 fast-forward 原始 target、驗證 target、從 target worktree 移除乾淨且精確匹配的 Issue worktree，最後關閉並 read back Issue。Retry 可辨識已整合 candidate 或已移除 worktree；人類手動確保同時只有一個 target integration writer。
+讀取 completion note 與 unchanged candidate 後，由 close leaf 依序取得 repository close lease 與 target mutation writer。將同一候選合併到記錄的 target，證明 reachable，移除乾淨且精確匹配的 Issue worktree，再關閉並 read back Issue。Retry 只跳過已滿足的有序步驟；鎖的擁有權與 conflict／dirty-target 停止規則以 `close-issue` 為準。它不 refresh candidate、不重跑 review／測試，也不要求人類代管鎖。
 
 ### `explain-decision`
 
@@ -175,4 +175,8 @@ Codex 子代理共用儲存庫檔案系統。因此，除非每個可寫入代�
 5. 清理用 `remove-ron`
 6. 同步 promoted-skill docs、READMEs、plugin manifest 與 `ask-matt`
 
-Issue delivery 使用既有 Matt tracker/domain setup、`to-spec`、`to-tickets` 與 `code-review`，並以 `implement` 作為預設；只有使用者明確選擇 worktree alternative 時才改用 `execute-issue` 與 `close-issue`。此採用沒有新增通用 agent framework、Codex plugin、安裝、推送或發布動作。
+Issue delivery 使用既有 Matt tracker/domain setup、`to-spec`、`to-tickets` 與 `code-review`，Tracker Spec 沿其發布的 Run／decomposition route，Issue leaves 使用 `execute-issue` 與 `close-issue`；`implement` 僅處理 Standalone Spec 或明確 current-branch 工作。此採用沒有新增通用 agent framework、Codex plugin、安裝、推送或發布動作。
+
+## 操作完成條件
+
+一般變更以要求達成及適用檢查通過為終點。Execution 以 AC、當前 candidate 的驗證／review、乾淨工作樹與 completion read-back 為終點。Closeout 以指定 target 可達、精確 worktree 清理與 tracker closure 為終點。Run 以所有必要節點與 parent 都完成為終點；worker 結束或部分完成不可回報整體成功。重試沿用各 owner 已記錄的修復預算。

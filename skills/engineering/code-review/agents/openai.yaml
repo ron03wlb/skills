@@ -1,4 +1,4 @@
 interface:
   display_name: "Code Review"
   short_description: "Review risky diffs against standards and spec"
-  default_prompt: "Review Standards and Spec independently from one fixed point, including any prospective workflowArtifacts paths, requirement sources, purposes, contribution ownership, and non-contract behavior; classify only exact repository- or Spec-proved violations as Confirmed code review findings and keep each unsupported observation visible as a non-blocking Code review advisory."
+  default_prompt: "Use $code-review to assess this fixed candidate and report applicable Standards and Spec findings separately."

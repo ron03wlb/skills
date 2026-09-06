@@ -35,4 +35,4 @@ The tracker uses the five default Matt triage role names. See `docs/agents/triag
 
 ### Domain docs
 
-This is a single-context repository using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+For a task that depends on domain terms or workflow contracts, search relevant entries in root `CONTEXT.md` and `docs/adr/`, then read only the matching passages. See `docs/agents/domain.md` when changing those concepts. Simple edits need no domain survey.

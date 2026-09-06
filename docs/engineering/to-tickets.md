@@ -12,6 +12,8 @@ Reach for it only when [to-spec](https://aihero.dev/skills-to-spec) published a 
 
 ## Prerequisites
 
+Fresh decomposition performs tracker writes and needs no planning worktree. Its upstream publication, version, scope, and seal still require exact read-back; accepted glossary or ADR writes return to `to-spec`.
+
 [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, labels, current Workflow checkpoint profiles, and concrete producer adapters. The parent Spec needs a valid Planning Seal, explicit Multi-Issue classification, approved-scope identity, and exact completed `to-spec` publication and handoff. A frozen legacy/profile-v1 retry also needs its existing shared Target mutation writer.
 
 ## Stable reconciliation

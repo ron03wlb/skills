@@ -83,7 +83,7 @@ The compact user-visible terminal output from `grill-with-docs` that binds its *
 _Avoid_: Hidden planning journal, automatic `to-spec`, Planning Seal
 
 **Spec workflow lane**:
-The independent ownership and concurrency unit for exactly one proposed **Tracker Spec** and target, consisting of one Codex task, one isolated planning worktree, and the Spec's later **DAG Run**. Multiple lanes may grill, plan, publish, and execute concurrently against one target; a lane never owns another Spec, and only bounded Planning Seal or integration writes enter **Target mutation serialization**.
+The independent ownership and concurrency unit for exactly one proposed **Tracker Spec** and target, consisting of one Codex task and the Spec's later **DAG Run**. An isolated planning worktree is required when writing accepted glossary or ADR changes; read-only design and tracker-only publication need no worktree. Multiple lanes may plan, publish, and execute concurrently against one target; only bounded Planning Seal or integration writes enter **Target mutation serialization**.
 _Avoid_: Global multi-Spec coordinator, shared planning checkout, multi-Spec Run
 
 **Planning baseline revalidation**:
@@ -583,7 +583,7 @@ A new **Executable Issue** that owns one or more **Confirmed code review finding
 _Avoid_: Automatic Issue reopening, verifier-owned repair, implicit historical owner
 
 **Material repair wave**:
-One bounded pass in which the single writable owner addresses confirmed Standards or Spec findings inside the unchanged Issue scope, verifies the repair, and produces a new candidate. One `execute-issue` invocation permits at most ten waves; only an explicit later invocation starts a new limit, and no durable counter is maintained.
+One bounded pass in which the single writable owner addresses confirmed Standards or Spec findings inside the unchanged Issue scope, verifies the repair, and produces a new candidate. One Issue operation permits at most ten waves across invocations and conflict-repair attempts. Existing Issue progress evidence records the cumulative count before a wave starts; retries reuse it, and an unprovable prior count is an evidence gap rather than zero.
 
 **Local checkpoint commit**:
 An Issue-owned local commit made after one coherent vertical slice or review repair passes its relevant verification. Push, target integration, deployment, and unrelated paths remain excluded during `execute-issue`.
@@ -606,7 +606,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A completed **Workflow checkpoint transaction** remains an immutable Git-common-dir receipt; only active or incomplete state blocks, and downstream reads neither mutate nor delete the receipt
 - Reinvoking the same `to-spec` or `to-tickets` command automatically resumes an exact matching incomplete checkpoint transaction at its first unsatisfied stage; mismatch preserves state and stops, while Run never performs producer recovery
 - `to-spec` Planning Seal writes, frozen legacy/profile-v1 producer checkpoints, and `close-issue` acquire the same target-scoped **Target mutation serialization** writer for their bounded target mutation; fresh tracker-only publication and Issue execution never consume this writer
-- Every proposed **Tracker Spec** owns one **Spec workflow lane** with one Codex task, isolated planning worktree, and later **DAG Run**; lanes sharing a target remain concurrent and never require a global multi-Spec coordinator
+- Every proposed **Tracker Spec** owns one **Spec workflow lane** with one Codex task and later **DAG Run**, plus an isolated planning worktree when accepted glossary or ADR documents are written; lanes sharing a target remain concurrent and never require a global multi-Spec coordinator
 - Target movement during grilling does not invalidate the lane; **Planning baseline revalidation** may bind a semantically compatible handoff to the latest baseline, while relevant drift stops only that lane for renewed human confirmation
 - A real `close-issue` leaf alone acquires the repository close lease and then **Target mutation serialization**; the DAG coordinator observes both, never acquires, releases, reclaims, or delegates either lease, and preserves closeout outside Issue execution slots and retry budgets
 - Healthy repository-close contention enters `WAITING_FOR_REPOSITORY_CLOSE_LEASE`; compatible target-writer contention retains bounded **Target writer wait**. Both leave unrelated Issue execution eligible and require journaled tracker identity/state, target HEAD/state, candidate commit/reachability, completion identity/hash/state, worktree registration/state, control revision, and Grant evidence to match a post-release reacquisition before closeout, while unknown ownership, timeout, coordinator loss, or changed evidence returns a blocker without stealing the lease

@@ -7,6 +7,8 @@ Use these repository-configured adapters for a current ordinary Multi-Issue deco
 - `upstream.readPublication` consumes the already-selected parent snapshot and returns the exact tracker Spec identity, publication identity, body version, target, Planning Seal, Multi-Issue classification, approved-scope identity, and next command.
 - `upstream.readHandoff` takes that publication identity and returns the completed `to-spec` transaction and immutable handoff identities. Call both reads once from the same selected snapshot; never rerun upstream generation, planning, review, validation, or publication.
 
+Fresh decomposition is tracker-only: no planning lane is required. The consumed seal, publication identity, body version, and approved scope still bind every mutation; accepted glossary or ADR writes return to `to-spec`.
+
 ## Checkpoint adapter
 
 - `checkpoint.read` takes the exact repository, Spec, producer `to-tickets`, versioned operation identity receipt, profile version, target, baseline, and bindings. A fresh `to-tickets@v2` operation gets its operation identity receipt from `bindProducerCheckpointOperationIdentity` in `workflow-operation-identity.mjs`; the receipt binds repository, Spec, approved publication identity or hash, producer `to-tickets`, and stage `decomposition`. It returns no transaction or one immutable transaction read-back with its recorded first unsatisfied stage.

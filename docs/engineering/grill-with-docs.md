@@ -1,10 +1,12 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task's isolated planning worktree, interviews you until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share one understanding, and records accepted vocabulary and hard decisions there. It is the same one-question-at-a-time interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, creates an isolated planning worktree when accepted documents need writing, and interviews you until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share one understanding, and records accepted vocabulary and hard decisions there. It is the same one-question-at-a-time interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase.
 
 It is **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**. Every other grilling skill leaves the [session](https://www.aihero.dev/ai-coding-dictionary/session) in your head; this one leaves files on disk, isolated from the target checkout and other planning lanes. A term lands in `CONTEXT.md` when it resolves, and a decision that passes all three ADR gates lands with it. The worktree stays with the task through the later `to-spec` handoff, so accepted planning state is never inferred from shared target dirt.
 
 ## When to reach for it
+
+Read-only design and tracker-only settled scope need no planning worktree. Create the isolated lane before accepted glossary or ADR writes, then pass that exact ownership to `to-spec`.
 
 You invoke this by typing `/grill-with-docs`; the agent will not reach for it on its own.
 
@@ -22,7 +24,7 @@ The wayfinder split comes down to session count: `/grill-with-docs` for single-s
 
 ## Prerequisites
 
-The skill needs a Git repository where the task can own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's `CONTEXT.md` if a `CONTEXT-MAP.md` marks the repo as multi-context. Decisions go to its `docs/adr/`. Both are created lazily; the target checkout is not the writing surface.
+The skill reads a Git repository; before accepted document writes, the task must own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's `CONTEXT.md` if a `CONTEXT-MAP.md` marks the repo as multi-context. Decisions go to its `docs/adr/`. Both are created lazily; the target checkout is not the writing surface.
 
 It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. The lane contract passes both the same task, proposed Spec, target, baseline, and worktree identity.
 
@@ -78,7 +80,7 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 
 ## Where it fits
 
-`grill-with-docs` is the isolated planning-lane head of the main build chain:
+`grill-with-docs` is the design head of the main build chain:
 
 ```txt
 grill-with-docs → to-spec → [to-tickets] → run-issue-workflow → verify-target-before-push → push-target

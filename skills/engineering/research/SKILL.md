@@ -1,9 +1,9 @@
 ---
 name: research
-description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
+description: Compare primary sources to resolve a research question and preserve cited findings in a repository note. Use when source synthesis and a durable note are needed, not a quick fact lookup.
 ---
 
-Spin up a **background agent** to do the research, so you keep working while it reads.
+Use one **background agent** when the research can proceed independently alongside useful local work. Otherwise perform the bounded research directly. Keep one owner for the cited Markdown artifact; no nested delegation.
 
 Its job:
 

@@ -6,6 +6,8 @@ It does not answer you in the conversation. The output is a file, written where 
 
 ## When to reach for it
 
+Use this when a question requires comparison of primary sources and a durable cited repository note. A quick fact lookup stays in the current task. Delegate only when the bounded research can run independently alongside useful local work; otherwise complete it directly.
+
 Type `/research`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task turns into reading legwork.
 
 Reach for it when the next step is *finding something out* from outside the working directory (how a third-party API behaves, what a spec actually says, whether a version claim holds), and you'd rather not stall your own thread doing the reading. What you need decides which skill:
@@ -68,8 +70,8 @@ No, it now fires them for you. In the unreleased changes since v1.1, a charting 
 
 ## It's working if
 
-- Your own session keeps going. If you are sitting watching it read, the delegation didn't happen.
-- Exactly one new background task appears. A second one with a near-identical name is the nesting bug.
+- When research is delegated, your own session keeps going on useful independent work.
+- Delegated research has one owner and does not create nested agents.
 - One new Markdown file shows up, in the folder the repo already uses for notes, and the agent tells you the path.
 - Every claim in it carries a link, and following two at random lands you on an official doc, a spec, or the actual source file, not on someone's write-up of it.
 - You can make the decision you were stuck on from the file alone, without going back to the sources yourself.

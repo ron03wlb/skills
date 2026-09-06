@@ -8,6 +8,8 @@ disable-model-invocation: true
 
 Use this only for an approved **Standalone Spec** or explicitly requested direct current-branch work. A **Tracker Spec**, including a local-file tracker record, follows its published `/to-spec` route; do not implement it here.
 
-Treat the selected plan and Acceptance Criteria as scope. Call the Skill tool with "tdd" at pre-agreed seams where behavior can be captured, run focused checks regularly and the full required suite at the end, then call the Skill tool with "code-review" against the fixed baseline. Repair confirmed findings before committing only the intended current-branch changes.
+Treat the selected plan and Acceptance Criteria as scope. Call the Skill tool with "tdd" at existing public interfaces where approved behavior can be captured, run focused checks regularly and the full required suite at the end, then call the Skill tool with "code-review" against the fixed baseline. Repair confirmed findings before committing only the intended current-branch changes.
+
+Complete when the approved behavior and applicable verification pass, required review has no Confirmed finding, and the intended commit and remaining limitations are reported. A missing required proof is incomplete.
 
 Do not create tracker lifecycle state, a dedicated Issue worktree, integration receipts, push, or deploy.
