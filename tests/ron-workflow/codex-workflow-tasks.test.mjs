@@ -7,6 +7,21 @@ import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
+test("host loss before submission leaves no creation intent to strand on re-entry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-unsent-task-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-1", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+  let calls = 0;
+  const host = { disconnected: false, async call() { calls++; throw new Error("CODEX_HOST_DISCONNECTED"); } };
+  const tasks = createCodexWorkflowTasks({ host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version",
+    issueNumber: async () => { host.disconnected = true; return 1; }, sleep: async () => {} });
+  try {
+    await assert.rejects(tasks.create({ issueId: "I_1", runIdentity }), /DISCONNECTED/u);
+    assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), null);
+    assert.equal(calls, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("a lost task creation response reuses its exact discovered lane without a second create", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-task-"));
   execFileSync("git", ["init", root], { stdio: "ignore" });

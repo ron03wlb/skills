@@ -8,7 +8,7 @@ import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, de
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 
 const one = (values, label) => {
-  if (values.length !== 1) throw new Error(`${label}: expected one exact record, observed ${values.length}`);
+  if (values.length !== 1) throw Object.assign(new Error(`${label}: expected one exact record, observed ${values.length}`), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
   return values[0];
 };
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;

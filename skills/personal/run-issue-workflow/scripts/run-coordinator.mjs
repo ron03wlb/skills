@@ -263,7 +263,7 @@ const closeRequestEvidenceChanged = (status, { issueId, expected, observed }) =>
   resumePredicates: ["close_request_identity_is_reconciled", "retry_same_run_issue_workflow"],
 });
 
-const trackerUnavailable = (request, attempts, status) => {
+const trackerUnavailable = (request, attempts, status, authorityConflict) => {
   if (!status && request.runIdentity) {
     const issueIds = Array.isArray(request.issueIds) && request.issueIds.every(isText)
       ? [...new Set(request.issueIds)]
@@ -288,18 +288,22 @@ const trackerUnavailable = (request, attempts, status) => {
       diagnoses: [],
     };
   }
-  if (!status) return initialTrackerUnavailable(request, attempts);
+  if (!status) {
+    const initial = initialTrackerUnavailable(request, attempts);
+    if (!authorityConflict) return initial;
+    status = { ...initial, diagnoses: [] };
+  }
   const affectedNodes = status.nodes
     .filter(({ state }) => state !== "SUCCEEDED")
     .map(({ issueId }) => issueId);
   return diagnosedStop(status, {
-    reasonCode: "tracker_unavailable",
+    reasonCode: authorityConflict ? "tracker_authority_conflict" : "tracker_unavailable",
     limitationClass: "unresolved-evidence",
-    evidence: [`Tracker reads failed after ${attempts.join(", ")} millisecond probes.`],
+    evidence: authorityConflict ? [authorityConflict] : [`Tracker reads failed after ${attempts.join(", ")} millisecond probes.`],
     attemptedRecovery: attempts.map((delayMs) => ({ delayMs })),
-    noAutomaticTransition: "Cached tracker evidence cannot authorize workflow action.",
+    noAutomaticTransition: authorityConflict ? "Conflicting current authority requires its planning owner; network retries cannot repair it." : "Cached tracker evidence cannot authorize workflow action.",
     affectedNodes,
-    resumePredicates: ["tracker_read_succeeds"],
+    resumePredicates: [authorityConflict ? "current_scope_authority_agrees" : "tracker_read_succeeds"],
   });
 };
 
@@ -438,21 +442,20 @@ export function createCoordinator({
   if (typeof sleep !== "function") throw new TypeError("Coordinator requires sleep()");
 
   const readTracker = async (request) => {
-    try {
-      return { available: true, snapshot: await tracker.read(request), attempts: [] };
-    } catch {
-      const attempts = [];
-      for (const delayMs of TRACKER_PROBE_DELAYS_MS) {
+    const attempts = [];
+    for (const delayMs of [0, ...TRACKER_PROBE_DELAYS_MS]) {
+      if (delayMs) {
         attempts.push(delayMs);
         await sleep(delayMs);
-        try {
-          return { available: true, snapshot: await tracker.read(request), attempts };
-        } catch {
-          // Exhaust the fixed probe schedule before returning a diagnosis.
-        }
       }
-      return { available: false, snapshot: null, attempts };
+      try {
+        return { available: true, snapshot: await tracker.read(request), attempts };
+      } catch (error) {
+        if (error.code === "WORKFLOW_AUTHORITY_CONFLICT") return { available: false, snapshot: null, attempts, authorityConflict: error.message };
+        // Transport failures retain the fixed probe schedule.
+      }
     }
+    return { available: false, snapshot: null, attempts };
   };
 
   const acquireRunWriter = (current) => {
@@ -1073,7 +1076,7 @@ export function createCoordinator({
               issueIds: outageCandidate.issueIds,
               maxParallel: outageCandidate.maxParallel,
             } : selectedRequest;
-            return trackerUnavailable(outageRequest, trackerResult.attempts, lastStatus);
+            return trackerUnavailable(outageRequest, trackerResult.attempts, lastStatus, trackerResult.authorityConflict);
           }
           const journal = runIdentity ? store.readEvents(runIdentity.runId) : [];
           let current = await reconcile({
@@ -1367,7 +1370,7 @@ export function createCoordinator({
           if (deferredEnvironmentStop) {
             const trackerResult = await readTracker(selectedRequest);
             if (!trackerResult.available) {
-              return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus);
+              return trackerUnavailable(selectedRequest, trackerResult.attempts, lastStatus, trackerResult.authorityConflict);
             }
             let refreshed = await reconcile({
               request: selectedRequest,

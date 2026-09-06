@@ -113,6 +113,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const create = async ({ issueId, runIdentity }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const number = await issueNumber(issueId);
+    if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
     const prompt = `${key}\nUse the installed workflow's exact skill at ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to execute Issue #${number}.\nRead the current Issue and only its required linked scope. Run Grant: ${JSON.stringify(runIdentity)}. Read its grant.recorded event from the repository Git common directory before any mutation.\nUse this task's existing Git worktree as the sole Issue lane after verifying its common directory, target ancestry and ownership. Record this worktree and branch; do not create a second worktree. Target: ${runIdentity.target}. Complete implementation, required verification, independent review and implementation_complete read-back, then stop. A later close request owns integration and closure. No push or deployment. All workflow skills and references must come from ${packageRoot}/skills for this Run's pinned version.`;
     const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, prompt });
     if (!reservation.created) {

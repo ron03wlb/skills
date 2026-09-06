@@ -47,6 +47,12 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     chmodSync(join(bin, "gh"), 0o755); process.env.PATH = `${bin}:${oldPath}`;
     const owner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: { listRunIds: () => ["unreadable"], readEvents() { throw new Error("Unreadable journal"); } }, tasks: { read: async () => ({ state: "RESUMABLE" }) } });
     const snapshot = await owner.sources.tracker.read({ specId: "1" });
+    fixture.body = "Different unapproved scope";
+    writeFileSync(fixturePath, JSON.stringify(fixture));
+    await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
+      error.code === "WORKFLOW_AUTHORITY_CONFLICT" && /Current approved Spec publication/u.test(error.message));
+    fixture.body = body;
+    writeFileSync(fixturePath, JSON.stringify(fixture));
     const current = await owner.sources.reconciliation.read({ tracker: snapshot, journal: [], request: {} });
     assert.equal(reduceRunReadyHandoff(current.runReadyAuthority).state, "READY");
     assert.equal(current.facts.run.targetHead, seal);

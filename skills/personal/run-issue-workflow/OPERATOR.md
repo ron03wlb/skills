@@ -53,9 +53,13 @@ Every non-progress result should name a stable reason, evidence, affected and un
 
 Tracker outage probes are fixed at 5, 15, and 30 seconds. Transient Issue-lane attempts are capped at three. Only the exact recognized Windows Gradle loopback fingerprint receives one process-local remediation cycle.
 
+A successfully read tracker whose required authority record is missing or ambiguous reports `tracker_authority_conflict` immediately with the observed mismatch. Network backoff cannot repair a changed scope or publication; the planning owner resolves it while independent selected Runs continue. Actual transport failures retain the outage probes.
+
 ## Recover without duplication
 
 On re-entry, the coordinator reads the journal and reacquires live Tracker, Git, worktree, completion-note, and Codex task evidence. It adopts trustworthy manual completion, a settled task, an accepted close request, partial close progress, and already-successful nodes. It never recreates or guesses an ambiguous lane.
+
+If the host disconnects before task submission, the adapter checks that state before reserving a new creation intent. Existing uncertain intents remain preserved and require exact native outcome read-back; the absence of a task in a partial listing does not authorize another create.
 
 Some current-host task listings omit newly delegated tasks and their preview can be empty. The adapter then uses only exact delegation-input matches in the local creation-day Codex rollout files as discovery hints, followed by native task-input and Git common-directory read-back. Rollout text, titles, and a hinted ID alone never establish a lane or authorize another task. Native delegation inputs also supply close/retry request read-back when no user-message item exists.
 
