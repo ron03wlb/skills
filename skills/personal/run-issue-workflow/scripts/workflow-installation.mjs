@@ -51,6 +51,9 @@ function verifyPackage(root, version) {
 export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   let version = recordedVersion ?? null;
   try {
+    if (!recordedVersion && existsSync(join(cacheDirectory, "installation-pending.json"))) {
+      throw new Error("Installation recovery is pending; inspect installation-pending.json before selecting a version for a new Run");
+    }
     const catalog = readJson(join(cacheDirectory, "installation.json"));
     validateCatalog(catalog);
     version ??= catalog.versions.find(({ id }) => id === catalog.current);

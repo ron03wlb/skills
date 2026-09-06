@@ -68,6 +68,8 @@ test("an installed entry update preserves a running workflow's exact executable 
       });
     } finally { fs.symlinkSync = originalSymlink; syncBuiltinESMExports(); }
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
+    assert.equal(selectWorkflowVersion({ cacheDirectory }).state, "UNAVAILABLE");
+    assert.equal(selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version }).state, "AVAILABLE");
     // Test-owned recovery: the preserved intent was inspected and the public old entry proved intact.
     rmSync(join(cacheDirectory, "installation-pending.json"));
     const second = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
