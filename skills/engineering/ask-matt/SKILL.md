@@ -27,6 +27,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 
 ## Other starting points
 
+- Vague needs or a solution-first idea → `/clarify-needs` for a user-confirmed goal, first-principles proposal comparison, and a Needs Summary; it converges when evidence is sufficient and preserves existing follow-up authorization.
 - A new software project without a governing Spec → personal `/start-project` for discovery; it hands off through `/grill-with-docs` when a Planning handoff packet is still missing, then `/to-spec`.
 - A personal daily reflection → `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 - Raw request → `/triage`; failure whose cause is unknown → `/diagnosing-bugs`.
@@ -37,7 +38,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 ## Independent controls
 
 - `/wiki` manages repository Wiki work; `/remove-ron` removes only the retired repository-local Ron footprint.
-- `/confirm-understanding` calibrates a mental model; `/explain-decision` compares one live choice; `/grilling` pressure-tests a plan without changing workflow state.
+- `/confirm-understanding` calibrates a mental model against specified evidence; `/explain-decision` compares one live choice; `/grilling` pressure-tests a plan through its decision tree. `/clarify-needs` settles vague needs without requiring every branch to be exhausted. These conversations create no new execution authority.
 - `/to-questionnaire`, `/wait-what`, `/handoff`, `/teach`, handle their named collaboration need. `/writing-for-agents` handles substantive instruction, structure, or routing changes; simple wording edits stay inline. `/resolving-merge-conflicts` handles an in-progress merge or rebase conflict.
 
 Use `/setup-matt-pocock-skills` when tracker, labels, or domain-doc layout is not configured.
