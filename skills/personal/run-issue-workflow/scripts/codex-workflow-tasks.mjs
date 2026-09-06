@@ -51,10 +51,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const prompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
     let closeRequest;
     if (prompt) {
-      const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (.+)$/u);
+      const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (\{[^\n]+\})/u);
       if (!match) throw new Error("Task close request evidence is malformed");
       const evidence = JSON.parse(match[2]);
-      closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence };
+      const continuation = prompt.match(/^Close continuation: (\{.+\})$/mu);
+      closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence, ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
     }
     const retryPrompt = userTexts(snapshot).find((text) => text.includes("Retry request: "));
     const retryMatch = retryPrompt?.match(/Retry request: (\{.+\})$/u);

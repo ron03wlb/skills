@@ -22,7 +22,7 @@ From the canonical repository identity, derive one versioned operation identity 
 
 ## 2. Reduce immediate-upstream authority
 
-Before cleanup, writer acquisition, Grant creation or renewal, panel open, task action, or leaf mutation, read [the Run-ready handoff contract](references/run-ready-handoff.md) and reduce its owner facts. Consume [Run preparation](references/run-preparation.md) before declaring readiness: prior approvals are reused, known missing permissions and declared SQL attestations belong to the planning owner before Start. Only `READY` may continue. `INCOMPLETE` returns the exact producer retry; `UNKNOWN` returns a stable fail-closed diagnosis. Neither state permits Run mutation.
+Before cleanup, writer acquisition, Grant creation or renewal, panel open, task action, or leaf mutation, read [the Run-ready handoff contract](references/run-ready-handoff.md) and reduce its owner facts. Consume [Run preparation](../../../docs/agents/run-preparation.md) before declaring readiness: prior approvals are reused, known missing permissions and declared SQL attestations belong to the planning owner before Start. Only `READY` may continue. `INCOMPLETE` returns the exact producer retry; `UNKNOWN` returns a stable fail-closed diagnosis. Neither state permits Run mutation.
 
 After successful `READY` reduction and reconciliation, create one read-back DAG Run Grant or reuse the exact existing Grant for that identity. Record `max_parallel`, default three, in the append-only journal. Renewal cannot change identity or parallelism; Resume after Pause needs a revisioned setting change. The Grant authorizes only this Run's `execute-issue` and `close-issue` calls, never scope expansion, external-prerequisite execution, push, deployment, or ambiguity repair.
 

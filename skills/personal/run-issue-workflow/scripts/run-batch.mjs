@@ -1,6 +1,5 @@
 const terminal = status => ["SUCCEEDED", "STOPPED"].includes(status?.run?.state);
-const occupied = status => (status?.nodes ?? []).filter(node =>
-  node.task?.state === "EXECUTING" || node.task?.state === "UNKNOWN").length;
+const occupied = status => (status?.nodes ?? []).reduce((count, node) => count + Math.max(node.task?.reservedWorkers ?? 0, ["DISPATCHED", "EXECUTING", "UNKNOWN"].includes(node.task?.state) ? 1 : 0), 0);
 
 // A bounded, explicitly selected batch. Each lane owns its Run, Grant, journal and controls.
 export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () => true, onRound = async () => {} }) {
@@ -23,7 +22,7 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
       const status = statuses.get(lane.specId);
       if (terminal(status) || status.run.state === "UNAVAILABLE") continue;
       const used = [...statuses.values()].reduce((count, current) => count + occupied(current), 0);
-      const slots = [...statuses.values()].some(current => current.capacityUnknown) ? 0 : Math.max(0, maxWorkers - used);
+      const slots = [...statuses.values()].some(current => current.capacityUnknown || current.run.state === "UNAVAILABLE") ? 0 : Math.max(0, maxWorkers - used);
       if (!(status.legalActions ?? []).some(action => slots > 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type))) continue;
       try {
         statuses.set(lane.specId, await lane.run({ mode: "step", executionSlots: slots }));

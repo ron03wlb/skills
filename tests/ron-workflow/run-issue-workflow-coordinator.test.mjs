@@ -3844,3 +3844,29 @@ test("conflict repair reuses the original lane and its persistent wave before cl
     assert.equal(store.readEvents(identity.runId).filter(event => event.type === "repair.recorded").length, 10);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("an ambiguous Issue lane isolates its dependants while the same Run dispatches independent work", async () => {
+  const { root, store } = createStoreFixture();
+  const active = new Set();
+  let ambiguous = true;
+  const creates = [];
+  const actionStops = new Map();
+  const options = { store, actionStops, tasks: {
+    async findIssueLane({ issueId }) { return issueId === "13" && ambiguous ? [{ threadId: "first", hostId: "local" }, { threadId: "second", hostId: "local" }] : []; },
+    async create({ issueId }) { creates.push(issueId); active.add(issueId); return { threadId: `task-${issueId}`, hostId: "local" }; },
+    async read() { return { state: "RUNNING" }; }, async message() { throw new Error("No message expected"); }, async wait() { throw new Error("A batch step yields"); },
+  }, tracker: { read: async () => ({}) }, reconcile: async () => reconciliation({ runIdentity: multiIdentity,
+    nodes: ["13", "14", "16"].map(issueId => ({ issueId, blockers: issueId === "16" ? ["13"] : [], trackerState: "OPEN", taskState: active.has(issueId) ? "EXECUTING" : "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" })) }),
+    now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+  try {
+    const stopped = await createCoordinator(options).run({ specId: "12", mode: "step" });
+    assert.deepEqual(stopped.diagnoses.find(item => item.reasonCode === "issue_lane_ambiguous").affectedNodes, ["13", "16"]);
+    await createCoordinator(options).run({ specId: "12", mode: "snapshot" });
+    await createCoordinator(options).run({ specId: "12", mode: "step" });
+    assert.deepEqual(creates, ["14"]);
+    ambiguous = false;
+    await createCoordinator(options).run({ specId: "12", mode: "snapshot" });
+    await createCoordinator(options).run({ specId: "12", mode: "step" });
+    assert.deepEqual(creates, ["14", "13"], "fresh unique ownership unblocks only the original Issue without new approval");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

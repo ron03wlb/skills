@@ -29,7 +29,7 @@ Reuse an artifact as a matching clean valid **Prerequisite candidate** only when
 
 Otherwise invoke the model-invoked `prepare-prerequisite-artifact` skill with the exact Issue, linked Spec, target, worktree, topic branch, unchanged scope, checkpoint, and declared artifact. Accept its return only when a fresh read-back proves the matching candidate, blob, path, validation, clean review, worktree, branch, and ancestry evidence. Any drift or mismatch stops without accepting readiness.
 
-For planning entry, read [Run preparation](../../personal/run-issue-workflow/references/run-preparation.md). Confirm the declared opaque environment identity, authorized effect and rights, application owner, prepared recovery and outcome checks before presentation. Read existing approvals and exact attestations first; do not ask again for already approved unchanged scope. The planning owner retains the candidate packet and native task identity for later Run adoption.
+For planning entry, read [Run preparation](../../../docs/agents/run-preparation.md). Confirm the declared opaque environment identity, authorized effect and rights, application owner, prepared recovery and outcome checks before presentation. Read existing approvals and exact attestations first; do not ask again for already approved unchanged scope. The planning owner retains the candidate packet and native task identity for later Run adoption.
 
 Present the committed primary **Operator SQL**, candidate, blob, and repository-relative path to the human for execution. Never execute or replay it, connect to a database, run recovery or cleanup, retry a failure, collect credentials, or invent external-state proof.
 

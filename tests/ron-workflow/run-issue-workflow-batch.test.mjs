@@ -42,3 +42,19 @@ test("restart observes every selected existing worker before any new dispatch", 
   assert.ok(trace.indexOf("existing:read") < trace.indexOf("ready:step"));
   assert.equal(result.state, "PRESERVED");
 });
+
+test("DISPATCHED workers and unavailable activity reserve the shared capacity", async () => {
+  for (const unavailable of [false, true]) {
+    let connected = true;
+    let attempted = 0;
+    await runBatch({ maxWorkers: 1, connected: () => connected,
+      lanes: [
+        { specId: "existing", run: async () => unavailable
+          ? { run: { state: "UNAVAILABLE" }, capacityUnknown: true, nodes: [], legalActions: [] }
+          : { run: { state: "RUNNING" }, nodes: [{ task: { state: "DISPATCHED" } }], legalActions: [] } },
+        { specId: "ready", async run({ mode }) { if (mode === "step") attempted++; return { run: { state: "RUNNING" }, nodes: [], legalActions: [{ type: "dispatch_issue" }] }; } },
+      ], sleep: async () => { connected = false; },
+    });
+    assert.equal(attempted, 0, "unread activity cannot become an empty worker slot");
+  }
+});

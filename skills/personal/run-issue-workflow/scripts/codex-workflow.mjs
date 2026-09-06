@@ -5,6 +5,7 @@ import { setTimeout } from "node:timers/promises";
 import { createCodexWorkflowTasks, unwrapCodexResult } from "./codex-workflow-tasks.mjs";
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
 import { createRunStore } from "./run-store.mjs";
+import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
 
@@ -40,7 +41,11 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
       const acceptedEquivalent = task.closeRequest?.runId === identity.runId && task.closeRequest.issueId === issueId
         && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity;
       if (task.closeRequest?.state === "ACCEPTED" && task.closeRequest.issueId === issueId && task.closeRequest.requestIdentity !== requestIdentity && !acceptedEquivalent) throw new Error("Parent close authority changed");
-      if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`);
+      const effectiveIdentity = acceptedEquivalent ? task.closeRequest.requestIdentity : requestIdentity;
+      const continuation = planCloseContinuation({ task, requestIdentity: effectiveIdentity, requestEvidence });
+      if (continuation.exhausted) throw new Error("Parent close continuation budget exhausted without progress; preserve its existing task");
+      if (continuation.needed) await setTimeout([5000, 15000, 30000][continuation.attempt - 1]);
+      if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent || continuation.needed) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${effectiveIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`);
       if (step) return { settled: false };
       const waited = await tasks.wait([dispatch.taskRef]);
       return { settled: waited.taskSettled, requestIdentity: acceptedEquivalent && waited.closeRequestIdentity === task.closeRequest.requestIdentity ? requestIdentity : waited.closeRequestIdentity };

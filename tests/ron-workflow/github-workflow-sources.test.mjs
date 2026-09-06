@@ -4,6 +4,9 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { createCoordinator } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
+import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
 import { renderWorkflowRecord, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
@@ -107,6 +110,42 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     completionComment.body += "\nchanged evidence";
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /compatibility frontier/u);
     assert.equal(issueGit("rev-parse", "HEAD"), packet.candidate, "compatibility never rewrites the existing contribution");
+    completionComment.body = completionComment.body.replace("\nchanged evidence", "");
+    await refresh();
+    const runStore = createRunStore({ gitCommonDir: join(root, ".git") });
+    const ref = { threadId: "existing-issue-task", hostId: "local" };
+    let nativePrompt = "Implementation fixture completed";
+    let nativeMessages = 0;
+    const host = { async call(name, args) {
+      if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: lane, status: { type: "idle" } },
+        turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] }] }] };
+      if (name.endsWith("send_message_to_thread")) {
+        nativeMessages++; nativePrompt = args.prompt;
+        if (nativeMessages === 1) git("merge", "--ff-only", packet.candidate);
+        else if (nativeMessages === 2) {
+          assert.match(nativePrompt, /Close continuation: .*"attempt":1/u);
+          git("worktree", "remove", lane); fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
+        } else throw new Error("Duplicate completed close mutation");
+        throw new Error("response lost after accepted close action");
+      }
+      throw new Error(`Unexpected native action ${name}`);
+    } };
+    const nativeTasks = createCodexWorkflowTasks({ host, store: runStore, project: { path: root, projectId: "project", hostId: "local" }, packageRoot: "/fixture-installed", issueNumber: async () => 1, sleep: async () => {} });
+    const liveOwners = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: runStore, tasks: nativeTasks });
+    const beforeClose = await refresh();
+    const writer = runStore.acquireWriter(beforeClose.runIdentity.runId);
+    writer.append({ type: "grant.recorded", at: "2026-09-06T00:00:00.000Z", runIdentity: beforeClose.runIdentity, maxParallel: 3 });
+    writer.append({ type: "dispatch.recorded", at: "2026-09-06T00:00:00.000Z", issueId: "I_1", attempt: 1, taskRef: ref }); writer.release();
+    const coordinatorOptions = { store: runStore, tasks: nativeTasks, tracker: liveOwners.sources.tracker,
+      reconcile: args => liveOwners.sources.reconciliation.read(args), handoff: { read: async ({ current }) => current.runReadyAuthority }, now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+    const partial = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
+    assert.equal(partial.nodes[0].close.candidateReachable, true);
+    assert.equal(partial.nodes[0].close.worktreeState, "PRESENT");
+    const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
+    assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
+    assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");
+    assert.equal(nativeMessages, 2, "one original action plus one bounded continuation; lost replies cause no duplicate sends");
+    assert.equal(runStore.readEvents(beforeClose.runIdentity.runId).filter(event => event.type === "dispatch.recorded").length, 1);
     fixture.body += " changed scope"; writeFileSync(fixturePath, JSON.stringify(fixture));
     await assert.rejects(owner.sources.tracker.read({ specId: "1" }), /Current approved Spec publication/u);
     assert.equal(git("status", "--porcelain"), "");

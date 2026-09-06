@@ -38,6 +38,7 @@ export function createWorkflowRuntime({
   requireMethod(authorityAdapters.handoff, "read");
 
   let active = false;
+  const actionStops = new Map();
   let cleanupInspected = false;
   return {
     async run(request = {}) {
@@ -124,6 +125,7 @@ export function createWorkflowRuntime({
         store,
         workflowVersion,
         compatibleRecordedVersion,
+        actionStops,
         tracker: authorityAdapters.tracker,
         tasks,
         selector: authorityAdapters.selector,

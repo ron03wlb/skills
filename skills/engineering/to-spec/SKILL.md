@@ -18,7 +18,7 @@ Read any referenced Spec body, comments, prior partial-publication report, and e
 
 Only this task’s isolated lane authorizes publication.
 
-Before Run-ready, follow [Run preparation](../../personal/run-issue-workflow/references/run-preparation.md): reuse approvals, probe capabilities, and ask once for missing scope. Carry the inventory in publication/handoff. After publishing Issue identities, route SQL prerequisites through `pre-execute-issue` before ready-state read-back; reuse its attested lane. No SQL is N/A. Preparation grants no SQL or deployment authority.
+Before Run-ready, follow [Run preparation](../../../docs/agents/run-preparation.md): reuse approvals, probe capabilities, and ask once for missing scope. Carry the inventory in publication/handoff. After publishing Issue identities, call the Skill tool with "pre-execute-issue" for SQL prerequisites before ready-state read-back; reuse its attested lane. No SQL is N/A. Preparation grants no SQL or deployment authority.
 
 ## 2. Draft the classified contract
 

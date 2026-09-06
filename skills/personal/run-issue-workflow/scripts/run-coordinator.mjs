@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
@@ -302,14 +303,14 @@ const trackerUnavailable = (request, attempts, status) => {
   });
 };
 
-const issueLaneAmbiguous = (status, issueId, laneCount) => diagnosedStop(status, {
+const issueLaneAmbiguous = (status, issueId, laneCount) => ({ ...diagnosedStop(status, {
   reasonCode: "issue_lane_ambiguous",
   limitationClass: "unresolved-evidence",
   evidence: [`Issue ${issueId} matched ${laneCount} Codex task lanes; exactly one or zero is required.`],
   noAutomaticTransition: "Ambiguous task identity cannot authorize dispatch, retry, or closeout.",
-  affectedNodes: status.nodes.map(({ issueId: nodeIssueId }) => nodeIssueId),
+  affectedNodes: [issueId],
   resumePredicates: ["one_exact_issue_lane_is_proven"],
-});
+}), reservationCount: laneCount || status.run.maxParallel });
 
 const issueLaneMissing = (status, issueId) => diagnosedStop(status, {
   reasonCode: "issue_lane_missing",
@@ -407,6 +408,7 @@ export function createCoordinator({
   onSelected,
   workflowVersion,
   compatibleRecordedVersion,
+  actionStops = new Map(),
   now,
   sleep,
 }) {
@@ -653,10 +655,16 @@ export function createCoordinator({
       };
     }
     const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
-    if (!accepted) {
+    const continuation = accepted ? planCloseContinuation({ task, requestIdentity, requestEvidence }) : { needed: false };
+    if (continuation.exhausted) return { stopped: diagnosedStop(status, {
+      reasonCode: "close_retry_budget_exhausted", evidence: ["Three native close continuations settled without progress; preserve the original task and current Git/tracker state."],
+      affectedNodes: [action.issueId], noAutomaticTransition: "The unchanged close progress exhausted its persistent continuation budget.", resumePredicates: ["close_progress_or_owning_source_failure_is_resolved"],
+    }) };
+    if (continuation.needed) await sleep([5000, 15000, 30000][continuation.attempt - 1]);
+    if (!accepted || continuation.needed) {
       await tasks.message(
         taskRef,
-        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
+        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`,
       );
     }
     if (step) return { active: true };
@@ -977,9 +985,42 @@ export function createCoordinator({
       let lastStatus = null;
       let latestFacts = null;
       let panelHandle = null;
+      const actionFactsIdentity = (facts, issueId) => JSON.stringify(canonicalize({
+        run: Object.fromEntries(RUN_IDENTITY_KEYS.map(key => [key, facts.run[key]])),
+        node: facts.nodes.find(node => node.issueId === issueId),
+      }));
       const rebuildStatus = (facts) => {
-        latestFacts = facts;
-        return writer.rebuildStatus(facts);
+        const control = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised");
+        const local = [];
+        const reservations = new Map();
+        for (const [key, entry] of actionStops) {
+          if (entry.runId !== facts.run.runId) continue;
+          if (entry.factsIdentity !== actionFactsIdentity(facts, entry.issueId)
+            || control?.command === "RESUME" && control.revision > entry.controlRevision) { actionStops.delete(key); continue; }
+          if (entry.reservationCount) reservations.set(entry.issueId, entry.reservationCount);
+          local.push({ code: entry.diagnosis.reasonCode, reasonCode: entry.diagnosis.reasonCode,
+            affectedNodes: [entry.issueId], evidence: entry.diagnosis.evidence });
+        }
+        latestFacts = { ...facts, nodes: facts.nodes.map(node => reservations.has(node.issueId) ? { ...node, reservedWorkers: reservations.get(node.issueId) } : node), contradictions: [...facts.contradictions, ...local] };
+        return writer.rebuildStatus(latestFacts);
+      };
+      const isolateActionStop = (stopped, action, current) => {
+        if (current.runIdentity.classification !== "MULTI" || !current.facts.nodes.some(node => node.issueId === action.issueId)) return false;
+        const diagnosis = stopped.diagnoses.findLast(item => item.affectedNodes.includes(action.issueId));
+        if (!diagnosis) return false;
+        actionStops.set(`${current.runIdentity.runId}:${action.issueId}`, { runId: current.runIdentity.runId, issueId: action.issueId,
+          factsIdentity: actionFactsIdentity(current.facts, action.issueId), controlRevision: stopped.run.controlRevision, diagnosis, reservationCount: stopped.reservationCount ?? 0 });
+        return true;
+      };
+      const refreshActionStops = async current => {
+        for (const [key, entry] of actionStops) {
+          if (entry.runId !== current.runIdentity.runId || !["issue_lane_ambiguous", "issue_lane_missing", "issue_action_unresolved"].includes(entry.diagnosis.reasonCode)) continue;
+          try {
+            const found = await tasks.findIssueLane({ issueId: entry.issueId, runIdentity: current.runIdentity });
+            if (Array.isArray(found) && (found.length === 1 || found.length === 0 && entry.diagnosis.reasonCode === "issue_lane_ambiguous")) actionStops.delete(key);
+            else if (Array.isArray(found)) entry.reservationCount = found.length;
+          } catch { /* Unproven identity keeps only this Issue fenced. */ }
+        }
       };
       const publishPanelStop = (status, error) => {
         requireMethod(writer, "publishStatus");
@@ -1191,6 +1232,7 @@ export function createCoordinator({
             continue;
           }
 
+          await refreshActionStops(current);
           lastStatus = rebuildStatus(current.facts);
           for (const pending of request.controlQueue?.splice(0) ?? []) {
             try {
@@ -1233,9 +1275,10 @@ export function createCoordinator({
                 break;
               }
             }
+            try {
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
-              if (stopped) return stopped;
+              if (stopped) { if (isolateActionStop(stopped, action, current)) break; return stopped; }
             } else if (action.type === "repair_issue") {
               await repairIssue({ action, current, writer });
             } else if (action.type === "remediate_environment") {
@@ -1246,11 +1289,11 @@ export function createCoordinator({
               }
             } else if (action.type === "close_issue") {
               const outcome = await closeIssue({ action, current, status: lastStatus, step: request.mode === "step" });
-              if (outcome.stopped) return outcome.stopped;
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {
               const outcome = await closeParent({ action, current, status: lastStatus, step: request.mode === "step" });
-              if (outcome.stopped) return outcome.stopped;
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (!outcome.settled && request.mode !== "step") return lastStatus;
             } else if (["wait_repository_close_lease", "wait_target_writer"].includes(action.type)) {
               const outcome = await waitForCloseLease({
@@ -1261,7 +1304,7 @@ export function createCoordinator({
                 status: lastStatus,
                 writer,
               });
-              if (outcome.stopped) return outcome.stopped;
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (outcome.controlRevisionChanged) {
                 controlRevisionChanged = true;
                 break;
@@ -1276,6 +1319,15 @@ export function createCoordinator({
               });
             } else {
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
+            }
+            } catch (error) {
+              if (current.runIdentity.classification !== "MULTI" || !["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
+              lastStatus = rebuildStatus(current.facts); // A fenced writer must throw before any continuation.
+              const stopped = diagnosedStop(lastStatus, { reasonCode: "issue_action_unresolved", evidence: [error.message],
+                affectedNodes: [action.issueId], noAutomaticTransition: "Read the owning task before retrying this unresolved action.", resumePredicates: ["exact_issue_action_is_reconciled"] });
+              stopped.reservationCount = action.type === "dispatch_issue" ? 1 : 0;
+              if (!isolateActionStop(stopped, action, current)) throw error;
+              break;
             }
           }
           if (request.mode === "step") stepFinished = true;

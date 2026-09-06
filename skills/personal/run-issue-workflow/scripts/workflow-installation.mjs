@@ -143,7 +143,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const tree = execFileSync("git", ["-C", sourceRepository, "ls-tree", "-rz", "--full-tree", sourceCommit, "--", "skills"], { encoding: "utf8" });
+  const tree = execFileSync("git", ["-C", sourceRepository, "ls-tree", "-rz", "--full-tree", sourceCommit, "--", "skills", "docs/agents/run-preparation.md"], { encoding: "utf8" });
   const files = tree.split("\0").filter(Boolean).map((line) => {
     const match = line.match(/^(100644|100755) blob [a-f0-9]+\t(.+)$/u);
     if (!match || !safePath(match[2])) throw new Error("Workflow package contains an unsupported path or link");
@@ -162,7 +162,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   try {
     mkdirSync(versionsDirectory, { recursive: true });
     mkdirSync(staging);
-    const archive = execFileSync("git", ["-C", sourceRepository, "archive", sourceCommit, "skills"], { maxBuffer: 32 * 1024 * 1024 });
+    const archive = execFileSync("git", ["-C", sourceRepository, "archive", sourceCommit, "skills", ...(files.some(file => file.path === "docs/agents/run-preparation.md") ? ["docs/agents/run-preparation.md"] : [])], { maxBuffer: 32 * 1024 * 1024 });
     execFileSync("tar", ["-x", "-C", staging], { input: archive });
     for (const file of files) file.sha256 = sha256(readFileSync(join(staging, file.path)));
     const id = sha256(JSON.stringify({ sourceCommit, files }));

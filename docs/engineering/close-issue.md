@@ -39,3 +39,5 @@ A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Dec
 `close-issue` follows [execute-issue](https://aihero.dev/skills-execute-issue). After the desired Issues are closed, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) performs the one aggregate gate on exact target `HEAD`. See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
 
 Transient failures trigger bounded probes of Git or the tracker before retrying only an unsatisfied action. A lost response never causes a second completed merge, cleanup or closure.
+
+The coordinator can continue a settled partial close in its original task. Its native request keeps a three-attempt budget for unchanged progress across restarts, so only remaining actions run.

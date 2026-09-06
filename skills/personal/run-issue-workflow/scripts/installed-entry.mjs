@@ -69,8 +69,8 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
     for (const id of specIds) {
       try {
         const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true });
-        lanes.push(typeof lane.run === "function" ? lane : { specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, reason: lane.reason, nodes: [], legalActions: [] }) });
-      } catch (error) { lanes.push({ specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, reason: error.message, nodes: [], legalActions: [] }) }); }
+        lanes.push(typeof lane.run === "function" ? lane : { specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
+      } catch (error) { lanes.push({ specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
     }
     return await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected });
   } finally { for (const lane of lanes) await lane.close?.(); }

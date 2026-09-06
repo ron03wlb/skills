@@ -181,7 +181,8 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: completion ? "COMPLETE" : latest?.record.kind === "implementation_blocked" ? "BLOCKED" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
-      if (completion && task?.closeRequest?.issueId === issue.node_id && task.closeRequest.runId === selectedIdentity.runId) node.taskState = "NONE";
+      if (completion && task?.closeRequest?.runId === selectedIdentity.runId
+        && (task.closeRequest.issueId === issue.node_id || authority.classification === "MULTI" && task.closeRequest.issueId === authority.specId)) node.taskState = "NONE";
       if (repairing) { node.taskState = "EXECUTING"; node.completionState = "NONE"; }
       if (acceptedRepair && task.state === "RESUMABLE" && task.snapshot?.turns?.[0]?.status === "completed") throw new Error("Conflict repair settled without renewed completion; inspect the original lane's semantic or verification blocker");
       if (task?.state === "UNKNOWN") throw new Error(`Issue #${issue.number} task state is unknown`);
@@ -228,12 +229,6 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         && conflict.requestIdentity === task.closeRequest?.requestIdentity && conflict.targetRestored === true) {
         if (target.state !== "CLEAN" || !ancestor(conflict.targetHead, target.head)) throw new Error("Conflict target restoration or current ownership is unproven");
         node.closeConflict = { candidate: conflict.candidate, targetHead: target.head };
-      }
-      if (completion && !repairing && !node.closeConflict && task?.state === "RESUMABLE"
-        && task.snapshot?.turns?.[0]?.status === "completed" && task.closeRequest?.runId === selectedIdentity.runId
-        && task.closeRequest.issueId === issue.node_id && task.closeRequest.evidence?.authorityEvidence?.candidateCommit === completion.record.candidate
-        && (node.trackerState !== "CLOSED" || node.worktreeState !== "ABSENT" || !node.candidateReachable)) {
-        throw new Error("Close task settled with unresolved remaining actions after owning-source read-back; preserve its original lane and inspect the leaf result");
       }
       nodes.push(node);
       } catch (error) {

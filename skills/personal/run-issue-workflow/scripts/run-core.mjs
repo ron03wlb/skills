@@ -566,6 +566,7 @@ const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationC
     attempt: Number.isInteger(dispatch?.attempt) ? dispatch.attempt : 0,
     retryCount,
     remediationCount,
+    ...(node.reservedWorkers === undefined ? {} : { reservedWorkers: node.reservedWorkers }),
   },
   close: {
     completionState: isText(node.completionState) ? node.completionState : "UNKNOWN",
@@ -1038,7 +1039,8 @@ export function reduceRun(input) {
   const deliverySucceeded = allSucceeded && (
     input.run.classification === "SINGLE" || input.run.parentTrackerState === "CLOSED"
   );
-  const slots = Math.max(0, maxParallel - active.length);
+  const occupiedWorkers = normalizedNodes.reduce((count, node) => count + Math.max(node.reservedWorkers ?? 0, ["DISPATCHED", "EXECUTING", "UNKNOWN"].includes(node.taskState) ? 1 : 0), 0);
+  const slots = Math.max(0, maxParallel - occupiedWorkers);
   const normalActions = [];
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
