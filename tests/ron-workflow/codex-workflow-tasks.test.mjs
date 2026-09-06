@@ -66,3 +66,63 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.match(prompt, /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+
+test("exact local creation hints recover without reading unrelated coordinator history", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-exact-task-"));
+  execFileSync("git", ["init", root], { stdio: "ignore" });
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-1", specId: "I_1", target: "main" };
+  const prompt = "exact immutable creation input";
+  store.reserveHostTask({ runId: runIdentity.runId, issueId: "I_1", prompt });
+  const ref = { threadId: "worker", hostId: "local" };
+  const calls = [];
+  const options = { store, project: { projectId: "project", hostId: "local", path: root }, packageRoot: "/installed/version", issueNumber: async () => 1,
+    discoverTasks: async ({ prompt: input }) => { assert.equal(input, prompt); return [{ ...ref, cwd: root }]; },
+    host: { async call(name, args) {
+      calls.push(name);
+      assert.equal(name, "mcp__codex_app__read_thread", "exact hints must precede broad history discovery");
+      assert.equal(args.threadId, ref.threadId);
+      return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: root, status: { type: "idle" } },
+        turns: [{ items: [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] }] };
+    } } };
+  try {
+    assert.deepEqual(await createCodexWorkflowTasks(options).findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
+    assert.deepEqual(calls, ["mcp__codex_app__read_thread"]);
+    const mismatch = { ...options, discoverTasks: async () => [{ ...ref, cwd: root + "-wrong" }] };
+    await assert.rejects(createCodexWorkflowTasks(mismatch).findIssueLane({ issueId: "I_1", runIdentity }), /ownership/u,
+      "local discovery cannot substitute for exact current native and Git ownership");
+    const duplicate = { ...options, discoverTasks: async () => [{ ...ref, cwd: root }, { threadId: "other", hostId: "local", cwd: root }],
+      host: { async call(name, args) { const result = await options.host.call(name, { ...args, threadId: ref.threadId }); result.thread.id = args.threadId; return result; } } };
+    assert.equal((await createCodexWorkflowTasks(duplicate).findIssueLane({ issueId: "I_1", runIdentity })).length, 2,
+      "multiple exact native matches remain ambiguous for the coordinator");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("worktree creation recovery skips the saved checkout's unrelated active tasks", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-unready-task-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-1", specId: "I_1", target: "main" };
+  store.reserveHostTask({ runId: runIdentity.runId, issueId: "I_1", prompt: "exact input" });
+  const tasks = createCodexWorkflowTasks({ store, project: { projectId: "project", hostId: "local", path: root },
+    discoverTasks: async () => [], host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__list_threads", "the saved checkout cannot be the created worktree");
+      return { threads: [{ id: "coordinator", hostId: "local", projectId: "project", kind: "codex", cwd: root, status: "active" }] };
+    } } });
+  try { await assert.rejects(tasks.findIssueLane({ issueId: "I_1", runIdentity }), /TASK_CREATION_UNRESOLVED/u); }
+  finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unloaded native task with a completed latest turn is settled without replaying its work", async () => {
+  let type = "notLoaded";
+  let status = "completed";
+  const ref = { threadId: "worker", hostId: "local" };
+  const tasks = createCodexWorkflowTasks({ project: {}, host: { async call() {
+    return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type } }, turns: [{ status, items: [] }] };
+  } } });
+  assert.equal((await tasks.read(ref)).state, "RESUMABLE");
+  status = "inProgress";
+  assert.equal((await tasks.read(ref)).state, "UNKNOWN", "unloaded does not prove unfinished work settled");
+  status = "completed"; type = "active";
+  assert.equal((await tasks.read(ref)).state, "RUNNING", "active native state takes precedence over older completion");
+});

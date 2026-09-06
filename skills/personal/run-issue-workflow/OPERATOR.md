@@ -57,13 +57,15 @@ A successfully read tracker whose required authority record is missing or ambigu
 
 If a native Codex tool never responds, retain its exact request and any known task identity. A local rollout can help locate the task, but does not replace the required native read-back. Report the unfinished boundary and resume the same installed entry when that owning source responds; do not count a preserved Run as delivered.
 
+A native `notLoaded` task with a completed latest turn is settled for continuation; an active task remains running, and an unloaded task with unfinished or unreadable latest work remains unknown. This reads current host state without replaying valid implementation or review.
+
 ## Recover without duplication
 
 On re-entry, the coordinator reads the journal and reacquires live Tracker, Git, worktree, completion-note, and Codex task evidence. It adopts trustworthy manual completion, a settled task, an accepted close request, partial close progress, and already-successful nodes. It never recreates or guesses an ambiguous lane.
 
 If the host disconnects before task submission, the adapter checks that state before reserving a new creation intent. Existing uncertain intents remain preserved and require exact native outcome read-back; the absence of a task in a partial listing does not authorize another create.
 
-Some current-host task listings omit newly delegated tasks and their preview can be empty. The adapter then uses only exact delegation-input matches in the local creation-day Codex rollout files as discovery hints, followed by native task-input and Git common-directory read-back. Rollout text, titles, and a hinted ID alone never establish a lane or authorize another task. Native delegation inputs also supply close/retry request read-back when no user-message item exists.
+Some current-host task listings omit newly delegated tasks and their preview can be empty. For local creation recovery, the adapter first uses exact delegation-input matches in the creation-day Codex rollout files as discovery hints, followed by native task-input and Git common-directory read-back. Multiple exact matches remain ambiguous; an ownership mismatch preserves the lane. Without exact hints, the task-list fallback skips the saved checkout's tasks because the creation intent requires a separate worktree. This avoids reading unrelated coordinator history before the existing worker. Rollout text, titles, and a hinted ID alone never establish a lane or authorize another task. Native delegation inputs also supply close/retry request read-back when no user-message item exists.
 
 Use an explicit Spec ID after a stopped Run, identity change, multiple candidate Runs, or any authority repair. Use no arguments only when one exact non-terminal Run is proven.
 
