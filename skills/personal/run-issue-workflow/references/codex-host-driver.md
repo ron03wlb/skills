@@ -2,9 +2,9 @@
 
 Read only after the human explicitly starts the selected Run, including its Issue tasks and later messages to those tasks. The entry itself verifies producer handoff and scope before requesting a task. This driver calls only the current task's available desktop tools; it is not an App Server client or a daemon.
 
-Launch the installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID] [Run-ID]` through `tools.exec_command` with `tty:true`, `yield_time_ms:1000`, and the consumer as `workdir`. Shell-quote each path or ID. Save its `session_id` and `output` using `store("workflow.host", {sessionId: result.session_id, buffer: result.output})`. Always preserve the session for subsequent ticks; do not launch a second coordinator while it is active.
+Launch the installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID or comma-separated Spec batch] [Run-ID]` through `tools.exec_command` with `tty:true`, `yield_time_ms:1000`, and the consumer as `workdir`. Shell-quote each path or ID. Save its `session_id` and `output` using `store("workflow.host", {sessionId: result.session_id, buffer: result.output})`. Always preserve the session for subsequent ticks; do not launch a second coordinator while it is active.
 
-Run this unchanged tick in `functions.exec`. It returns compact status only; full tool payloads remain transport data and are not reprinted into the coordinator context. An explicit text control is set with `store("workflow.control", "PAUSE")` (or `RESUME`, `STOP`, `REFRESH`) before the next tick. Continue ticks while the host session exists, reporting meaningful progress at least once a minute. If the app or coordinator disconnects, the entry stops dispatching and releases its writer after 90 seconds without a heartbeat. Worker tasks may still finish their already-dispatched work.
+Run this unchanged tick in `functions.exec`. It returns compact status only; full tool payloads remain transport data and are not reprinted into the coordinator context. For batches, set `workflow.control` to `{control: "PAUSE", runId: "<exact-Run-ID>"}` (likewise Resume, Stop or Refresh). An unqualified batch control is rejected. A single-Run text control is set with `store("workflow.control", "PAUSE")` (or `RESUME`, `STOP`, `REFRESH`) before the next tick. Continue ticks while the host session exists, reporting meaningful progress at least once a minute. If the app or coordinator disconnects, the entry stops dispatching and releases its writer after 90 seconds without a heartbeat. Worker tasks may still finish their already-dispatched work.
 
 The current host accepts at most 50 non-pinned tasks in `list_threads`. The driver bounds that read-only parameter for retained versions that requested more. It does not change Run identity, task creation, or evidence; an unresolved creation intent still prevents a duplicate task.
 
@@ -24,7 +24,7 @@ const accept = (result) => {
 const control = load("workflow.control");
 store("workflow.control", null);
 accept(await tools.write_stdin({session_id: lane.sessionId,
-  chars: JSON.stringify(control ? {control} : {heartbeat:true}) + "\n",
+  chars: JSON.stringify(control ? (typeof control === "string" ? {control} : control) : {heartbeat:true}) + "\n",
   yield_time_ms: 1000, max_output_tokens: 16000}));
 const until = Date.now() + 40000;
 while ((lane.sessionId || lane.buffer.includes("\n")) && Date.now() < until) {

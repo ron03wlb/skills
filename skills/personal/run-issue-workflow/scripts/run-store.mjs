@@ -1,3 +1,4 @@
+import { maintainLeaseHealth, readLeaseHealth } from "./lease-health.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -872,10 +873,12 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const repositoryCloseLeaseHandle = (operationId, generation) => {
     let active = true;
+    const health = maintainLeaseHealth(repositoryCloseLeasePaths.lock, { operationId, coordinatorInstanceId, generation });
     return {
       operationId,
       assertCurrent() {
         if (!active) throw new Error("REPOSITORY_CLOSE_LEASE_RELEASED");
+        health.pulse();
         return withLease({
           paths: repositoryCloseLeasePaths,
           kind: "repository-close",
@@ -885,6 +888,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       },
       release() {
         if (!active) throw new Error("REPOSITORY_CLOSE_LEASE_RELEASED");
+        health.pulse();
         return withLease({
           paths: repositoryCloseLeasePaths,
           kind: "repository-close",
@@ -898,6 +902,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
             generation,
           });
           active = false;
+          health.stop();
         });
       },
     };
@@ -1009,18 +1014,22 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const closeWriterHandle = (target, runId, paths, generation) => {
     let active = true;
+    const health = maintainLeaseHealth(paths.lock, { operationId: runId, coordinatorInstanceId, generation });
     return {
       target,
       runId,
       assertCurrent() {
         if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
+        health.pulse();
         return withLease({ paths, kind: "close", target, runId, generation }, () => true);
       },
       release() {
         if (!active) throw new Error("TARGET_CLOSE_WRITER_RELEASED");
+        health.pulse();
         return withLease({ paths, kind: "close", target, runId, generation }, () => {
           retireLease({ paths, kind: "close", target, runId, generation });
           active = false;
+          health.stop();
         });
       },
     };
@@ -1172,10 +1181,12 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   const readTargetMutationWriterReclaimLock = (target) => readCloseWriterReclaimLock(target);
 
   return {
+    gitCommonDir: resolve(gitCommonDir),
     acquireWriter,
     reclaimWriter,
     readWriterLock,
     readWriterReclaimLock,
+    readLeaseHealth: ({ leaseKind, target, owner }) => readLeaseHealth(leaseKind === "repository-close" ? repositoryCloseLeasePaths.lock : targetMutationPathsFor(target).lock, owner),
     acquireRepositoryCloseLease,
     reclaimRepositoryCloseLease,
     observeRepositoryCloseLease,

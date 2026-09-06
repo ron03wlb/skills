@@ -1,4 +1,4 @@
 interface:
   display_name: "Pre-Execute Issue"
   short_description: "Prepare and attest one exact prerequisite"
-  default_prompt: "Use $pre-execute-issue for one exact declared prerequisite, present its content-bound Operator SQL candidate for human execution, and record only the reported `APPLIED` or `NO_OP` outcome."
+  default_prompt: "Use $pre-execute-issue for one exact declared prerequisite from its planning or active execution owner, reuse existing scope approvals, present its content-bound Operator SQL candidate for human execution, and record only the reported `APPLIED` or `NO_OP` outcome."

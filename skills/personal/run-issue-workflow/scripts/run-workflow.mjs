@@ -23,6 +23,7 @@ export function createWorkflowRuntime({
   sleep,
   authoritySources,
   workflowVersion,
+  compatibleRecordedVersion,
 }) {
   for (const method of ["readEvents", "readStatus", "previewCleanup", "applyCleanup"]) {
     requireMethod(store, method);
@@ -37,18 +38,22 @@ export function createWorkflowRuntime({
   requireMethod(authorityAdapters.handoff, "read");
 
   let active = false;
+  let cleanupInspected = false;
   return {
     async run(request = {}) {
       if (active) throw new Error("WORKFLOW_RUNTIME_ALREADY_ACTIVE");
       active = true;
+      if (!["snapshot", "step"].includes(request.mode)) cleanupInspected = false;
       let panelState = { opened: false, closed: false, origin: null };
       let cleanupPreview = null;
       let cleanupResult = null;
       const inspectCleanup = async (selectedRequest, current, apply) => {
+        if (cleanupInspected) return;
         const runs = await cleanup.listRuns({ request: selectedRequest });
         const cleanupAt = now();
         const protectedRunIds = current?.runIdentity?.runId ? [current.runIdentity.runId] : [];
         cleanupPreview = store.previewCleanup({ now: cleanupAt, runs, protectedRunIds });
+        cleanupInspected = true;
         cleanupResult = apply && selectedRequest.cleanupPreview !== true
           ? store.applyCleanup({ now: cleanupAt, runs, protectedRunIds })
           : null;
@@ -118,6 +123,7 @@ export function createWorkflowRuntime({
       const coordinator = createCoordinator({
         store,
         workflowVersion,
+        compatibleRecordedVersion,
         tracker: authorityAdapters.tracker,
         tasks,
         selector: authorityAdapters.selector,
@@ -125,7 +131,7 @@ export function createWorkflowRuntime({
         handoff: authorityAdapters.handoff,
         leaf,
         environment,
-        panel,
+        panel: ["step", "snapshot"].includes(request.mode) ? undefined : panel,
         onSelected: ({ request: selectedRequest, current }) => inspectCleanup(selectedRequest, current, true),
         now,
         sleep,

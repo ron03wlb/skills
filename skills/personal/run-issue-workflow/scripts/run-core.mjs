@@ -217,6 +217,12 @@ export function reduceRunReadyHandoff(input) {
     );
   }
 
+  if (input.preparation && input.preparation.state !== "READY") {
+    return runReadyResult(input, { state: input.preparation.state === "UNKNOWN" ? "UNKNOWN" : "INCOMPLETE",
+      reasonCode: "run_preparation_pending", evidence: [input.preparation.reason ?? "Complete the approved authorization inventory and exact Manual prerequisite before Run-ready."],
+      nextOwner: authority.classification === "SINGLE" ? "to-spec" : "to-tickets", noAutomaticTransition: "Known missing preparation belongs to the planning owner before starting this Run.",
+      recoveryPredicates: ["planning_preparation_is_ready"] });
+  }
   const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const checkpointOwnsBaseScope = checkpoint.producerCommand === expectedProducer
     && checkpoint.specId === authority.specId
@@ -1073,20 +1079,30 @@ export function reduceRun(input) {
       cycle: 1,
     }];
   }).slice(0, slots);
-  normalActions.push(...remediations);
+  const repairs = closeable.filter(issueId => byId.get(issueId).closeConflict).flatMap(issueId => {
+    const conflict = byId.get(issueId).closeConflict;
+    const previous = input.journal.filter(event => event.type === "repair.recorded" && event.issueId === issueId);
+    if (previous.length >= 10 && previous.at(-1)?.candidate !== conflict.candidate) {
+      nodes.find(node => node.issueId === issueId).state = "BLOCKED";
+      nodeDiagnoses.push(diagnosis({ reasonCode: "repair_budget_exhausted", evidence: ["The persistent ten-wave conflict repair budget is exhausted."], affectedNodes: [issueId], allNodes: allNodeIds, resumePredicates: ["human_resolves_same_scope_repair_blocker"], noAutomaticTransition: "Re-entry does not reset the repair budget." }));
+      return [];
+    }
+    return [{ type: "repair_issue", issueId, ...conflict }];
+  }).slice(0, slots);
+  normalActions.push(...repairs, ...remediations.slice(0, Math.max(0, slots - repairs.length)));
   const dispatchable = [
     ...retrying.filter((issueId) => byId.get(issueId).taskState === "TRANSIENT_FAILURE"),
     ...ready,
   ];
-  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length)).map((issueId) => ({
+  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length - repairs.length)).map((issueId) => ({
     type: "dispatch_issue",
     issueId,
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
   }));
   normalActions.push(...dispatchActions);
-  const executionActionsScheduled = remediations.length > 0 || dispatchActions.length > 0;
-  if (!executionActionsScheduled && closeoutAvailable && closeable.length > 0) {
-    normalActions.push({ type: "close_issue", issueId: closeable[0] });
+  const executionActionsScheduled = repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
+  if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict)) {
+    normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict) });
   }
   const needsParentClose = allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
@@ -1141,7 +1157,14 @@ export function reduceRun(input) {
   }
   const activeCloseWait = activeRepositoryCloseWait ?? activeTargetWriterWait;
   if (activeCloseWait) {
-    normalActions.splice(0, normalActions.length, {
+    const dependsOnWait = (id, seen = new Set()) => {
+      if (id === activeCloseWait.issueId) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return (byId.get(id)?.blockers ?? []).some(blocker => dependsOnWait(blocker, seen));
+    };
+    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type) && !dependsOnWait(action.issueId));
+    normalActions.splice(0, normalActions.length, ...(independent.length ? independent : [{
       type: activeCloseWait.type === "repository-close-wait.started"
         ? "wait_repository_close_lease"
         : "wait_target_writer",
@@ -1149,7 +1172,7 @@ export function reduceRun(input) {
       owner: { ...activeCloseWait.owner },
       timeoutMs: activeCloseWait.timeoutMs,
       preWaitEvidence: activeCloseWait.preWaitEvidence,
-    });
+    }]));
   }
   const repositoryCloseDiagnoses = !executionActionsScheduled && repositoryCloseLeaseUncertain
     && (closeable.length > 0 || needsParentClose)

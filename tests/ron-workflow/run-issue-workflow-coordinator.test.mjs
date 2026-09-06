@@ -45,6 +45,33 @@ const multiIdentity = {
 
 const selectedPlanningSeal = "c".repeat(40);
 
+test("cooperative batch steps read fresh activity, dispatch once, and preserve the existing Grant", async () => {
+  const { root, store } = createStoreFixture();
+  const active = new Set();
+  let creates = 0;
+  const coordinator = createCoordinator({ store, tracker: { async read() { return {}; } },
+    tasks: {
+      async findIssueLane() { return []; },
+      async create({ issueId }) { creates += 1; active.add(issueId); return { threadId: `thread-${issueId}`, hostId: "local" }; },
+      async read() { return { state: "RUNNING" }; },
+      async message() { throw new Error("No message expected"); },
+      async wait() { throw new Error("A batch step must yield instead of waiting on workers"); },
+    },
+    reconcile: async () => reconciliation({ runIdentity: multiIdentity,
+      nodes: ["13", "14"].map(issueId => ({ issueId, blockers: [], trackerState: "OPEN", taskState: active.has(issueId) ? "EXECUTING" : "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" })),
+    }), now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {},
+  });
+  try {
+    await coordinator.run({ specId: "12", mode: "snapshot" });
+    await coordinator.run({ specId: "12", mode: "step", executionSlots: 0 });
+    assert.equal(creates, 0);
+    const first = await coordinator.run({ specId: "12", mode: "step", executionSlots: 1 });
+    assert.equal(creates, 1);
+    assert.equal(first.frontier.active.length, 1);
+    assert.equal(store.readEvents(first.run.runId).filter(event => event.type === "grant.recorded").length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const closeAuthorityEvidenceFor = (issueId, overrides = {}) => ({
   trackerIdentity: `github-issue:${issueId}:version:1`,
   targetHead: "a".repeat(40),
@@ -2010,7 +2037,7 @@ test("repository close wait dispatches within max_parallel before requesting the
   }
 });
 
-test("repository close wait times out without consuming retries or reclaiming the leaf lease", async () => {
+test("healthy repository close wait continues beyond thirty seconds and only settles on coordinator loss", async () => {
   const { root, store } = createStoreFixture();
   const competitorOperationId = `workflow-op-v1-${"c".repeat(64)}`;
   const competitor = store.acquireRepositoryCloseLease({ operationId: competitorOperationId });
@@ -2050,22 +2077,21 @@ test("repository close wait times out without consuming retries or reclaiming th
       tasks,
       reconcile,
       now: () => "2026-09-03T01:30:00.000Z",
-      sleep: async () => { sleepCalls += 1; },
+      sleep: async () => { sleepCalls += 1; return sleepCalls >= 65 ? { coordinatorActive: false } : undefined; },
     });
     const status = await coordinator.run({ specId: "15" });
     const waitEvents = store.readEvents(identity.runId)
       .filter(({ type }) => type.startsWith("repository-close-wait."));
 
     assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_timeout");
-    assert.equal(waitEvents.at(-1).outcome, "TIMED_OUT");
-    assert.equal(sleepCalls, 30);
+    assert.equal(status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_coordinator_lost");
+    assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
+    assert.equal(sleepCalls, 65);
     assert.equal(status.nodes[0].task.retryCount, 0);
     assert.deepEqual(status.diagnoses.at(-1).resumePredicates, [
-      "repository_close_lease_is_absent_or_healthy",
-      "retry_same_run_issue_workflow",
+      "coordinator_is_active",
     ]);
-    assertRecoverablePacket(status.diagnoses.at(-1), { source: /repository close-lease/u });
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /coordinator liveness/u });
     assert.equal(
       status.diagnoses.at(-1).operatorPacket.preservedStages.run.state,
       "WAITING_FOR_REPOSITORY_CLOSE_LEASE",
@@ -2431,20 +2457,19 @@ test("target-writer wait times out with preserved ownership and same-command rec
       tasks,
       reconcile,
       now: () => "2026-08-30T14:45:00.000Z",
-      sleep: async () => {},
+      sleep: async () => ({ coordinatorActive: false }),
     });
     const status = await coordinator.run({ specId: "15" });
     const waitEvents = store.readEvents(identity.runId)
       .filter(({ type }) => type.startsWith("target-writer-wait."));
 
     assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_wait_timeout");
-    assert.equal(waitEvents.at(-1).outcome, "TIMED_OUT");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_wait_coordinator_lost");
+    assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
     assert.deepEqual(status.diagnoses.at(-1).resumePredicates, [
-      "target_writer_is_absent_or_healthy",
-      "retry_same_run_issue_workflow",
+      "coordinator_is_active",
     ]);
-    assertRecoverablePacket(status.diagnoses.at(-1), { source: /target-writer lock/u });
+    assertRecoverablePacket(status.diagnoses.at(-1), { source: /coordinator liveness/u });
     assert.equal(
       status.diagnoses.at(-1).operatorPacket.preservedStages.run.state,
       "WAITING_FOR_TARGET_WRITER",
@@ -2516,7 +2541,7 @@ test("coordinator loss settles the writer wait without releasing another Run's w
   }
 });
 
-test("coordinator loss recovery fails closed on an unsettled journaled writer wait", async () => {
+test("re-entry settles an interrupted wait using the preserved Stop revision", async () => {
   const { root, gitCommonDir, store } = createStoreFixture();
   const competitor = store.acquireTargetMutationWriter({
     target: identity.target,
@@ -2588,12 +2613,11 @@ test("coordinator loss recovery fails closed on an unsettled journaled writer wa
     const waitEvents = recoveredStore.readEvents(identity.runId)
       .filter(({ type }) => type.startsWith("target-writer-wait."));
 
-    assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_wait_interrupted");
+    assert.equal(status.run.state, "STOPPED");
+    assert.equal(status.diagnoses.at(-1).reasonCode, "stopped_by_user");
     assert.equal(waitEvents.filter(({ type }) => type === "target-writer-wait.started").length, 1);
-    assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
+    assert.equal(waitEvents.at(-1).outcome, "CONTROL_CHANGED");
     assert.equal(recoveredStore.readTargetMutationWriterLock(identity.target).operationId, "run-other-spec");
-    assertRecoverablePacket(status.diagnoses.at(-1), { source: /coordinator journal/u });
   } finally {
     competitor.release();
     rmSync(root, { recursive: true, force: true });
@@ -2737,11 +2761,11 @@ const assertWriterReleaseEvidenceChange = async ({ mutate, label }) => {
       .filter(({ type }) => type.startsWith("target-writer-wait."));
 
     assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_evidence_changed");
-    assert.equal(waitEvents.at(-1).outcome, "EVIDENCE_CHANGED");
-    assert.equal(reconciliations, 3);
+    assert.equal(status.diagnoses.at(-1).reasonCode, label === "Grant" ? "grant_identity_conflict" : "target_writer_evidence_changed");
+    if (label !== "Grant") assert.equal(waitEvents.at(-1).outcome, "EVIDENCE_CHANGED");
+    assert.ok(reconciliations >= 3);
     assert.equal(taskCalls, 0);
-    assertRecoverablePacket(status.diagnoses.at(-1), { source: /post-wait.*reconciliation/u });
+    if (label !== "Grant") assertRecoverablePacket(status.diagnoses.at(-1), { source: /post-wait.*reconciliation/u });
   } finally {
     if (!competitorReleased) competitor.release();
     rmSync(root, { recursive: true, force: true });
@@ -3713,4 +3737,110 @@ test("parent close delegates both leases to the real leaf", async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("known preparation gaps stop before Grant or task creation and the attested lane resumes without recreation", async () => {
+  const { root, store } = createStoreFixture();
+  const ref = { threadId: "prepared-task", hostId: "local" };
+  let prepared = false;
+  let accepted = false;
+  let messages = 0;
+  const tasks = {
+    async findIssueLane({ prepared: packet }) { assert.deepEqual(packet.taskRef, ref); return [ref]; },
+    async create() { throw new Error("Prepared work must reuse its task"); },
+    async read() { return { state: accepted ? "RUNNING" : "RESUMABLE" }; },
+    async message() { messages++; accepted = true; },
+    async wait() { throw new Error("Cooperative step cannot wait"); },
+  };
+  const coordinator = createCoordinator({ store, tasks, tracker: { read: async () => ({}) },
+    reconcile: async () => {
+      const handoff = readyHandoffFor(identity);
+      handoff.preparation = { state: prepared ? "READY" : "INCOMPLETE", reason: "Missing exact installation and SQL preparation" };
+      return { ...reconciliation({ runReadyHandoff: handoff, nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: accepted ? "EXECUTING" : "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" }] }), preparedLanes: { 15: { taskRef: ref } } };
+    }, now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {},
+  });
+  try {
+    assert.equal((await coordinator.run({ specId: "15", mode: "step" })).runReadyHandoff.state, "INCOMPLETE");
+    assert.deepEqual(store.readEvents(identity.runId), []);
+    assert.equal(messages, 0);
+    prepared = true;
+    await coordinator.run({ specId: "15", mode: "step" });
+    assert.equal(messages, 1);
+    assert.deepEqual(store.readEvents(identity.runId).find(event => event.type === "dispatch.recorded").taskRef, ref);
+    await coordinator.run({ specId: "15", mode: "step" });
+    assert.equal(messages, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("compatible runtime observation keeps the original Grant and incompatible sources remain isolated", async () => {
+  const { root, store } = createStoreFixture();
+  const first = { id: "1".repeat(64), sourceCommit: "a".repeat(40), sourceRepository: "github:example/repo", protocolVersion: 1 };
+  const next = { ...first, id: "2".repeat(64), sourceCommit: "b".repeat(40) };
+  const options = { store, tasks: Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"].map(name => [name, async () => { throw new Error(`No task ${name}`); }])), tracker: { read: async () => ({}) },
+    reconcile: async () => reconciliation({ nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" }] }), now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+  try {
+    await createCoordinator({ ...options, workflowVersion: first }).run({ specId: "15", mode: "snapshot" });
+    const original = store.readEvents(identity.runId)[0];
+    await createCoordinator({ ...options, workflowVersion: next, compatibleRecordedVersion: first }).run({ specId: "15", mode: "snapshot" });
+    await createCoordinator({ ...options, workflowVersion: next, compatibleRecordedVersion: first }).run({ specId: "15", mode: "snapshot" });
+    assert.deepEqual(store.readEvents(identity.runId)[0], original);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "grant.recorded").length, 1);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "runtime.observed").length, 1);
+    const denied = await createCoordinator({ ...options, workflowVersion: { ...next, sourceRepository: "github:other/repo" }, compatibleRecordedVersion: first }).run({ specId: "15", mode: "snapshot" });
+    assert.equal(denied.diagnoses.at(-1).reasonCode, "workflow_version_unavailable");
+    assert.equal(store.readEvents(identity.runId).length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("conflict repair reuses the original lane and its persistent wave before closing only a newly reviewed candidate", async () => {
+  const { root, store } = createStoreFixture();
+  const ref = { threadId: "original", hostId: "local" };
+  let candidate = "b".repeat(40);
+  let repairRequest;
+  let closeRequest;
+  let repairs = 0;
+  let closes = 0;
+  let repaired = false;
+  let running = false;
+  let completed = false;
+  const tasks = {
+    async findIssueLane() { return [ref]; }, async create() { throw new Error("Never replace conflict lane"); },
+    async read() { return { state: running ? "RUNNING" : "RESUMABLE", repairRequest, closeRequest }; },
+    async message(taskRef, prompt) {
+      assert.deepEqual(taskRef, ref);
+      if (prompt.includes("Repair request:")) {
+        repairs++; repairRequest = JSON.parse(prompt.match(/Repair request: (\{.+\})$/u)[1]); running = true;
+        assert.match(prompt, /Verify the new candidate.*independent Standards and Spec review/u);
+      } else {
+        closes++; completed = true;
+        closeRequest = { state: "ACCEPTED", requestIdentity: closeRequestIdentityFrom(prompt), runId: identity.runId, issueId: "15", evidence: JSON.parse(prompt.match(/Current close request evidence: (\{.+\})$/u)[1]) };
+      }
+    }, async wait() { throw new Error("A cooperative step cannot wait"); },
+  };
+  const options = { store, tasks, tracker: { read: async () => ({}) }, reconcile: async () => reconciliation({ taskRefs: { 15: ref },
+    nodes: [{ issueId: "15", blockers: [], trackerState: completed ? "CLOSED" : "OPEN", taskState: running ? "EXECUTING" : "NONE", completionState: running ? "NONE" : "COMPLETE", candidateReachable: completed, worktreeState: completed ? "ABSENT" : "PRESENT", closeAuthorityEvidence: closeAuthorityEvidenceFor("15", { candidateCommit: candidate }), ...(!repaired && !running ? { closeConflict: { candidate, targetHead: "a".repeat(40) } } : {}) }] }), now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+  try {
+    const writer = store.acquireWriter(identity.runId);
+    writer.append({ type: "grant.recorded", at: options.now(), runIdentity: identity, maxParallel: 3 });
+    writer.append({ type: "dispatch.recorded", at: options.now(), issueId: "15", attempt: 1, taskRef: ref }); writer.release();
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(repairs, 1);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "repair.recorded").length, 1);
+    assert.equal(closes, 0, "repairing work has no renewed completion authority");
+    running = false; repaired = true; candidate = "c".repeat(40);
+    const result = await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(closes, 1);
+    assert.equal(result.run.state, "SUCCEEDED");
+    const budgetWriter = store.acquireWriter(identity.runId);
+    for (let wave = 2; wave <= 10; wave++) budgetWriter.append({ type: "repair.recorded", at: options.now(), issueId: "15", wave, candidate: String(wave).padStart(40, "0"), targetHead: "a".repeat(40), taskRef: ref, requestIdentity: `sha256:${String(wave).padStart(64, "0")}` });
+    budgetWriter.release();
+    repaired = false; completed = false; candidate = "d".repeat(40);
+    for (let reentry = 0; reentry < 2; reentry++) {
+      const exhausted = await createCoordinator(options).run({ specId: "15", mode: "step" });
+      assert.equal(exhausted.diagnoses.at(-1).reasonCode, "repair_budget_exhausted");
+    }
+    assert.equal(repairs, 1);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "repair.recorded").length, 10);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

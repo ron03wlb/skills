@@ -39,6 +39,8 @@ The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://
 
 The personal Run route uses an installed package connected to the current Codex host. Ongoing Runs retain their selected version, and text controls remain available when the panel cannot open.
 
+Known permissions and SQL prerequisites belong before Run-ready, through planning and [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue). An explicit comma-separated Spec batch keeps separate Runs and Grants while rotating ready work within a shared worker bound. Healthy waits continue across observation windows; same-scope conflicts return to the original Issue lane for bounded repair and renewed verification/review.
+
 ## It's working if
 
 - You get one route for the exact work in front of you, with the reason its authority and lifecycle fit.

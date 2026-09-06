@@ -973,7 +973,7 @@ test("pre-execute-issue owns the content-bound Prerequisite candidate and Operat
   assert.doesNotMatch(preExecute, /^disable-model-invocation:/mu);
   assert.doesNotMatch(preExecuteMetadata, /^policy:/mu);
   assert.match(preExecute, /^description:.*Use when.*directly.*active `execute-issue` lane/mu);
-  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or `execute-issue` automatically reaches it from an active authorized lane.*exact unresolved Manual prerequisite/iu);
+  assert.match(preExecuteDocs, /Type `\/pre-execute-issue <Issue-ID>`, or the planning producer or `execute-issue` automatically reaches it from an active authorized lane.*exact unresolved Manual prerequisite/iu);
   assert.match(preExecuteMetadata, /exact declared prerequisite.*content-bound.*`APPLIED` or `NO_OP`/isu);
 
   assert.match(preExecute, /direct `\/pre-execute-issue <Issue-ID>`.*active `execute-issue` handoff/isu);
@@ -1904,7 +1904,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /same Git common dir.*different targets.*one.*different repositories.*concurrent/isu);
   assert.match(close, /target mutation writer.*planning producers.*exact target.*Issue execution.*planning.*unrelated targets.*never.*repository close lease/isu);
   assert.match(close, /healthy contention.*observe.*owner.*bounded.*retry.*without.*steal/isu);
-  assert.match(close, /timeout.*unknown ownership.*stale-proof mismatch.*acquisition race.*stop before.*mutation/isu);
+  assert.match(close, /Unknown ownership.*stale-proof mismatch.*stops the affected closeout.*healthy acquisition race.*observation/isu);
   assert.doesNotMatch(close, /durable FIFO queue|waiter registry|queue-specific reclaim/iu);
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
@@ -1921,7 +1921,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /If the Issue is open, close it/iu);
   assert.match(close, /read it back once/iu);
   assert.match(close, /retry skips completed actions.*resumes the next one/isu);
-  assert.match(close, /human may explicitly rerun `execute-issue`.*same topic branch.*Issue worktree.*latest target.*original Acceptance Criteria.*Scope change.*planning/isu);
+  assert.match(close, /human or same authorized coordinator may rerun `execute-issue`.*same topic branch.*Issue worktree.*latest target.*original Acceptance Criteria.*Scope change.*planning/isu);
   assert.match(close, /Multi-Issue Spec.*Decomposition publication record.*every exact child is closed.*candidate.*reachable.*same target/isu);
   assert.match(close, /returns to `\/to-tickets <Parent-ID>` reconciliation/iu);
   assert.match(close, /parent closure never claims `push_ready`/iu);
@@ -3215,7 +3215,7 @@ test("installed route proof uses real close leaves and filesystem stores across 
     "acquireInstalledCloseIssueLeases",
     "Promise.all",
     "maxParallel",
-    "repository_close_lease_wait_timeout",
+    "repository_close_lease_wait_coordinator_lost",
     "retryCount",
     "operationId",
   ]) {
@@ -3326,7 +3326,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /DAG Run Grant.*`max_parallel`.*default three/isu);
   assert.match(skill, /repository-owned.*`run-authority-adapters\.mjs`.*owning sources.*checkpoint.*handoff.*tracker.*Decomposition.*target.*shared writer.*callers.*never.*invent `handoff\.read`/isu);
   assert.match(skill, /Fresh Single-Issue.*`to-spec`.*publication.*handoff.*Fresh Multi-Issue.*`to-tickets`.*upstream publication.*upstream handoff.*operation receipt.*`decomposition:v1`.*digest.*mapping.*blocker edges.*frozen.*profile-v1.*record identities/isu);
-  assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker.*identities.*clean target.*decomposition identity.*current Multi-Issue.*operation.*tracker read-back/isu);
+  assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker.*identities.*known target state.*decomposition identity.*current Multi-Issue.*operation.*tracker read-back/isu);
   assert.match(skill, /current Single-Issue handoff.*exact transaction identity.*publication read-back/isu);
   assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*profile.*Planning Seal.*classification.*approved-scope identity.*baseline.*transaction identity.*first unsatisfied stage.*current producer.*never owns target dirt.*frozen.*initially-clean state.*plan path.*generated-content identity.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
   assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*exact observed checkpoint and handoff producer.*Spec.*target.*Planning Seal.*classification.*scope.*record.*decomposition.*no-automatic-transition.*recovery predicates/isu);
@@ -3370,7 +3370,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*every currently legal Issue dispatch.*repository-close-wait\.started.*repository-close-wait\.settled.*execution slot or retry/isu);
   assert.match(skill, /tracker identity\/state.*target HEAD\/state.*candidate commit\/reachability.*completion evidence ID\/body SHA-256\/state.*registered worktree identity\/state.*control revision/isu);
   assert.match(skill, /healthy target-writer contention retains.*`WAITING_FOR_TARGET_WRITER`.*`target-writer-wait\.\*`/isu);
-  assert.match(skill, /unknown repository-close or target-writer ownership.*timeout.*coordinator loss.*changed evidence.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
+  assert.match(skill, /unknown repository-close or target-writer ownership.*coordinator loss.*changed immutable authority.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
   assert.match(core, /REPOSITORY_CLOSE_WAIT_TIMEOUT_MS\s*=\s*30_000/iu);
   assert.match(core, /WAITING_FOR_REPOSITORY_CLOSE_LEASE/iu);
   assert.match(core, /wait_repository_close_lease/iu);
@@ -3378,7 +3378,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
   assert.match(coordinator, /repository-close-wait\.started.*repository-close-wait\.settled.*target-writer-wait\.started.*target-writer-wait\.settled/isu);
   assert.doesNotMatch(coordinator, /acquireRepositoryCloseLease|acquireTargetMutationWriter|reclaimTargetMutationWriter/iu);
-  for (const outcome of ["OWNER_CHANGED", "TIMED_OUT", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
+  for (const outcome of ["OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
     assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
   }
   for (const evidence of [
@@ -3402,7 +3402,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
   assert.match(operator, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*healthy target-writer contention.*`WAITING_FOR_TARGET_WRITER`.*Issue execution.*`max_parallel`.*no Issue execution slot or retry.*reacquires/isu);
   assert.match(operator, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer/isu);
-  assert.match(operator, /Unknown owner.*timeout.*coordinator loss.*changed evidence.*owning source.*smallest human action.*same `\/run-issue-workflow`/isu);
+  assert.match(operator, /Unknown owner.*coordinator loss.*changed immutable authority.*owning source.*smallest human action.*same `\/run-issue-workflow`/isu);
   assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
   assert.match(read("CONTEXT.md"), /real `close-issue` leaf alone acquires the repository close lease and then.*Target mutation serialization.*coordinator observes both.*never acquires, releases, reclaims, or delegates/isu);
   assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*repository-close or target-writer wait starts and settlements/isu);

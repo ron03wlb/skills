@@ -2393,7 +2393,7 @@ test("repository close contention waits after dispatch and unknown ownership blo
   assert.equal(unknown.diagnoses.at(-1).operatorPacket.retryCommand, "/run-issue-workflow 12");
 });
 
-test("an unsettled target-writer event projects the bounded coordinator wait state", () => {
+test("an unsettled target-writer event preserves waiting while dispatching independent work", () => {
   const owner = {
     operationId: "run-other-spec",
     coordinatorInstanceId: "coordinator-other-spec",
@@ -2426,13 +2426,7 @@ test("an unsettled target-writer event projects the bounded coordinator wait sta
   const status = reduceRun(input);
 
   assert.equal(status.run.state, "WAITING_FOR_TARGET_WRITER");
-  assert.deepEqual(status.legalActions, [{
-    type: "wait_target_writer",
-    issueId: "13",
-    owner,
-    timeoutMs: 30_000,
-    preWaitEvidence,
-  }]);
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "14", attempt: 1 }]);
   assert.deepEqual(status.frontier.ready, ["14"]);
   assert.equal(planControl(status, "PAUSE", "2026-08-30T00:01:01.000Z").accepted, true);
   assert.equal(planControl(status, "STOP", "2026-08-30T00:01:01.000Z").accepted, true);

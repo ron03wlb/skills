@@ -16,10 +16,34 @@ const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (i
     : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 
-export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber }) {
+export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout }) {
   const refs = new Map();
   const cursors = new Map();
-  const call = async (name, args) => unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args));
+  const call = async (name, args) => {
+    const delays = [1000, 5000, 15000];
+    for (let attempt = 0; ; attempt += 1) {
+      try { return unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args)); }
+      catch (error) {
+        if (!["read_thread", "list_threads", "wait_threads"].includes(name) || attempt === delays.length
+          || !/timeout|temporar|unavailable|connection|response lost|rate.?limit|network/iu.test(error.message)) throw error;
+        await sleep(delays[attempt]);
+      }
+    }
+  };
+  const readHistory = async (ref, predicate) => {
+    let snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 16000 });
+    const cursorsSeen = new Set();
+    for (let page = 0; ; page += 1) {
+      if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
+      if (predicate(snapshot) || !snapshot.page?.hasMore) return snapshot;
+      const cursor = snapshot.page.nextCursor;
+      if (!cursor || cursorsSeen.has(cursor) || page >= 99) throw new Error("Task history is unresolved; preserve the existing lane");
+      cursorsSeen.add(cursor);
+      const older = await call("read_thread", { ...ref, cursor, turnLimit: 10, includeOutputs: true, maxOutputCharsPerItem: 16000 });
+      if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
+      snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
+    }
+  };
   const read = async (ref) => {
     const snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 16000 });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
@@ -30,19 +54,37 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (.+)$/u);
       if (!match) throw new Error("Task close request evidence is malformed");
       const evidence = JSON.parse(match[2]);
-      closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId };
+      closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence };
     }
     const retryPrompt = userTexts(snapshot).find((text) => text.includes("Retry request: "));
     const retryMatch = retryPrompt?.match(/Retry request: (\{.+\})$/u);
     const retryRequest = retryMatch ? { state: "ACCEPTED", ...JSON.parse(retryMatch[1]) } : undefined;
+    const repairPrompt = userTexts(snapshot).find(text => text.includes("Repair request: "));
+    const repairMatch = repairPrompt?.match(/Repair request: (\{.+\})$/u);
+    const repairRequest = repairMatch ? { state: "ACCEPTED", ...JSON.parse(repairMatch[1]) } : undefined;
+    const final = (snapshot.turns?.[0]?.items ?? []).findLast(item => item.type === "agentMessage" && item.phase === "final_answer")?.text;
+    const closeResultMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
+    const closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
     return { state: type === "active" ? "RUNNING" : type === "idle" ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, snapshot, cwd: snapshot.thread.cwd };
+      closeRequest, retryRequest, repairRequest, closeResult, snapshot, cwd: snapshot.thread.cwd };
   };
-  const findIssueLane = async ({ issueId, runIdentity }) => {
+  const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const journaled = store.readEvents(runIdentity.runId).filter((event) => event.type === "dispatch.recorded" && event.issueId === issueId);
     if (journaled.length) return [journaled.at(-1).taskRef];
     if (refs.has(key)) return [refs.get(key)];
+    if (prepared) {
+      const ref = prepared.taskRef;
+      if (!ref?.threadId || ref.hostId !== project.hostId) throw new Error("Prepared task identity is unproven");
+      const marker = `Workflow prerequisite lane: ${JSON.stringify({ issueId, specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash })}`;
+      const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)));
+      const cwd = snapshot.thread.cwd;
+      const common = path => realpathSync(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+      if (cwd !== prepared.worktree || common(cwd) !== common(project.path)
+        || !userTexts(snapshot).some(text => text.includes(marker))) throw new Error("Native prepared task ownership is unproven");
+      refs.set(key, ref);
+      return [ref];
+    }
     const intent = store.readHostTask({ runId: runIdentity.runId, issueId });
     if (!intent) return [];
     const listing = await call("list_threads", { limit: 50 });
@@ -50,7 +92,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     for (const task of [...(listing.pinnedThreads ?? []), ...(listing.threads ?? [])]) {
       if (task.kind !== "codex" || task.projectId !== project.projectId || task.hostId !== project.hostId) continue;
       const ref = { threadId: task.id, hostId: task.hostId };
-      const { snapshot } = await read(ref);
+      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt));
       if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
     }
     if (found.length === 0 && project.path && project.hostId === "local") {
@@ -58,7 +100,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const common = (cwd) => realpathSync(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const hint of await discoverLocalCodexTasks({ prompt: intent.prompt, since })) {
         const ref = { threadId: hint.threadId, hostId: hint.hostId };
-        const { snapshot, cwd } = await read(ref);
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt));
+        const cwd = snapshot.thread.cwd;
         if (cwd === hint.cwd && common(cwd) === common(project.path) && userTexts(snapshot).includes(intent.prompt)) found.push(ref);
       }
     }
@@ -76,18 +119,20 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
       return existing[0];
     }
-    const created = await call("create_thread", { title: `Workflow Issue ${number}`, prompt,
+    let created;
+    try { created = await call("create_thread", { title: `Workflow Issue ${number}`, prompt,
       target: { type: "project", projectId: project.projectId,
-        environment: { type: "worktree", startingState: { type: "branch", branchName: runIdentity.target } } } });
+        environment: { type: "worktree", startingState: { type: "branch", branchName: runIdentity.target } } } }); }
+    catch { created = { uncertain: true }; }
     if (created.threadId && created.hostId) {
       const ref = { threadId: created.threadId, hostId: created.hostId };
       refs.set(key, ref);
       return ref;
     }
     // clientThreadId is a setup operation, never a task reference.
-    if (created.clientThreadId) {
+    if (created.clientThreadId || created.uncertain) {
       for (const delay of [1000, 2000, 4000, 8000, 15000, 30000, 30000, 30000]) {
-        await setTimeout(delay);
+        await sleep(delay);
         try {
           const existing = await findIssueLane({ issueId, runIdentity });
           if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
@@ -102,10 +147,20 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   return {
     findIssueLane, create, read,
     async message(ref, prompt) {
-      const issue = prompt.match(/(?:close|retry) (?:parent )?Issue (I_[A-Za-z0-9_-]+)/u);
+      const issue = prompt.match(/(?:close|retry|repair) (?:parent )?Issue (I_[A-Za-z0-9_-]+)/u);
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
       const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${prompt}`;
-      await call("send_message_to_thread", { ...ref, prompt: frozenPrompt });
+      for (const delay of [1000, 5000, 15000]) {
+        try { await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }); return; }
+        catch (error) {
+          // Even a failed response may have accepted the message. Never resend without native read-back.
+          await sleep(delay);
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
+          if (userTexts(snapshot).includes(frozenPrompt)) return;
+          if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
+        }
+      }
+      throw new Error("Task message retry budget exhausted after native read-back");
     },
     async wait(taskRefs) {
       const result = await call("wait_threads", { targets: taskRefs.map((ref) => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) })), timeoutMs: 30000 });

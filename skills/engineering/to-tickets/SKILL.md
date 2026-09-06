@@ -16,6 +16,8 @@ Read the exact completed `to-spec` `handoff.completed` result through the upstre
 
 Read the exact `to-tickets` operation only. Unrelated operations on the same target neither conflict nor block. Target-checkout dirt and unrelated staged, unstaged, untracked, modified, or mixed work are preserved and are not transaction authority because fresh decomposition performs no target write. Missing, stale, contradictory, legacy plan-only, or ambiguous upstream or operation state stops before child, relation, label, or parent-comment mutation; never synthesize a handoff, infer ownership, or repair another operation.
 
+Before publishing a Run-ready result, consume [Run preparation](../../personal/run-issue-workflow/references/run-preparation.md). Read prior human approvals, prepare exact missing operations and read-only capability probes, then ask once for only the missing scope. Carry the actual inventory in the existing publication/handoff. After the exact Issue identities are published, hand declared SQL prerequisites to `pre-execute-issue` before their ready-state and final handoff read-backs. Reuse its one prepared task/worktree and exact human outcome; no SQL is N/A. Preparation never creates a Run Grant, executes SQL or authorizes deployment.
+
 ## 2. Draft independent children
 
 Create narrow vertical slices whose behavior is independently verifiable. Give every child one immutable `<Spec-ID>/<NN>` Decomposition key plus its own stable `AC-n` Acceptance Criteria, source-grounded Implementation Plan, Verification, blockers, target, and Planning baseline. The key resolves its parent; tracker Issue IDs remain the public execution and closeout inputs, and titles are never identity. Expected paths and symbols are non-exhaustive. Every criterion must be covered by a plan step and verification item, and every step must cover a criterion through inline `Covers: AC-n` references.
@@ -48,4 +50,4 @@ Apply its preflight before mutation, then perform its child, relation, parent-re
 
 Only after the contract's decomposition and ready-state receipts read back may the transaction advance `handoff.completed`. Report the dependency-ready frontier without a child `/execute-issue` command and end exactly with `/run-issue-workflow <Spec-ID>`.
 
-This skill never schedules tasks, starts a Run, implements, closes, integrates, pushes, deploys, rolls back, or silently repairs evidence.
+This skill never schedules product execution, starts a Run, implements, closes, integrates, pushes, deploys, rolls back, or silently repairs evidence.

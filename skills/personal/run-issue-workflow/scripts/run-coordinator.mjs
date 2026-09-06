@@ -5,10 +5,11 @@ import {
   createRecoverableOperatorPacket,
   REASON_CODES,
   reduceRunReadyHandoff,
+  planControl,
 } from "./run-core.mjs";
 import {
   createCloseWaitEvidence,
-  sameCloseWaitEvidence,
+  sameCloseWaitAuthority,
 } from "./run-target-writer-wait.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
@@ -48,6 +49,7 @@ const ENGINE_WRITER_CONTENTION = new Set([
 ]);
 const MUTATING_ACTION_TYPES = new Set([
   "dispatch_issue",
+  "repair_issue",
   "remediate_environment",
   "close_issue",
   "close_parent",
@@ -67,8 +69,17 @@ const canonicalize = (value) => {
   }
   return value;
 };
-const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
-  .update(JSON.stringify(canonicalize(evidence)))
+const closeRequestAuthority = (evidence) => {
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, ...authority } = evidence;
+  if (authority.authorityEvidence) {
+    const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
+    authority.authorityEvidence = fixed;
+  }
+  if (authority.childCloseStates) authority.childCloseStates = authority.childCloseStates.map(closeRequestAuthority);
+  return authority;
+};
+export const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
+  .update(JSON.stringify(canonicalize(closeRequestAuthority(evidence))))
   .digest("hex")}`;
 
 const requireMethod = (owner, name) => {
@@ -395,6 +406,7 @@ export function createCoordinator({
   panel,
   onSelected,
   workflowVersion,
+  compatibleRecordedVersion,
   now,
   sleep,
 }) {
@@ -536,9 +548,11 @@ export function createCoordinator({
       });
       return null;
     }
+    const prepared = current.preparedLanes?.[action.issueId];
     const existing = await tasks.findIssueLane({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
+      prepared,
     });
     if (!Array.isArray(existing) || existing.length > 1) {
       return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
@@ -549,6 +563,15 @@ export function createCoordinator({
       environment: "local",
     });
     if (!isTaskRef(taskRef)) throw new Error("ISSUE_LANE_NOT_READY");
+    if (prepared) {
+      const task = await tasks.read(taskRef);
+      const accepted = task.retryRequest?.state === "ACCEPTED" && task.retryRequest.runId === current.runIdentity.runId
+        && task.retryRequest.issueId === action.issueId && task.retryRequest.attempt === 1;
+      if (!accepted) {
+        if (task.state !== "RESUMABLE") throw new Error("Prepared lane has not settled; preserve it before execution");
+        await tasks.message(taskRef, `Use $execute-issue to retry Issue ${action.issueId} from its prepared prerequisite candidate in this exact task and worktree. Reuse the freshly read attestation and existing approvals. Retry request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, attempt: 1 })}`);
+      }
+    }
     writer.append({
       type: "dispatch.recorded",
       at: now(),
@@ -559,7 +582,27 @@ export function createCoordinator({
     return null;
   };
 
-  const closeIssue = async ({ action, current, status }) => {
+  const repairIssue = async ({ action, current, writer }) => {
+    const journal = store.readEvents(current.runIdentity.runId);
+    const prior = journal.filter(event => event.type === "repair.recorded" && event.issueId === action.issueId);
+    const taskRef = current.taskRefs?.[action.issueId];
+    if (!isTaskRef(taskRef)) throw new Error("Conflict repair requires the original Issue task");
+    let intent = prior.findLast(event => event.candidate === action.candidate);
+    if (!intent) {
+      const wave = prior.length + 1;
+      if (wave > 10) throw new Error("Persistent conflict repair budget exhausted");
+      const requestIdentity = closeRequestIdentityFor({ runIdentity: current.runIdentity, issueId: action.issueId, candidate: action.candidate, baseline: action.targetHead, wave });
+      intent = writer.append({ type: "repair.recorded", at: now(), issueId: action.issueId, wave, candidate: action.candidate, targetHead: action.targetHead, taskRef, requestIdentity });
+    }
+    const task = await tasks.read(taskRef);
+    const accepted = task.repairRequest?.requestIdentity === intent.requestIdentity && task.repairRequest.runId === current.runIdentity.runId;
+    if (!accepted) {
+      if (task.state !== "RESUMABLE") throw new Error("Original Issue task is not ready for conflict repair");
+      await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
+    }
+  };
+
+  const closeIssue = async ({ action, current, status, step = false }) => {
     let taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) {
       const existing = await tasks.findIssueLane({
@@ -589,13 +632,18 @@ export function createCoordinator({
       worktreeState: node.close.worktreeState,
       authorityEvidence: sourceNode.closeAuthorityEvidence,
     };
-    const requestIdentity = closeRequestIdentityFor(requestEvidence);
+    let requestIdentity = closeRequestIdentityFor(requestEvidence);
     const task = await tasks.read(taskRef);
     const acceptedForLane = task?.closeRequest?.state === "ACCEPTED"
       && task.closeRequest.runId === current.runIdentity.runId
       && task.closeRequest.issueId === action.issueId;
+    if (acceptedForLane && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity) requestIdentity = task.closeRequest.requestIdentity;
+    const repair = store.readEvents(current.runIdentity.runId).findLast(event => event.type === "repair.recorded" && event.issueId === action.issueId);
+    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && repair
+      && repair.candidate === task.closeRequest.evidence?.authorityEvidence?.candidateCommit
+      && sourceNode.closeAuthorityEvidence.candidateCommit !== repair.candidate;
     if (task?.closeRequest?.state === "ACCEPTED"
-      && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity)) {
+      && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity) && !renewedAfterRepair) {
       return {
         stopped: closeRequestEvidenceChanged(status, {
           issueId: action.issueId,
@@ -611,6 +659,7 @@ export function createCoordinator({
         `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
       );
     }
+    if (step) return { active: true };
     const waited = await tasks.wait([taskRef]);
     const settled = waited?.taskSettled === true;
     if (settled && waited.closeRequestIdentity !== requestIdentity) {
@@ -622,7 +671,7 @@ export function createCoordinator({
         }),
       };
     }
-    return { active: settled && waited?.coordinatorActive !== false };
+    return { active: waited?.coordinatorActive !== false };
   };
 
   const remediateEnvironment = async ({ action, current, writer }) => {
@@ -653,7 +702,7 @@ export function createCoordinator({
     return true;
   };
 
-  const closeParent = async ({ action, current, status }) => {
+  const closeParent = async ({ action, current, status, step = false }) => {
     requireMethod(leaf, "closeParent");
     const requestEvidence = {
       runIdentity: current.runIdentity,
@@ -678,6 +727,7 @@ export function createCoordinator({
       runIdentity: current.runIdentity,
       requestIdentity,
       requestEvidence,
+      step,
     });
     if (result?.settled === true && result.requestIdentity !== requestIdentity) {
       return {
@@ -776,23 +826,7 @@ export function createCoordinator({
       evidence,
     });
 
-    if (unsettled) {
-      appendSettlement({
-        started: unsettled,
-        outcome: "COORDINATOR_INACTIVE",
-        evidence: [`Writer wait ${unsettled.sequence} was left unsettled by a prior coordinator.`],
-      });
-      return stop(
-        waitKind.interrupted,
-        [
-          `Run ${current.runIdentity.runId} recovered unsettled writer wait ${unsettled.sequence}.`,
-          `The Run, Issue completion, and ${waitKind.label} state remain preserved.`,
-        ],
-        ["invoke_same_run_issue_workflow_after_writer_wait_reconciliation"],
-      );
-    }
-
-    const started = writer.append({
+    const started = unsettled ?? writer.append({
       type: waitKind.startedType,
       at: now(),
       issueId: action.issueId,
@@ -801,6 +835,10 @@ export function createCoordinator({
       timeoutMs: action.timeoutMs,
       preWaitEvidence: action.preWaitEvidence,
     });
+    if (started.preWaitEvidence.controlRevision !== status.run.controlRevision) {
+      appendSettlement({ started, outcome: "CONTROL_CHANGED", evidence: ["A control revision superseded the pending observation."] });
+      return { controlRevisionChanged: true };
+    }
     const changedEvidenceStop = (evidence) => {
       appendSettlement({ started, outcome: "EVIDENCE_CHANGED", evidence });
       return stop(
@@ -833,7 +871,7 @@ export function createCoordinator({
           nodes: refreshed.facts.nodes,
           controlRevision: recoveryStatus.run.controlRevision,
         });
-        if (!sameCloseWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {
+        if (!sameCloseWaitAuthority(started.preWaitEvidence, refreshedEvidence, action.issueId)) {
           return changedEvidenceStop([
             `Pre-wait evidence ${JSON.stringify(started.preWaitEvidence)}.`,
             `Post-wait evidence ${JSON.stringify(refreshedEvidence)}.`,
@@ -847,7 +885,7 @@ export function createCoordinator({
       appendSettlement({
         started,
         outcome: "RELEASED",
-        evidence: [`The exact competing ${waitKind.label} is absent and all pre-wait evidence was reacquired unchanged.`],
+        evidence: [`The exact competing ${waitKind.label} is absent; close authority is unchanged and current readiness was reacquired.`],
       });
       return { released: true };
     };
@@ -877,62 +915,33 @@ export function createCoordinator({
         expectedOwner: action.owner,
       });
     recoveryStatus = writer.rebuildStatus(current.facts);
-    let elapsedMs = 0;
-    const pollMs = Math.min(1_000, action.timeoutMs);
-    while (elapsedMs < action.timeoutMs) {
-      const observedOutcome = await settleObservedOwner(observeOwner());
-      if (observedOutcome) return observedOutcome;
-
-      const delayMs = Math.min(pollMs, action.timeoutMs - elapsedMs);
-      const waitResult = await sleep(delayMs);
-      elapsedMs += delayMs;
-      if (waitResult?.coordinatorActive === false) {
-        appendSettlement({
-          started,
-          outcome: "COORDINATOR_INACTIVE",
-          evidence: [`The active coordinator was lost while the ${waitKind.label} remained owned.`],
-        });
-        return stop(
-          waitKind.coordinatorLost,
-          [`Coordinator liveness became inactive during ${waitKind.label} wait.`],
-          ["coordinator_is_active", "retry_same_run_issue_workflow"],
-        );
-      }
-      const latestControl = store.readEvents(current.runIdentity.runId)
-        .findLast(({ type }) => type === "control.revised");
-      if ((latestControl?.revision ?? 0) !== status.run.controlRevision) {
-        appendSettlement({
-          started,
-          outcome: "CONTROL_CHANGED",
-          evidence: [`Control revision changed from ${status.run.controlRevision} to ${latestControl.revision}.`],
-        });
-        return { controlRevisionChanged: true };
-      }
+    const observedOutcome = await settleObservedOwner(observeOwner());
+    if (observedOutcome) return observedOutcome;
+    const health = repositoryCloseWait ? current.facts.run.repositoryCloseLeaseHealth : current.facts.run.closeWriterHealth;
+    if (health !== "HEALTHY") {
+      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["Current owner health is unproven; the lease remains untouched."] });
+      return stop(waitKind.coordinatorLost, ["Current owner health is unproven."], [waitKind.reconcilePredicate]);
     }
+    // One observation slice yields back to scheduling; elapsed time never invalidates healthy ownership.
+    const waitResult = request.mode === "step" ? undefined : await sleep(1000);
+    if (waitResult?.coordinatorActive === false) {
+      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["The active coordinator disconnected; retain owner and progress."] });
+      return stop(waitKind.coordinatorLost, ["Coordinator liveness became inactive during wait."], ["coordinator_is_active"]);
+    }
+    const latestControl = store.readEvents(current.runIdentity.runId).findLast(({ type }) => type === "control.revised");
+    if ((latestControl?.revision ?? 0) !== status.run.controlRevision) {
+      appendSettlement({ started, outcome: "CONTROL_CHANGED", evidence: ["Control revision changed during wait."] });
+      return { controlRevisionChanged: true };
+    }
+    return { waiting: true };
 
-    const deadlineOutcome = await settleObservedOwner(observeOwner());
-    if (deadlineOutcome) return deadlineOutcome;
-    const minimumTimeoutAt = new Date(Date.parse(started.at) + action.timeoutMs).toISOString();
-    const observedAt = now();
-    appendSettlement({
-      started,
-      outcome: "TIMED_OUT",
-      at: Date.parse(observedAt) >= Date.parse(minimumTimeoutAt) ? observedAt : minimumTimeoutAt,
-      evidence: [`The exact competing ${waitKind.label} remained present for ${action.timeoutMs} milliseconds.`],
-    });
-    return stop(
-      waitKind.timeout,
-      [
-        `${waitKind.label} ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds for target ${current.runIdentity.target}.`,
-        "The Run, Issue completion, and target state remain preserved.",
-      ],
-      [waitKind.absentPredicate, "retry_same_run_issue_workflow"],
-    );
   };
 
   return {
     async run(request = {}) {
+      if (request.executionSlots !== undefined && (!Number.isInteger(request.executionSlots) || request.executionSlots < 0)) throw new TypeError("Invalid batch execution capacity");
       let selectedRequest = request;
+      let stepFinished = false;
       let candidateRuns = null;
       if (!isText(request.specId)) {
         requireMethod(selector, "listNonTerminalRuns");
@@ -1152,7 +1161,10 @@ export function createCoordinator({
                 resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
               });
             }
-            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)) {
+            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)
+              && !(sameWorkflowVersion(previousGrant.workflowVersion, compatibleRecordedVersion)
+                && workflowVersion?.protocolVersion === 1 && compatibleRecordedVersion?.protocolVersion === 1
+                && workflowVersion.sourceRepository === compatibleRecordedVersion.sourceRepository)) {
               return diagnosedStop(rebuildStatus(current.facts), {
                 reasonCode: "workflow_version_unavailable",
                 limitationClass: "contract-blocker",
@@ -1162,13 +1174,16 @@ export function createCoordinator({
                 resumePredicates: ["recorded_workflow_version_is_available"],
               });
             }
-            writer.append({
+            if (!previousGrant) writer.append({
               type: "grant.recorded",
               at: now(),
               runIdentity,
               maxParallel: grantMaxParallel,
               ...(workflowVersion === undefined ? {} : { workflowVersion }),
             });
+            const priorRuntime = store.readEvents(runIdentity.runId).findLast(({ type }) => type === "runtime.observed");
+            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)
+              && !sameWorkflowVersion(priorRuntime?.workflowVersion, workflowVersion)) writer.append({ type: "runtime.observed", at: now(), workflowVersion });
             grantRecorded = true;
             lastStatus = rebuildStatus(current.facts);
             const panelStopped = await openPanel(lastStatus);
@@ -1177,8 +1192,16 @@ export function createCoordinator({
           }
 
           lastStatus = rebuildStatus(current.facts);
-          if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state)) return lastStatus;
+          for (const pending of request.controlQueue?.splice(0) ?? []) {
+            try {
+              const decision = planControl(lastStatus, pending.command, now());
+              if (decision.changed) { writer.append(decision.event); lastStatus = rebuildStatus(current.facts); }
+              pending.resolve({ ...decision, status: lastStatus });
+            } catch (error) { pending.reject(error); }
+          }
+          if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state) || request.mode === "snapshot" || stepFinished) return lastStatus;
           if (lastStatus.legalActions.length === 0) {
+            if (request.mode === "step") return lastStatus;
             if (lastStatus.run.state === "PAUSED" && typeof panelHandle?.waitForControl === "function") {
               try {
                 await panelHandle.waitForControl(lastStatus.run.controlRevision);
@@ -1199,7 +1222,9 @@ export function createCoordinator({
 
           let deferredEnvironmentStop = null;
           let controlRevisionChanged = false;
-          for (const action of lastStatus.legalActions) {
+          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type));
+          if (request.mode === "step" && actions.length === 0) return lastStatus;
+          for (const action of request.mode === "step" ? actions.slice(0, 1) : actions) {
             if (MUTATING_ACTION_TYPES.has(action.type)) {
               const latestControl = store.readEvents(runIdentity.runId)
                 .findLast(({ type }) => type === "control.revised");
@@ -1211,6 +1236,8 @@ export function createCoordinator({
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
               if (stopped) return stopped;
+            } else if (action.type === "repair_issue") {
+              await repairIssue({ action, current, writer });
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) {
@@ -1218,13 +1245,13 @@ export function createCoordinator({
                 continue;
               }
             } else if (action.type === "close_issue") {
-              const outcome = await closeIssue({ action, current, status: lastStatus });
+              const outcome = await closeIssue({ action, current, status: lastStatus, step: request.mode === "step" });
               if (outcome.stopped) return outcome.stopped;
               if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {
-              const outcome = await closeParent({ action, current, status: lastStatus });
+              const outcome = await closeParent({ action, current, status: lastStatus, step: request.mode === "step" });
               if (outcome.stopped) return outcome.stopped;
-              if (!outcome.settled) return lastStatus;
+              if (!outcome.settled && request.mode !== "step") return lastStatus;
             } else if (["wait_repository_close_lease", "wait_target_writer"].includes(action.type)) {
               const outcome = await waitForCloseLease({
                 action,
@@ -1251,6 +1278,7 @@ export function createCoordinator({
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
           }
+          if (request.mode === "step") stepFinished = true;
           if (controlRevisionChanged) continue;
           if (deferredEnvironmentStop) {
             const trackerResult = await readTracker(selectedRequest);

@@ -1,6 +1,6 @@
 # GitHub payload encoding
 
-This is the GitHub encoding of existing producer and implementation owner contracts. It adds no approval, review, completion, or Run authority. Consumers read exact GitHub node IDs and SHA-256 of comment bodies with `github-workflow-records.mjs`; prose is displayed but never treated as completion. Only repository OWNER, MEMBER or COLLABORATOR records are accepted. An unknown legacy encoding is preserved for explicit compatibility reconciliation, never translated into historical success.
+This is the GitHub encoding of existing producer and implementation owner contracts. It adds no approval, review, completion, or Run authority. Consumers read exact GitHub node IDs and SHA-256 of comment bodies with `github-workflow-records.mjs`; prose is displayed but never treated as completion. Only repository OWNER, MEMBER or COLLABORATOR records are accepted. Known JSON-fenced owner encodings are read through the same exact identities and digests; unknown encodings are preserved and isolated, never translated into historical success.
 
 The owning skill renders its already-verified payload with `renderWorkflowRecord(record)` from the installed package's `scripts/github-workflow-records.mjs`, appends that exact body through the configured GitHub CLI, and reads the resulting comment back. Use `--body-file` or a structured API input, never interpolate a multiline JSON payload into a shell argument. A comment contains exactly one `workflow-record` fenced JSON block. The GitHub comment node ID supplies `identity`; never invent it in a payload. Reuse one exact existing record after a lost response; conflicting or multiple records stop before another append.
 
@@ -23,3 +23,8 @@ The composite `kind: producer_handoff` adds the existing exact v2 `checkpointIde
 Only after the completion-evidence reference's checks pass, encode its existing payload with `kind: implementation_complete`, `issueId` and `specId` (immutable node IDs), `target`, `targetWorktree`, `topic`, `worktree` (the exact Issue path), `baseline`, `candidate`, full `operationIdentity`, `planningSeal`, `manualAttestations`, `workflowArtifacts`, `standards: clean`, `spec: clean`, nonempty `verification` command/result entries, `repairWaves`, and `worktreeState: clean`. Required adoption records remain separate and keep their existing contracts.
 
 A genuine blocked exit uses `kind: implementation_blocked`, exact Issue/Spec identities, reason and available lane/evidence fields. New blocked records supersede completion only under execute-issue's existing invalidation rule; a target-only close problem must not be encoded as an implementation failure.
+
+
+## Planning preparation fields
+
+Before Run-ready, `spec_publication.preparation` carries the actual required operation inventory, required tracker publication semantics and exact declared SQL prerequisites. The immediate producer’s `producer_handoff.preparation` carries read-back existing human approvals and any exact prerequisite candidate/attestation/task/worktree packet. Follow [Run preparation](run-preparation.md) for these fields. They extend the existing owner handoff, create no generic permission framework and never authorize SQL execution or deployment. GitHub capability read-back reports READ_WRITE_READBACK, not atomic CAS.

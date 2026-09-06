@@ -14,6 +14,7 @@ test("a lost task creation response reuses its exact discovered lane without a s
   const runIdentity = { runId: "run-1", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
   const ref = { threadId: "task-1", hostId: "local" };
   let creates = 0;
+  let messages = 0;
   let prompt;
   let waits = 0;
   const host = { async call(name, args) {
@@ -21,6 +22,7 @@ test("a lost task creation response reuses its exact discovered lane without a s
       assert.equal(args.targets[0].afterCursor, waits++ ? "observed-cursor" : undefined);
       return { polls: [{ thread: { id: ref.threadId }, cursor: "observed-cursor" }] };
     }
+    if (name.endsWith("send_message_to_thread")) { messages++; prompt = args.prompt; throw new Error("response lost"); }
     if (name.endsWith("create_thread")) { creates++; prompt = args.prompt; assert.equal(args.target.environment.type, "worktree"); throw new Error("response lost"); }
     if (name.endsWith("list_threads")) {
       assert.ok(args.limit <= 50, "current host limits list_threads to 50");
@@ -34,9 +36,9 @@ test("a lost task creation response reuses its exact discovered lane without a s
     }
     throw new Error(`Unexpected ${name}`);
   } };
-  const options = { host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version", issueNumber: async () => 1 };
+  const options = { host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version", issueNumber: async () => 1, sleep: async () => {} };
   try {
-    await assert.rejects(createCodexWorkflowTasks(options).create({ issueId: "I_1", runIdentity }), /response lost/u);
+    assert.deepEqual(await createCodexWorkflowTasks(options).create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
     const resumed = createCodexWorkflowTasks(options);
     assert.deepEqual(await resumed.findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
     assert.deepEqual(await resumed.create({ issueId: "I_1", runIdentity }), ref);
@@ -44,6 +46,8 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.equal((await resumed.read(ref)).state, "RESUMABLE");
     assert.equal((await resumed.wait([ref])).taskSettled, true);
     assert.equal((await resumed.wait([ref])).taskSettled, true);
+    await resumed.message(ref, `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`);
+    assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
     assert.match(prompt, /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

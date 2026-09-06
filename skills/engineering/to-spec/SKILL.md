@@ -6,9 +6,9 @@ disable-model-invocation: true
 
 # To Spec
 
-Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and prefer existing high-level verification seams.
+Synthesize settled requirements using repository evidence, domain vocabulary, relevant ADRs, and existing verification seams.
 
-The configured issue tracker, triage labels, current Workflow checkpoint profiles, concrete publication adapters, and shared Target mutation writer must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Never create or repair those authority seams here.
+Require the configured tracker, labels, Workflow checkpoint profiles, publication adapters, and Target mutation writer; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Never create or repair those authority seams here.
 
 ## 1. Consume the planning lane handoff
 
@@ -16,7 +16,9 @@ Require the active settled-context task's **Spec workflow lane** handoff. It bin
 
 Read any referenced Spec body, comments, prior partial-publication report, and exact matching producer transaction. An existing Spec uses `revision` mode: update the same tracker Spec and do not create a duplicate. Otherwise use `primary` mode and reserve or reuse exactly one draft identity through the tracker adapter after the lane and Planning baseline gates below.
 
-Multiple planning lanes may target the same branch. Consume only this task's lane; never use a shared planning checkout, global workflow lock, another lane's accepted decisions, or unrelated worktree state as publication evidence.
+Only this task’s isolated lane authorizes publication.
+
+Before Run-ready, follow [Run preparation](../../personal/run-issue-workflow/references/run-preparation.md): reuse approvals, probe capabilities, and ask once for missing scope. Carry the inventory in publication/handoff. After publishing Issue identities, route SQL prerequisites through `pre-execute-issue` before ready-state read-back; reuse its attested lane. No SQL is N/A. Preparation grants no SQL or deployment authority.
 
 ## 2. Draft the classified contract
 
@@ -27,7 +29,7 @@ Multiple planning lanes may target the same branch. Consume only this task's lan
 
 File count, module count, risk, or apparent size alone never decides. Classify automatically from the settled requirements and repository evidence. Only material ambiguity that could change the route permits one blocking question with a recommendation; never default from uncertainty.
 
-User Outcomes are optional actor/value context, at most three, and never define done.
+User Outcomes, at most three, provide context, never done authority.
 
 - A **Single-Issue** Spec is the executable authority. Stable `AC-n` Acceptance Criteria are its sole done authority. Expected paths and symbols are source-grounded starting points, not an allowlist. Every Acceptance Criterion must be covered by at least one Implementation Plan step and one Verification item; every Implementation Plan step must cover at least one Acceptance Criterion. Use inline `Covers: AC-n`, compare the defined and covered ID sets before publication, and stop on missing, unexpected, or orphan mappings without creating a matrix or parser.
 - A **Multi-Issue** parent is decomposition authority only. Keep the overall outcome, cross-Issue constraints, decomposition rationale, exclusions, and `/to-tickets` handoff. Do not put child Acceptance Criteria, Implementation Plans, touchpoints, or verification commands in the parent; `/to-tickets` gives each child its mapped executable contract.
@@ -50,7 +52,7 @@ Record the Planning Seal as `created`, `successor`, or `reused`. A publication r
 
 ## 4. Start or resume the Spec producer transaction
 
-Before the first transaction or tracker mutation, read [`references/spec-publication-interfaces.md`](references/spec-publication-interfaces.md) and use only its planning, checkpoint, tracker, and handoff adapters.
+Before mutation, read [`references/spec-publication-interfaces.md`](references/spec-publication-interfaces.md) and use only its planning, checkpoint, tracker, and handoff adapters.
 
 Resolve the tracker identity before transaction creation. In primary mode, call `deriveSpecReservationOperationIdentity` for the canonical repository and immutable proposed-Spec identity, call `tracker.reserve`, read one draft tracker identity and version token back, and reuse that same reservation on retry. In revision mode, require `tracker.read` of the existing Spec and its version token. Bind the read-back tracker identity to every later Spec-bound transaction and publication operation; caller correlation values never define authority.
 
@@ -58,17 +60,17 @@ First search the exact operation for an existing valid incomplete transaction-v1
 
 A fresh ordinary publication uses `to-spec@v2`. Call `bindProducerCheckpointOperationIdentity` and `createProducerOperationCheckpoint` to bind one exact operation-scoped transaction and owner-derived receipt to repository, Spec, approved publication identity or hash, producer `to-spec`, stage `publication`, tracker identity, profile `v2`, target, latest baseline, Planning Seal, classification, and approved-scope identity. Its ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`. Advance the first stage only after the Planning Seal adapter's exact receipt reads back.
 
-The current profile has no target operational-plan, plan-content, checkpoint-commit, or prospective-attestation stage. Target-checkout dirt outside the exact accepted Planning Seal write is preserved and is not transaction authority; only a ref, lane, or adapter identity conflict that risks the wrong mutation is a Hard gate.
+Current profiles omit operational-plan, plan-content, checkpoint-commit, and prospective-attestation stages. Target-checkout dirt outside the exact accepted Planning Seal write is preserved and is not transaction authority; only a ref, lane, or adapter identity conflict that risks the wrong mutation is a Hard gate.
 
-Only one exact matching transaction may resume at its first unsatisfied stage. Re-read every completed receipt and require all bound identities to match. A missing transaction with observed downstream mutation, duplicate operation, mismatched receipt, out-of-order stage, or ambiguous adapter result stops without duplicate publication or attribution of unrelated work.
+Only one exact matching transaction may resume at its first unsatisfied stage; re-read completed receipts and bound identities. A missing transaction with observed downstream mutation, duplicate operation, mismatched receipt, out-of-order stage, or ambiguous adapter result stops without duplicate publication or attribution of unrelated work.
 
 ## 5. Publish and complete the handoff
 
 Publish only the tracker identity and version token already bound to the transaction. Primary mode populates its reserved draft; revision mode updates the same existing Spec. Neither mode creates a replacement Spec to recover a partial publication.
 
-Use compare-and-set publication. Read back the exact body, classification, full Planning Seal SHA/state, latest observed baseline, target, selected template, `ready-for-agent` label, tracker identity, version token, publication identity, approved-scope identity, and next command. For Single-Issue verify every `AC-n` mapping; for Multi-Issue verify cross-Issue constraints and decomposition rationale exist and child-level executable sections remain absent. Only then append the exact `publication.read_back` receipt.
+Use the probed publication mode: atomic compare-and-set only when supported; otherwise exact pre-read/write/read-back without an atomicity claim. Read back the exact body, classification, full Planning Seal SHA/state, latest observed baseline, target, selected template, `ready-for-agent` label, tracker identity, version token, publication identity, approved-scope identity, and next command. For Single-Issue verify every `AC-n` mapping; for Multi-Issue verify cross-Issue constraints and decomposition rationale exist and child-level executable sections remain absent. Only then append the exact `publication.read_back` receipt.
 
-Append or reuse one immutable `handoff.completed` receipt binding the producer, Spec and tracker identity, target, Planning Seal, transaction identity, publication identity, classification, and approved-scope identity. Read the handoff back, then advance the transaction's final stage with that immutable handoff identity. A Single-Issue Spec ends only with `/run-issue-workflow <Spec-ID>`; a Multi-Issue Spec ends only with `/to-tickets <Spec-ID>`.
+Append or reuse one immutable `handoff.completed` receipt binding the producer, Spec and tracker identity, target, Planning Seal, transaction identity, publication identity, classification, and approved-scope identity. Read back the handoff; advance the final stage with its immutable identity. A Single-Issue Spec ends only with `/run-issue-workflow <Spec-ID>`; a Multi-Issue Spec ends only with `/to-tickets <Spec-ID>`.
 
 ## 6. Disposition and recovery
 
@@ -76,6 +78,6 @@ A **Hard gate** protects mutation identity: wrong target, duplicate or misattrib
 
 A **Recoverable blocker** names the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-spec` retry. Use it for relevant semantic drift, unavailable human confirmation, bounded writer timeout, or a readable owning source that needs repair. Recovery re-enters this skill and resumes at the first exact unsatisfied stage; there is no generic repair, resume, or force command.
 
-An **advisory** cannot affect identity, attribution, durable state, or published behavior. Keep it visible; advisories never block, mutate authority, or become a waiver.
+An **advisory** cannot affect authority or behavior. Keep it visible; it never blocks or becomes a waiver.
 
 On any partial failure, report the lane, Planning Seal, latest observed baseline, tracker identity, transaction identity, immutable receipts, and first unsatisfied stage that exist. Preserve the planning worktree until successful handoff read-back. This skill never starts a Run, implements, decomposes, integrates, pushes, deploys, rolls back, or mutates another lane.

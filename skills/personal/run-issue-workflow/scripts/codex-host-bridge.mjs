@@ -16,7 +16,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
   const reader = createInterface({ input, terminal: false });
   const pending = new Map();
   let closed = false;
-  let control = null;
+  const controls = new Map();
   let toolCalls = 0;
   const startedAt = Date.now();
   let idleTimer;
@@ -26,7 +26,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     if (closed) return;
     closed = true;
     clearTimeout(idleTimer);
-    control?.onDisconnect?.(new Error("CODEX_HOST_DISCONNECTED"));
+    for (const control of controls.values()) control.onDisconnect?.(new Error("CODEX_HOST_DISCONNECTED"));
     for (const request of pending.values()) request.reject(new Error("CODEX_HOST_DISCONNECTED"));
     pending.clear();
     reader.close();
@@ -41,11 +41,12 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
       armIdleTimer();
       if (message.heartbeat === true) return;
       if (typeof message.control === "string") {
-        if (!control) throw new Error("No active Run control");
+        const control = message.runId ? controls.get(message.runId) : controls.size === 1 ? [...controls.values()][0] : null;
+        if (!control) throw new Error("Select one active Run ID for control");
         const result = message.control === "REFRESH"
           ? { accepted: true, changed: false, status: await control.readStatus() }
           : await control.submitControl(message.control);
-        emit({ type: "control-result", command: message.control, result });
+        emit({ type: "control-result", runId: message.runId, command: message.control, result });
         return;
       }
       const request = pending.get(message.id);
@@ -72,10 +73,12 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     controls: {
       async connect(connection) {
         if (closed) throw new Error("CODEX_HOST_DISCONNECTED");
-        if (control) throw new Error("Run controls already connected");
-        control = connection;
-        emit({ type: "status", status: await connection.readStatus() });
-        return { async close() { control = null; } };
+        const status = await connection.readStatus();
+        const key = status?.run?.runId ?? "single";
+        if (controls.has(key)) throw new Error("Run controls already connected");
+        controls.set(key, connection);
+        emit({ type: "status", status });
+        return { async close() { if (controls.get(key) === connection) controls.delete(key); } };
       },
     },
     get disconnected() { return closed; },

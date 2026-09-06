@@ -5,9 +5,10 @@ import { setTimeout } from "node:timers/promises";
 import { createCodexWorkflowTasks, unwrapCodexResult } from "./codex-workflow-tasks.mjs";
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
 import { createRunStore } from "./run-store.mjs";
+import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
 
-export async function runCodexWorkflow({ repository, specId, runIdentity, workflowVersion, packageRoot, host }) {
+export async function prepareCodexWorkflow({ repository, specId, runIdentity, workflowVersion, compatibleRecordedVersion, packageRoot, host }) {
   const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
   if (configuration.schema !== "codex-workflow-host:v1") throw new Error("Unknown static workflow host configuration");
   const projectsResult = unwrapCodexResult(await host.call("mcp__codex_app__list_projects", {}));
@@ -22,24 +23,49 @@ export async function runCodexWorkflow({ repository, specId, runIdentity, workfl
   let tasks;
   const taskSource = { read: (...args) => tasks.read(...args) };
   let store;
-  const storeSource = { listRunIds: () => store.listRunIds(), readStatus: (...args) => store.readStatus(...args), readEvents: (...args) => store.readEvents(...args), readWriterLock: (...args) => store.readWriterLock(...args), readHostTask: (...args) => store.readHostTask(...args) };
+  const storeSource = { readLeaseHealth: (...args) => store.readLeaseHealth(...args), listRunIds: () => store.listRunIds(), readStatus: (...args) => store.readStatus(...args), readEvents: (...args) => store.readEvents(...args), readWriterLock: (...args) => store.readWriterLock(...args), readHostTask: (...args) => store.readHostTask(...args) };
   const owners = createGitHubWorkflowSources({ repository, repositoryName: configuration.repository, store: storeSource, tasks: taskSource });
   store = createRunStore({ gitCommonDir: owners.gitCommonDir });
   const selectedIssue = await owners.readIssue(specId);
   tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber: owners.issueNumber });
-  const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, authoritySources: owners.sources,
+  const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, compatibleRecordedVersion, authoritySources: owners.sources,
     controls: host.controls,
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
     cleanup: { listRuns: owners.readCleanupRuns },
     now: () => new Date().toISOString(), sleep: (ms) => setTimeout(ms),
-    leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence }) {
+    leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
       const dispatch = store.readEvents(identity.runId).findLast(({ type }) => type === "dispatch.recorded");
       if (!dispatch) throw new Error("Parent close requires the existing Run task");
-      await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`);
+      const task = await tasks.read(dispatch.taskRef);
+      const acceptedEquivalent = task.closeRequest?.runId === identity.runId && task.closeRequest.issueId === issueId
+        && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity;
+      if (task.closeRequest?.state === "ACCEPTED" && task.closeRequest.issueId === issueId && task.closeRequest.requestIdentity !== requestIdentity && !acceptedEquivalent) throw new Error("Parent close authority changed");
+      if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`);
+      if (step) return { settled: false };
       const waited = await tasks.wait([dispatch.taskRef]);
-      return { settled: waited.taskSettled, requestIdentity: waited.closeRequestIdentity };
+      return { settled: waited.taskSettled, requestIdentity: acceptedEquivalent && waited.closeRequestIdentity === task.closeRequest.requestIdentity ? requestIdentity : waited.closeRequestIdentity };
     } },
   });
-  const result = await runtime.run({ specId: selectedIssue.node_id, ...(runIdentity ? { runIdentity } : {}) });
-  return { status: result.status, panel: result.panel, metrics: { ...host.metrics(), ...owners.metrics(), humanInterventions: "unavailable" } };
+  let latest;
+  const pendingControls = [];
+  let connection;
+  return {
+    specId: selectedIssue.node_id,
+    async run(options = {}) {
+      latest = await runtime.run({ specId: selectedIssue.node_id, ...(runIdentity ? { runIdentity } : {}), ...options, controlQueue: pendingControls });
+      if (options.mode && !connection && latest.status.run.runId) connection = await host.controls.connect({
+        readStatus: async () => store.readStatus(latest.status.run.runId),
+        submitControl: command => new Promise((resolve, reject) => pendingControls.push({ command, resolve, reject })),
+        onDisconnect: error => { for (const pending of pendingControls.splice(0)) pending.reject(error); },
+      });
+      return latest.status;
+    },
+    async close() { await connection?.close(); for (const pending of pendingControls.splice(0)) pending.reject(new Error("Batch control connection ended")); },
+    result: () => ({ status: latest.status, panel: latest.panel, metrics: { ...host.metrics(), ...owners.metrics(), humanInterventions: "unavailable" } }),
+  };
+}
+
+export async function runCodexWorkflow(options) {
+  const lane = await prepareCodexWorkflow(options);
+  try { await lane.run(); return lane.result(); } finally { await lane.close(); }
 }

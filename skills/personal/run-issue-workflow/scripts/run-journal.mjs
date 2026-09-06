@@ -5,6 +5,8 @@ export const DEFAULT_MAX_PARALLEL = 3;
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
 export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
+  "runtime.observed",
+  "repair.recorded",
   "control.revised",
   "dispatch.recorded",
   "retry.recorded",
@@ -27,6 +29,8 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
+  ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity"])],
+  ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
   ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion"])],
   ["control.revised", new Set(["type", "at", "revision", "command"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
@@ -128,6 +132,16 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
   assertExactFields(event, allowedFields, `${event.type} event`);
   requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
+    case "repair.recorded":
+      requireText(event.issueId, "repair Issue");
+      requirePositiveInteger(event.wave, "repair wave", 10);
+      validateTaskRef(event.taskRef, "repair task");
+      for (const field of ["candidate", "targetHead"]) if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(event[field])) throw new TypeError("Repair requires exact Git commits");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity)) throw new TypeError("Repair request identity is invalid");
+      break;
+    case "runtime.observed":
+      validateWorkflowVersion(event.workflowVersion);
+      break;
     case "grant.recorded":
       assertExactFields(event.runIdentity, new Set(immutableRunIdentityKeys), "grant runIdentity");
       for (const key of ["runId", "specId", "approvedScopeHash", "target", "classification"]) {
@@ -240,6 +254,17 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
         throw new TypeError("A renewed grant must preserve its workflow version");
       }
     }
+  }
+  if (event.type === "repair.recorded") {
+    const previous = events.filter(item => item.type === "repair.recorded" && item.issueId === event.issueId);
+    const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    if (!dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef) || event.wave !== previous.length + 1
+      || previous.some(item => item.candidate === event.candidate)) throw new TypeError("Repair must preserve its original dispatched lane and monotonic candidate budget");
+  }
+  if (event.type === "runtime.observed") {
+    const grant = events.findLast(({ type }) => type === "grant.recorded");
+    if (!grant?.workflowVersion || grant.workflowVersion.sourceRepository !== event.workflowVersion.sourceRepository
+      || grant.workflowVersion.protocolVersion !== event.workflowVersion.protocolVersion) throw new TypeError("Runtime observation requires a compatible recorded package source and protocol");
   }
   if (event.type === "control.revised") {
     const previousControl = events.findLast(({ type }) => type === "control.revised");

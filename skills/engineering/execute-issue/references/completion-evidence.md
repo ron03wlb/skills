@@ -17,7 +17,7 @@ Write one compact tracker completion note containing:
 - Issue and linked Spec; Issue target branch/worktree, topic branch/worktree, baseline, and final candidate;
 - completion note `operationIdentity`: the full owner-derived versioned receipt binding canonical repository, linked Spec, approved publication identity or hash, producer `execute-issue`, stage `implementation`, and stable Issue;
 - Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
-- `manualAttestations`: every consumed attestation, or an explicit empty list. A v2 entry records `kind: manual_prerequisite_complete:v2`, its tracker-native immutable identity, Issue, Prerequisite candidate, Git blob, artifact, and outcome; a v1 entry records its immutable identity, Issue, and exact legacy non-generated artifact path. Never degrade v2 to a path string or infer a missing field;
+- `manualAttestations`: every consumed attestation, or an explicit empty list. A v2 entry records `kind: manual_prerequisite_complete:v2`, its tracker-native immutable identity, Issue, Prerequisite candidate, Git blob, artifact, declared environment identity where applicable, and outcome; a v1 entry records its immutable identity, Issue, and exact legacy non-generated artifact path. Never degrade v2 to a path string or infer a missing field;
 - `workflowArtifacts`: the reviewed prospective entries with exact `path`, `requirementSource`, and `purpose`, or an explicit empty list;
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.

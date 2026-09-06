@@ -20,7 +20,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 
 - `tracker.reserve` takes the repository, `primary` or `revision` mode, exact operation identity, and requested Spec identity. Primary reservation calls `deriveSpecReservationOperationIdentity`; its bootstrap key uses only the repository and immutable proposed-Spec identity. It returns one immutable tracker identity; exact read-back then replaces bootstrap authority with the reserved tracker identity and a Spec-bound versioned operation identity for every later stage. Revision requires the existing Spec and its approved publication identity or hash.
 - `tracker.read` returns that identity's body, comments, labels, version token, and publication identity.
-- `tracker.publish` compare-and-sets the expected version token with the canonical body and `ready-for-agent` label, then returns the new version token and publication identity. A timeout or missing response is unresolved until `tracker.read` proves the result.
+- `tracker.publish` uses the publication mode actually proven during planning. Atomic CAS is used only when supported. On configured GitHub Issues, immediately re-read the expected body/version, perform the authorized write, then verify the exact body and labels; report this as read/write/read-back, never CAS. If atomicity is an approved requirement, unsupported CAS blocks planning before Run-ready. Publication returns the observed version and publication identity. A timeout or missing response is unresolved until `tracker.read` proves the result.
 
 ## Handoff adapter
 

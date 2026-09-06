@@ -5,13 +5,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { bodyDigest } from "./github-workflow-records.mjs";
 import { createCodexHostBridge } from "./codex-host-bridge.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
+import { runBatch } from "./run-batch.mjs";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createRunStore } from "./run-store.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const cacheDirectory = resolve(packageRoot, "../..");
 const emit = (value) => process.stdout.write(`workflow-host ${JSON.stringify(value)}\n`);
 
-export async function runInstalledEntry({ repository, specId, runId, host }) {
+async function selectInstalledLane({ repository, specId, runId, host, prepareOnly = false }) {
   repository = realpathSync(repository);
   const common = realpathSync(resolve(repository, execFileSync("git", ["-C", repository, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
   const store = createRunStore({ gitCommonDir: common });
@@ -42,14 +44,42 @@ export async function runInstalledEntry({ repository, specId, runId, host }) {
   if (previousGrant && !previousGrant.workflowVersion) return { state: "UNAVAILABLE", reason: "Selected Run has no proven package version; preserve its evidence for compatibility reconciliation" };
   const selected = selectWorkflowVersion({ cacheDirectory, recordedVersion: previousGrant?.workflowVersion });
   if (selected.state !== "AVAILABLE") return selected;
-  const composition = await import(pathToFileURL(join(selected.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
-  return composition.runCodexWorkflow({ repository, specId: previousGrant?.runIdentity.specId ?? specId,
-    runIdentity: previousGrant?.runIdentity, workflowVersion: selected.version, packageRoot: selected.root, host });
+  const current = selectWorkflowVersion({ cacheDirectory });
+  const compatible = previousGrant && current.state === "AVAILABLE"
+    && current.version.protocolVersion === selected.version.protocolVersion
+    && current.version.sourceRepository === selected.version.sourceRepository;
+  const runtime = compatible ? current : selected;
+  const composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
+  const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
+    runIdentity: previousGrant?.runIdentity, workflowVersion: runtime.version,
+    compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host };
+  if (prepareOnly) {
+    if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
+    return composition.prepareCodexWorkflow(options);
+  }
+  return composition.runCodexWorkflow(options);
+}
+
+export async function runInstalledEntry({ repository, specId, runId, host, specIds, maxWorkers = 3 }) {
+  if (!specIds && typeof specId === "string" && specId.includes(",")) specIds = specId.split(",");
+  if (!specIds) return selectInstalledLane({ repository, specId, runId, host });
+  if (runId || specIds.length === 0 || new Set(specIds).size !== specIds.length) throw new Error("Batch entry requires explicit distinct Specs and no ambiguous Run ID");
+  const lanes = [];
+  try {
+    for (const id of specIds) {
+      try {
+        const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true });
+        lanes.push(typeof lane.run === "function" ? lane : { specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, reason: lane.reason, nodes: [], legalActions: [] }) });
+      } catch (error) { lanes.push({ specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, reason: error.message, nodes: [], legalActions: [] }) }); }
+    }
+    return await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected });
+  } finally { for (const lane of lanes) await lane.close?.(); }
+
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repository, specId, runId] = process.argv.slice(2);
-  if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number] [Run ID]");
+  if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID]");
   if (process.stdin.isTTY) execFileSync("stty", ["-echo", "-icanon", "min", "1", "time", "0"], { stdio: "inherit" });
   const host = createCodexHostBridge();
   try {
