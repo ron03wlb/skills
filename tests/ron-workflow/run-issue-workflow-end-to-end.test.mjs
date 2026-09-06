@@ -355,6 +355,35 @@ test("text controls can pause and stop a Run when its browser panel is unavailab
   }
 });
 
+test("a paused text-only Run diagnoses host loss without requiring a browser", async () => {
+  const { root, store } = createStoreFixture();
+  const model = { trackerState: "OPEN", taskState: "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" };
+  const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"]
+    .map((name) => [name, async () => { throw new Error(`Paused Run must not call ${name}`); }]));
+  try {
+    const runtime = createWorkflowRuntime({
+      store, tasks,
+      tracker: { async read() { return {}; } },
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser: { async open() { throw new Error("Browser unavailable"); } },
+      controls: { async connect({ submitControl, onDisconnect }) {
+        await submitControl("PAUSE");
+        onDisconnect(new Error("CODEX_HOST_DISCONNECTED"));
+        return { async close() {} };
+      } },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-06T04:00:00.000Z", sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: identity.specId });
+    const diagnosis = result.status.diagnoses.find(({ reasonCode }) => reasonCode === "coordinator_unavailable");
+    assert.ok(diagnosis);
+    assert.deepEqual(diagnosis.resumePredicates, ["active_host_reconnected"]);
+    assert.equal(result.status.diagnoses.some(({ reasonCode }) => reasonCode === "panel_unavailable"), false);
+    assert.equal(result.journal.some(({ type }) => type === "dispatch.recorded"), false);
+    assert.equal(store.readWriterLock(identity.runId), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("runtime composition builds the owning-source handoff adapter", async () => {
   const { root, store } = createStoreFixture();
   const reads = [];

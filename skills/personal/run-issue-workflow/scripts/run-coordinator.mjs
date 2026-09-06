@@ -327,6 +327,14 @@ const panelUnavailable = (status) => diagnosedStop(status, {
   resumePredicates: ["panel_can_open"],
 });
 
+const coordinatorUnavailable = (status) => diagnosedStop(status, {
+  reasonCode: "coordinator_unavailable",
+  evidence: ["The active Codex host heartbeat disconnected."],
+  noAutomaticTransition: "Reconnect the active host and resume the same Run; preserve existing tasks and controls.",
+  affectedNodes: status.nodes.filter(({ state }) => state !== "SUCCEEDED").map(({ issueId }) => issueId),
+  resumePredicates: ["active_host_reconnected"],
+});
+
 const authorityDrift = ({ status, runIdentity, current, recordedGrant, afterWriterWait = false }) => {
   const recoverablePacket = (evidence, smallestHumanAction) => afterWriterWait
     ? createRecoverableOperatorPacket({
@@ -964,9 +972,10 @@ export function createCoordinator({
         latestFacts = facts;
         return writer.rebuildStatus(facts);
       };
-      const publishPanelStop = (status) => {
+      const publishPanelStop = (status, error) => {
         requireMethod(writer, "publishStatus");
-        return writer.publishStatus(panelUnavailable(status));
+        return writer.publishStatus(error?.message === "CODEX_HOST_DISCONNECTED"
+          ? coordinatorUnavailable(status) : panelUnavailable(status));
       };
       const openPanel = async (status) => {
         if (!panel || panelHandle) return null;
@@ -980,8 +989,8 @@ export function createCoordinator({
           requireMethod(opened, "close");
           panelHandle = opened;
           return null;
-        } catch {
-          return publishPanelStop(status);
+        } catch (error) {
+          return publishPanelStop(status, error);
         }
       };
       try {
@@ -1173,8 +1182,8 @@ export function createCoordinator({
             if (lastStatus.run.state === "PAUSED" && typeof panelHandle?.waitForControl === "function") {
               try {
                 await panelHandle.waitForControl(lastStatus.run.controlRevision);
-              } catch {
-                return publishPanelStop(lastStatus);
+              } catch (error) {
+                return publishPanelStop(lastStatus, error);
               }
               continue;
             }

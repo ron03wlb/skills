@@ -487,7 +487,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     const path = hostTaskPath(runId, issueId);
     const existing = readHostTask({ runId, issueId });
     if (existing) return { created: false, intent: existing };
-    const intent = { runId, issueId, prompt };
+    const intent = { runId, issueId, prompt, createdAt: new Date().toISOString() };
     assertNoToken(intent);
     mkdirSync(dirname(path), { recursive: true });
     let descriptor;

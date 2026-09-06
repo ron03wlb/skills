@@ -57,6 +57,8 @@ Tracker outage probes are fixed at 5, 15, and 30 seconds. Transient Issue-lane a
 
 On re-entry, the coordinator reads the journal and reacquires live Tracker, Git, worktree, completion-note, and Codex task evidence. It adopts trustworthy manual completion, a settled task, an accepted close request, partial close progress, and already-successful nodes. It never recreates or guesses an ambiguous lane.
 
+Some current-host task listings omit newly delegated tasks and their preview can be empty. The adapter then uses only exact delegation-input matches in the local creation-day Codex rollout files as discovery hints, followed by native task-input and Git common-directory read-back. Rollout text, titles, and a hinted ID alone never establish a lane or authorize another task. Native delegation inputs also supply close/retry request read-back when no user-message item exists.
+
 Use an explicit Spec ID after a stopped Run, identity change, multiple candidate Runs, or any authority repair. Use no arguments only when one exact non-terminal Run is proven.
 
 ## Inspect after return

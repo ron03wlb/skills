@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { delegatedInput, discoverLocalCodexTasks } from "./codex-task-discovery.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed");
@@ -8,8 +11,9 @@ export function unwrapCodexResult(result) {
   const body = result?.content?.find(({ type }) => type === "text")?.text;
   return body === undefined ? result : JSON.parse(body);
 }
-const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (items ?? [])
-  .filter(({ type }) => type === "userMessage").flatMap(({ content }) => content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []));
+const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (items ?? []).flatMap((item) =>
+  item.type === "userMessage" ? item.content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []
+    : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber }) {
@@ -17,7 +21,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const cursors = new Map();
   const call = async (name, args) => unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args));
   const read = async (ref) => {
-    const snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: false, maxOutputCharsPerItem: 16000 });
+    const snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 16000 });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const prompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -47,7 +51,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (task.kind !== "codex" || task.projectId !== project.projectId || task.hostId !== project.hostId) continue;
       const ref = { threadId: task.id, hostId: task.hostId };
       const { snapshot } = await read(ref);
-      if (snapshot.thread.preview?.startsWith(`${key}\n`)) found.push(ref);
+      if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
+    }
+    if (found.length === 0 && project.path && project.hostId === "local") {
+      const since = intent.createdAt ?? store.readEvents(runIdentity.runId).find(({ type }) => type === "grant.recorded")?.at;
+      const common = (cwd) => realpathSync(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+      for (const hint of await discoverLocalCodexTasks({ prompt: intent.prompt, since })) {
+        const ref = { threadId: hint.threadId, hostId: hint.hostId };
+        const { snapshot, cwd } = await read(ref);
+        if (cwd === hint.cwd && common(cwd) === common(project.path) && userTexts(snapshot).includes(intent.prompt)) found.push(ref);
+      }
     }
     if (found.length === 0) throw new Error("TASK_CREATION_UNRESOLVED: preserve the recorded intent and inspect the host; do not create another task");
     if (found.length === 1) refs.set(key, found[0]);
@@ -97,8 +110,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     async wait(taskRefs) {
       const result = await call("wait_threads", { targets: taskRefs.map((ref) => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) })), timeoutMs: 30000 });
       // Fresh task status is authoritative; a wait timeout or commentary is not completion.
-      for (const target of result.results ?? result.threads ?? []) {
-        if (target.threadId && target.cursor) cursors.set(target.threadId, target.cursor);
+      for (const target of result.polls ?? result.results ?? result.threads ?? []) {
+        const threadId = target.thread?.id ?? target.threadId;
+        if (threadId && target.cursor) cursors.set(threadId, target.cursor);
       }
       const states = await Promise.all(taskRefs.map(read));
       return { coordinatorActive: !host.disconnected, taskSettled: states.every(({ state }) => state === "RESUMABLE"),
