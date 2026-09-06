@@ -6,7 +6,8 @@ It is a reference, not a process. There is no loop to run, no artifact it produc
 
 ## When to reach for it
 
-Reach for this when designing or reshaping a module and its public interface. Existing-term lookup and routine implementation need no design workflow.
+- Module or public-interface design: use this skill.
+- Existing-term lookup or routine implementation: proceed directly.
 
 Type `/codebase-design`, or the agent reaches for it automatically when a design task fits.
 

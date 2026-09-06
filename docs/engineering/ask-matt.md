@@ -6,7 +6,8 @@ The router does not re-decide delivery shape. [to-spec](https://aihero.dev/skill
 
 ## When to reach for it
 
-Read-only design and tracker-only settled scope need no planning worktree. Create the isolated lane before accepted glossary or ADR writes, then pass that exact ownership to `to-spec`.
+- Read-only design or tracker-only settled scope: no planning worktree.
+- Accepted glossary or ADR writes: create the isolated lane first, then pass its exact ownership to `to-spec`.
 
 You invoke this by typing `/ask-matt` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
@@ -36,7 +37,10 @@ Published Tracker Specs route through the separately installed authorized coordi
 
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 
-The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [confirm-understanding](https://aihero.dev/skills-confirm-understanding) to calibrate a mental model against named evidence, [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison, and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs. Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing knowledge, [wait-what](https://aihero.dev/skills-wait-what) when the last message did not land, and [writing-for-agents](https://aihero.dev/skills-writing-for-agents) when editing skills or other documents consumed by agents.
+The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [confirm-understanding](https://aihero.dev/skills-confirm-understanding) to calibrate a mental model against named evidence, [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison, and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs. Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing knowledge, [wait-what](https://aihero.dev/skills-wait-what) when the last message did not land.
+
+- Substantive instruction, structure, or routing changes: [writing-for-agents](https://aihero.dev/skills-writing-for-agents).
+- Simple wording edits: edit directly.
 
 ## It's working if
 
@@ -56,7 +60,7 @@ For a new software project without a governing Spec, the personal `/start-projec
 
 For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 
-Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) is the reference for skills and other agent-facing documents.
+Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) governs substantive instruction, structure, and routing changes.
 
 At a phase boundary, choose whether to continue, clear, create a [handoff](https://aihero.dev/skills-handoff), delegate a bounded subtask, or compact. Do not switch context strategies mid-phase unless the remaining work can be split cleanly.
 

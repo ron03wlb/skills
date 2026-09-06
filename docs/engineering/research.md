@@ -6,15 +6,19 @@ It does not answer you in the conversation. The output is a file, written where 
 
 ## When to reach for it
 
-Use this when a question requires comparison of primary sources and a durable cited repository note. A quick fact lookup stays in the current task. Delegate only when the bounded research can run independently alongside useful local work; otherwise complete it directly.
+- Source comparison with a durable cited repository note: use this skill.
+- Quick fact lookup: continue directly.
+- Useful independent local work can continue: delegate the bounded research.
+- No useful parallel work: complete the research directly.
 
-Type `/research`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task turns into reading legwork.
+Type `/research`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when a task needs source comparison and a durable cited note.
 
 Reach for it when the next step is *finding something out* from outside the working directory (how a third-party API behaves, what a spec actually says, whether a version claim holds), and you'd rather not stall your own thread doing the reading. What you need decides which skill:
 
 | What you need | Reach for |
 | --- | --- |
-| An external fact a decision is waiting on | `research` |
+| A decision needs primary-source comparison and a cited note | `research` |
+| One quick external fact | Direct lookup |
 | A decision made *with* you, by interview | [grilling](https://aihero.dev/skills-grilling) |
 | A durable architecture decision, written into `CONTEXT.md` and ADRs | [grill-with-docs](https://aihero.dev/skills-grill-with-docs) |
 | To find out whether an approach works in your codebase | [prototype](https://aihero.dev/skills-prototype) |
@@ -24,9 +28,9 @@ The line between `research` and `grill-with-docs` is the **shelf life of what co
 
 ## Delegated legwork
 
-The defining move is that the reading runs as a **background agent**. You keep working; it goes off, follows each claim to its primary source, writes one Markdown file, and reports back. Research is legwork you delegate, not thinking you outsource: you get a document to grill, plan, or design against, and you still make the call.
+The defining output is one cited repository note. When delegation is useful, one **background agent** owns the bounded reading and file while the caller continues independent work. The caller remains responsible for interpreting the findings.
 
-The delegation is unguarded, and the background agent can spawn a further background agent of its own. This is the skill's best-documented rough edge.
+A delegated researcher performs its task directly and does not create nested research agents.
 
 Where the file lands is decided by the repo, not by the skill: it matches whatever convention already exists for notes, and if there is none it picks somewhere sensible and tells you where. It writes one file per run.
 
@@ -40,9 +44,9 @@ Recovered evidence keeps its provenance. An archived copy is cited with its snap
 
 **It spawned a second research agent. Is that meant to happen?**
 
-No. This is an open bug, [issue #530](https://github.com/mattpocock/skills/issues/530). The skill tells its caller to spin up a background agent but does not restrict the agent type, so the agent it spawns is a `general-purpose` one that holds the `Agent` tool and the same instructions, and fires them again. One reporter measured a single research task costing roughly 450k [tokens](https://www.aihero.dev/ai-coding-dictionary/token) across three overlapping runs, with the duplicate finishing half an hour later entirely out of view. It reproduces outside Claude Code too; the same nesting was confirmed in Codex with GPT-5.6-sol. There is no shipped fix. Users have patched their own installed copy with a line telling an agent that is already a [subagent](https://www.aihero.dev/ai-coding-dictionary/subagent) to do the work itself, which helps but is instruction-level, not structural. Watch your background task list after invoking, and stop the duplicate.
+No. The current instruction contract gives one researcher ownership of the note and forbids nested delegation. The historical duplicate-agent reports motivated that guardrail; they are not the current intended behavior.
 
-The opposite failure exists as well: if your own global instructions forbid an agent from re-delegating work, the background agent will politely decline the task and the skill quietly does nothing.
+If the host cannot delegate, the caller can perform the bounded research directly. Report the actual mode rather than claiming a background task ran.
 
 **Where should the file live, and should I commit it?**
 
@@ -58,7 +62,7 @@ No. Nothing auto-loads a past research file; it is a document sitting in the rep
 
 **Why not just ask the agent to go read the docs?**
 
-You can, and a two-line prompt saying exactly that was the practice this skill replaced. Two things the skill buys over the prompt: it runs in the background so your session keeps its [context](https://www.aihero.dev/ai-coding-dictionary/context) clean, and the primary-source constraint and the cited-file output come out the same way every time rather than however you happened to phrase it. Against a [harness](https://www.aihero.dev/ai-coding-dictionary/harness)'s own deep-research mode, the difference is the artifact and the source discipline, not the search. If a two-line prompt gets you what you need on a small question, use the two-line prompt.
+A quick question can stay a direct lookup. This skill earns its use when primary-source comparison and a durable cited note help the next decision; background execution is optional.
 
 **When does it stop reading?**
 

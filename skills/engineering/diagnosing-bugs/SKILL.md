@@ -23,6 +23,8 @@ Prefer debugger inspection or targeted logs over broad logging. Tag temporary in
 
 ## Fix and verify
 
+For a diagnosis-only request, stop when the cause is supported and report the evidence and proposed remedy. Apply a fix only when it is within the user's requested scope.
+
 When a behavioral regression test can capture the real bug pattern through a public interface, write it before the fix and observe red → green. Choose an existing seam within the approved requirement autonomously. If no practical seam exists, record the limitation and verify at the highest practical surface; a shallow test does not substitute for the real symptom.
 
 Apply the smallest supported fix, rerun the original symptom check and affected verification, remove temporary instrumentation, and explain the cause. Completion requires evidence the reported failure is resolved, or an explicit unresolved state with the preserved findings and next necessary input.

@@ -20,10 +20,10 @@ Whatever the user said is the fixed point — a commit SHA, branch name, tag, `m
 
 Choose the candidate form once:
 
-- **Committed candidate** — capture `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base).
+- **Committed candidate** — resolve the supplied candidate ref, or `HEAD` when none is supplied, once to a full `<candidate-sha>`. Capture `git diff <fixed-point>...<candidate-sha>` (three-dot, against the merge-base), or the exact comparison explicitly requested by the user. Report both resolved endpoints; later branch movement cannot change this candidate.
 - **WIP candidate** — capture `git diff <fixed-point>` for tracked committed, staged, and unstaged changes. Also capture `git status --short`, inspect every in-scope untracked path as candidate input, and explicitly list excluded unrelated paths.
 
-For either form, note the commit list via `git log <fixed-point>..HEAD --oneline`. Confirm the fixed point resolves with `git rev-parse <fixed-point>`. The candidate is non-empty when its tracked diff or at least one in-scope untracked path contains reviewable changes. A bad ref or empty candidate should fail here — not inside two parallel sub-agents.
+For committed work, note `git log <fixed-point>..<candidate-sha> --oneline`; for WIP, record current `HEAD` and the observed working-tree inputs. Confirm the fixed point resolves with `git rev-parse <fixed-point>`. The candidate is non-empty when its tracked diff or at least one in-scope untracked path contains reviewable changes. A bad ref or empty candidate should fail here — not inside two parallel sub-agents.
 
 ### 2. Identify the spec source
 

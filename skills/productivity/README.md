@@ -19,4 +19,4 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 
 - **[grilling](./grilling/SKILL.md)** — Interview the user relentlessly about a plan, decision, or idea until every branch of the decision tree is resolved.
 - **[explain-decision](./explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
-- **[writing-for-agents](./writing-for-agents/SKILL.md)** — Write predictable skills, `AGENTS.md`, `CLAUDE.md`, and other documents consumed by agents.
+- **[writing-for-agents](./writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.

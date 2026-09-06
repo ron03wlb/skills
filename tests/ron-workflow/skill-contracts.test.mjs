@@ -544,7 +544,7 @@ test("code-review owns requested and material-risk review activation", () => {
   assert.doesNotMatch(metadata, /^policy:/mu);
   assert.match(metadata, /risky diffs/iu);
 
-  assert.match(skill, /committed candidate.*git diff <fixed-point>\.\.\.HEAD/isu);
+  assert.match(skill, /committed candidate.*git diff <fixed-point>\.\.\.<candidate-sha>/isu);
   assert.match(skill, /WIP candidate.*git diff <fixed-point>.*git status --short.*in-scope untracked/isu);
   assert.match(skill, /work-in-progress.*use `HEAD` as the fixed point/isu);
   assert.match(skill, /non-empty.*tracked diff.*in-scope untracked/isu);

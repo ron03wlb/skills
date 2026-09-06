@@ -6,7 +6,11 @@ The loop must eventually verify the reported symptom. A fully minimized reproduc
 
 ## When to reach for it
 
-Type `/diagnosing-bugs`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it when a failure's cause is unknown. A known mechanical fix or a simple explanation can stay in the current task.
+Type `/diagnosing-bugs`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) selects it for an unexplained failure.
+
+- Unknown cause: use the evidence loop.
+- Known mechanical fix or simple explanation: continue directly.
+- Diagnosis-only request: report the supported cause and remedy; fixing requires the corresponding user scope.
 
 ## A signal that answers the question
 

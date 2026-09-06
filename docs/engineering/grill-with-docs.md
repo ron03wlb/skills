@@ -2,11 +2,12 @@
 
 `grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, creates an isolated planning worktree when accepted documents need writing, and interviews you until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share one understanding, and records accepted vocabulary and hard decisions there. It is the same one-question-at-a-time interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase.
 
-It is **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**. Every other grilling skill leaves the [session](https://www.aihero.dev/ai-coding-dictionary/session) in your head; this one leaves files on disk, isolated from the target checkout and other planning lanes. A term lands in `CONTEXT.md` when it resolves, and a decision that passes all three ADR gates lands with it. The worktree stays with the task through the later `to-spec` handoff, so accepted planning state is never inferred from shared target dirt.
+Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. That worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
 ## When to reach for it
 
-Read-only design and tracker-only settled scope need no planning worktree. Create the isolated lane before accepted glossary or ADR writes, then pass that exact ownership to `to-spec`.
+- Read-only design or tracker-only settled scope: no planning worktree.
+- Accepted glossary or ADR writes: create the isolated lane first, then pass its exact ownership to `to-spec`.
 
 You invoke this by typing `/grill-with-docs`; the agent will not reach for it on its own.
 
@@ -30,7 +31,10 @@ It also needs two other skills present: [grilling](https://aihero.dev/skills-gri
 
 ## The planning lane
 
-One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target because each writes only its own planning worktree; there is no shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry. The task produces an exact lane handoff packet, tells you to run [to-spec](https://aihero.dev/skills-to-spec), keeps the lane for a retry after partial publication, and disposes only that exact clean worktree after successful handoff read-back.
+One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target without a shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry.
+
+- Accepted document writes stay in the exact registered worktree; preserve it through partial publication and dispose only that clean worktree after successful `to-spec` handoff read-back.
+- Tracker-only scope uses an explicit empty accepted-change list; no worktree is created or retained.
 
 ## The paper trail
 

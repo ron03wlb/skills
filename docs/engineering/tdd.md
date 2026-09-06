@@ -2,17 +2,22 @@
 
 `tdd` builds one approved behavior through a **red → green** loop: observe a failing test through a public interface, implement the smallest change, and observe it pass. Tests describe externally observable behavior so they survive internal refactoring.
 
-The agent selects an existing **seam** from approved requirements autonomously. A new interface or unresolved requirement needs a decision when it changes the contract; an already approved interface needs no repeated confirmation.
+The agent selects an existing **seam** from approved requirements autonomously; existing approval is enough to start a behavioral test.
 
 ## When to reach for it
 
-Type `/tdd`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it for test-first behavior or a meaningful regression test. Routine wording edits do not need behavioral tests.
+Type `/tdd`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) selects it for test-first behavior or a meaningful regression test.
+
+- Approved behavior at an existing public interface: state the seam and proceed.
+- New interface or unresolved contract decision: settle the material choice first.
+- Explicit request to confirm first: follow that request.
+- Routine wording edit: no behavioral test is needed.
 
 ## One behavior at a time
 
 Each test is a tracer bullet through a useful public interface. Expected results come from the requirement or a worked example, not a duplicate of the implementation. Run one red → green slice before choosing the next. Examples and mocking guidance are available when the test design needs them.
 
-If the interface itself needs design, [codebase-design](https://aihero.dev/skills-codebase-design) helps choose its shape. Respect an explicit request to confirm first; otherwise state the existing seam and proceed within the approved behavior.
+[codebase-design](https://aihero.dev/skills-codebase-design) supports the interface-design branch when the seam itself is unsettled.
 
 ## It's working if
 

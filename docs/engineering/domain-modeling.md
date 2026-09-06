@@ -6,7 +6,12 @@ It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to bo
 
 ## When to reach for it
 
-Type `/domain-modeling`, or the agent reaches for it automatically when domain concepts, glossary definitions, or architectural decisions need to change. Existing-term lookups and incidental wording edits stay inline. In practice, automatic invocation is the weakest part of the skill: when `grill-with-docs` or `wayfinder` say to load it, [models](https://www.aihero.dev/ai-coding-dictionary/model) frequently load `grilling` and skip this one. If a [grilling](https://www.aihero.dev/ai-coding-dictionary/grilling) session runs and `CONTEXT.md` is untouched at the end, that is what happened; invoke it by name alongside the other skill.
+Type `/domain-modeling`, or the agent selects it when its trigger fits.
+
+- Changes to domain concepts, glossary definitions, or architectural decisions: use this skill.
+- Existing-term lookup or incidental wording edit: proceed directly.
+
+ In practice, automatic invocation is the weakest part of the skill: when `grill-with-docs` or `wayfinder` say to load it, [models](https://www.aihero.dev/ai-coding-dictionary/model) frequently load `grilling` and skip this one. If a [grilling](https://www.aihero.dev/ai-coding-dictionary/grilling) session runs and `CONTEXT.md` is untouched at the end, that is what happened; invoke it by name alongside the other skill.
 
 Reach for it when the *words* are the problem:
 

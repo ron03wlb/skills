@@ -1,6 +1,6 @@
 ## What it does
 
-`code-review` reviews committed or WIP candidate changes since a fixed point — a commit, branch, tag, or merge-base — along two separate axes: **Standards** (does the code follow this repo's documented conventions?) and **[Spec](https://www.aihero.dev/ai-coding-dictionary/spec)** (does it implement what the originating issue or spec asked for?). Material risk requires independent reviewers, using parallel [subagents](https://www.aihero.dev/ai-coding-dictionary/subagent) when available. A low-risk requested review may use one agent for both applicable axes, recording that mode and reporting them side by side. It never merges or re-ranks the two sets of findings — keeping them separate is the whole point, because a change can pass one axis and fail the other, and a single blended verdict lets one mask the other.
+`code-review` reviews committed or WIP candidate changes since a fixed point — a commit, branch, tag, or merge-base — along two separate axes: **Standards** (does the code follow this repo's documented conventions?) and **[Spec](https://www.aihero.dev/ai-coding-dictionary/spec)** (does it implement what the originating issue or spec asked for?). It records the candidate, review mode, and applicable axis results side by side. It never merges or re-ranks the two sets of findings — keeping them separate is the whole point, because a change can pass one axis and fail the other, and a single blended verdict lets one mask the other.
 
 Only a **Confirmed code review finding** blocks: the Coordinator must verify exact repository evidence for a Standards violation or exact Spec evidence for a mismatch. A **Code review advisory** lacks that proof and stays visible without failing the review or creating waiver state.
 
@@ -9,10 +9,17 @@ Only a **Confirmed code review finding** blocks: the Coordinator must verify exa
 Type `/code-review`, or the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reaches for it automatically when you ask to review a branch, a PR, work-in-progress changes, or anything "since X".
 The agent also reaches for this skill before integration when a change has material security, data, concurrency, migration, contract, or cross-module risk.
 
+| Review context | Evidence mode |
+| --- | --- |
+| Material risk | Independent reviewers, using parallel [subagents](https://www.aihero.dev/ai-coding-dictionary/subagent) when available |
+| Low-risk requested review | One agent may assess both applicable axes separately |
+| Required independent evidence is unavailable | Report review incomplete |
+
 Reach for this when there is a diff to judge against a known-good point and you want the two questions — *is it built right?* and *is it the right thing?* — answered independently. It runs at the end of the build loop; for actually writing the code test-first, use [tdd](https://aihero.dev/skills-tdd), and for building a whole spec into code use [implement](https://aihero.dev/skills-implement), which runs its own `/code-review` pass before committing.
 Automatic risk-based invocation does not relax that gate: the review still requires a fixed point.
 
-For committed work, the candidate is the merge-base diff through `HEAD`. For work in progress, `HEAD` is the default fixed point when none is named, and the candidate includes tracked changes plus explicitly in-scope untracked files while excluding unrelated dirt.
+- Committed work: resolve the supplied candidate ref, or `HEAD` by default, to one SHA. Review its merge-base diff unless the user explicitly requests another comparison; record both endpoints.
+- Work in progress: `HEAD` is the default fixed point when none is named; include tracked changes and explicitly in-scope untracked files, preserving unrelated dirt.
 
 ## Prerequisites
 
@@ -39,10 +46,9 @@ The Coordinator checks every observation against its cited candidate hunk and go
 
 ## Where it fits
 
-`code-review` is the review step at the tail of the main build chain:
+`code-review` checks a fixed candidate produced by the appropriate execution owner:
 
-```txt
-grill-with-docs → to-spec → to-tickets → implement → code-review
-```
+- Tracker Spec: [to-spec](https://aihero.dev/skills-to-spec) publishes its Run or [to-tickets](https://aihero.dev/skills-to-tickets) route; [execute-issue](https://aihero.dev/skills-execute-issue) runs implementation review before completion.
+- Standalone Spec or explicit current-branch work: [implement](https://aihero.dev/skills-implement) invokes review for its candidate.
 
-Its closest neighbour is [implement](https://aihero.dev/skills-implement), which drives the build and calls this as its own review pass before committing; upstream, the spec it checks against is produced by [to-spec](https://aihero.dev/skills-to-spec) and [to-tickets](https://aihero.dev/skills-to-tickets). When you're unsure which skill or flow fits, [ask-matt](https://aihero.dev/skills-ask-matt) routes you.
+[ask-matt](https://aihero.dev/skills-ask-matt) maps the surrounding flows.

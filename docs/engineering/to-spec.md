@@ -12,9 +12,12 @@ Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-
 
 ## Prerequisites
 
-Tracker-only publication requires the settled scope, source identities, existing tracker identity/version for a revision, and an explicit empty accepted-change list. It needs no planning worktree or lane handoff. Actual glossary or ADR writes require the exact registered isolated lane and shared target writer. The owner-local planning adapter enforces this distinction before publication; compare-and-set still protects the tracker version.
+- Tracker-only publication: settled scope, source identities, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
+- Actual glossary or ADR writes: the exact registered isolated lane and shared target writer.
 
-[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, triage labels, publication adapters, Workflow checkpoint store. Accepted document writes additionally require the shared Target mutation writer and the active task's exact isolated worktree handoff.
+The owner-local planning adapter enforces this distinction before publication; compare-and-set still protects the tracker version.
+
+[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, triage labels, publication adapters, and Workflow checkpoint store. The document-write branch additionally consumes the shared Target mutation writer and active task's exact worktree handoff.
 
 ## One optimistic publication
 
@@ -27,7 +30,7 @@ Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordina
 - Two tasks can plan and publish different Specs against one target without sharing a planning checkout.
 - The published Planning Seal, operation-scoped transaction, tracker publication, and immutable handoff agree.
 - A Single-Issue Spec ends in `/run-issue-workflow <Spec-ID>`; a Multi-Issue parent ends in `/to-tickets <Spec-ID>`.
-- A recoverable failure names the owning source and same command to retry while the task's planning worktree remains intact.
+- A recoverable failure names the owning source and same command to retry while any owned planning worktree remains intact.
 
 ## Where it fits
 

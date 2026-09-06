@@ -8,7 +8,8 @@ It trusts the published delivery classification and records the branch from whic
 
 Type `/execute-issue <Issue-ID>` directly, or an authorized coordinator reaches for it when a valid DAG Run Grant binds that exact dependency-ready Issue. Without either authority, the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) stops before creating a worktree or changing state.
 
-Reach for it for direct human execution of an already published dependency-ready Issue, or as the implementation leaf of its authorized Run. Use [implement](https://aihero.dev/skills-implement) for an approved Standalone Spec or explicit direct current-branch task.
+- Published dependency-ready Issue: invoke this directly or through its authorized Run.
+- Approved Standalone Spec or explicit current-branch work: use [implement](https://aihero.dev/skills-implement).
 
 ## Trustworthy candidate
 

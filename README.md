@@ -197,12 +197,12 @@ Skills I use daily for code work.
 - **[attest-target-contribution](./skills/engineering/attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery or a frozen producer-owned prospective Workflow plan checkpoint.
 - **[record-closed-issue-reconciliation](./skills/engineering/record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for human-confirmed failed-command or command-representation reconciliation.
 - **[prototype](./skills/engineering/prototype/SKILL.md)** — Build a throwaway prototype to answer a design question — a runnable terminal app for state/logic questions, or several radically different UI variations toggleable from one route.
-- **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Disciplined diagnosis loop for hard bugs and performance regressions: reproduce → minimise → hypothesise → instrument → fix → regression-test.
-- **[research](./skills/engineering/research/SKILL.md)** — Investigate a question against high-trust primary sources and capture the findings as a cited Markdown file in the repo, run as a background agent.
-- **[tdd](./skills/engineering/tdd/SKILL.md)** — Test-driven development with a red-green-refactor loop. Builds features or fixes bugs one vertical slice at a time.
+- **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Investigate unexplained failures and regressions through an evidence-led path; choose reproduction, source inspection, or probes as needed.
+- **[research](./skills/engineering/research/SKILL.md)** — Compare primary sources and preserve a cited repository note; delegate when useful independent work can proceed alongside it.
+- **[tdd](./skills/engineering/tdd/SKILL.md)** — Build approved behavior through a red-green loop at existing public interfaces, one vertical slice at a time.
 - **[domain-modeling](./skills/engineering/domain-modeling/SKILL.md)** — Sharpen a project's domain model and record accepted `CONTEXT.md` and ADR changes inside the active planning lane when one exists.
 - **[codebase-design](./skills/engineering/codebase-design/SKILL.md)** — Shared discipline and vocabulary for designing deep modules: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface.
-- **[code-review](./skills/engineering/code-review/SKILL.md)** — Two-axis review of the diff and any prospective workflow artifact declaration: **Standards** and **Spec**, run as parallel sub-agents; automatic activation also covers material security, data, concurrency, migration, contract, or cross-module risk before integration.
+- **[code-review](./skills/engineering/code-review/SKILL.md)** — Two-axis review of the diff and any prospective workflow artifact declaration: **Standards** and **Spec**, with independent reviewers for material security, data, concurrency, migration, contract, or cross-module risk before integration; low-risk requested review may run inline.
 - **[resolving-merge-conflicts](./skills/engineering/resolving-merge-conflicts/SKILL.md)** — Work through an in-progress git merge or rebase conflict hunk by hunk, resolving by intent traced to each side's primary source, then finish the operation — never `--abort`.
 - **[wizard](./skills/engineering/wizard/SKILL.md)** — Generate an interactive bash wizard for manual setup, credentials, dashboard steps, migrations, or cutovers that only a human can perform.
 
@@ -223,4 +223,4 @@ General workflow tools, not code-specific.
 
 - **[grilling](./skills/productivity/grilling/SKILL.md)** — Interview the user relentlessly about a plan, decision, or idea until every branch of the decision tree is resolved. The reusable loop behind `grill-me` and `grill-with-docs`.
 - **[explain-decision](./skills/productivity/explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
-- **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Write predictable skills, `AGENTS.md`, `CLAUDE.md`, and other documents consumed by agents.
+- **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.
