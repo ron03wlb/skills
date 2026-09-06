@@ -41,10 +41,12 @@ test("an installed entry update preserves a running workflow's exact executable 
   const entry = "skills/personal/run-issue-workflow/scripts/installed-entry.mjs";
   mkdirSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts"), { recursive: true });
   const git = (...args) => execFileSync("git", ["-C", sourceRepository, ...args], { encoding: "utf8" }).trim();
+  mkdirSync(join(sourceRepository, "docs/agents"), { recursive: true });
+  writeFileSync(join(sourceRepository, "docs/agents/run-preparation.md"), "Shared planning preparation contract\n");
   const commit = (version) => {
     writeFileSync(join(sourceRepository, entry), `console.log(${JSON.stringify(version)});\n`);
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), `---\nname: run-issue-workflow\ndescription: Run approved work.\n---\n${version}\n`);
-    git("add", "skills");
+    git("add", "skills", "docs/agents/run-preparation.md");
     git("-c", "user.name=Workflow Test", "-c", "user.email=workflow@example.test", "commit", "-m", version);
     return git("rev-parse", "HEAD");
   };
@@ -77,6 +79,7 @@ test("an installed entry update preserves a running workflow's exact executable 
     fs.unlinkSync(skillDirectory); fs.symlinkSync(first.root + "/skills/personal/run-issue-workflow", skillDirectory);
     const second = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
     assert.equal(second.recovered, true);
+    assert.equal(readFileSync(join(second.root, "docs/agents/run-preparation.md"), "utf8"), "Shared planning preparation contract\n");
     assert.equal(fs.existsSync(join(cacheDirectory, "installation-pending.json")), false);
     assert.notEqual(first.version.id, second.version.id);
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v2");
@@ -89,6 +92,8 @@ test("an installed entry update preserves a running workflow's exact executable 
     assert.equal(unavailable.version.sourceCommit, first.version.sourceCommit);
     assert.match(unavailable.reason, /content/u);
     assert.match(readFileSync(join(resumed.root, entry), "utf8"), /tampered/u);
+    writeFileSync(join(second.root, "docs/agents/run-preparation.md"), "tampered shared authority\n");
+    assert.equal(selectWorkflowVersion({ cacheDirectory, recordedVersion: second.version }).state, "UNAVAILABLE");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

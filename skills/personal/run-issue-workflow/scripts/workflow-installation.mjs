@@ -13,7 +13,7 @@ const skillPath = "skills/personal/run-issue-workflow";
 const versionFields = ["id", "sourceCommit", "sourceRepository", "protocolVersion"];
 const sameVersion = (left, right) => versionFields.every((field) => left?.[field] === right?.[field]);
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-const safePath = (path) => typeof path === "string" && path.startsWith("skills/")
+const safePath = (path) => typeof path === "string" && (path.startsWith("skills/") || path === "docs/agents/run-preparation.md")
   && !path.split(/[\\/]/u).some((part) => ["", ".", ".."].includes(part));
 
 function validateCatalog(catalog) {
