@@ -309,6 +309,49 @@ const runExplicitSelection = async ({
   return { result: await runtime.run({ specId: currentRun.specId }), creates };
 };
 
+test("text controls can pause and stop a Run when its browser panel is unavailable", async () => {
+  const { root, store } = createStoreFixture();
+  const model = {
+    trackerState: "OPEN", taskState: "NONE", completionState: "NONE",
+    candidateReachable: false, worktreeState: "ABSENT",
+  };
+  const controlsSeen = [];
+  let disconnected = false;
+  const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"]
+    .map((name) => [name, async () => { throw new Error(`Stopped Run must not call ${name}`); }]));
+  try {
+    const runtime = createWorkflowRuntime({
+      store, tasks,
+      tracker: { async read() { return {}; } },
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser: { async open() { throw new Error("Browser unavailable"); } },
+      controls: {
+        async connect({ readStatus, submitControl }) {
+          assert.equal((await readStatus()).run.runId, identity.runId);
+          for (const command of ["PAUSE", "STOP"]) {
+            const result = await submitControl(command);
+            assert.equal(result.accepted, true);
+            controlsSeen.push(command);
+          }
+          return { async close() { disconnected = true; } };
+        },
+      },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-06T04:00:00.000Z", sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: identity.specId });
+    assert.equal(result.status.run.state, "STOPPED");
+    assert.deepEqual(controlsSeen, ["PAUSE", "STOP"]);
+    assert.deepEqual(result.journal.filter(({ type }) => type === "control.revised")
+      .map(({ command }) => command), ["PAUSE", "STOP"]);
+    assert.equal(result.journal.some(({ type }) => type === "dispatch.recorded"), false);
+    assert.equal(result.panel.mode, "text");
+    assert.equal(disconnected, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("runtime composition builds the owning-source handoff adapter", async () => {
   const { root, store } = createStoreFixture();
   const reads = [];

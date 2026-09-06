@@ -17,6 +17,7 @@ export function createWorkflowRuntime({
   leaf,
   environment,
   browser,
+  controls,
   cleanup,
   now,
   sleep,
@@ -26,6 +27,7 @@ export function createWorkflowRuntime({
     requireMethod(store, method);
   }
   requireMethod(browser, "open");
+  if (controls !== undefined) requireMethod(controls, "connect");
   requireMethod(cleanup, "listRuns");
   if (authoritySources === undefined) {
     throw new TypeError("Workflow runtime requires repository-owned authoritySources");
@@ -69,14 +71,21 @@ export function createWorkflowRuntime({
             }
             return result;
           };
-          const bridge = await startRunPanelBridge({ readStatus, submitControl });
-          panelState = { opened: true, closed: false, origin: bridge.origin };
+          const textControl = controls
+            ? await controls.connect({ readStatus, submitControl })
+            : null;
+          if (textControl) requireMethod(textControl, "close");
+          let bridge;
           try {
+            bridge = await startRunPanelBridge({ readStatus, submitControl });
+            panelState = { opened: true, closed: false, origin: bridge.origin };
             await browser.open(bridge.panelUrl);
           } catch (error) {
-            await bridge.close();
+            await bridge?.close();
+            bridge = null;
             panelState = { ...panelState, closed: true };
-            throw error;
+            if (!textControl) throw error;
+            panelState = { opened: false, closed: false, origin: null, mode: "text" };
           }
           return {
             async waitForControl(afterRevision) {
@@ -85,8 +94,12 @@ export function createWorkflowRuntime({
               await new Promise((resolve) => waiters.push({ afterRevision, resolve }));
             },
             async close() {
-              await bridge.close();
-              panelState = { ...panelState, closed: true };
+              try {
+                await bridge?.close();
+              } finally {
+                await textControl?.close();
+                panelState = { ...panelState, closed: true };
+              }
             },
           };
         },
