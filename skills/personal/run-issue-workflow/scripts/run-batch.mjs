@@ -37,5 +37,9 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
       || ["BLOCKED", "UNAVAILABLE"].includes(status.run.state) && occupied(status) === 0)) break;
     await sleep(progressed ? 250 : 1000);
   }
-  return { state: [...statuses.values()].every(status => status.run.state === "SUCCEEDED") ? "SUCCEEDED" : "PRESERVED", runs: [...statuses.values()] };
+  const runs = lanes.map(lane => statuses.get(lane.specId) ?? {
+    run: { specId: lane.specId, state: "UNAVAILABLE" }, capacityUnknown: true, nodes: [], legalActions: [],
+    reason: "Host disconnected before this selected Spec could be observed; preserve its existing Run and tasks.",
+  });
+  return { state: runs.every(status => status.run.state === "SUCCEEDED") ? "SUCCEEDED" : "PRESERVED", runs };
 }
