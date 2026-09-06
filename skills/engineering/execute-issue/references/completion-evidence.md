@@ -22,4 +22,6 @@ Write one compact tracker completion note containing:
 - `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
 - `worktree: clean` and `implementation_complete`.
 
+For the installed Codex GitHub host, serialize this same owner-verified payload using [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The encoding adds no new completion authority.
+
 Read the note back once and stop. Later movement of the Issue target branch does not change this state. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; the human or a coordinator holding the same valid DAG Run Grant separately invokes `/close-issue`.

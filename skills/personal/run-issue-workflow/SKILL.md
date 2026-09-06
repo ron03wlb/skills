@@ -10,7 +10,7 @@ Run one bounded Tracker Spec as a Codex-native DAG. This skill is the sole Start
 
 ## 1. Select and bind one Run
 
-`/run-issue-workflow <Spec-ID>` selects that exact Spec. Read its body, comments, classification, target, approved scope, Planning Seal, and read-back Decomposition publication record before workflow action. Reject missing, contradictory, stale, or inaccessible authority.
+`/run-issue-workflow <Spec-ID>` selects that exact Spec and authorizes its necessary Codex Issue tasks and later execution/close messages. Pass this identity to the installed entry; its owning sources read the body, comments, classification, target, approved scope, Planning Seal and Decomposition before workflow action. Inspect only the scope or diagnosis needed for the current action; full tracker history stays available on demand. Reject missing, contradictory, stale, or inaccessible authority.
 
 A no-argument invocation resumes only one unique non-terminal Run from current journals and live tracker evidence. Zero candidates require a Spec ID; multiple candidates require explicit selection; otherwise take no workflow action. Never select from a global queue, title, recency, or label alone.
 
@@ -26,19 +26,21 @@ After successful `READY` reduction and reconciliation, create or renew one read-
 
 ## 3. Run the composed lifecycle
 
-Repository-owned `run-authority-adapters.mjs` binds owning-source authority; `run-workflow.mjs` is the single composition interface. After `READY` and Grant read-back, read [the coordinator lifecycle](references/coordinator-lifecycle.md) only when opening or controlling the panel, reconciling live state, dispatching or adopting an Issue lane, waiting for repository-close or target-writer availability, or executing a reducer action.
+Use the installed `scripts/installed-entry.mjs`, not a caller-built factory. The shared package's `codex-workflow.mjs` connects the current Codex host, real Git and GitHub readers through `run-authority-adapters.mjs` and the existing `run-workflow.mjs` composition interface. The consumer supplies only `docs/agents/workflow-host.json`. Read [the active Codex host driver](references/codex-host-driver.md) to launch and forward its allowlisted tools from this task.
+
+The entry selects a trusted immutable package snapshot and journals its version on the Grant. Re-entry resolves the original retained version before importing runtime or dispatching work; a global entry update does not select a new version for that Run. Unavailable, modified or unproven packages preserve the Run and give recovery information. Installation is a separately authorized operation and never runs inside a product Run. After `READY` and Grant read-back, read [the coordinator lifecycle](references/coordinator-lifecycle.md) only when opening or controlling the panel, reconciling live state, dispatching or adopting an Issue lane, waiting for repository-close or target-writer availability, or executing a reducer action.
 
 The happy path is ordered:
 
 1. Reconcile every tracker, Git/worktree, completion, task, journal, and writer source.
-2. Dispatch dependency-ready Issues without exceeding `max_parallel`; every Issue has one lane, and `execute-issue` owns its dedicated Issue worktree.
+2. Dispatch dependency-ready Issues without exceeding `max_parallel`; every Issue has one lane. `execute-issue` owns its dedicated Issue worktree: the Codex task creates it, then execution verifies and adopts that exact worktree. A recorded creation intent prevents duplicate tasks after a lost response.
 3. Treat valid `implementation_complete` as authority to serialize `close-issue`, not as node success.
 4. Release dependants only after the candidate is reachable from the Issue target branch, the exact worktree is absent, and the Issue is closed.
 5. For Multi-Issue, invoke parent-only close after all-child node success; for Single-Issue, finish after its sole node succeeds.
 
 Closeout and its waits consume no execution slot. The coordinator only observes closeout availability and sends an evidence-bound request; the real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.
 
-Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur only through the lifecycle reference and runtime reducers. Use [OPERATOR.md](OPERATOR.md) for invocation, intervention, recovery, and inspection. Examples are display fixtures, never authority.
+Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur only through the lifecycle reference and runtime reducers. If the panel cannot open, the same writer continues with text status and Pause/Stop through the host driver. A disconnected coordinator stops dispatching; app closure never means background progress. Use [OPERATOR.md](OPERATOR.md) for invocation, intervention, recovery, and inspection. Examples are display fixtures, never authority.
 
 ## 4. Recover or stop
 
@@ -46,4 +48,4 @@ Read [Run recovery](references/recovery.md) only after a worker, tracker, enviro
 
 Stop at `SUCCEEDED`, `STOPPED`, or any state with no legal action. A blocked, failed, or paused result must name exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates. Re-entry always reacquires live evidence and resumes only the next legal action without duplication.
 
-This personal coordinator uses only current-host Codex task capabilities and repository-owned scripts. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.
+This personal coordinator uses only current-host Codex task capabilities and the shared installed package. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.

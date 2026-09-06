@@ -17,6 +17,8 @@ Route the user's situation; do not perform the routed work.
 5. `/close-issue <Issue-ID>` integrates the exact candidate into the recorded Issue target branch, removes its clean worktree, and closes it. Issue worktrees may run concurrently; target mutation stays serialized. Use the same command for a Multi-Issue parent only after every exact child is closed and reachable.
 6. Before push, invoke `/verify-target-before-push <target>`. Local-ahead derives members from completion notes; already-pushed work uses an explicit range. Both run aggregate review and verification once. A passing local-ahead run writes `push_ready`; then `/push-target <target>` performs one ordinary non-force push and reads the remote ref back.
 
+The personal `/run-issue-workflow` uses its installed entry and real current-host tools, retains a Run's package version, and offers text controls when the panel is unavailable. Its consumer repository supplies only static host configuration.
+
 The public Issue leaves are `/execute-issue` and `/close-issue`; the model-only prerequisite helper is not a public route.
 
 Read [workflow route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.

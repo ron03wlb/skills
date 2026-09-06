@@ -28,6 +28,9 @@ After a close conflict, the human may explicitly start one successor attempt in 
 
 Any number of Issue worktrees may complete concurrently against the same recorded target. Their completion notes remain valid while `close-issue` serially advances that target.
 
+
+When a Run creates the Codex task with a Git worktree, execution verifies and adopts that exact lane. It does not create a second worktree. The installed GitHub path gives completion notes a structured encoding of the same reviewed evidence so the coordinator can read identities without interpreting prose.
+
 ## It's working if
 
 - Implementation stays in the exact Issue worktree and preserves the recorded target and Acceptance Criteria.

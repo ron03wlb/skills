@@ -465,6 +465,44 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     return projection;
   };
 
+  const listRunIds = () => existsSync(runsRoot)
+    ? readdirSync(runsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && runIdPattern.test(entry.name))
+      .map(({ name }) => name).sort(compareRunIds) : [];
+
+  const hostTaskPath = (runId, issueId) => {
+    if (typeof issueId !== "string" || issueId.length === 0) throw new TypeError("Host task requires an Issue identity");
+    return join(pathsFor(runId).runDir, `host-task-${createHash("sha256").update(issueId).digest("hex")}.json`);
+  };
+  const readHostTask = ({ runId, issueId }) => {
+    const path = hostTaskPath(runId, issueId);
+    if (!existsSync(path)) return null;
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    if (value.runId !== runId || value.issueId !== issueId || typeof value.prompt !== "string") {
+      throw new Error("Host task intent identity differs");
+    }
+    assertNoToken(value);
+    return value;
+  };
+  const reserveHostTask = ({ runId, issueId, prompt }) => {
+    const path = hostTaskPath(runId, issueId);
+    const existing = readHostTask({ runId, issueId });
+    if (existing) return { created: false, intent: existing };
+    const intent = { runId, issueId, prompt };
+    assertNoToken(intent);
+    mkdirSync(dirname(path), { recursive: true });
+    let descriptor;
+    try {
+      descriptor = openSync(path, "wx", 0o600);
+      writeSync(descriptor, JSON.stringify(intent));
+      fsyncSync(descriptor);
+    } catch (error) {
+      if (error.code === "EEXIST") return { created: false, intent: readHostTask({ runId, issueId }) };
+      throw error;
+    } finally { if (descriptor !== undefined) closeSync(descriptor); }
+    syncDirectory(dirname(path));
+    return { created: true, intent };
+  };
+
   const readCleanupRecords = () => {
     if (!existsSync(cleanupPath)) return [];
     const seenRunIds = new Set();
@@ -1155,6 +1193,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     readCleanupLock,
     readEvents,
     readStatus,
+    listRunIds,
+    readHostTask,
+    reserveHostTask,
     readCleanupRecords,
     previewCleanup,
     applyCleanup,

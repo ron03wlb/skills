@@ -22,6 +22,7 @@ export function createWorkflowRuntime({
   now,
   sleep,
   authoritySources,
+  workflowVersion,
 }) {
   for (const method of ["readEvents", "readStatus", "previewCleanup", "applyCleanup"]) {
     requireMethod(store, method);
@@ -55,6 +56,7 @@ export function createWorkflowRuntime({
       const panel = {
         async open({ readStatus, appendEvent, rebuildStatus }) {
           const waiters = [];
+          let controlFailure = null;
           const applyControl = createRunPanelControl({
             readStatus,
             appendEvent,
@@ -72,7 +74,14 @@ export function createWorkflowRuntime({
             return result;
           };
           const textControl = controls
-            ? await controls.connect({ readStatus, submitControl })
+            ? await controls.connect({
+              readStatus,
+              submitControl,
+              onDisconnect(error) {
+                controlFailure = error;
+                for (const waiter of waiters.splice(0)) waiter.reject(error);
+              },
+            })
             : null;
           if (textControl) requireMethod(textControl, "close");
           let bridge;
@@ -89,9 +98,11 @@ export function createWorkflowRuntime({
           }
           return {
             async waitForControl(afterRevision) {
+              if (controlFailure) throw controlFailure;
               const current = await readStatus();
               if (current.run.controlRevision > afterRevision) return;
-              await new Promise((resolve) => waiters.push({ afterRevision, resolve }));
+              if (controlFailure) throw controlFailure;
+              await new Promise((resolve, reject) => waiters.push({ afterRevision, resolve, reject }));
             },
             async close() {
               try {
@@ -106,6 +117,7 @@ export function createWorkflowRuntime({
       };
       const coordinator = createCoordinator({
         store,
+        workflowVersion,
         tracker: authorityAdapters.tracker,
         tasks,
         selector: authorityAdapters.selector,

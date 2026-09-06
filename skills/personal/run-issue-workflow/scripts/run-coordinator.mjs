@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
+import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
   createRecoverableOperatorPacket,
   REASON_CODES,
@@ -386,6 +386,7 @@ export function createCoordinator({
   environment,
   panel,
   onSelected,
+  workflowVersion,
   now,
   sleep,
 }) {
@@ -396,6 +397,7 @@ export function createCoordinator({
     "observeRepositoryCloseLease",
     "observeTargetMutationWriter",
   ]) requireMethod(store, method);
+  if (workflowVersion !== undefined) validateWorkflowVersion(workflowVersion);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
   if (panel) {
@@ -1141,11 +1143,22 @@ export function createCoordinator({
                 resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
               });
             }
+            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)) {
+              return diagnosedStop(rebuildStatus(current.facts), {
+                reasonCode: "workflow_version_unavailable",
+                limitationClass: "contract-blocker",
+                evidence: ["The runtime version differs from this Run's recorded workflow version."],
+                noAutomaticTransition: "Preserve the Run and restore its trusted package before resuming.",
+                affectedNodes: current.facts.nodes.map(({ issueId }) => issueId),
+                resumePredicates: ["recorded_workflow_version_is_available"],
+              });
+            }
             writer.append({
               type: "grant.recorded",
               at: now(),
               runIdentity,
               maxParallel: grantMaxParallel,
+              ...(workflowVersion === undefined ? {} : { workflowVersion }),
             });
             grantRecorded = true;
             lastStatus = rebuildStatus(current.facts);

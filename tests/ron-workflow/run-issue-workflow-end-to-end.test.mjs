@@ -315,13 +315,15 @@ test("text controls can pause and stop a Run when its browser panel is unavailab
     trackerState: "OPEN", taskState: "NONE", completionState: "NONE",
     candidateReachable: false, worktreeState: "ABSENT",
   };
+  const workflowVersion = { id: "a".repeat(64), sourceCommit: "b".repeat(40),
+    sourceRepository: "/trusted/skills", protocolVersion: 1 };
   const controlsSeen = [];
   let disconnected = false;
   const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"]
     .map((name) => [name, async () => { throw new Error(`Stopped Run must not call ${name}`); }]));
   try {
     const runtime = createWorkflowRuntime({
-      store, tasks,
+      store, tasks, workflowVersion,
       tracker: { async read() { return {}; } },
       reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
       browser: { async open() { throw new Error("Browser unavailable"); } },
@@ -341,6 +343,7 @@ test("text controls can pause and stop a Run when its browser panel is unavailab
     });
     const result = await runtime.run({ specId: identity.specId });
     assert.equal(result.status.run.state, "STOPPED");
+    assert.deepEqual(result.journal.find(({ type }) => type === "grant.recorded").workflowVersion, workflowVersion);
     assert.deepEqual(controlsSeen, ["PAUSE", "STOP"]);
     assert.deepEqual(result.journal.filter(({ type }) => type === "control.revised")
       .map(({ command }) => command), ["PAUSE", "STOP"]);

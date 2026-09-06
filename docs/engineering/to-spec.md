@@ -20,6 +20,9 @@ Before publication or a Planning Seal write, `to-spec` re-reads only relevant gl
 
 Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordinary tracker publication uses a current transaction with Planning Seal, publication, and `handoff.completed` read-back; it creates no target operational-plan file or commit. Existing valid incomplete legacy and profile-v1 operations keep their frozen exact-resume behavior.
 
+
+The installed Codex GitHub path records publication and handoff fields in structured comments, preserving the native comment identities and exact body digests. The producer still owns approval and checkpoint completion; installation or a readable comment alone never starts a Run.
+
 ## It's working if
 
 - Two tasks can plan and publish different Specs against one target without sharing a planning checkout.

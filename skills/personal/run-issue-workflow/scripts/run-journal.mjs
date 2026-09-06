@@ -27,7 +27,7 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
-  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel"])],
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion"])],
   ["control.revised", new Set(["type", "at", "revision", "command"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
   ["retry.recorded", new Set([
@@ -77,6 +77,18 @@ const assertExactFields = (value, allowed, label) => {
   const unknown = Object.keys(value).find((key) => !allowed.has(key));
   if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
 };
+
+const workflowVersionFields = new Set(["id", "sourceCommit", "sourceRepository", "protocolVersion"]);
+export function validateWorkflowVersion(version) {
+  assertExactFields(version, workflowVersionFields, "workflow version");
+  if (!/^[a-f0-9]{64}$/u.test(version.id ?? "")
+    || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(version.sourceCommit ?? "")
+    || version.protocolVersion !== 1) throw new TypeError("Invalid or incompatible workflow version");
+  requireText(version.sourceRepository, "workflow version sourceRepository");
+}
+
+export const sameWorkflowVersion = (left, right) => [...workflowVersionFields]
+  .every((field) => left?.[field] === right?.[field]);
 
 const validateTaskRef = (taskRef, label) => {
   assertExactFields(taskRef, new Set(["threadId", "hostId"]), label);
@@ -130,6 +142,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
         throw new TypeError("A SINGLE Run must bind decompositionIdentity as null");
       }
       if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
+      if (event.workflowVersion !== undefined) validateWorkflowVersion(event.workflowVersion);
       break;
     case "control.revised":
       requirePositiveInteger(event.revision, "control revision");
@@ -222,6 +235,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       }
       if ((previous.maxParallel ?? DEFAULT_MAX_PARALLEL) !== (event.maxParallel ?? DEFAULT_MAX_PARALLEL)) {
         throw new TypeError("A renewed grant must preserve maxParallel until a revisioned setting exists");
+      }
+      if (!sameWorkflowVersion(previous.workflowVersion, event.workflowVersion)) {
+        throw new TypeError("A renewed grant must preserve its workflow version");
       }
     }
   }

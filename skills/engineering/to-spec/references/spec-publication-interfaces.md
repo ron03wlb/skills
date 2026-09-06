@@ -34,3 +34,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 | Hard gate | Continuing could target the wrong ref, duplicate or misattribute publication, or corrupt transaction state | Stop before the next mutation and report the conflicting identities. |
 | Recoverable blocker | The owning source is readable but needs human repair or renewed confirmation | Report the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-spec` retry. |
 | Advisory | The observation cannot affect mutation identity, attribution, durable state, or published behavior | Keep it visible; it never blocks or changes authority. |
+
+## Installed Codex GitHub binding
+
+For this configured host, serialize the existing owner-verified publication and handoff fields through [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The installed reader consumes exact native comment IDs and body digests; it never creates or repairs producer checkpoints. The producer remains responsible for approval, ordered stage writes, and independent read-back.

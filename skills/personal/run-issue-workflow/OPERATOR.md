@@ -10,13 +10,23 @@ A Single-Issue Spec runs as one node. A Multi-Issue Spec uses only the exact rea
 
 ## Start or resume
 
-Invoke `/run-issue-workflow <Spec-ID>` once. Successful reconciliation creates or renews the exact Run Grant, opens the loopback panel, and starts work immediately. There is no second Start control.
+Invoke `/run-issue-workflow <Spec-ID>` once. Successful reconciliation creates or renews the exact Run Grant, tries the loopback panel, keeps text controls available, and starts work immediately. There is no second Start control.
 
 Before that authority or any mutation, Entry invokes the owning-source handoff adapter once with the already-read tracker and reconciliation snapshots, then reduces one immediate-upstream producer handoff. A fresh Single-Issue Spec consumes only `to-spec`'s publication and completed handoff. A fresh Multi-Issue Spec consumes only `to-tickets`' completed composite handoff with the upstream publication and handoff, operation receipt, and exact Decomposition identity, digest, mapping, and blocker edges; frozen legacy/profile-v1 handoffs retain their historical record identities. `READY` continues only when the live selected authority, including its Planning Seal, matches. `INCOMPLETE` returns the exact `/to-spec <Spec-ID>` or `/to-tickets <Spec-ID>` retry command, transaction identity, first unsatisfied stage, and producer-owned retry predicates only after the exact transaction and the same live selected authority agree; current producers never own target dirt, and known unrelated dirt does not change their retry. A mismatch returns `UNKNOWN` with the exact conflicting field plus observed and expected values. Other `UNKNOWN` results return a stable diagnosis, exact observed checkpoint and handoff values, and recovery predicates for missing, dirty, malformed, contradictory, stale, legacy, or ambiguous evidence. Neither state applies cleanup, acquires a writer, records a Grant, opens the panel, acts on a task or leaf, or repairs a producer; the returned cleanup preview remains read-only.
 
 After one exact Run is selected and its identity is reconciled, invocation previews and applies the bounded terminal-Run retention sweep before writer acquisition. The selected Run is protected even if cleanup evidence contradicts reconciliation. Zero or ambiguous no-argument selection only previews; use `cleanupPreview: true` to inspect the same eligible set without deletion.
 
-Provide the canonical repository identity and repository owning sources for current Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, producer handoff, target, repository-close and target-writer liveness, Codex task, shared leaf, browser, and cleanup evidence. `run-workflow.mjs` passes those sources through repository-owned `run-authority-adapters.mjs`; callers do not implement `handoff.read` or duplicate upstream validation. For a fresh current-profile Run, the adapter derives one deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; caller correlation never defines the Run. Current stored Runs match that key rather than Spec ID alone, while a selected legacy Run keeps its journaled identity for compatibility. The internal adapter also derives one versioned Run-ready fact from existing snapshots plus one checkpoint classification read. Adapters normalize evidence or execute an already-authorized action; they do not choose the ready frontier.
+The installed entry supplies the real Codex/Git/GitHub composition. Consumers keep only `docs/agents/workflow-host.json` with schema `codex-workflow-host:v1` and the exact GitHub repository name. The checkout origin and one saved Codex Git project must match; no user-provided test factories or adapters are required. The producer's completed checkpoint and independently read-back GitHub handoff remain prerequisites. Human approval of a Spec alone does not create them.
+
+The owning adapter uses the canonical repository identity to derive one deterministic versioned operation identity from immutable Spec, approved-publication, producer and stage values; caller correlation never defines the Run. Current stored Runs match that key rather than Spec ID alone.
+
+## Install and retain versions
+
+For an explicitly approved installation, use `scripts/install-workflow.mjs <trusted-source-repository> <exact-commit> <cache-directory> <public-skill-directory> [exact-existing-link-target]`. The source commit must exist and contain the complete entry. The installer snapshots the committed skill package, records source commit/content digests, retains old versions, and preserves an existing known link in a backup before replacement. Unknown directories or links are never overwritten. Passing an existing link target is exact replacement authorization, not permission to replace any installation.
+
+Start through the resolved public skill's `scripts/installed-entry.mjs` using [the active host driver](references/codex-host-driver.md). The Grant records that package version. A later global update leaves ongoing Runs on their original retained version. Unavailable or modified content returns recovery information without changing the Run or installing anything. An old Run without proven version information stays preserved for compatibility reconciliation.
+
+The driver carries tool results without printing full task histories into the model context. Final evidence includes available command/tool counts and elapsed time; token usage and unobserved human intervention counts remain `unavailable`. Tests with substituted CLI or host responses are local component evidence only. A delivery baseline requires actual installed-entry Git, tracker and task read-back.
 
 ## Read the panel
 
@@ -27,7 +37,7 @@ The panel shows the current Run identity and state, published DAG edges, ready a
 - **Stop** cooperatively revokes further work after active operations settle; it does not kill tasks or delete state.
 - **Refresh** reads the newest projection and appends no journal event.
 
-Closing the browser panel has no effect. The bridge closes automatically when the active coordinator returns at a terminal or diagnosed stop. Reopen the workflow explicitly after return; do not treat a stale browser snapshot as evidence.
+Text controls use the same journal writer and legal controls when the browser is unavailable. Closing the browser panel has no effect. The entry stops requesting work after loss of the active host heartbeat, preserves dispatched tasks and Run progress, and releases its writer. It does not promise scheduling after the app closes. The bridge closes automatically when the active coordinator returns at a terminal or diagnosed stop. Reopen the workflow explicitly after return; do not treat a stale browser snapshot as evidence.
 
 ## Observe closeout waits
 
