@@ -25,6 +25,8 @@ The calling skill can narrow the round:
 
 Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket)-shaping that its wrappers add on top.
 
+For an Issue workflow, the decision tree includes actual installation, task/message, local integration/cleanup and tracker permissions. The agent prepares concrete operations and looks up host capabilities before asking once for missing approval. Declared SQL brings environment, effect, rights, operator, recovery and outcome validation into planning; no SQL is recorded as N/A. Later leaves reuse unchanged decisions.
+
 ## It's working if
 
 - Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) numbers the currently answerable questions and recommends an answer for each, within the calling skill's decision limit.

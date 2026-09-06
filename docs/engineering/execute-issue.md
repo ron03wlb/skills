@@ -25,9 +25,14 @@ After the clean candidate passes verification and review, execution independentl
 
 If closeout stops because the target is dirty or close progress is partial, invoking `execute-issue` again only checks the recorded identities and evidence, reports the still-valid completion, and stops. It does not rerun baseline checks, focused checks, final verification, the full suite, review, commits, or tracker writes. Preserve and resolve the target work, then retry `/close-issue <Issue-ID>`.
 
-After a close conflict, the human may explicitly start one successor attempt in the same branch and worktree from the latest target when the original Acceptance Criteria and ownership are unchanged. The new completion becomes current; a scope change returns to planning.
+After a safely aborted close conflict, the human or same authorized coordinator may start one successor attempt in the same branch and worktree from the latest target when the original Acceptance Criteria and ownership are unchanged. The coordinator preserves the original task/worktree and a ten-wave repair budget across re-entry. The new completion becomes current only after required verification and clean independent review; a scope change returns to planning.
 
 Any number of Issue worktrees may complete concurrently against the same recorded target. Their completion notes remain valid while `close-issue` serially advances that target.
+
+
+When a Run creates the Codex task with a Git worktree, execution verifies and adopts that exact lane. It does not create a second worktree. The installed GitHub path gives completion notes a structured encoding of the same reviewed evidence so the coordinator can read identities without interpreting prose.
+
+Successful verification is reused only while the candidate, exact command, relevant configuration, environment and freshly read required external inputs remain unchanged. A new candidate or integration combination gets the checks it needs; tracker retries do not repeat an unchanged expensive suite.
 
 ## It's working if
 

@@ -39,6 +39,11 @@ For GitLab, setup records `Blocking representation: body` for new configuration 
 | Prior partial native failure | Verified recovery may use configured body only when evidence is consistent; otherwise publication fails closed. |
 
 
+
+The installed Codex GitHub path includes exact child body digests and the verified ready frontier in the structured Decomposition record. Downstream code can detect contract changes and consume the producer handoff without repeating generation or semantic validation.
+
+Before child readiness and the final handoff, the planning owner resolves approved operation scope against the exact child mapping and prepares declared SQL through [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue). The prepared task/worktree becomes that same child’s execution lane. Existing approvals are reused; only concrete missing scope is asked once, and no SQL adds no SQL question.
+
 ## It's working if
 
 - A retry reuses matching child keys instead of creating duplicates.

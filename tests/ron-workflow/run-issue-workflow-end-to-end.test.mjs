@@ -309,6 +309,81 @@ const runExplicitSelection = async ({
   return { result: await runtime.run({ specId: currentRun.specId }), creates };
 };
 
+test("text controls can pause and stop a Run when its browser panel is unavailable", async () => {
+  const { root, store } = createStoreFixture();
+  const model = {
+    trackerState: "OPEN", taskState: "NONE", completionState: "NONE",
+    candidateReachable: false, worktreeState: "ABSENT",
+  };
+  const workflowVersion = { id: "a".repeat(64), sourceCommit: "b".repeat(40),
+    sourceRepository: "/trusted/skills", protocolVersion: 1 };
+  const controlsSeen = [];
+  let disconnected = false;
+  const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"]
+    .map((name) => [name, async () => { throw new Error(`Stopped Run must not call ${name}`); }]));
+  try {
+    const runtime = createWorkflowRuntime({
+      store, tasks, workflowVersion,
+      tracker: { async read() { return {}; } },
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser: { async open() { throw new Error("Browser unavailable"); } },
+      controls: {
+        async connect({ readStatus, submitControl }) {
+          assert.equal((await readStatus()).run.runId, identity.runId);
+          for (const command of ["PAUSE", "STOP"]) {
+            const result = await submitControl(command);
+            assert.equal(result.accepted, true);
+            controlsSeen.push(command);
+          }
+          return { async close() { disconnected = true; } };
+        },
+      },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-06T04:00:00.000Z", sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: identity.specId });
+    assert.equal(result.status.run.state, "STOPPED");
+    assert.deepEqual(result.journal.find(({ type }) => type === "grant.recorded").workflowVersion, workflowVersion);
+    assert.deepEqual(controlsSeen, ["PAUSE", "STOP"]);
+    assert.deepEqual(result.journal.filter(({ type }) => type === "control.revised")
+      .map(({ command }) => command), ["PAUSE", "STOP"]);
+    assert.equal(result.journal.some(({ type }) => type === "dispatch.recorded"), false);
+    assert.equal(result.panel.mode, "text");
+    assert.equal(disconnected, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a paused text-only Run diagnoses host loss without requiring a browser", async () => {
+  const { root, store } = createStoreFixture();
+  const model = { trackerState: "OPEN", taskState: "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" };
+  const tasks = Object.fromEntries(["findIssueLane", "create", "read", "message", "wait"]
+    .map((name) => [name, async () => { throw new Error(`Paused Run must not call ${name}`); }]));
+  try {
+    const runtime = createWorkflowRuntime({
+      store, tasks,
+      tracker: { async read() { return {}; } },
+      reconcile: async ({ journal }) => singleRunCurrent({ journal, model }),
+      browser: { async open() { throw new Error("Browser unavailable"); } },
+      controls: { async connect({ submitControl, onDisconnect }) {
+        await submitControl("PAUSE");
+        onDisconnect(new Error("CODEX_HOST_DISCONNECTED"));
+        return { async close() {} };
+      } },
+      cleanup: { async listRuns() { return []; } },
+      now: () => "2026-09-06T04:00:00.000Z", sleep: async () => {},
+    });
+    const result = await runtime.run({ specId: identity.specId });
+    const diagnosis = result.status.diagnoses.find(({ reasonCode }) => reasonCode === "coordinator_unavailable");
+    assert.ok(diagnosis);
+    assert.deepEqual(diagnosis.resumePredicates, ["active_host_reconnected"]);
+    assert.equal(result.status.diagnoses.some(({ reasonCode }) => reasonCode === "panel_unavailable"), false);
+    assert.equal(result.journal.some(({ type }) => type === "dispatch.recorded"), false);
+    assert.equal(store.readWriterLock(identity.runId), null);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("runtime composition builds the owning-source handoff adapter", async () => {
   const { root, store } = createStoreFixture();
   const reads = [];
@@ -383,7 +458,7 @@ test("runtime composition builds the owning-source handoff adapter", async () =>
     const result = await runtime.run({ specId: "17", cleanupPreview: true });
 
     assert.equal(result.status.run.state, "BLOCKED");
-    assert.equal(result.status.diagnoses[0].reasonCode, "target_dirty_without_owner");
+    assert.equal(result.status.diagnoses[0].reasonCode, "target_ownership_conflict");
     assert.equal(result.status.runReadyHandoff.state, "UNKNOWN");
     assert.deepEqual(
       reads.slice(0, 6),
@@ -1846,7 +1921,7 @@ test("installed route proves real close leaf concurrency and same-command resume
       runIdentity: runs.closeA2,
       repositoryId: repositoryIdA,
       issueId: "92",
-      sleep: async () => { closeA2SleepCalls += 1; },
+      sleep: async () => { closeA2SleepCalls += 1; return closeA2SleepCalls >= 65 ? { coordinatorActive: false } : undefined; },
     });
     closeB = createCloseHarness({
       label: "closeB",
@@ -1906,7 +1981,7 @@ test("installed route proves real close leaf concurrency and same-command resume
 
     assert.equal(blockedCloseA2.status.run.state, "BLOCKED");
     const timeoutDiagnosis = blockedCloseA2.status.diagnoses.at(-1);
-    assert.equal(timeoutDiagnosis.reasonCode, "repository_close_lease_wait_timeout");
+    assert.equal(timeoutDiagnosis.reasonCode, "repository_close_lease_wait_coordinator_lost");
     assert.equal(blockedCloseA2.status.nodes[0].task.retryCount, 0);
     assert.equal(blockedCloseA2.status.nodes[0].close.completionState, "COMPLETE");
     assert.equal(blockedCloseA2.status.nodes[0].close.candidateReachable, false);
@@ -1915,9 +1990,9 @@ test("installed route proves real close leaf concurrency and same-command resume
     assert.equal(timedOutWait.owner.operationId, trace.find(({ event, label }) => (
       event === "acquire" && label === "closeA1"
     )).operationId);
-    assert.match(timeoutDiagnosis.operatorPacket.observedEvidence.join(" "), /repository close lease/iu);
+    assert.match(timeoutDiagnosis.operatorPacket.observedEvidence.join(" "), /coordinator liveness/iu);
     assert.equal(closeA2.snapshot().closeMessages, 0);
-    assert.equal(closeA2SleepCalls, 30);
+    assert.equal(closeA2SleepCalls, 65);
     assert.equal(executionResultA.status.run.maxParallel, 1);
     assert.equal(executionResultB.status.run.maxParallel, 2);
     assert.deepEqual(executionA.created, ["941"]);
@@ -2305,6 +2380,7 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
     journal,
     model,
     targetState,
+    contradictions: targetState === "DIRTY" ? [{ code: "scope_conflict", evidence: ["Changed accepted scope"], affectedNodes: ["17"] }] : [],
   });
   const browser = {
     async open(panelUrl) {
@@ -2751,7 +2827,7 @@ test("end-to-end no-argument recovery adopts interrupted manual and partial-clos
     assert.equal(closeMessages, 1, "recovery must reuse the accepted evidence-bound request");
     assert.equal(panelOpens, 2);
     assert.equal(resumed.journal.filter(({ type }) => type === "dispatch.recorded").length, 1);
-    assert.equal(resumed.journal.filter(({ type }) => type === "grant.recorded").length, 2);
+    assert.equal(resumed.journal.filter(({ type }) => type === "grant.recorded").length, 1, "re-entry preserves the original Grant");
     assert.equal(model.trackerState, "CLOSED");
     assert.equal(model.worktreeState, "ABSENT");
     assert.equal(store.readWriterLock(identity.runId), null);
@@ -2975,11 +3051,11 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
 test("end-to-end target and contract stops remain structured after panel shutdown", async (t) => {
   const scenarios = [
     {
-      name: "dirty target",
-      targetState: "DIRTY",
+      name: "unknown target ownership",
+      targetState: "UNKNOWN",
       contradictions: [],
-      reasonCode: "target_dirty_without_owner",
-      resumePredicate: "target_is_clean_or_exact_incomplete_owner_is_proven",
+      reasonCode: "target_state_uncertain",
+      resumePredicate: "target_state_is_known",
       expectedPanels: 0,
     },
     {

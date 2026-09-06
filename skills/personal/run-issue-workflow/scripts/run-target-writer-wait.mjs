@@ -197,6 +197,23 @@ export const sameCloseWaitEvidence = (left, right) => (
   JSON.stringify(canonicalFact(left)) === JSON.stringify(canonicalFact(right))
 );
 
+// Reconciliation proves current readiness; waiting only pins the authority for its close action.
+export const sameCloseWaitAuthority = (left, right, issueId) => {
+  const authority = (evidence) => ({
+    runIdentity: evidence.runIdentity,
+    grant: evidence.grant,
+    controlRevision: evidence.controlRevision,
+    trackerAvailable: evidence.target.trackerAvailable,
+    parentTrackerIdentity: evidence.target.parentTrackerIdentity,
+    issues: evidence.issues.filter(issue => !issueId || !evidence.issues.some(node => node.issueId === issueId) || issue.issueId === issueId)
+      .map(issue => ({ issueId: issue.issueId, completionState: issue.completionState,
+        authorityEvidence: issue.authorityEvidence === null ? null : Object.fromEntries(
+          Object.entries(issue.authorityEvidence).filter(([key]) => key !== "targetHead")),
+      })),
+  });
+  return sameCloseWaitEvidence(authority(left), authority(right));
+};
+
 // Frozen compatibility aliases for callers that still name the target-writer wait.
 export const createTargetWriterWaitEvidence = createCloseWaitEvidence;
 export const validateTargetWriterWaitEvidence = validateCloseWaitEvidence;

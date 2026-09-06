@@ -14,7 +14,7 @@ On restart, resolve any selector-known Run identity and node set locally before 
 
 ## Writer and environment recovery
 
-Unknown repository-close or target-writer ownership, close-wait timeout, coordinator loss, or changed evidence after the wait is a Recoverable blocker. Report the owning source, exact evidence, smallest human action, preserved Run and Issue stages, and the same `/run-issue-workflow` retry. Elapsed time never grants reclaim authority.
+Unknown repository-close or target-writer ownership, coordinator loss, or changed immutable authority after the wait is a Recoverable blocker. Report the owning source, exact evidence, smallest human action, preserved Run and Issue stages, and the same `/run-issue-workflow` retry. Elapsed time never grants reclaim authority.
 
 The only automatic environment adapter is the Windows Gradle case: a `Selector.open()` probe whose exact result includes `java.io.IOException: Unable to establish loopback connection` may invoke `gradle-loopback-safe` for one reversible, process-local remediation cycle. Every other failure remains untouched. A repeated exact fingerprint in one attempt becomes `environment_unresolved`; later valid attempts classify independently. A legacy `remediation.recorded` without `attempt` belongs only to the latest preceding dispatch for that Issue. Missing, mismatched, future, duplicate, or ambiguous evidence fails closed without journal rewriting.
 
@@ -23,3 +23,10 @@ The only automatic environment adapter is the Windows Gradle case: a `Selector.o
 Stop at `SUCCEEDED`, `STOPPED`, or any state with no legal action. Every blocked, failed, or paused result reports the stable reason code, exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates.
 
 This coordinator is not a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow. Shared leaf repair requires a separately authorized Issue and later explicit re-entry.
+
+
+Healthy waits continue across bounded observations and preserve their journaled owner across re-entry. Normal target HEAD movement and ordered close progress are refreshed. Current native task and Git evidence are read before deciding whether an uncertain create, message, merge or close needs retry; no cached status or absent response proves failure.
+
+Known JSON encodings of existing owner records are read without rewriting them. Missing operation/artifact fields follow their independent exact legacy frontiers or genuinely unadopted scope; no historical Grant, review or completion is invented. Conflicting Issue evidence isolates that Issue and its transitive dependants. A known compatible current runtime records its actual version while preserving the original Grant and retained content.
+
+An accepted close task that settled after partial progress may continue in the same task after fresh Git and tracker reconciliation. Native `Close continuation` metadata retains at most three attempts for unchanged observed progress across re-entry; accepted-message read-back suppresses duplicate sends. New progress resumes only remaining actions. Exhaustion isolates that Issue; it never resets the reviewed candidate or reruns execution checks. Coordinator action failures likewise isolate the owning Issue and descendants; fresh task discovery releases a resolved ambiguity while unrelated work continues within the actual remaining capacity.

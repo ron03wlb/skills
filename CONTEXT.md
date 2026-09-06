@@ -47,7 +47,7 @@ The local branch recorded in an **Issue** when its **Issue worktree** is created
 _Avoid_: Current checked-out branch, latest moving branch, inferred merge destination
 
 **Execution baseline**:
-The exact target-branch commit captured once when one explicit `execute-issue` attempt starts. It is that attempt's fixed point for Standards and Spec review; a human-authorized rerun after a real merge conflict starts a new attempt from the latest target without creating another Issue branch or worktree.
+The exact target-branch commit captured once when one explicit `execute-issue` attempt starts. It is that attempt's fixed point for Standards and Spec review; a human or same-Grant coordinator repair after a safely aborted merge conflict starts a new attempt from the latest target without creating another Issue branch or worktree.
 _Avoid_: Per-wave hash confirmation, lifecycle Grant
 
 **Planning Seal**:
@@ -175,7 +175,7 @@ The `close-issue` specialization of **Target mutation serialization**, preservin
 _Avoid_: Separate close-writer namespace, concurrent integration writers, execution lock
 
 **Target writer wait**:
-The bounded non-failure state entered when a healthy competing operation owns the exact target writer. The waiting **Spec workflow lane** continues independent Issue execution, then reacquires current target and owning-source evidence before retrying integration after release; unknown ownership, timeout, or coordinator loss becomes a **Recoverable blocker** rather than lease-stealing or guessed progress.
+The bounded non-failure state entered when a healthy competing operation owns the exact target writer. The waiting **Spec workflow lane** continues independent Issue execution, then reacquires current target and owning-source evidence before retrying integration after release; unknown ownership or coordinator loss becomes a **Recoverable blocker** rather than lease-stealing or guessed progress.
 _Avoid_: Writer contention failure, durable global queue, lease stealing
 
 **DAG Run**:
@@ -609,7 +609,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Every proposed **Tracker Spec** owns one **Spec workflow lane** with one Codex task and later **DAG Run**, plus an isolated planning worktree when accepted glossary or ADR documents are written; lanes sharing a target remain concurrent and never require a global multi-Spec coordinator
 - Target movement during grilling does not invalidate the lane; **Planning baseline revalidation** may bind a semantically compatible handoff to the latest baseline, while relevant drift stops only that lane for renewed human confirmation
 - A real `close-issue` leaf alone acquires the repository close lease and then **Target mutation serialization**; the DAG coordinator observes both, never acquires, releases, reclaims, or delegates either lease, and preserves closeout outside Issue execution slots and retry budgets
-- Healthy repository-close contention enters `WAITING_FOR_REPOSITORY_CLOSE_LEASE`; compatible target-writer contention retains bounded **Target writer wait**. Both leave unrelated Issue execution eligible and require journaled tracker identity/state, target HEAD/state, candidate commit/reachability, completion identity/hash/state, worktree registration/state, control revision, and Grant evidence to match a post-release reacquisition before closeout, while unknown ownership, timeout, coordinator loss, or changed evidence returns a blocker without stealing the lease
+- Healthy repository-close contention enters `WAITING_FOR_REPOSITORY_CLOSE_LEASE`; compatible target-writer contention retains bounded **Target writer wait**. Both leave independent execution eligible and continue across bounded observation windows. Re-entry preserves the pending wait; post-release reconciliation pins tracker/scope identity, candidate, completion, control revision and Grant while refreshing normal target HEAD, dirt and ordered close progress. Unproven ownership or changed authority isolates the affected branch without stealing the lease
 - Every skill applies **Workflow check disposition** only to checks owned by its interface; downstream consumers trust exact upstream read-back, advisories never block, and only evidence protecting mutation identity, uniqueness, durable state, or push safety is a Hard gate
 - After a human repairs a **Recoverable blocker** at its owning source, **Same-command recovery** resumes the first unsatisfied idempotent stage; no generic resume command, central repair workflow, or force-bypass flag is introduced
 - `/to-spec` is the sole owner of **Delivery routing**: it routes a **Single-Issue Spec** directly to `/run-issue-workflow <Spec-ID>` and routes a **Multi-Issue Spec** to `/to-tickets <Spec-ID>`, whose successful publication then routes the same parent to `/run-issue-workflow <Spec-ID>`
@@ -635,7 +635,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - After every child of a Multi-Issue Spec reaches **DAG node success**, the same **DAG Run Grant** authorizes the coordinator to invoke parent-only `close-issue`, validate the publication record and child reachability again, and require the parent to be closed before declaring **DAG delivery success**
 - A v1 **DAG Run** enters run-level `SUCCEEDED` at **DAG delivery success** and stops; `/verify-target-before-push`, aggregate target review and verification, **Push-ready receipt**, push, and deployment remain outside its grant and lifecycle
 - **DAG branch isolation** keeps unrelated ready branches eligible after one child fails, while that child and every descendant remain blocked
-- A target-wide dirty state, merge conflict, authority mismatch, contract drift, or ambiguous tracker or Git evidence pauses the entire **DAG Run** and requires human resolution before resumption
+- Target dirt pauses integration into that target while independent Issue worktrees continue. Issue-scoped contract, ownership, or evidence conflicts isolate that Issue and its dependants; only a Run identity or Grant conflict stops the entire **DAG Run**.
 - **DAG scheduling authority** comes only from published blocker edges; path, symbol, or module overlap never creates an inferred dependency or blocks an otherwise ready Issue
 - A transient worker or terminal failure may consume one **DAG retry budget** attempt and retry the same Issue, but the third failed attempt marks that node failed, blocks its descendants, and leaves unrelated ready branches eligible
 - `implementation_blocked`, merge conflict, Scope change, authority or contract mismatch, and ambiguous evidence bypass the **DAG retry budget** and enter their defined blocked or run-paused state immediately
@@ -735,3 +735,13 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - "backlog" was previously used to mean both the *tool* hosting issues and the *body of work* inside it — resolved: the tool is the **Issue tracker**; "backlog" is no longer used as a domain term.
 - "backlog backend" / "backlog manager" — resolved: collapsed into **Issue tracker**.
 - "Issue Execution Packet" and "Issue Execution Checkpoint" were previously used for overlapping context concepts — resolved as **Issue Context Packet** for ephemeral input and **Issue Progress Checkpoint** for durable recovery output.
+
+
+## Approved workflow preparation and recovery
+
+- An explicitly selected multi-Spec batch keeps independent Runs and Grants, shares a worker bound, observes existing workers before allocation, and rotates ready actions. It creates no global pool or daemon and starts no unselected Spec.
+- Planning inventories actual permissions and read-only host capabilities before one request for missing approval. Known SQL prerequisites use the existing candidate and human attestation flow before related readiness; no SQL is N/A. Environment identity and artifact content are bound, with no implied database or deployment authority.
+- A planning-prepared prerequisite task/worktree is the later Issue execution lane. Native ownership and current Git evidence must match before the first execution message; existing attestations and approvals are reused.
+- Safe conflict abort remains the close owner’s responsibility. The coordinator returns the original lane to execution under unchanged scope and a persistent ten-wave repair budget; replacement candidates require renewed necessary verification and independent Standards/Spec review. Semantic scope changes isolate that Issue and dependants for planning.
+- Execution-owned verification results are reusable only for the exact candidate, command, relevant configuration, environment and freshly read required external inputs. New candidates and integration combinations receive their required checks.
+- Known compatible record encodings and protocol-v1 runtime changes are handled by current code after exact source and authority checks. Original Grants, retained content and historical reviews remain unchanged; current runtime observations record only what is now true.

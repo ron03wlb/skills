@@ -1,6 +1,6 @@
 ---
 name: pre-execute-issue
-description: Prepare and attest one exact declared Issue prerequisite. Use when a human invokes it directly or an active `execute-issue` lane hands off the same unresolved Manual prerequisite.
+description: Prepare and attest one exact declared Issue prerequisite. Use when a human invokes it directly or the owning planning producer or active `execute-issue` lane hands off that exact Manual prerequisite.
 ---
 
 # Pre-Execute Issue
@@ -9,7 +9,7 @@ Resolve one exact Manual prerequisite, establish its content identity, and recor
 
 ## Accept one exact entry
 
-Entry is either a direct `/pre-execute-issue <Issue-ID>` invocation or an active `execute-issue` handoff that already binds the exact caller lane and approved scope. Read the exact Issue, linked Spec, ordered comments, published classification, blockers, Planning Seal, and recorded target.
+Entry is either a direct `/pre-execute-issue <Issue-ID>` invocation or the owning `to-spec`/`to-tickets` planning handoff or active `execute-issue` handoff that binds the exact caller lane and approved scope. Read the exact Issue, linked Spec, ordered comments, published classification, blockers, Planning Seal, and recorded target.
 
 From the Issue or linked Spec, resolve only one exact declared normalized repository-relative artifact, or accept one exact unchanged-scope late discovery from the active handoff. The late-discovery packet must preserve behavior, Acceptance Criteria, target, exclusions, schema outcome, and ownership.
 
@@ -17,7 +17,7 @@ No declaration skips this workflow without a write or worktree; arbitrary `.sql`
 
 ## Reconcile the Issue worktree
 
-Derive the recorded Issue target from tracker evidence, not the current checkout. Reconcile exactly one unique Issue topic branch and Issue worktree using the repository's established Issue-worktree convention. An active handoff must reuse its exact branch and worktree; it never creates a second lane. A direct invocation may create the one pair from the current recorded target when neither exists.
+Derive the recorded Issue target from tracker evidence, not the current checkout. Reconcile exactly one unique Issue topic branch and Issue worktree using the repository's established Issue-worktree convention. An active handoff must reuse its exact branch and worktree; it never creates a second lane. A direct invocation or approved planning handoff may create the one pair from the current recorded target when neither exists.
 
 Create or reuse only that exact pair. Dirty, mismatched, multiply registered, ambiguous, or ambiguously owned branch or worktree state stops without cleanup or unrelated mutation. Never stash, reset, move, delete, or repair existing state. Record the target baseline, topic branch, worktree path, and current checkpoint once.
 
@@ -28,6 +28,8 @@ On retry, inspect the ordered Issue history before any new preparation or presen
 Reuse an artifact as a matching clean valid **Prerequisite candidate** only when one read-back packet supplies its full candidate commit, exact Git blob, normalized repository-relative path, passing deterministic validation, and clean Standards and Spec review evidence. Verify that Git contains the commit and blob, the candidate contains the recorded target baseline and any active-lane checkpoint, the exact worktree is clean at that candidate, and the declared path resolves to that blob. Missing review or validation evidence is not reconstructed from filenames, commit messages, or prose.
 
 Otherwise invoke the model-invoked `prepare-prerequisite-artifact` skill with the exact Issue, linked Spec, target, worktree, topic branch, unchanged scope, checkpoint, and declared artifact. Accept its return only when a fresh read-back proves the matching candidate, blob, path, validation, clean review, worktree, branch, and ancestry evidence. Any drift or mismatch stops without accepting readiness.
+
+For planning entry, read [Run preparation](../../../docs/agents/run-preparation.md). Confirm the declared opaque environment identity, authorized effect and rights, application owner, prepared recovery and outcome checks before presentation. Read existing approvals and exact attestations first; do not ask again for already approved unchanged scope. The planning owner retains the candidate packet and native task identity for later Run adoption.
 
 Present the committed primary **Operator SQL**, candidate, blob, and repository-relative path to the human for execution. Never execute or replay it, connect to a database, run recovery or cleanup, retry a failure, collect credentials, or invent external-state proof.
 
@@ -47,9 +49,10 @@ blob: <full-Git-blob-SHA>
 artifact: <repository-relative-path>
 outcome: <APPLIED|NO_OP>
 attested_by: human
+environment_identity: <declared-opaque-environment-identity>
 ```
 
-The tracker supplies author and timestamp. Do not add credentials, target details, artifact contents, query output, a duplicate digest, or invented verification claims. Legacy `manual_prerequisite_complete:v1` notes remain readable only for their exact path-bound legacy artifact; they cannot authorize a newly generated Prerequisite candidate.
+For a new environment-bound declaration, require the same `environment_identity` on reuse and every read-back. An older environment-less v2 is readable only for its exact older declaration; do not upgrade it or apply it to a new environment. The tracker supplies author and timestamp. Do not add credentials, target details, artifact contents, query output, a duplicate digest, or invented verification claims. Legacy `manual_prerequisite_complete:v1` notes remain readable only for their exact path-bound legacy artifact; they cannot authorize a newly generated Prerequisite candidate.
 
 An error, SQL failure, missing outcome, or any other value produces no attestation, no resume, and no automatic retry or rollback. Report the error text and stop; read-only diagnosis and any corrected candidate require separate authority.
 
@@ -58,6 +61,8 @@ Tracker write or read-back failure is unresolved persistence: report it and neve
 ## Stop or return to the caller
 
 A direct invocation must stop after exact attestation read-back and grants no implementation authority. Report the Issue, candidate, blob, artifact, and outcome, then tell the human that `/execute-issue <Issue-ID>` is a separate action.
+
+For a planning handoff, return the exact candidate/attestation/task/worktree packet to that same producer; it completes readiness before a later Run Grant may authorize execution.
 
 For an active handoff, return only to the same authorized execution lane after a fresh read proves the Issue, linked Spec, target, declared artifact, candidate, blob, topic branch, worktree, blocker state, approved scope, and candidate/checkpoint/target ancestry are unchanged. The original direct-human authority or exact DAG Run Grant must still bind that lane; this skill creates no execution authority.
 

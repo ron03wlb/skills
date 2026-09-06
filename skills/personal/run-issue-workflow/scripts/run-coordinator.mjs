@@ -1,14 +1,16 @@
 import { createHash } from "node:crypto";
+import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 
-import { DEFAULT_MAX_PARALLEL } from "./run-journal.mjs";
+import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
   createRecoverableOperatorPacket,
   REASON_CODES,
   reduceRunReadyHandoff,
+  planControl,
 } from "./run-core.mjs";
 import {
   createCloseWaitEvidence,
-  sameCloseWaitEvidence,
+  sameCloseWaitAuthority,
 } from "./run-target-writer-wait.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
@@ -48,6 +50,7 @@ const ENGINE_WRITER_CONTENTION = new Set([
 ]);
 const MUTATING_ACTION_TYPES = new Set([
   "dispatch_issue",
+  "repair_issue",
   "remediate_environment",
   "close_issue",
   "close_parent",
@@ -67,8 +70,17 @@ const canonicalize = (value) => {
   }
   return value;
 };
-const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
-  .update(JSON.stringify(canonicalize(evidence)))
+const closeRequestAuthority = (evidence) => {
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, ...authority } = evidence;
+  if (authority.authorityEvidence) {
+    const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
+    authority.authorityEvidence = fixed;
+  }
+  if (authority.childCloseStates) authority.childCloseStates = authority.childCloseStates.map(closeRequestAuthority);
+  return authority;
+};
+export const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
+  .update(JSON.stringify(canonicalize(closeRequestAuthority(evidence))))
   .digest("hex")}`;
 
 const requireMethod = (owner, name) => {
@@ -291,13 +303,16 @@ const trackerUnavailable = (request, attempts, status) => {
   });
 };
 
-const issueLaneAmbiguous = (status, issueId, laneCount) => diagnosedStop(status, {
+const issueLaneAmbiguous = (status, issueId, laneCount) => ({ ...diagnosedStop(status, {
   reasonCode: "issue_lane_ambiguous",
   limitationClass: "unresolved-evidence",
   evidence: [`Issue ${issueId} matched ${laneCount} Codex task lanes; exactly one or zero is required.`],
   noAutomaticTransition: "Ambiguous task identity cannot authorize dispatch, retry, or closeout.",
-  affectedNodes: status.nodes.map(({ issueId: nodeIssueId }) => nodeIssueId),
+  affectedNodes: [issueId],
   resumePredicates: ["one_exact_issue_lane_is_proven"],
+}), reservationCount: laneCount || status.run.maxParallel,
+  nodes: status.nodes.map(node => node.issueId === issueId
+    ? { ...node, task: { ...node.task, reservedWorkers: laneCount || status.run.maxParallel } } : node),
 });
 
 const issueLaneMissing = (status, issueId) => diagnosedStop(status, {
@@ -325,6 +340,14 @@ const panelUnavailable = (status) => diagnosedStop(status, {
     .filter(({ state }) => state !== "SUCCEEDED")
     .map(({ issueId }) => issueId),
   resumePredicates: ["panel_can_open"],
+});
+
+const coordinatorUnavailable = (status) => diagnosedStop(status, {
+  reasonCode: "coordinator_unavailable",
+  evidence: ["The active Codex host heartbeat disconnected."],
+  noAutomaticTransition: "Reconnect the active host and resume the same Run; preserve existing tasks and controls.",
+  affectedNodes: status.nodes.filter(({ state }) => state !== "SUCCEEDED").map(({ issueId }) => issueId),
+  resumePredicates: ["active_host_reconnected"],
 });
 
 const authorityDrift = ({ status, runIdentity, current, recordedGrant, afterWriterWait = false }) => {
@@ -386,6 +409,9 @@ export function createCoordinator({
   environment,
   panel,
   onSelected,
+  workflowVersion,
+  compatibleRecordedVersion,
+  actionStops = new Map(),
   now,
   sleep,
 }) {
@@ -396,6 +422,7 @@ export function createCoordinator({
     "observeRepositoryCloseLease",
     "observeTargetMutationWriter",
   ]) requireMethod(store, method);
+  if (workflowVersion !== undefined) validateWorkflowVersion(workflowVersion);
   requireMethod(tracker, "read");
   for (const method of ["findIssueLane", "create", "read", "message", "wait"]) requireMethod(tasks, method);
   if (panel) {
@@ -471,7 +498,7 @@ export function createCoordinator({
         if (!accepted) {
           await tasks.message(
             priorDispatch.taskRef,
-            `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant.`,
+            `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Retry request: ${JSON.stringify({runId: current.runIdentity.runId, issueId: action.issueId, attempt: action.attempt})}`,
           );
         }
       } else if (task?.state === "INACTIVE" && Array.isArray(task.inactiveEvidence)
@@ -526,9 +553,11 @@ export function createCoordinator({
       });
       return null;
     }
+    const prepared = current.preparedLanes?.[action.issueId];
     const existing = await tasks.findIssueLane({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
+      prepared,
     });
     if (!Array.isArray(existing) || existing.length > 1) {
       return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
@@ -539,6 +568,15 @@ export function createCoordinator({
       environment: "local",
     });
     if (!isTaskRef(taskRef)) throw new Error("ISSUE_LANE_NOT_READY");
+    if (prepared) {
+      const task = await tasks.read(taskRef);
+      const accepted = task.retryRequest?.state === "ACCEPTED" && task.retryRequest.runId === current.runIdentity.runId
+        && task.retryRequest.issueId === action.issueId && task.retryRequest.attempt === 1;
+      if (!accepted) {
+        if (task.state !== "RESUMABLE") throw new Error("Prepared lane has not settled; preserve it before execution");
+        await tasks.message(taskRef, `Use $execute-issue to retry Issue ${action.issueId} from its prepared prerequisite candidate in this exact task and worktree. Reuse the freshly read attestation and existing approvals. Retry request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, attempt: 1 })}`);
+      }
+    }
     writer.append({
       type: "dispatch.recorded",
       at: now(),
@@ -549,7 +587,27 @@ export function createCoordinator({
     return null;
   };
 
-  const closeIssue = async ({ action, current, status }) => {
+  const repairIssue = async ({ action, current, writer }) => {
+    const journal = store.readEvents(current.runIdentity.runId);
+    const prior = journal.filter(event => event.type === "repair.recorded" && event.issueId === action.issueId);
+    const taskRef = current.taskRefs?.[action.issueId];
+    if (!isTaskRef(taskRef)) throw new Error("Conflict repair requires the original Issue task");
+    let intent = prior.findLast(event => event.candidate === action.candidate);
+    if (!intent) {
+      const wave = prior.length + 1;
+      if (wave > 10) throw new Error("Persistent conflict repair budget exhausted");
+      const requestIdentity = closeRequestIdentityFor({ runIdentity: current.runIdentity, issueId: action.issueId, candidate: action.candidate, baseline: action.targetHead, wave });
+      intent = writer.append({ type: "repair.recorded", at: now(), issueId: action.issueId, wave, candidate: action.candidate, targetHead: action.targetHead, taskRef, requestIdentity });
+    }
+    const task = await tasks.read(taskRef);
+    const accepted = task.repairRequest?.requestIdentity === intent.requestIdentity && task.repairRequest.runId === current.runIdentity.runId;
+    if (!accepted) {
+      if (task.state !== "RESUMABLE") throw new Error("Original Issue task is not ready for conflict repair");
+      await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
+    }
+  };
+
+  const closeIssue = async ({ action, current, status, step = false }) => {
     let taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) {
       const existing = await tasks.findIssueLane({
@@ -579,13 +637,18 @@ export function createCoordinator({
       worktreeState: node.close.worktreeState,
       authorityEvidence: sourceNode.closeAuthorityEvidence,
     };
-    const requestIdentity = closeRequestIdentityFor(requestEvidence);
+    let requestIdentity = closeRequestIdentityFor(requestEvidence);
     const task = await tasks.read(taskRef);
     const acceptedForLane = task?.closeRequest?.state === "ACCEPTED"
       && task.closeRequest.runId === current.runIdentity.runId
       && task.closeRequest.issueId === action.issueId;
+    if (acceptedForLane && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity) requestIdentity = task.closeRequest.requestIdentity;
+    const repair = store.readEvents(current.runIdentity.runId).findLast(event => event.type === "repair.recorded" && event.issueId === action.issueId);
+    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && repair
+      && repair.candidate === task.closeRequest.evidence?.authorityEvidence?.candidateCommit
+      && sourceNode.closeAuthorityEvidence.candidateCommit !== repair.candidate;
     if (task?.closeRequest?.state === "ACCEPTED"
-      && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity)) {
+      && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity) && !renewedAfterRepair) {
       return {
         stopped: closeRequestEvidenceChanged(status, {
           issueId: action.issueId,
@@ -595,12 +658,19 @@ export function createCoordinator({
       };
     }
     const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
-    if (!accepted) {
+    const continuation = accepted ? planCloseContinuation({ task, requestIdentity, requestEvidence }) : { needed: false };
+    if (continuation.exhausted) return { stopped: diagnosedStop(status, {
+      reasonCode: "close_retry_budget_exhausted", evidence: ["Three native close continuations settled without progress; preserve the original task and current Git/tracker state."],
+      affectedNodes: [action.issueId], noAutomaticTransition: "The unchanged close progress exhausted its persistent continuation budget.", resumePredicates: ["close_progress_or_owning_source_failure_is_resolved"],
+    }) };
+    if (continuation.needed) await sleep([5000, 15000, 30000][continuation.attempt - 1]);
+    if (!accepted || continuation.needed) {
       await tasks.message(
         taskRef,
-        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}`,
+        `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`,
       );
     }
+    if (step) return { active: true };
     const waited = await tasks.wait([taskRef]);
     const settled = waited?.taskSettled === true;
     if (settled && waited.closeRequestIdentity !== requestIdentity) {
@@ -612,7 +682,7 @@ export function createCoordinator({
         }),
       };
     }
-    return { active: settled && waited?.coordinatorActive !== false };
+    return { active: waited?.coordinatorActive !== false };
   };
 
   const remediateEnvironment = async ({ action, current, writer }) => {
@@ -643,7 +713,7 @@ export function createCoordinator({
     return true;
   };
 
-  const closeParent = async ({ action, current, status }) => {
+  const closeParent = async ({ action, current, status, step = false }) => {
     requireMethod(leaf, "closeParent");
     const requestEvidence = {
       runIdentity: current.runIdentity,
@@ -668,6 +738,7 @@ export function createCoordinator({
       runIdentity: current.runIdentity,
       requestIdentity,
       requestEvidence,
+      step,
     });
     if (result?.settled === true && result.requestIdentity !== requestIdentity) {
       return {
@@ -766,23 +837,7 @@ export function createCoordinator({
       evidence,
     });
 
-    if (unsettled) {
-      appendSettlement({
-        started: unsettled,
-        outcome: "COORDINATOR_INACTIVE",
-        evidence: [`Writer wait ${unsettled.sequence} was left unsettled by a prior coordinator.`],
-      });
-      return stop(
-        waitKind.interrupted,
-        [
-          `Run ${current.runIdentity.runId} recovered unsettled writer wait ${unsettled.sequence}.`,
-          `The Run, Issue completion, and ${waitKind.label} state remain preserved.`,
-        ],
-        ["invoke_same_run_issue_workflow_after_writer_wait_reconciliation"],
-      );
-    }
-
-    const started = writer.append({
+    const started = unsettled ?? writer.append({
       type: waitKind.startedType,
       at: now(),
       issueId: action.issueId,
@@ -791,6 +846,10 @@ export function createCoordinator({
       timeoutMs: action.timeoutMs,
       preWaitEvidence: action.preWaitEvidence,
     });
+    if (started.preWaitEvidence.controlRevision !== status.run.controlRevision) {
+      appendSettlement({ started, outcome: "CONTROL_CHANGED", evidence: ["A control revision superseded the pending observation."] });
+      return { controlRevisionChanged: true };
+    }
     const changedEvidenceStop = (evidence) => {
       appendSettlement({ started, outcome: "EVIDENCE_CHANGED", evidence });
       return stop(
@@ -823,7 +882,7 @@ export function createCoordinator({
           nodes: refreshed.facts.nodes,
           controlRevision: recoveryStatus.run.controlRevision,
         });
-        if (!sameCloseWaitEvidence(started.preWaitEvidence, refreshedEvidence)) {
+        if (!sameCloseWaitAuthority(started.preWaitEvidence, refreshedEvidence, action.issueId)) {
           return changedEvidenceStop([
             `Pre-wait evidence ${JSON.stringify(started.preWaitEvidence)}.`,
             `Post-wait evidence ${JSON.stringify(refreshedEvidence)}.`,
@@ -837,7 +896,7 @@ export function createCoordinator({
       appendSettlement({
         started,
         outcome: "RELEASED",
-        evidence: [`The exact competing ${waitKind.label} is absent and all pre-wait evidence was reacquired unchanged.`],
+        evidence: [`The exact competing ${waitKind.label} is absent; close authority is unchanged and current readiness was reacquired.`],
       });
       return { released: true };
     };
@@ -867,62 +926,33 @@ export function createCoordinator({
         expectedOwner: action.owner,
       });
     recoveryStatus = writer.rebuildStatus(current.facts);
-    let elapsedMs = 0;
-    const pollMs = Math.min(1_000, action.timeoutMs);
-    while (elapsedMs < action.timeoutMs) {
-      const observedOutcome = await settleObservedOwner(observeOwner());
-      if (observedOutcome) return observedOutcome;
-
-      const delayMs = Math.min(pollMs, action.timeoutMs - elapsedMs);
-      const waitResult = await sleep(delayMs);
-      elapsedMs += delayMs;
-      if (waitResult?.coordinatorActive === false) {
-        appendSettlement({
-          started,
-          outcome: "COORDINATOR_INACTIVE",
-          evidence: [`The active coordinator was lost while the ${waitKind.label} remained owned.`],
-        });
-        return stop(
-          waitKind.coordinatorLost,
-          [`Coordinator liveness became inactive during ${waitKind.label} wait.`],
-          ["coordinator_is_active", "retry_same_run_issue_workflow"],
-        );
-      }
-      const latestControl = store.readEvents(current.runIdentity.runId)
-        .findLast(({ type }) => type === "control.revised");
-      if ((latestControl?.revision ?? 0) !== status.run.controlRevision) {
-        appendSettlement({
-          started,
-          outcome: "CONTROL_CHANGED",
-          evidence: [`Control revision changed from ${status.run.controlRevision} to ${latestControl.revision}.`],
-        });
-        return { controlRevisionChanged: true };
-      }
+    const observedOutcome = await settleObservedOwner(observeOwner());
+    if (observedOutcome) return observedOutcome;
+    const health = repositoryCloseWait ? current.facts.run.repositoryCloseLeaseHealth : current.facts.run.closeWriterHealth;
+    if (health !== "HEALTHY") {
+      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["Current owner health is unproven; the lease remains untouched."] });
+      return stop(waitKind.coordinatorLost, ["Current owner health is unproven."], [waitKind.reconcilePredicate]);
     }
+    // One observation slice yields back to scheduling; elapsed time never invalidates healthy ownership.
+    const waitResult = request.mode === "step" ? undefined : await sleep(1000);
+    if (waitResult?.coordinatorActive === false) {
+      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["The active coordinator disconnected; retain owner and progress."] });
+      return stop(waitKind.coordinatorLost, ["Coordinator liveness became inactive during wait."], ["coordinator_is_active"]);
+    }
+    const latestControl = store.readEvents(current.runIdentity.runId).findLast(({ type }) => type === "control.revised");
+    if ((latestControl?.revision ?? 0) !== status.run.controlRevision) {
+      appendSettlement({ started, outcome: "CONTROL_CHANGED", evidence: ["Control revision changed during wait."] });
+      return { controlRevisionChanged: true };
+    }
+    return { waiting: true };
 
-    const deadlineOutcome = await settleObservedOwner(observeOwner());
-    if (deadlineOutcome) return deadlineOutcome;
-    const minimumTimeoutAt = new Date(Date.parse(started.at) + action.timeoutMs).toISOString();
-    const observedAt = now();
-    appendSettlement({
-      started,
-      outcome: "TIMED_OUT",
-      at: Date.parse(observedAt) >= Date.parse(minimumTimeoutAt) ? observedAt : minimumTimeoutAt,
-      evidence: [`The exact competing ${waitKind.label} remained present for ${action.timeoutMs} milliseconds.`],
-    });
-    return stop(
-      waitKind.timeout,
-      [
-        `${waitKind.label} ${JSON.stringify(action.owner)} did not release within ${action.timeoutMs} milliseconds for target ${current.runIdentity.target}.`,
-        "The Run, Issue completion, and target state remain preserved.",
-      ],
-      [waitKind.absentPredicate, "retry_same_run_issue_workflow"],
-    );
   };
 
   return {
     async run(request = {}) {
+      if (request.executionSlots !== undefined && (!Number.isInteger(request.executionSlots) || request.executionSlots < 0)) throw new TypeError("Invalid batch execution capacity");
       let selectedRequest = request;
+      let stepFinished = false;
       let candidateRuns = null;
       if (!isText(request.specId)) {
         requireMethod(selector, "listNonTerminalRuns");
@@ -958,13 +988,58 @@ export function createCoordinator({
       let lastStatus = null;
       let latestFacts = null;
       let panelHandle = null;
-      const rebuildStatus = (facts) => {
-        latestFacts = facts;
-        return writer.rebuildStatus(facts);
+      const actionFactsIdentity = (facts, issueId) => JSON.stringify(canonicalize({
+        run: Object.fromEntries(RUN_IDENTITY_KEYS.map(key => [key, facts.run[key]])),
+        node: facts.nodes.find(node => node.issueId === issueId),
+      }));
+      const actionProgressIdentity = (facts, issueId) => {
+        const resume = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised" && event.command === "RESUME");
+        return `sha256:${createHash("sha256").update(JSON.stringify([actionFactsIdentity(facts, issueId), resume?.revision ?? 0])).digest("hex")}`;
       };
-      const publishPanelStop = (status) => {
+      const failedActions = facts => store.readEvents(facts.run.runId).filter(event => event.type === "action.failed"
+        && event.progressIdentity === actionProgressIdentity(facts, event.issueId));
+      const rebuildStatus = (facts) => {
+        const control = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised");
+        const local = [];
+        const reservations = new Map();
+        for (const failure of failedActions(facts).filter(event => event.attempt === 3)) {
+          local.push({ code: "issue_action_retry_exhausted", reasonCode: "issue_action_retry_exhausted",
+            affectedNodes: [failure.issueId], evidence: [`${failure.actionType} exhausted three attempts without owning-source progress: ${failure.evidence}`] });
+          if (failure.actionType === "dispatch_issue") reservations.set(failure.issueId, 1);
+        }
+        for (const [key, entry] of actionStops) {
+          if (entry.runId !== facts.run.runId) continue;
+          if (entry.factsIdentity !== actionFactsIdentity(facts, entry.issueId)
+            || control?.command === "RESUME" && control.revision > entry.controlRevision) { actionStops.delete(key); continue; }
+          if (entry.reservationCount) reservations.set(entry.issueId, entry.reservationCount);
+          local.push({ code: entry.diagnosis.reasonCode, reasonCode: entry.diagnosis.reasonCode,
+            affectedNodes: [entry.issueId], evidence: entry.diagnosis.evidence });
+        }
+        latestFacts = { ...facts, nodes: facts.nodes.map(node => reservations.has(node.issueId) ? { ...node, reservedWorkers: reservations.get(node.issueId) } : node), contradictions: [...facts.contradictions, ...local] };
+        return writer.rebuildStatus(latestFacts);
+      };
+      const isolateActionStop = (stopped, action, current) => {
+        if (current.runIdentity.classification !== "MULTI" || !current.facts.nodes.some(node => node.issueId === action.issueId)) return false;
+        const diagnosis = stopped.diagnoses.findLast(item => item.affectedNodes.includes(action.issueId));
+        if (!diagnosis) return false;
+        actionStops.set(`${current.runIdentity.runId}:${action.issueId}`, { runId: current.runIdentity.runId, issueId: action.issueId,
+          factsIdentity: actionFactsIdentity(current.facts, action.issueId), controlRevision: stopped.run.controlRevision, diagnosis, reservationCount: stopped.reservationCount ?? 0 });
+        return true;
+      };
+      const refreshActionStops = async current => {
+        for (const [key, entry] of actionStops) {
+          if (entry.runId !== current.runIdentity.runId || !["issue_lane_ambiguous", "issue_lane_missing"].includes(entry.diagnosis.reasonCode)) continue;
+          try {
+            const found = await tasks.findIssueLane({ issueId: entry.issueId, runIdentity: current.runIdentity });
+            if (Array.isArray(found) && (found.length === 1 || found.length === 0 && entry.diagnosis.reasonCode === "issue_lane_ambiguous")) actionStops.delete(key);
+            else if (Array.isArray(found)) entry.reservationCount = found.length;
+          } catch { /* Unproven identity keeps only this Issue fenced. */ }
+        }
+      };
+      const publishPanelStop = (status, error) => {
         requireMethod(writer, "publishStatus");
-        return writer.publishStatus(panelUnavailable(status));
+        return writer.publishStatus(error?.message === "CODEX_HOST_DISCONNECTED"
+          ? coordinatorUnavailable(status) : panelUnavailable(status));
       };
       const openPanel = async (status) => {
         if (!panel || panelHandle) return null;
@@ -978,8 +1053,8 @@ export function createCoordinator({
           requireMethod(opened, "close");
           panelHandle = opened;
           return null;
-        } catch {
-          return publishPanelStop(status);
+        } catch (error) {
+          return publishPanelStop(status, error);
         }
       };
       try {
@@ -1141,12 +1216,29 @@ export function createCoordinator({
                 resumePredicates: ["matching_grant_or_revisioned_setting_is_reconciled"],
               });
             }
-            writer.append({
+            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)
+              && !(sameWorkflowVersion(previousGrant.workflowVersion, compatibleRecordedVersion)
+                && workflowVersion?.protocolVersion === 1 && compatibleRecordedVersion?.protocolVersion === 1
+                && workflowVersion.sourceRepository === compatibleRecordedVersion.sourceRepository)) {
+              return diagnosedStop(rebuildStatus(current.facts), {
+                reasonCode: "workflow_version_unavailable",
+                limitationClass: "contract-blocker",
+                evidence: ["The runtime version differs from this Run's recorded workflow version."],
+                noAutomaticTransition: "Preserve the Run and restore its trusted package before resuming.",
+                affectedNodes: current.facts.nodes.map(({ issueId }) => issueId),
+                resumePredicates: ["recorded_workflow_version_is_available"],
+              });
+            }
+            if (!previousGrant) writer.append({
               type: "grant.recorded",
               at: now(),
               runIdentity,
               maxParallel: grantMaxParallel,
+              ...(workflowVersion === undefined ? {} : { workflowVersion }),
             });
+            const priorRuntime = store.readEvents(runIdentity.runId).findLast(({ type }) => type === "runtime.observed");
+            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)
+              && !sameWorkflowVersion(priorRuntime?.workflowVersion, workflowVersion)) writer.append({ type: "runtime.observed", at: now(), workflowVersion });
             grantRecorded = true;
             lastStatus = rebuildStatus(current.facts);
             const panelStopped = await openPanel(lastStatus);
@@ -1154,14 +1246,41 @@ export function createCoordinator({
             continue;
           }
 
+          // Creation may have reached the host before its dispatch receipt. Reconcile every
+          // pending intent before a batch snapshot can advertise free worker capacity.
+          if (tasks.observePendingCreations) {
+            const pending = await tasks.observePendingCreations({ runIdentity, issueIds: current.facts.nodes.map(node => node.issueId) });
+            let adopted = false;
+            for (const observation of pending) {
+              if (observation.refs?.length === 1 && isTaskRef(observation.refs[0])) {
+                writer.append({ type: "dispatch.recorded", at: now(), issueId: observation.issueId, attempt: 1, taskRef: observation.refs[0] });
+                actionStops.delete(`${runIdentity.runId}:${observation.issueId}`);
+                adopted = true;
+              } else {
+                const stopped = issueLaneAmbiguous(rebuildStatus(current.facts), observation.issueId, observation.refs?.length ?? 0);
+                if (observation.error) stopped.diagnoses.at(-1).evidence.push(observation.error);
+                if (!isolateActionStop(stopped, { issueId: observation.issueId }, current)) return stopped;
+              }
+            }
+            if (adopted) continue;
+          }
+          await refreshActionStops(current);
           lastStatus = rebuildStatus(current.facts);
-          if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state)) return lastStatus;
+          for (const pending of request.controlQueue?.splice(0) ?? []) {
+            try {
+              const decision = planControl(lastStatus, pending.command, now());
+              if (decision.changed) { writer.append(decision.event); lastStatus = rebuildStatus(current.facts); }
+              pending.resolve({ ...decision, status: lastStatus });
+            } catch (error) { pending.reject(error); }
+          }
+          if (["SUCCEEDED", "STOPPED"].includes(lastStatus.run.state) || request.mode === "snapshot" || stepFinished) return lastStatus;
           if (lastStatus.legalActions.length === 0) {
+            if (request.mode === "step") return lastStatus;
             if (lastStatus.run.state === "PAUSED" && typeof panelHandle?.waitForControl === "function") {
               try {
                 await panelHandle.waitForControl(lastStatus.run.controlRevision);
-              } catch {
-                return publishPanelStop(lastStatus);
+              } catch (error) {
+                return publishPanelStop(lastStatus, error);
               }
               continue;
             }
@@ -1177,7 +1296,9 @@ export function createCoordinator({
 
           let deferredEnvironmentStop = null;
           let controlRevisionChanged = false;
-          for (const action of lastStatus.legalActions) {
+          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type));
+          if (request.mode === "step" && actions.length === 0) return lastStatus;
+          for (const action of request.mode === "step" ? actions.slice(0, 1) : actions) {
             if (MUTATING_ACTION_TYPES.has(action.type)) {
               const latestControl = store.readEvents(runIdentity.runId)
                 .findLast(({ type }) => type === "control.revised");
@@ -1186,9 +1307,12 @@ export function createCoordinator({
                 break;
               }
             }
+            try {
             if (action.type === "dispatch_issue") {
               const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
-              if (stopped) return stopped;
+              if (stopped) { if (isolateActionStop(stopped, action, current)) break; return stopped; }
+            } else if (action.type === "repair_issue") {
+              await repairIssue({ action, current, writer });
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) {
@@ -1196,13 +1320,13 @@ export function createCoordinator({
                 continue;
               }
             } else if (action.type === "close_issue") {
-              const outcome = await closeIssue({ action, current, status: lastStatus });
-              if (outcome.stopped) return outcome.stopped;
+              const outcome = await closeIssue({ action, current, status: lastStatus, step: request.mode === "step" });
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {
-              const outcome = await closeParent({ action, current, status: lastStatus });
-              if (outcome.stopped) return outcome.stopped;
-              if (!outcome.settled) return lastStatus;
+              const outcome = await closeParent({ action, current, status: lastStatus, step: request.mode === "step" });
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
+              if (!outcome.settled && request.mode !== "step") return lastStatus;
             } else if (["wait_repository_close_lease", "wait_target_writer"].includes(action.type)) {
               const outcome = await waitForCloseLease({
                 action,
@@ -1212,7 +1336,7 @@ export function createCoordinator({
                 status: lastStatus,
                 writer,
               });
-              if (outcome.stopped) return outcome.stopped;
+              if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (outcome.controlRevisionChanged) {
                 controlRevisionChanged = true;
                 break;
@@ -1228,7 +1352,17 @@ export function createCoordinator({
             } else {
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
+            } catch (error) {
+              if (!["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
+              lastStatus = rebuildStatus(current.facts); // A fenced writer must throw before any continuation.
+              const progressIdentity = actionProgressIdentity(current.facts, action.issueId);
+              const attempt = failedActions(current.facts).filter(event => event.issueId === action.issueId && event.actionType === action.type).length + 1;
+              writer.append({ type: "action.failed", at: now(), issueId: action.issueId, actionType: action.type, progressIdentity, attempt, evidence: error.message });
+              if (attempt < 3) await sleep([1000, 5000][attempt - 1]);
+              break;
+            }
           }
+          if (request.mode === "step") stepFinished = true;
           if (controlRevisionChanged) continue;
           if (deferredEnvironmentStop) {
             const trackerResult = await readTracker(selectedRequest);

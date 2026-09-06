@@ -35,3 +35,7 @@ Fresh decomposition is tracker-only: no planning lane is required. The consumed 
 | Hard gate | Continuing could target the wrong Spec or ref, duplicate or misattribute tracker publication, or corrupt transaction state | Stop before the next mutation and report the conflicting identities. |
 | Recoverable blocker | The owning source is readable but needs human repair | Report the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-tickets` retry. |
 | Advisory | The observation cannot affect mutation identity, attribution, durable state, or published behavior | Keep it visible; it never blocks or changes authority. |
+
+## Installed Codex GitHub binding
+
+For this configured host, serialize the existing owner-verified publication and handoff fields through [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The installed reader consumes exact native comment IDs and body digests; it never creates or repairs producer checkpoints. The producer remains responsible for approval, ordered stage writes, and independent read-back.

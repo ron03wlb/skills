@@ -217,6 +217,12 @@ export function reduceRunReadyHandoff(input) {
     );
   }
 
+  if (input.preparation && input.preparation.state !== "READY") {
+    return runReadyResult(input, { state: input.preparation.state === "UNKNOWN" ? "UNKNOWN" : "INCOMPLETE",
+      reasonCode: "run_preparation_pending", evidence: [input.preparation.reason ?? "Complete the approved authorization inventory and exact Manual prerequisite before Run-ready."],
+      nextOwner: authority.classification === "SINGLE" ? "to-spec" : "to-tickets", noAutomaticTransition: "Known missing preparation belongs to the planning owner before starting this Run.",
+      recoveryPredicates: ["planning_preparation_is_ready"] });
+  }
   const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const checkpointOwnsBaseScope = checkpoint.producerCommand === expectedProducer
     && checkpoint.specId === authority.specId
@@ -319,15 +325,7 @@ export function reduceRunReadyHandoff(input) {
       ["supply_valid_run_ready_facts"],
     );
   }
-  if (input.targetState === "DIRTY") {
-    return unknownRunReady(
-      input,
-      "target_dirty_without_owner",
-      [`Target ${authority.target} is dirty without one exact incomplete producer owner.`],
-      ["target_is_clean_or_exact_incomplete_owner_is_proven"],
-    );
-  }
-  if (input.targetState !== "CLEAN") {
+  if (!["CLEAN", "DIRTY"].includes(input.targetState)) {
     return unknownRunReady(
       input,
       "target_state_uncertain",
@@ -335,12 +333,12 @@ export function reduceRunReadyHandoff(input) {
       ["target_state_is_known"],
     );
   }
-  if (input.targetOwnership !== "NONE") {
+  if (input.targetOwnership !== (input.targetState === "DIRTY" ? "UNOWNED" : "NONE")) {
     return unknownRunReady(
       input,
       "target_ownership_conflict",
-      [`Clean target ${authority.target} has contradictory ownership state ${input.targetOwnership}.`],
-      ["clean_target_has_no_dirty_owner"],
+      [`Target ${authority.target} has contradictory ownership state ${input.targetOwnership}.`],
+      ["target_ownership_matches_current_state"],
     );
   }
   if (!checkpointOwnsScope || checkpoint.firstUnsatisfiedStage !== null
@@ -568,6 +566,7 @@ const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationC
     attempt: Number.isInteger(dispatch?.attempt) ? dispatch.attempt : 0,
     retryCount,
     remediationCount,
+    ...(node.reservedWorkers === undefined ? {} : { reservedWorkers: node.reservedWorkers }),
   },
   close: {
     completionState: isText(node.completionState) ? node.completionState : "UNKNOWN",
@@ -735,6 +734,8 @@ export function reduceRun(input) {
     ].includes(event.type);
   const outOfScopeJournalEvent = input.journal.find((event) => (
     [
+      "action.failed",
+      "repair.recorded",
       "dispatch.recorded",
       "retry.recorded",
       "remediation.recorded",
@@ -1015,6 +1016,19 @@ export function reduceRun(input) {
           ? postWaitPacket(contradiction.evidence)
         : undefined,
     }));
+  const isolated = new Set();
+  for (const item of contradictionDiagnoses) {
+    const affected = new Set(item.affectedNodes);
+    let previousSize;
+    do {
+      previousSize = affected.size;
+      for (const node of nodes) if (node.blockers.some(id => affected.has(id))) affected.add(node.issueId);
+    } while (affected.size !== previousSize);
+    item.affectedNodes = [...affected].sort(compareIds);
+    item.unaffectedNodes = allNodeIds.filter(id => !affected.has(id));
+    for (const id of affected) isolated.add(id);
+  }
+  for (const node of nodes) if (isolated.has(node.issueId)) node.state = "BLOCKED";
   const ready = nodes.filter(({ state }) => state === "READY").map(({ issueId }) => issueId);
   const retrying = nodes.filter(({ state }) => state === "RETRYING").map(({ issueId }) => issueId);
   const active = normalizedNodes
@@ -1027,7 +1041,8 @@ export function reduceRun(input) {
   const deliverySucceeded = allSucceeded && (
     input.run.classification === "SINGLE" || input.run.parentTrackerState === "CLOSED"
   );
-  const slots = Math.max(0, maxParallel - active.length);
+  const occupiedWorkers = normalizedNodes.reduce((count, node) => count + Math.max(node.reservedWorkers ?? 0, ["DISPATCHED", "EXECUTING", "UNKNOWN"].includes(node.taskState) ? 1 : 0), 0);
+  const slots = Math.max(0, maxParallel - occupiedWorkers);
   const normalActions = [];
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
@@ -1053,7 +1068,7 @@ export function reduceRun(input) {
   const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
     || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterHealthy);
   const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
-  const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable;
+  const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable && input.run.targetState === "CLEAN";
   const remediations = retrying.flatMap((issueId) => {
     const node = byId.get(issueId);
     if (node.taskState !== "ENVIRONMENT_FAILURE") return [];
@@ -1068,20 +1083,30 @@ export function reduceRun(input) {
       cycle: 1,
     }];
   }).slice(0, slots);
-  normalActions.push(...remediations);
+  const repairs = closeable.filter(issueId => byId.get(issueId).closeConflict).flatMap(issueId => {
+    const conflict = byId.get(issueId).closeConflict;
+    const previous = input.journal.filter(event => event.type === "repair.recorded" && event.issueId === issueId);
+    if (previous.length >= 10 && previous.at(-1)?.candidate !== conflict.candidate) {
+      nodes.find(node => node.issueId === issueId).state = "BLOCKED";
+      nodeDiagnoses.push(diagnosis({ reasonCode: "repair_budget_exhausted", evidence: ["The persistent ten-wave conflict repair budget is exhausted."], affectedNodes: [issueId], allNodes: allNodeIds, resumePredicates: ["human_resolves_same_scope_repair_blocker"], noAutomaticTransition: "Re-entry does not reset the repair budget." }));
+      return [];
+    }
+    return [{ type: "repair_issue", issueId, ...conflict }];
+  }).slice(0, slots);
+  normalActions.push(...repairs, ...remediations.slice(0, Math.max(0, slots - repairs.length)));
   const dispatchable = [
     ...retrying.filter((issueId) => byId.get(issueId).taskState === "TRANSIENT_FAILURE"),
     ...ready,
   ];
-  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length)).map((issueId) => ({
+  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length - repairs.length)).map((issueId) => ({
     type: "dispatch_issue",
     issueId,
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
   }));
   normalActions.push(...dispatchActions);
-  const executionActionsScheduled = remediations.length > 0 || dispatchActions.length > 0;
-  if (!executionActionsScheduled && closeoutAvailable && closeable.length > 0) {
-    normalActions.push({ type: "close_issue", issueId: closeable[0] });
+  const executionActionsScheduled = repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
+  if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict)) {
+    normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict) });
   }
   const needsParentClose = allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
@@ -1108,7 +1133,7 @@ export function reduceRun(input) {
     nodes: normalizedNodes,
     controlRevision,
   });
-  if (!executionActionsScheduled && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
+  if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_repository_close_lease",
       issueId: waitingIssueId,
@@ -1120,7 +1145,7 @@ export function reduceRun(input) {
       timeoutMs: REPOSITORY_CLOSE_WAIT_TIMEOUT_MS,
       preWaitEvidence,
     });
-  } else if (!executionActionsScheduled && repositoryCloseLeaseAvailable
+  } else if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseAvailable
     && targetCloseWriterHealthy && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_target_writer",
@@ -1136,7 +1161,14 @@ export function reduceRun(input) {
   }
   const activeCloseWait = activeRepositoryCloseWait ?? activeTargetWriterWait;
   if (activeCloseWait) {
-    normalActions.splice(0, normalActions.length, {
+    const dependsOnWait = (id, seen = new Set()) => {
+      if (id === activeCloseWait.issueId) return true;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return (byId.get(id)?.blockers ?? []).some(blocker => dependsOnWait(blocker, seen));
+    };
+    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type) && !dependsOnWait(action.issueId));
+    normalActions.splice(0, normalActions.length, ...(independent.length ? independent : [{
       type: activeCloseWait.type === "repository-close-wait.started"
         ? "wait_repository_close_lease"
         : "wait_target_writer",
@@ -1144,7 +1176,7 @@ export function reduceRun(input) {
       owner: { ...activeCloseWait.owner },
       timeoutMs: activeCloseWait.timeoutMs,
       preWaitEvidence: activeCloseWait.preWaitEvidence,
-    });
+    }]));
   }
   const repositoryCloseDiagnoses = !executionActionsScheduled && repositoryCloseLeaseUncertain
     && (closeable.length > 0 || needsParentClose)
@@ -1202,8 +1234,8 @@ export function reduceRun(input) {
     globalGateDiagnoses.push(diagnosis({
       reasonCode: REASON_CODES.targetDirty,
       evidence,
-      noAutomaticTransition: "Target-wide mutation must stop while the target is dirty.",
-      affectedNodes: allNodeIds.filter((issueId) => stateById.get(issueId) !== "SUCCEEDED"),
+      noAutomaticTransition: "Integration waits for the target to be clean; independent Issue worktrees may continue.",
+      affectedNodes: closeable,
       allNodes: allNodeIds,
       resumePredicates: ["target_is_clean"],
       operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
@@ -1235,10 +1267,11 @@ export function reduceRun(input) {
       operatorPacket: releasedCloseWait ? postWaitPacket(evidence) : undefined,
     }));
   }
-  const hasContradiction = contradictionDiagnoses.length > 0
+  const hasContradiction = contradictionDiagnoses.some(({ affectedNodes }) => affectedNodes.length === 0)
+    || (isolated.size > 0 && normalActions.length === 0 && active.every(id => isolated.has(id)))
     || repositoryCloseDiagnoses.length > 0
     || closeWriterDiagnoses.length > 0
-    || globalGateDiagnoses.length > 0;
+    || globalGateDiagnoses.some(({ reasonCode }) => reasonCode !== REASON_CODES.targetDirty);
   const hasActiveWork = active.length > 0
     || activeRepositoryCloseWait !== undefined
     || activeTargetWriterWait !== undefined;

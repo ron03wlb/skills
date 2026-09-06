@@ -5,7 +5,7 @@ description: Close one completed Issue or Multi-Issue Spec against its recorded 
 
 # Close Issue
 
-Close one Issue by ID. Dispatch by the authoritative Issue shape: an Executable Issue follows the three-action close path; a Multi-Issue Spec follows the parent-only path. This skill never repairs product code, invokes `execute-issue`, reruns Standards or Spec review, runs aggregate verification, pushes, or deploys.
+Use the authoritative Issue shape: an Executable Issue follows the three-action close path; a Multi-Issue Spec follows the parent-only path. This skill never repairs product code, invokes `execute-issue`, reruns Standards or Spec review, runs aggregate verification, pushes, or deploys.
 
 ## Entry
 
@@ -15,7 +15,7 @@ Entry authority is either direct human invocation or a valid **DAG Run Grant**. 
 
 Within the same Git common dir, closeouts for different targets share one repository close lease; different repositories remain concurrent. The target mutation writer still coordinates planning producers and closeout on their exact target. Issue execution, Issue worktree work, and planning for unrelated targets never acquire the repository close lease.
 
-On healthy contention, observe the exact owner, then boundedly retry without lease stealing. After release, re-read every entry identity and mutation precondition before acquisition; an acquisition race returns to observation. Timeout, unknown ownership, stale-proof mismatch, or an unresolved acquisition race stops before closeout mutation. Reclaim only with exact owner-inactivity and abandoned-operation proof. The mechanism adds no scheduling service or global workflow lock.
+On healthy contention, observe the exact owner, then boundedly retry without lease stealing. After release, re-read every entry identity and mutation precondition before acquisition; an acquisition race returns to observation. Each observation is bounded, but healthy current owner progress continues across observation windows. Elapsed time never requires another human invocation or authorizes stealing a lease. Unknown ownership or stale-proof mismatch stops the affected closeout; a healthy acquisition race returns to observation. Reclaim only with exact owner-inactivity and abandoned-operation proof. The mechanism adds no scheduling service or global workflow lock.
 
 Release the target writer before the repository lease, and release both only after the attempt's required read-back or verified pre-mutation stop. A release or fencing failure reports the exact ownership state and stops.
 
@@ -35,9 +35,11 @@ Perform exactly three ordered, idempotent actions: merge the unchanged candidate
 
 Read the latest target `HEAD` while holding the shared target mutation writer. If `C` is already an ancestor of the target, the merge is satisfied. Otherwise require the target worktree to be clean and merge exact `C` into the latest target without rebasing, refreshing, or editing the Issue candidate. If the target is an ancestor of `C`, run `git merge --ff-only <C>`; only for diverged histories run `git merge --no-ff --no-edit <C>` to create the ordinary merge commit. Do not depend on repository `merge.ff` configuration.
 
-If the merge conflicts, run `git merge --abort`, verify the target returned to its pre-merge commit and is clean, and stop with the Issue worktree registered and the Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. An unexpected ref movement or abort failure reports the exact Git state and stops; a later `close-issue` retry starts from observable current state. The human may explicitly rerun `execute-issue` in the same topic branch and Issue worktree from the latest target only within the original Acceptance Criteria; a Scope change returns to planning.
+Use [the owner-local merge helper](scripts/merge-candidate.mjs) with the close owner’s two leases and exact candidate. If the merge conflicts, run `git merge --abort`, verify the target returned to its pre-merge commit and is clean, and stop with the Issue worktree registered and the Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. An unexpected ref movement or abort failure reports the exact Git state and stops; a later `close-issue` retry starts from observable current state. The human or same authorized coordinator may rerun `execute-issue` in the same topic branch and Issue worktree from the latest target only within the original Acceptance Criteria; a Scope change returns to planning.
 
-After success, require `C` to be an ancestor of the current Issue target branch. A merge hook or other side effect that leaves the target worktree dirty stops before cleanup or closure and requires explicit human handling.
+For a coordinator close conflict, return one native final-answer line `Workflow close result: <JSON>` with `schema: issue-close-result:v1`, `state: CONFLICT`, exact `runId`, `issueId`, accepted `requestIdentity`, candidate, pre-merge `targetHead`, `targetRestored: true`, and the observed conflicted paths. This is the owning action result, not a tracker success/failure receipt. The coordinator rechecks Git and unchanged authority, spends a persistent repair wave, and hands the original lane to `execute-issue`; close itself never repairs code or invokes execution. Missing restoration or semantic scope uncertainty preserves the affected lane.
+
+After success, require `C` to be an ancestor of the current Issue target branch. For a new ordinary merge combination, run the specific integration verification required by the approved Issue plan at the resulting clean target commit before cleanup; this is not the aggregate push gate or a repeat of unchanged execution checks. Reuse only exact valid combination evidence through the execution verification-cache interface. A merge hook or other side effect that leaves the target worktree dirty stops before cleanup or closure and requires explicit human handling.
 
 ### 2. Remove the Issue worktree
 
@@ -47,7 +49,7 @@ Require `C` to be reachable from the Issue target branch. If the exact registere
 
 Require `C` to remain reachable and the exact Issue worktree to be absent. If the Issue is open, close it through the configured tracker and read it back once. If it is already closed, read it back and treat closure as satisfied only when the same candidate is reachable and the worktree is absent; otherwise stop without reopening.
 
-A failure after merge reports which of the three observable actions remain. Retry skips completed actions and resumes the next one. Never roll back a successful merge automatically.
+For transient failures, probe Git or tracker state after 5, 15 and 30 seconds; retry only unsatisfied actions. Unknown ownership or exhausted probes preserves the lane. A failure after merge reports which of the three observable actions remain. Retry skips completed actions and resumes the next one. Never roll back a successful merge automatically.
 
 ## Multi-Issue parent
 

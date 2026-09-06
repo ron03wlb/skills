@@ -65,6 +65,7 @@ export function acquireCloseIssueLeases(input) {
     operationId: exactOperationId,
     operationIdentity,
     target: exactTarget,
+    gitCommonDir: store.gitCommonDir,
     assertCurrent() {
       if (targetReleased || repositoryReleased) throw new Error("CLOSE_ISSUE_LEASES_RELEASED");
       repositoryLease.assertCurrent();

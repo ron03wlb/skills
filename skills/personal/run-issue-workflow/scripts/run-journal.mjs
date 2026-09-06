@@ -5,6 +5,9 @@ export const DEFAULT_MAX_PARALLEL = 3;
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
 export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
+  "runtime.observed",
+  "repair.recorded",
+  "action.failed",
   "control.revised",
   "dispatch.recorded",
   "retry.recorded",
@@ -27,7 +30,10 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
-  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel"])],
+  ["action.failed", new Set(["type", "at", "issueId", "actionType", "progressIdentity", "attempt", "evidence"])],
+  ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity"])],
+  ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion"])],
   ["control.revised", new Set(["type", "at", "revision", "command"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
   ["retry.recorded", new Set([
@@ -78,6 +84,18 @@ const assertExactFields = (value, allowed, label) => {
   if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
 };
 
+const workflowVersionFields = new Set(["id", "sourceCommit", "sourceRepository", "protocolVersion"]);
+export function validateWorkflowVersion(version) {
+  assertExactFields(version, workflowVersionFields, "workflow version");
+  if (!/^[a-f0-9]{64}$/u.test(version.id ?? "")
+    || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(version.sourceCommit ?? "")
+    || version.protocolVersion !== 1) throw new TypeError("Invalid or incompatible workflow version");
+  requireText(version.sourceRepository, "workflow version sourceRepository");
+}
+
+export const sameWorkflowVersion = (left, right) => [...workflowVersionFields]
+  .every((field) => left?.[field] === right?.[field]);
+
 const validateTaskRef = (taskRef, label) => {
   assertExactFields(taskRef, new Set(["threadId", "hostId"]), label);
   requireText(taskRef.threadId, `${label}.threadId`);
@@ -116,6 +134,23 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
   assertExactFields(event, allowedFields, `${event.type} event`);
   requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
+    case "action.failed":
+      requireText(event.issueId, "failed action Issue");
+      if (!["dispatch_issue", "repair_issue", "close_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.progressIdentity)) throw new TypeError("Failed action requires exact progress identity");
+      requirePositiveInteger(event.attempt, "failed action attempt", 3);
+      requireText(event.evidence, "failed action evidence");
+      break;
+    case "repair.recorded":
+      requireText(event.issueId, "repair Issue");
+      requirePositiveInteger(event.wave, "repair wave", 10);
+      validateTaskRef(event.taskRef, "repair task");
+      for (const field of ["candidate", "targetHead"]) if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(event[field])) throw new TypeError("Repair requires exact Git commits");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity)) throw new TypeError("Repair request identity is invalid");
+      break;
+    case "runtime.observed":
+      validateWorkflowVersion(event.workflowVersion);
+      break;
     case "grant.recorded":
       assertExactFields(event.runIdentity, new Set(immutableRunIdentityKeys), "grant runIdentity");
       for (const key of ["runId", "specId", "approvedScopeHash", "target", "classification"]) {
@@ -130,6 +165,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
         throw new TypeError("A SINGLE Run must bind decompositionIdentity as null");
       }
       if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
+      if (event.workflowVersion !== undefined) validateWorkflowVersion(event.workflowVersion);
       break;
     case "control.revised":
       requirePositiveInteger(event.revision, "control revision");
@@ -223,7 +259,26 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       if ((previous.maxParallel ?? DEFAULT_MAX_PARALLEL) !== (event.maxParallel ?? DEFAULT_MAX_PARALLEL)) {
         throw new TypeError("A renewed grant must preserve maxParallel until a revisioned setting exists");
       }
+      if (!sameWorkflowVersion(previous.workflowVersion, event.workflowVersion)) {
+        throw new TypeError("A renewed grant must preserve its workflow version");
+      }
     }
+  }
+  if (event.type === "action.failed") {
+    const previous = events.filter(item => item.type === event.type && item.issueId === event.issueId
+      && item.actionType === event.actionType && item.progressIdentity === event.progressIdentity);
+    if (event.attempt !== previous.length + 1) throw new TypeError("Failed action attempts must preserve their monotonic progress budget");
+  }
+  if (event.type === "repair.recorded") {
+    const previous = events.filter(item => item.type === "repair.recorded" && item.issueId === event.issueId);
+    const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    if (!dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef) || event.wave !== previous.length + 1
+      || previous.some(item => item.candidate === event.candidate)) throw new TypeError("Repair must preserve its original dispatched lane and monotonic candidate budget");
+  }
+  if (event.type === "runtime.observed") {
+    const grant = events.findLast(({ type }) => type === "grant.recorded");
+    if (!grant?.workflowVersion || grant.workflowVersion.sourceRepository !== event.workflowVersion.sourceRepository
+      || grant.workflowVersion.protocolVersion !== event.workflowVersion.protocolVersion) throw new TypeError("Runtime observation requires a compatible recorded package source and protocol");
   }
   if (event.type === "control.revised") {
     const previousControl = events.findLast(({ type }) => type === "control.revised");

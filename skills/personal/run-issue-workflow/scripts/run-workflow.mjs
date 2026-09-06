@@ -17,15 +17,19 @@ export function createWorkflowRuntime({
   leaf,
   environment,
   browser,
+  controls,
   cleanup,
   now,
   sleep,
   authoritySources,
+  workflowVersion,
+  compatibleRecordedVersion,
 }) {
   for (const method of ["readEvents", "readStatus", "previewCleanup", "applyCleanup"]) {
     requireMethod(store, method);
   }
   requireMethod(browser, "open");
+  if (controls !== undefined) requireMethod(controls, "connect");
   requireMethod(cleanup, "listRuns");
   if (authoritySources === undefined) {
     throw new TypeError("Workflow runtime requires repository-owned authoritySources");
@@ -34,18 +38,23 @@ export function createWorkflowRuntime({
   requireMethod(authorityAdapters.handoff, "read");
 
   let active = false;
+  const actionStops = new Map();
+  let cleanupInspected = false;
   return {
     async run(request = {}) {
       if (active) throw new Error("WORKFLOW_RUNTIME_ALREADY_ACTIVE");
       active = true;
+      if (!["snapshot", "step"].includes(request.mode)) cleanupInspected = false;
       let panelState = { opened: false, closed: false, origin: null };
       let cleanupPreview = null;
       let cleanupResult = null;
       const inspectCleanup = async (selectedRequest, current, apply) => {
+        if (cleanupInspected) return;
         const runs = await cleanup.listRuns({ request: selectedRequest });
         const cleanupAt = now();
         const protectedRunIds = current?.runIdentity?.runId ? [current.runIdentity.runId] : [];
         cleanupPreview = store.previewCleanup({ now: cleanupAt, runs, protectedRunIds });
+        cleanupInspected = true;
         cleanupResult = apply && selectedRequest.cleanupPreview !== true
           ? store.applyCleanup({ now: cleanupAt, runs, protectedRunIds })
           : null;
@@ -53,6 +62,7 @@ export function createWorkflowRuntime({
       const panel = {
         async open({ readStatus, appendEvent, rebuildStatus }) {
           const waiters = [];
+          let controlFailure = null;
           const applyControl = createRunPanelControl({
             readStatus,
             appendEvent,
@@ -69,30 +79,53 @@ export function createWorkflowRuntime({
             }
             return result;
           };
-          const bridge = await startRunPanelBridge({ readStatus, submitControl });
-          panelState = { opened: true, closed: false, origin: bridge.origin };
+          const textControl = controls
+            ? await controls.connect({
+              readStatus,
+              submitControl,
+              onDisconnect(error) {
+                controlFailure = error;
+                for (const waiter of waiters.splice(0)) waiter.reject(error);
+              },
+            })
+            : null;
+          if (textControl) requireMethod(textControl, "close");
+          let bridge;
           try {
+            bridge = await startRunPanelBridge({ readStatus, submitControl });
+            panelState = { opened: true, closed: false, origin: bridge.origin };
             await browser.open(bridge.panelUrl);
           } catch (error) {
-            await bridge.close();
+            await bridge?.close();
+            bridge = null;
             panelState = { ...panelState, closed: true };
-            throw error;
+            if (!textControl) throw error;
+            panelState = { opened: false, closed: false, origin: null, mode: "text" };
           }
           return {
             async waitForControl(afterRevision) {
+              if (controlFailure) throw controlFailure;
               const current = await readStatus();
               if (current.run.controlRevision > afterRevision) return;
-              await new Promise((resolve) => waiters.push({ afterRevision, resolve }));
+              if (controlFailure) throw controlFailure;
+              await new Promise((resolve, reject) => waiters.push({ afterRevision, resolve, reject }));
             },
             async close() {
-              await bridge.close();
-              panelState = { ...panelState, closed: true };
+              try {
+                await bridge?.close();
+              } finally {
+                await textControl?.close();
+                panelState = { ...panelState, closed: true };
+              }
             },
           };
         },
       };
       const coordinator = createCoordinator({
         store,
+        workflowVersion,
+        compatibleRecordedVersion,
+        actionStops,
         tracker: authorityAdapters.tracker,
         tasks,
         selector: authorityAdapters.selector,
@@ -100,7 +133,7 @@ export function createWorkflowRuntime({
         handoff: authorityAdapters.handoff,
         leaf,
         environment,
-        panel,
+        panel: ["step", "snapshot"].includes(request.mode) ? undefined : panel,
         onSelected: ({ request: selectedRequest, current }) => inspectCleanup(selectedRequest, current, true),
         now,
         sleep,

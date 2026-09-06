@@ -24,7 +24,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 
 - `tracker.reserve` takes the repository, `primary` or `revision` mode, exact operation identity, and requested Spec identity. Primary reservation calls `deriveSpecReservationOperationIdentity`; its bootstrap key uses only the repository and immutable proposed-Spec identity. It returns one immutable tracker identity; exact read-back then replaces bootstrap authority with the reserved tracker identity and a Spec-bound versioned operation identity for every later stage. Revision requires the existing Spec and its approved publication identity or hash.
 - `tracker.read` returns that identity's body, comments, labels, version token, and publication identity.
-- `tracker.publish` compare-and-sets the expected version token with the canonical body and `ready-for-agent` label, then returns the new version token and publication identity. A timeout or missing response is unresolved until `tracker.read` proves the result.
+- `tracker.publish` uses the publication mode actually proven during planning. Atomic CAS is used only when supported. On configured GitHub Issues, immediately re-read the expected body/version, perform the authorized write, then verify the exact body and labels; report this as read/write/read-back, never CAS. If atomicity is an approved requirement, unsupported CAS blocks planning before Run-ready. Publication returns the observed version and publication identity. A timeout or missing response is unresolved until `tracker.read` proves the result.
 
 ## Handoff adapter
 
@@ -38,3 +38,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 | Hard gate | Continuing could target the wrong ref, duplicate or misattribute publication, or corrupt transaction state | Stop before the next mutation and report the conflicting identities. |
 | Recoverable blocker | The owning source is readable but needs human repair or renewed confirmation | Report the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-spec` retry. |
 | Advisory | The observation cannot affect mutation identity, attribution, durable state, or published behavior | Keep it visible; it never blocks or changes authority. |
+
+## Installed Codex GitHub binding
+
+For this configured host, serialize the existing owner-verified publication and handoff fields through [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The installed reader consumes exact native comment IDs and body digests; it never creates or repairs producer checkpoints. The producer remains responsible for approval, ordered stage writes, and independent read-back.

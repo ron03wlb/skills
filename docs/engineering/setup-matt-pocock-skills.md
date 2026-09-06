@@ -87,6 +87,9 @@ Not today. There is an open request for exactly this from someone running the sk
 
 One long-standing complaint says yes, in these words: *"having a skill to set up the other skill does not feel right to me: that means the LLM is configuring its own skills."* The trade is real and acknowledged: the alternative to a setup step is duplicating tracker instructions into every skill that touches issues. The output is inspectable, editable markdown, which is the mitigation: you can read every file it wrote and change it by hand, and day-to-day tweaks are exactly that, not another run.
 
+
+Installed workflow diagnostics distinguish a resolvable package version and current-host tool availability from a proven delivery. Setup can inspect those sources without installing a package or starting a Run.
+
 ## It's working if
 
 - `docs/agents/issue-tracker.md` and `docs/agents/domain.md` exist, plus `triage-labels.md` if `triage` is installed.
