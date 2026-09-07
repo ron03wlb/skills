@@ -4,7 +4,7 @@ import {
   existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync,
   realpathSync, renameSync, rmSync, rmdirSync, symlinkSync, writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { validateWorkflowVersion } from "./run-journal.mjs";
 
@@ -12,6 +12,7 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const skillPath = "skills/personal/run-issue-workflow";
 const versionFields = ["id", "sourceCommit", "sourceRepository", "protocolVersion"];
 const sameVersion = (left, right) => versionFields.every((field) => left?.[field] === right?.[field]);
+const directoryLink = (target, path) => symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 const safePath = (path) => typeof path === "string" && (path.startsWith("skills/") || path === "docs/agents/run-preparation.md")
   && !path.split(/[\\/]/u).some((part) => ["", ".", ".."].includes(part));
@@ -39,7 +40,8 @@ function verifyPackage(root, version) {
     if (!safePath(file.path) || seen.has(file.path)) throw new Error("Invalid package path");
     seen.add(file.path);
     const path = join(root, file.path);
-    if (!lstatSync(path).isFile() || !realpathSync(path).startsWith(`${realpathSync(root)}/`)
+    const within = relative(realpathSync(root), realpathSync(path));
+    if (!lstatSync(path).isFile() || !within || isAbsolute(within) || within === ".." || within.startsWith(".." + sep)
       || sha256(readFileSync(path)) !== file.sha256) throw new Error(`Package content changed: ${file.path}`);
   }
   if (sha256(JSON.stringify({ sourceCommit: version.sourceCommit, files: manifest.files })) !== version.id) {
@@ -65,7 +67,7 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
     return { state: "AVAILABLE", version, root };
   } catch (error) {
     return { state: "UNAVAILABLE", version, reason: error.message,
-      recovery: "Restore this exact trusted package or explicitly install a reviewed compatible version; preserve the Run." };
+      recovery: "Restore this exact trusted package or use the already-approved maintenance scope to install a reviewed compatible version; preserve the Run and original Start. Run preparation owns the pre-Run handoff." };
   }
 }
 
@@ -103,7 +105,7 @@ function recoverInstallation({ recoveryPath, sourceRepository, sourceCommit, cac
       // Keep both the original backup and any restored link; never overwrite a concurrent entry.
       renameSync(skillDirectory, backupTarget === null ? backup : `${skillDirectory}.before-${randomUUID()}`);
     }
-    symlinkSync(nextTarget, skillDirectory, "dir");
+    directoryLink(nextTarget, skillDirectory);
   }
   const versions = catalog.versions.some((known) => sameVersion(known, version)) ? catalog.versions : [...catalog.versions, version];
   const temporaryCatalog = join(cacheDirectory, `installation.json.${randomUUID()}`);
@@ -162,7 +164,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   try {
     mkdirSync(versionsDirectory, { recursive: true });
     mkdirSync(staging);
-    const archive = execFileSync("git", ["-C", sourceRepository, "archive", sourceCommit, "skills", ...(files.some(file => file.path === "docs/agents/run-preparation.md") ? ["docs/agents/run-preparation.md"] : [])], { maxBuffer: 32 * 1024 * 1024 });
+    const archive = execFileSync("git", ["-C", sourceRepository, "-c", "core.autocrlf=false", "archive", sourceCommit, "skills", ...(files.some(file => file.path === "docs/agents/run-preparation.md") ? ["docs/agents/run-preparation.md"] : [])], { maxBuffer: 32 * 1024 * 1024 });
     execFileSync("tar", ["-x", "-C", staging], { input: archive });
     for (const file of files) file.sha256 = sha256(readFileSync(join(staging, file.path)));
     const id = sha256(JSON.stringify({ sourceCommit, files }));
@@ -174,6 +176,10 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     mkdirSync(dirname(skillDirectory), { recursive: true });
     if (previousTarget !== null && resolve(dirname(skillDirectory), readlinkSync(skillDirectory)) !== previousTarget) {
       throw new Error("Installed link changed during installation");
+    }
+    if (previousTarget === join(root, skillPath) && catalog.current === id) {
+      verifyPackage(root, version);
+      return { version, root, skillDirectory, cacheDirectory, backup: null, reused: true };
     }
     backup = previousTarget === null ? null : `${skillDirectory}.before-${randomUUID()}`;
     writeFileSync(pendingPreparation, `${JSON.stringify({ skillDirectory, previousTarget, backup, previousCurrent: catalog.current, version, root })}\n`, { flag: "wx", mode: 0o600 });
@@ -188,7 +194,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     writeFileSync(temporaryCatalog, `${JSON.stringify({ ...catalog, current: id, versions })}\n`, { mode: 0o600 });
     renameSync(temporaryCatalog, catalogPath);
     // Creating the new link exclusively cannot overwrite an installation that appeared meanwhile.
-    symlinkSync(join(root, skillPath), skillDirectory, "dir");
+    directoryLink(join(root, skillPath), skillDirectory);
     verifyPackage(root, version);
     if (realpathSync(skillDirectory) !== realpathSync(join(root, skillPath))) throw new Error("Installed entry read-back differs");
     rmSync(recoveryPath);
@@ -196,7 +202,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   } catch (error) {
     let restoredPreviousEntry = false;
     if (backup && existsSync(backup)) {
-      try { symlinkSync(previousTarget, skillDirectory, "dir"); restoredPreviousEntry = true; }
+      try { directoryLink(previousTarget, skillDirectory); restoredPreviousEntry = true; }
       catch (restoreError) { if (restoreError.code !== "EEXIST") error.restoreFailure = restoreError.message; }
     }
     error.recovery = { recoveryPath, backup, restoredPreviousEntry, action: "Inspect these preserved paths and the public link before retrying; never overwrite an unknown entry." };

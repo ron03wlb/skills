@@ -11,6 +11,14 @@ import { createRunStore } from "./run-store.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const cacheDirectory = resolve(packageRoot, "../..");
+export function configureHostInput(input = process.stdin) {
+  if (!input.isTTY) return () => {};
+  if (typeof input.setRawMode !== "function") throw new Error("TTY input cannot enable native raw mode");
+  const previous = input.isRaw === true;
+  input.setRawMode(true);
+  return () => input.setRawMode(previous);
+}
+
 const emit = (value) => process.stdout.write(`workflow-host ${JSON.stringify(value)}\n`);
 
 async function selectInstalledLane({ repository, specId, runId, host, prepareOnly = false }) {
@@ -79,14 +87,16 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repository, specId, runId] = process.argv.slice(2);
-  if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID]");
-  if (process.stdin.isTTY) execFileSync("stty", ["-echo", "-icanon", "min", "1", "time", "0"], { stdio: "inherit" });
-  const host = createCodexHostBridge();
+  let host;
+  let restoreInput = () => {};
   try {
+    if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID]");
+    restoreInput = configureHostInput();
+    host = createCodexHostBridge();
     const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host });
     emit({ type: "result", result, metrics: host.metrics() });
   } catch (error) {
-    emit({ type: "error", message: error.message, metrics: host.metrics(), recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
+    emit({ type: "error", message: error.message, metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
     process.exitCode = 1;
-  } finally { host.close(); }
+  } finally { host?.close(); restoreInput(); process.stdin.pause(); }
 }

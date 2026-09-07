@@ -8,7 +8,7 @@ Read this reference only after `ask-matt` has identified a delivery, recovery, o
 
 For a Multi-Issue Tracker Spec, `to-tickets` consumes the completed `to-spec` handoff, runs its minimal operation-scoped transaction, publishes the Decomposition publication record and composite handoff, and returns `/run-issue-workflow <Spec-ID>`. Fresh `to-spec` and `to-tickets` operations create no target operational-plan checkpoint or prospective contribution record. Frozen legacy and profile-v1 producer operations keep their exact resume behavior and may invoke model-invoked `attest-target-contribution` only at their existing checkpoint stage; that helper needs no second confirmation and returns only the immutable record identity.
 
-Published Tracker Specs route through the separately installed authorized coordinator, while direct human invocation of individual `execute-issue` and `close-issue` leaves remains available. The coordinator may use one valid DAG Run Grant, but it does not create or broaden leaf authority. Each leaf revalidates the Grant and keeps its implementation, closeout, tracker, worktree, push, deploy, prerequisite, and scope boundaries. The Codex-only coordinator is neither promoted nor packaged by this shared skill set.
+Published Tracker Specs route through the separately installed authorized coordinator, while direct human invocation of individual `execute-issue` and `close-issue` leaves remains available. The coordinator may use one valid DAG Run Grant, but it does not create or broaden leaf authority. For coordinator entry, each leaf revalidates the Grant and keeps its implementation, closeout, tracker, worktree, push, deploy, prerequisite, and scope boundaries. The Codex-only coordinator is neither promoted nor packaged by this shared skill set.
 
 ## Prerequisites and execution
 
@@ -29,3 +29,7 @@ If a frozen coverage failure finds eligible direct target contributions, show th
 If frozen member derivation finds one eligible closed historical completion-evidence failure, prove one exact remedy, show the complete reconciliation draft, obtain human confirmation, invoke `/record-closed-issue-reconciliation`, and start fresh from Entry. If it finds one eligible historical command placeholder, prove the descendant Issue's exact full-suite command and a freshly frozen target pass; a current-only pass does not qualify. Then obtain human confirmation, invoke `/record-closed-issue-reconciliation`, and start fresh from Entry. No separate manual attestation command is required. No separate manual reconciliation command is required.
 
 After current local-ahead `push_ready`, `push-target` fetches the unique configured upstream, rejects drift, performs one ordinary non-force push of the exact verified target, and reads the remote ref back. It never pulls, merges, rebases, force-pushes, retries, deploys, or pushes another ref.
+
+Approved pre-Run maintenance retains the original human Start through [Run preparation](../../../../docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance), then returns to fresh installed-entry reconciliation. This is an internal bounded handoff; the user need not issue another leaf command.
+
+The public Issue leaves are `/execute-issue` and `/close-issue`.

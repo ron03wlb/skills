@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import { reduceRunReadyHandoff } from "../../skills/personal/run-issue-workflow/
 test("the GitHub source joins CLI tracker read-back to the real Git checkpoint and target", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "github-source-")));
   const oldPath = process.env.PATH;
+  const originalExec = childProcess.execFileSync;
   const lane = `${root}-issue`;
   const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
   try {
@@ -44,7 +46,12 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     writeFileSync(fixturePath, JSON.stringify(fixture));
     const bin = join(root, ".git", "bin"); mkdirSync(bin);
     writeFileSync(join(bin, "gh"), `#!/usr/bin/env node\nconst fs=require('node:fs');const data=JSON.parse(fs.readFileSync(${JSON.stringify(fixturePath)},'utf8'));const route=process.argv[3];console.log(JSON.stringify(route==='graphql'?{data:{node:{id:'I_1',number:1,repository:{nameWithOwner:'example/repo'}}}}:route.includes('comments')?[data.comments]:route.includes('blocked_by')?[[]]:[data]));\n`);
-    chmodSync(join(bin, "gh"), 0o755); process.env.PATH = `${bin}:${oldPath}`;
+    // Invoke the fixture through Node on every host; Windows does not execute Unix shebangs.
+    chmodSync(join(bin, "gh"), 0o755);
+    childProcess.execFileSync = (name, args, options) => name === "gh"
+      ? originalExec(process.execPath, [join(bin, "gh"), ...args], options)
+      : originalExec(name, args, options);
+    syncBuiltinESMExports();
     const owner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: { listRunIds: () => ["unreadable"], readEvents() { throw new Error("Unreadable journal"); } }, tasks: { read: async () => ({ state: "RESUMABLE" }) } });
     const snapshot = await owner.sources.tracker.read({ specId: "1" });
     fixture.body = "Different unapproved scope";
@@ -122,6 +129,16 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     assert.equal(reduceRunReadyHandoff((await refresh()).runReadyAuthority).state, "INCOMPLETE", "GitHub read/write/read-back is never atomic CAS");
     publication.preparation.trackerPublication.required = "READ_WRITE_READBACK";
 
+    const bootstrapHuman = { repositoryId: "github:example/repo", specId: "I_1", issueId: "I_1", target: "main", approvedScopeHash: authority.approvedScopeHash, decompositionIdentity: null,
+      startAuthority: "human-approval", operations: ["workflow-install", "task-create", "task-message", "local-close", "tracker-write"].map(action => ({ action, scope: "I_1" })) };
+    handoff.preparation.approvals = bootstrapHuman.operations.map(item => ({ ...item, authority: bootstrapHuman.startAuthority }));
+    const bootstrapOwner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: { listRunIds: () => [] } });
+    const bootstrapRead = () => bootstrapOwner.readBootstrapHandoff({ specId: "1", human: bootstrapHuman,
+      control: { state: "ACTIVE", connected: true, authority: bootstrapHuman.startAuthority } });
+    await refresh();
+    const bootstrapExecution = await bootstrapRead();
+    assert.equal(bootstrapExecution.state, "EXECUTE", JSON.stringify(bootstrapExecution));
+    assert.equal((await bootstrapRead()).operationIdentity.key, bootstrapExecution.operationIdentity.key, "re-entry adopts the same maintenance operation");
     git("worktree", "add", "-b", "issue-one", lane, "main");
     writeFileSync(join(lane, "change.sql"), "-- reviewed prerequisite fixture; no database connection\n");
     const issueGit = (...args) => execFileSync("git", ["-C", lane, ...args], { encoding: "utf8" }).trim();
@@ -152,6 +169,9 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const completionComment = { node_id: "IC_done", author_association: "OWNER", body: renderWorkflowRecord(completion).replace("```workflow-record", "```json") };
     fixture.comments.push(completionComment);
     assert.equal((await refresh()).facts.nodes[0].completionState, "COMPLETE", "a uniquely proven unadopted legacy candidate is retained");
+    const bootstrapClose = await bootstrapRead();
+    assert.equal(bootstrapClose.state, "CLOSE", JSON.stringify(bootstrapClose));
+    assert.equal(bootstrapClose.operationIdentity.key, bootstrapExecution.operationIdentity.key);
     const adoption = { kind: "workflow_operation_identity_contract_adopted:v1", repository: "example/repo", tracker: "github:example/repo", spec: "I_1", targetBranch: "main", legacyCompletionFrontier: [{ issue: "I_1", evidenceIdentity: "IC_done", bodySha256: bodyDigest(completionComment.body) }] };
     fixture.comments.push({ node_id: "IC_adopt", author_association: "OWNER", body: renderWorkflowRecord(adoption) });
     assert.equal((await refresh()).facts.nodes[0].completionState, "COMPLETE");
@@ -197,5 +217,5 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     fixture.body += " changed scope"; writeFileSync(fixturePath, JSON.stringify(fixture));
     await assert.rejects(owner.sources.tracker.read({ specId: "1" }), /Current approved Spec publication/u);
     assert.equal(git("status", "--porcelain"), "");
-  } finally { process.env.PATH = oldPath; rmSync(lane, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
+  } finally { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); process.env.PATH = oldPath; rmSync(lane, { recursive: true, force: true }); rmSync(root, { recursive: true, force: true }); }
 });

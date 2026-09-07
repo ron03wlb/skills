@@ -63,7 +63,7 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.equal((await resumed.wait([ref])).taskSettled, true);
     await resumed.message(ref, `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`);
     assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
-    assert.match(prompt, /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
+    assert.match(prompt.replaceAll("\\", "/"), /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

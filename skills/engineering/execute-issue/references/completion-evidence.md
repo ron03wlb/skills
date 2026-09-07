@@ -24,4 +24,4 @@ Write one compact tracker completion note containing:
 
 For the installed Codex GitHub host, serialize this same owner-verified payload using [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The encoding adds no new completion authority.
 
-Read the note back once and stop. Later movement of the Issue target branch does not change this state. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; the human or a coordinator holding the same valid DAG Run Grant separately invokes `/close-issue`.
+Read the note back once and stop. Later movement of the Issue target branch does not change this state. Execution never integrates the target, removes a worktree, closes the Issue, pushes, or deploys; subsequent `close-issue` entry retains its own checks and consumes direct human authority, a valid DAG Run Grant, or the continuing approved maintenance handoff from [Run preparation](../../../../docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance).

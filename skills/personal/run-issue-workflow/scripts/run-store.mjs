@@ -342,7 +342,18 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
 
   const retireLease = ({ paths, kind, runId, target, generation }) => {
     const retirement = `${paths.lock}.release-${generation}`;
-    renameSync(paths.lock, retirement);
+    for (let attempt = 0; ; attempt += 1) {
+      try { renameSync(paths.lock, retirement); break; }
+      catch (error) {
+        // Windows can transiently reject directory rename after metadata close. Retry only
+        // this exact still-owned generation; no lease is released or reclaimed by timeout.
+        if (process.platform !== "win32" || error.code !== "EPERM" || attempt === 2 || existsSync(retirement)) throw error;
+        const owner = readLockOwner(join(paths.lock, "owner.json"), kind);
+        if (owner.runId !== runId || owner.target !== target || owner.generation !== generation
+          || owner.coordinatorInstanceId !== coordinatorInstanceId) throw new Error("LOCK_LEASE_FENCED");
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
     syncParent(paths.lock);
     const retired = readLockOwner(join(retirement, "owner.json"), kind);
     if (retired.runId !== runId || retired.target !== target

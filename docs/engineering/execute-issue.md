@@ -43,3 +43,5 @@ Successful verification is reused only while the candidate, exact command, relev
 ## Where it fits
 
 `execute-issue` follows a Single-Issue [to-spec](https://aihero.dev/skills-to-spec) or ready [to-tickets](https://aihero.dev/skills-to-tickets) child and stops before integration. A human or the same authorized coordinator next invokes [close-issue](https://aihero.dev/skills-close-issue). After all desired closes, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) proves the aggregate target. See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.
+
+When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [Run preparation](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance). The leaf retains its normal ownership and verification; a second human command is unnecessary.

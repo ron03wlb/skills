@@ -41,3 +41,5 @@ A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Dec
 Transient failures trigger bounded probes of Git or the tracker before retrying only an unsatisfied action. A lost response never causes a second completed merge, cleanup or closure.
 
 The coordinator can continue a settled partial close in its original task. Its native request keeps a three-attempt budget for unchanged progress across restarts, so only remaining actions run.
+
+When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [Run preparation](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance). The leaf retains its normal ownership and verification; a second human command is unnecessary.

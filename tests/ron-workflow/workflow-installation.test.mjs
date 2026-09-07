@@ -65,7 +65,7 @@ test("an installed entry update preserves a running workflow's exact executable 
     try {
       assert.throws(() => installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory }), (error) => {
         assert.equal(error.recovery.restoredPreviousEntry, true);
-        assert.equal(JSON.parse(readFileSync(error.recovery.recoveryPath)).previousTarget, first.root + "/skills/personal/run-issue-workflow");
+        assert.equal(JSON.parse(readFileSync(error.recovery.recoveryPath)).previousTarget, join(first.root, "skills/personal/run-issue-workflow"));
         return /Simulated new-entry failure.*installation recovery/u.test(error.message);
       });
     } finally { fs.symlinkSync = originalSymlink; syncBuiltinESMExports(); }
@@ -73,16 +73,28 @@ test("an installed entry update preserves a running workflow's exact executable 
     assert.equal(selectWorkflowVersion({ cacheDirectory }).state, "UNAVAILABLE");
     assert.equal(selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version }).state, "AVAILABLE");
     // An intervening unknown entry must survive the same-command recovery attempt.
-    fs.unlinkSync(skillDirectory); fs.symlinkSync(sourceRepository, skillDirectory);
+    fs.unlinkSync(skillDirectory); fs.symlinkSync(sourceRepository, skillDirectory, process.platform === "win32" ? "junction" : "dir");
     assert.throws(() => installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory }), /public link.*now points/u);
     assert.equal(fs.readlinkSync(skillDirectory), sourceRepository);
-    fs.unlinkSync(skillDirectory); fs.symlinkSync(first.root + "/skills/personal/run-issue-workflow", skillDirectory);
+    fs.unlinkSync(skillDirectory); fs.symlinkSync(join(first.root, "skills/personal/run-issue-workflow"), skillDirectory, process.platform === "win32" ? "junction" : "dir");
     const second = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
     assert.equal(second.recovered, true);
     assert.equal(readFileSync(join(second.root, "docs/agents/run-preparation.md"), "utf8"), "Shared planning preparation contract\n");
     assert.equal(fs.existsSync(join(cacheDirectory, "installation-pending.json")), false);
     assert.notEqual(first.version.id, second.version.id);
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v2");
+    const backups = fs.readdirSync(join(root, "skills")).sort();
+    const repeated = installWorkflow({ sourceRepository, sourceCommit: secondCommit, cacheDirectory, skillDirectory });
+    assert.equal(repeated.reused, true);
+    assert.equal(repeated.version.id, second.version.id);
+    assert.deepEqual(fs.readdirSync(join(root, "skills")).sort(), backups);
+    const scripts = join(second.root, "skills/personal/run-issue-workflow/scripts");
+    const outside = join(root, "outside-scripts");
+    fs.cpSync(scripts, outside, { recursive: true });
+    fs.renameSync(scripts, scripts + ".preserved");
+    fs.symlinkSync(outside, scripts, process.platform === "win32" ? "junction" : "dir");
+    assert.equal(selectWorkflowVersion({ cacheDirectory }).state, "UNAVAILABLE", "unchanged bytes outside the package remain rejected");
+    fs.unlinkSync(scripts); fs.renameSync(scripts + ".preserved", scripts);
     const resumed = selectWorkflowVersion({ cacheDirectory, recordedVersion: first.version });
     assert.equal(resumed.state, "AVAILABLE");
     assert.equal(execFileSync(process.execPath, [join(resumed.root, entry)], { encoding: "utf8" }).trim(), "v1");
@@ -140,7 +152,7 @@ test("the exact install command recovers repeated interruptions before the catal
       syncBuiltinESMExports();
       installWorkflow(${JSON.stringify(killedOptions)});
     `;
-    assert.throws(() => execFileSync(process.execPath, ["--input-type=module", "-e", killedScript], { stdio: "ignore" }), (error) => error.signal === "SIGKILL");
+    assert.throws(() => execFileSync(process.execPath, ["--input-type=module", "-e", killedScript], { stdio: "ignore" }), (error) => process.platform === "win32" ? error.status === 1 : error.signal === "SIGKILL");
     const killedLock = `${killedOptions.cacheDirectory}.install-lock`;
     const killedPending = readFileSync(join(killedOptions.cacheDirectory, "installation-pending.json"), "utf8");
     assert.throws(() => installWorkflow(killedOptions), (error) => error.message.includes(killedLock) && /Prove no active installer.*preserve and move.*same exact install/u.test(error.message));
@@ -153,7 +165,7 @@ test("the exact install command recovers repeated interruptions before the catal
     for (const previousEntry of [false, true]) {
       const cacheDirectory = join(root, `cache-${previousEntry}`);
       const skillDirectory = join(root, `entry-${previousEntry}`);
-      if (previousEntry) fs.symlinkSync(sourceRepository, skillDirectory);
+      if (previousEntry) fs.symlinkSync(sourceRepository, skillDirectory, process.platform === "win32" ? "junction" : "dir");
       const options = { sourceRepository, sourceCommit, cacheDirectory, skillDirectory, replaceLinkTarget: sourceRepository };
       fs.renameSync = (from, to) => {
         if (previousEntry ? from === skillDirectory : to === join(cacheDirectory, "installation.json")) throw new Error("Interrupted initial installation");

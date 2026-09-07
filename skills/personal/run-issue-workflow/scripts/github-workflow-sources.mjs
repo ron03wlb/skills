@@ -1,8 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
-import { assessRunPreparation, readManualAttestation } from "./run-preparation.mjs";
-import { reduceRun } from "./run-core.mjs";
+import { assessRunPreparation, assessBootstrapHandoff, readManualAttestation } from "./run-preparation.mjs";
+import { reduceRun, reduceRunReadyHandoff } from "./run-core.mjs";
 import { bodyDigest, readWorkflowRecords, legacyCompletionAllowed } from "./github-workflow-records.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, deriveExecuteIssueOperationIdentity, assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
@@ -16,7 +16,7 @@ const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 
 export function createGitHubWorkflowSources({ repository, repositoryName, store, tasks }) {
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repositoryName)) throw new Error("Static GitHub repository identity is required");
-  repository = realpathSync(repository);
+  repository = realpathSync.native(repository);
   let commandCalls = 0;
   const command = (name, args, options = {}) => {
     commandCalls += 1;
@@ -29,7 +29,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
   if (![ `https://github.com/${repositoryName}`, `git@github.com:${repositoryName}`, `ssh://git@github.com/${repositoryName}` ].includes(remote)) {
     throw new Error("Configured repository does not match the checkout origin");
   }
-  const gitCommonDir = realpathSync(resolve(repository, git("rev-parse", "--git-common-dir")));
+  const gitCommonDir = realpathSync.native(resolve(repository, git("rev-parse", "--git-common-dir")));
   const checkpoints = createWorkflowControlStore({ gitCommonDir });
   const numbers = new Map();
   const issueNumber = async (locator) => {
@@ -53,11 +53,12 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     catch (error) { throw authorityConflict(error.message); }
     return { ...issue, comments, records };
   };
+  const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {
       const split = line.indexOf(" "); return split < 0 ? [line, true] : [line.slice(0, split), line.slice(split + 1)];
     }));
-    return fields;
+    return { ...fields, worktree: worktreePath(fields.worktree) };
   });
   const targetRead = (target) => {
     const registered = one(worktrees().filter(({ branch }) => branch === `refs/heads/${target}`), "Target worktree");
@@ -156,7 +157,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (!readManualAttestation(issue.comments.find(comment => comment.node_id === packet.attestationIdentity), packet)
           || git("cat-file", "-t", packet.candidate) !== "commit" || git("cat-file", "-t", packet.blob) !== "blob"
           || git("rev-parse", "--verify", `${packet.candidate}:${packet.artifact}`) !== packet.blob) throw new Error("Manual attestation or exact artifact content changed");
-        const matches = worktrees().filter(item => item.worktree === packet.worktree && item.branch === `refs/heads/${packet.topic}`);
+        const matches = worktrees().filter(item => item.worktree === worktreePath(packet.worktree) && item.branch === `refs/heads/${packet.topic}`);
         const registered = matches.length === 0 && issue.state === "closed" && ancestor(packet.candidate, target.head)
           ? { HEAD: target.head } : one(matches, "Prepared Issue worktree");
         if (git("rev-parse", "--verify", `${registered.HEAD}:${packet.artifact}`) !== packet.blob
@@ -216,9 +217,9 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         } else if (record.manualAttestations.length) throw new Error("Completion consumes undeclared Manual prerequisites");
         if (!record.planningSeal || !ancestor(record.planningSeal, record.baseline)) throw new Error("Completion Planning Seal is not proven at its recorded baseline");
         if (!ancestor(record.baseline, record.candidate)) throw new Error("Candidate does not contain its recorded baseline");
-        const matching = worktrees().filter(({ worktree, branch }) => worktree === record.worktree && branch === `refs/heads/${record.topic}`);
+        const matching = worktrees().filter(({ worktree, branch }) => worktree === worktreePath(record.worktree) && branch === `refs/heads/${record.topic}`);
         if (existsSync(record.worktree)) {
-          if (matching.length !== 1 || realpathSync(resolve(record.worktree, command("git", ["-C", record.worktree, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Completion worktree ownership differs");
+          if (matching.length !== 1 || realpathSync.native(resolve(record.worktree, command("git", ["-C", record.worktree, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Completion worktree ownership differs");
           if (!repairing && (matching[0].HEAD !== record.candidate || command("git", ["-C", record.worktree, "status", "--porcelain=v1"]))) throw new Error("Reviewed candidate or clean worktree changed");
           node.worktreeState = "PRESENT";
         } else if (matching.length) throw new Error("Completion worktree is missing but still registered");
@@ -288,6 +289,20 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     return evidence;
   };
   return {
+    // The active Codex task supplies its freshly read human handoff/control; this source owns
+    // tracker, checkpoint, Git and journal evidence and performs no task or Run mutation.
+    async readBootstrapHandoff({ specId, human, control }) {
+      const request = { specId };
+      const snapshot = await trackerRead(request);
+      const current = await reconciliationRead({ request, tracker: snapshot, journal: [] });
+      const node = current.facts.nodes.find(item => item.issueId === human?.issueId);
+      const hasRunGrant = store.listRunIds().some(id => store.readEvents(id).some(event =>
+        event.type === "grant.recorded" && event.runIdentity.specId === snapshot.spec.node_id));
+      return assessBootstrapHandoff({ human, control, repositoryId, authority: snapshot.authority, node, hasRunGrant,
+        readiness: reduceRunReadyHandoff(current.runReadyAuthority), approvals: snapshot.handoff.record.preparation?.approvals,
+        blockers: node?.blockers.map(id => current.facts.nodes.find(item => item.issueId === id)),
+        contradictions: current.facts.contradictions });
+    },
     gitCommonDir, issueNumber, readIssue, targetRead, readCleanupRuns, metrics: () => ({ commandCalls }),
     sources: {
       repository: { readIdentity: async () => repositoryId }, tracker: { read: trackerRead },
