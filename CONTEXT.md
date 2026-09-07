@@ -273,7 +273,7 @@ The **DAG stop diagnosis** classification that distinguishes an instance blocker
 _Avoid_: Generic failure, automatic skill rewrite, UI diagnosis
 
 **Shared workflow repair isolation**:
-The rule that a `skill-contract-gap` or control-engine defect pauses the product **DAG Run** and is repaired through a separate scoped, reviewed, and verified workflow change. Product workers never edit or install their own governing skills or coordinator; after the repaired version is installed, the original Run may continue only through explicit **DAG run reconciliation**.
+The rule that a skill-contract gap or control-engine defect keeps affected product execution inactive while a separate scoped, reviewed, and verified workflow change repairs it. Product workers never edit or install their own governing skills or coordinator. Before Run creation, an explicitly selected Spec's already-approved maintenance may proceed under the original human Start authority, independently of the unavailable coordinator. Verified installation returns to fresh **DAG run reconciliation** under that continuing authority; a new human command is needed only when authorization no longer covers continuation.
 _Avoid_: Self-modifying run, product-worktree skill repair, silent coordinator patch
 
 **Codex-native coordinator**:
@@ -668,10 +668,10 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Invoking `/run-issue-workflow <Spec-ID>` is the sole Start authority: after a valid Single-Issue classification or Multi-Issue **Decomposition publication record** is reconciled, it opens the panel and immediately begins automatic execution without a second confirmation
 - **DAG run reconciliation** skips manually completed nodes only after proving **DAG node success**, resumes an existing valid `implementation_complete` or partial **Close progress**, and dispatches only the remaining dependency-ready frontier without duplicating Issues, workers, or execution lanes
 - **DAG run reconciliation** resumes the same run only when its **DAG run identity** is unchanged; identity drift invalidates the old grant and reports `contract_drift` without selecting a mixed frontier
-- After new planning or decomposition resolves identity drift, only another explicit `/run-issue-workflow <Spec-ID>` invocation may create the next run revision and grant
+- After planning or decomposition resolves identity drift, a new Run revision requires explicit human authority for that exact scope; before any Run exists, an approved revision may retain the active original Start, while an existing Grant is never silently rebound
 - Every blocked, failed, or run-paused state requires a **DAG stop diagnosis**; the Codex panel renders that record but never invents, weakens, or repairs its evidence
 - A **Workflow limitation class** identifies whether progress requires instance resolution, control-engine repair, shared-skill contract change, or a human decision on unresolved evidence
-- **Shared workflow repair isolation** requires every skill-contract or control-engine repair to occur outside the affected product Run with its own scope, review, verification, and installation; the product Run resumes only through a later explicit reconciliation
+- **Shared workflow repair isolation** requires every skill-contract or control-engine repair to occur outside the affected product Run with its own scope, review, verification, and installation; already-approved pre-Run maintenance retains the original Start authority and returns through fresh reconciliation without repeated human approval
 - The **Codex-native coordinator** is the v1 execution adapter for a **DAG Run**; the Run Grant's explicit child-task authority permits native Codex task creation, while Orca and Codex App Server remain outside v1
 - The **Coordinator liveness boundary** keeps the **DAG Run** automatic only while its coordinator task is active; coordinator loss is fail-closed and a later explicit invocation reconciles settled child-task evidence without duplicate dispatch
 - The **DAG control bridge** may record bounded panel commands while the coordinator is active, but it never continues scheduling or closeout after coordinator loss
