@@ -42,4 +42,4 @@ Transient failures trigger bounded probes of Git or the tracker before retrying 
 
 The coordinator can continue a settled partial close in its original task. Its native request keeps a three-attempt budget for unchanged progress across restarts, so only remaining actions run.
 
-When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [Run preparation](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance). The leaf retains its normal ownership and verification; a second human command is unnecessary.
+When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [its owner](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md). The leaf retains its normal ownership and verification; a second human command is unnecessary.

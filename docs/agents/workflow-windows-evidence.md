@@ -138,3 +138,16 @@ Issue 66 contributes this ordinary evidence document and its required non-contra
 - #71's ordinary same-task close turn began at `10:38:27Z`. Its scratch helper first encountered API-name mismatches; the owner corrected the observed local calls and preserved failed attempts. It then fast-forwarded target to `04c82f8d09eff9ca046e21a948e9328a9f28454f`, confirmed clean target and canonical LF bytes, and removed registration/content. The remaining empty `a06f/skills` directory again returned `EBUSY`. At `10:47:10Z` the original task was idle after its bounded retries, with both leases released and #71 still OPEN. `.git/issue66-validation/native-close-failure-71.json` preserves that partial result. The coordinator handed only the exact idle-host cleanup recovery to the existing parent owner; no new candidate or unchanged verification replay was requested.
 - The parent close owner subsequently released ten freshly verified idle #71 helper processes and removed only that exact empty directory under its own leases, then read #71 back CLOSED. Original marker blobs matched the target checkout, so this continuation needed no additional normalization. The topic/candidate were retained and no unchanged verification ran. Sources: `.git/issue66-validation/host-release-71.jsonl` and `.git/workflow-verification/workflow-op-v1-c4d6c274f852bd93a2d209e9137bd8c38693e4a990e100e0b2a33d94b342a01d/close-host-continuation.mjs`. This remains intervened recovery of the unchanged host condition.
 - Unmeasured token cost, wall-time savings, host resource cost, and unavailable historical raw traces are unavailable. Fixture checks and prior-host history do not substitute for the live assertions above.
+
+## Issue 67: operational-entry reading-load measurement
+
+Issue 67 changes instructions only; it does not repeat or claim a new Windows delivery. `scripts/measure-operational-reading-load.mjs` compares the fixed `9714cce428597f9ec5edc4b3665d2c0d1f9d7697` baseline with the candidate using whitespace-delimited tokens in full UTF-8 files, counting each path once per scenario. Fresh publication includes its preparation owner because the producer carries and reads that inventory before handoff; both selected publication cases declare no accepted document delta, SQL, or legacy transaction.
+
+| Scenario | Baseline | Candidate | Required candidate branch files |
+| --- | ---: | ---: | --- |
+| Fresh Single publication | 3,867 | 3,472 | entry, preparation, Spec interfaces, Single template, GitHub payload encoding |
+| Fresh Multi publication | 3,851 | 3,456 | entry, preparation, Spec interfaces, Multi template, GitHub payload encoding |
+| Executable close | 2,345 | 2,152 | entry, operation identity, completion evidence, coordination, executable closeout |
+| Parent-only close | 1,839 | 1,211 | entry, operation identity, coordination, parent closeout |
+
+The candidate entries are 987 (`to-spec`) and 568 (`close-issue`) words, each below 1,200 and the unchanged global 1,500 Operational budget. The script and `tests/ron-workflow/operational-reading-load.test.mjs` enforce all four strict reductions; this records instruction-reading measurements, not token, cost, performance, or new native-delivery measurements.

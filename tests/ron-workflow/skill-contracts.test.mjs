@@ -39,6 +39,20 @@ const readExecuteIssueContract = () => [
   read("skills/engineering/execute-issue/references/manual-prerequisites.md"),
   read("skills/engineering/execute-issue/references/completion-evidence.md"),
 ].join("\n");
+const readToSpecContract = () => [
+  read("skills/engineering/to-spec/SKILL.md"),
+  read("skills/engineering/to-spec/references/spec-publication-interfaces.md"),
+  read("skills/engineering/to-spec/references/single-issue-template.md"),
+  read("skills/engineering/to-spec/references/multi-issue-template.md"),
+].join("\n");
+const readCloseIssueContract = () => [
+  read("skills/engineering/close-issue/SKILL.md"),
+  read("skills/engineering/close-issue/references/operation-identity.md"),
+  read("skills/engineering/close-issue/references/completion-evidence.md"),
+  read("skills/engineering/close-issue/references/close-coordination.md"),
+  read("skills/engineering/close-issue/references/executable-closeout.md"),
+  read("skills/engineering/close-issue/references/parent-closeout.md"),
+].join("\n");
 
 const workflowEntryBudgets = Object.freeze([
   {
@@ -88,6 +102,11 @@ test("moved workflow detail has an exact conditional owner-local reference and s
       trigger: /read \[the decomposition contract\]\(references\/decomposition-contract\.md\) only when starting, resuming, reconciling/iu,
     },
     {
+      entry: "skills/engineering/to-spec/SKILL.md",
+      references: ["skills/engineering/to-spec/references/spec-publication-interfaces.md"],
+      trigger: /Before the first `readPlanningBaseline`, read \[spec publication interfaces\]\(references\/spec-publication-interfaces\.md\).*primary mode.*`tracker\.reserve`.*revision mode.*`tracker\.read`/isu,
+    },
+    {
       entry: "skills/personal/run-issue-workflow/SKILL.md",
       references: [
         "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
@@ -104,6 +123,15 @@ test("moved workflow detail has an exact conditional owner-local reference and s
         "skills/engineering/execute-issue/references/completion-evidence.md",
       ],
       trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
+    },
+    {
+      entry: "skills/engineering/close-issue/SKILL.md",
+      references: [
+        "skills/engineering/close-issue/references/close-coordination.md",
+        "skills/engineering/close-issue/references/executable-closeout.md",
+        "skills/engineering/close-issue/references/parent-closeout.md",
+      ],
+      trigger: /Read \[close coordination\]\(references\/close-coordination\.md\) before any lease acquisition.*exactly three ordered executable actions.*\[executable closeout\]\(references\/executable-closeout\.md\).*For a Multi-Issue parent.*\[parent closeout\]\(references\/parent-closeout\.md\)/isu,
     },
   ];
 
@@ -222,7 +250,7 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/operation-identity.md");
   const run = readRunIssueWorkflowContract();
   const execute = readExecuteIssueContract();
-  const close = read("skills/engineering/close-issue/SKILL.md");
+  const close = readCloseIssueContract();
   const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
   const runOperator = read("skills/personal/run-issue-workflow/OPERATOR.md");
 
@@ -637,7 +665,7 @@ test("Wiki is one independent user-invoked documentation control", () => {
   }
 });
 test("planning lanes revalidate relevant facts before tracker work becomes executable", () => {
-  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const spec = readToSpecContract();
   const tickets = readToTicketsContract();
   const implement = read("skills/engineering/implement/SKILL.md");
   const execute = readExecuteIssueContract();
@@ -675,7 +703,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   assert.match(spec, /re-read only.*relevant glossary.*ADR.*source facts.*latest target/isu);
   assert.match(spec, /compatible.*target movement.*bind.*latest baseline/isu);
   assert.match(spec, /relevant semantic drift.*Recoverable blocker.*owning source.*observed evidence.*smallest human action.*preserved stages.*same `\/to-spec` retry/isu);
-  assert.match(spec, /accepted glossary or ADR.*shared Target mutation writer.*one scoped Planning Seal/isu);
+  assert.match(spec, /one exact accepted delta.*shared writer.*one scoped seal/isu);
   assert.match(spec, /no accepted.*delta.*reuse.*latest baseline.*no empty commit/isu);
   assert.doesNotMatch(spec, /operational plan.*commit only.*exact plan/isu);
   assert.match(spec, /revision mode.*tracker.read.*existing Spec.*version token/isu);
@@ -774,7 +802,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
 });
 
 test("to-spec owns minimal operation-scoped publication and Single-Issue Run handoff", () => {
-  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const spec = readToSpecContract();
   const metadata = read("skills/engineering/to-spec/agents/openai.yaml");
   const docs = read("docs/engineering/to-spec.md");
   const template = read("skills/engineering/to-spec/references/single-issue-template.md");
@@ -793,7 +821,7 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
     "to-spec must consume its lane, revalidate, checkpoint, and publish in order",
   );
 
-  assert.match(spec, /fresh ordinary.*`to-spec@v2`.*exact operation.*repository.*Spec.*producer.*target.*baseline.*Planning Seal.*classification.*approved-scope/isu);
+  assert.match(spec, /fresh.*`to-spec@v2`.*operation identity receipt.*repository.*Spec.*approved publication.*producer.*`to-spec`.*`publication`/isu);
   assert.match(spec, /ordered stages.*`planning_seal\.read_back`.*`publication\.read_back`.*`handoff\.completed`/isu);
   assert.match(spec, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
   assert.match(spec, /existing valid incomplete.*transaction-v1.*`to-spec@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
@@ -1864,14 +1892,14 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Subsequent `close-issue` entry uses direct human authority, a valid DAG Run Grant, or the same approved maintenance handoff/iu);
   assert.doesNotMatch(execute, /review_profile|focused review|full review/iu);
 
-  const close = read("skills/engineering/close-issue/SKILL.md");
+  const close = readCloseIssueContract();
   const closeLease = read("skills/engineering/close-issue/scripts/close-lease.mjs");
   const closeMetadata = read("skills/engineering/close-issue/agents/openai.yaml");
   assert.doesNotMatch(close, /^disable-model-invocation:\s*true$/mu);
   assert.doesNotMatch(closeMetadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(close, /direct human invocation.*valid.*DAG Run Grant.*without.*per-Issue.*approval/isu);
   assert.match(close, /never creates.*DAG Run Grant/iu);
-  assert.match(close, /coordinator.*Single-Issue.*target.*bound Spec.*Multi-Issue.*Executable Issue.*exact Issue.*mapping.*parent-only.*target.*bound Spec/isu);
+  assert.match(close, /For coordinator entry.*Grant.*exact Spec.*Decomposition record.*Single target.*Executable child.*mapping.*parent-only target/isu);
   assert.match(close, /absent from.*mapping.*stop before mutation/isu);
   assert.match(plainMarkdown(read("docs/engineering/close-issue.md")), /Single-Issue.*bound Spec.*Multi-Issue child.*exact mapping member.*parent-only.*bound Spec/isu);
   assert.match(close, /`implementation_complete` note/iu);
@@ -3485,7 +3513,7 @@ test("task prompts stay compact while their owners retain detailed authority", (
 });
 
 test("planning isolation belongs to accepted document writes, not tracker-only publication", () => {
-  const spec = read("skills/engineering/to-spec/SKILL.md");
+  const spec = readToSpecContract();
   const interfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
   assert.match(spec, /tracker-only publication.*empty list.*no planning worktree or lane handoff/isu);
   assert.match(spec, /readPlanningBaseline.*scripts\/planning-entry\.mjs/isu);

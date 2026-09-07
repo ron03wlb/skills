@@ -2,7 +2,7 @@
 
 Read only after the human explicitly starts the selected Run, including its Issue tasks and later messages to those tasks. The entry itself verifies producer handoff and scope before requesting a task. This driver calls only the current task's available desktop tools; it is not an App Server client or a daemon.
 
-The entry uses Node native raw mode for TTY input on Windows and Unix and restores the prior mode on exit. A startup/package failure before Run creation returns to [approved pre-Run maintenance](../../../../docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance) when its exact human scope already exists. The active task completes that isolated handoff and returns here without a new human command; never launch a caller-built coordinator.
+The entry uses Node native raw mode for TTY input on Windows and Unix and restores the prior mode on exit. A startup/package failure before Run creation returns to [approved pre-Run maintenance](../../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) when its exact human scope already exists. The active task completes that isolated handoff and returns here without a new human command; never launch a caller-built coordinator.
 
 Launch the installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID or comma-separated Spec batch] [Run-ID]` through `tools.exec_command` with `tty:true`, `yield_time_ms:1000`, and the consumer as `workdir`. Shell-quote each path or ID. Save its `session_id` and `output` using `store("workflow.host", {sessionId: result.session_id, buffer: result.output})`. Always preserve the session for subsequent ticks; do not launch a second coordinator while it is active.
 

@@ -85,4 +85,4 @@ Missing tracker, labels or domain-document configuration routes to [setup-matt-p
 
 `ask-matt` is a reach-for-it-anytime router, not a chain step. Its most common neighbours are [grill-with-docs](https://aihero.dev/skills-grill-with-docs), [to-spec](https://aihero.dev/skills-to-spec), and [execute-issue](https://aihero.dev/skills-execute-issue); [ask-matt](https://aihero.dev/skills-ask-matt) remains the map of record.
 
-An already-approved pre-Run workflow repair carries the original Start through the existing execution and closeout owners. The router preserves that handoff instead of asking for another human command; [Run preparation](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance) owns the exact boundary.
+An already-approved pre-Run workflow repair carries the original Start through the existing execution and closeout owners. The router preserves that handoff instead of asking for another human command; [its owner](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md) owns the exact boundary.

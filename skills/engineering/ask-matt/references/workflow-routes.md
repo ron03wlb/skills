@@ -32,6 +32,6 @@ If frozen member derivation finds one eligible closed historical completion-evid
 
 After current local-ahead `push_ready`, `push-target` fetches the unique configured upstream, rejects drift, performs one ordinary non-force push of the exact verified target, and reads the remote ref back. It never pulls, merges, rebases, force-pushes, retries, deploys, or pushes another ref.
 
-Approved pre-Run maintenance retains the original human Start through [Run preparation](../../../../docs/agents/run-preparation.md#approved-pre-run-workflow-maintenance), then returns to fresh installed-entry reconciliation. This is an internal bounded handoff; the user need not issue another leaf command.
+Approved pre-Run maintenance retains the original human Start through [its owner](../../../../docs/agents/references/approved-pre-run-workflow-maintenance.md), then returns to fresh installed-entry reconciliation. This is an internal bounded handoff; the user need not issue another leaf command.
 
 The public Issue leaves are `/execute-issue` and `/close-issue`.
