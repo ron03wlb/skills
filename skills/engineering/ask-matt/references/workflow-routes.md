@@ -4,6 +4,8 @@ Read this reference only after `ask-matt` has identified a delivery, recovery, o
 
 ## Planning and publication
 
+An approved revision returns through `to-spec` and `to-tickets`. The decomposition owner may explicitly carry unchanged closed children forward with exact prior completion evidence; unresolved old lanes retain their recovery owner. Existing completion records and manual recovery history stay unchanged.
+
 `/grill-with-docs` binds one proposed Spec and target to the current task. Accepted vocabulary or ADR writes use an isolated planning worktree and pass its exact ownership to `/to-spec`; tracker-only publication needs no worktree. `to-spec` revalidates relevant Planning facts, creates or reuses the Planning Seal, publishes through its minimal operation-scoped transaction, and remains the sole classification authority.
 
 For a Multi-Issue Tracker Spec, `to-tickets` consumes the completed `to-spec` handoff, runs its minimal operation-scoped transaction, publishes the Decomposition publication record and composite handoff, and returns `/run-issue-workflow <Spec-ID>`. Fresh `to-spec` and `to-tickets` operations create no target operational-plan checkpoint or prospective contribution record. Frozen legacy and profile-v1 producer operations keep their exact resume behavior and may invoke model-invoked `attest-target-contribution` only at their existing checkpoint stage; that helper needs no second confirmation and returns only the immutable record identity.

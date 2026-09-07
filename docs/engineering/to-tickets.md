@@ -23,6 +23,8 @@ Every child is self-contained and depends only on its parent constraints and exp
 
 Decomposition keys make retries stable: exact tracker evidence is reused, while duplicate or conflicting identity sources fail closed. Owned blockers must be acyclic, and readable External blockers affect readiness while remaining read-only.
 
+After an approved parent revision, an unchanged completed child can be explicitly carried forward with its original body, candidate and completion receipt. The producer verifies closure, integration and absent ownership before binding that evidence into the new decomposition. It preserves historical manual recovery and blocked records; a revision cannot turn that history into automatic execution.
+
 A fresh operation reads the upstream publication and handoff once, then binds them with the parent, target, Planning Seal, classification, and approved scope in a minimal `to-tickets@v2` transaction. Its only stages are Decomposition publication, ready-state, and final-handoff read-back. It creates no target operational-plan file or commit and no prospective `direct_target_contribution:v1` record. Existing valid incomplete legacy and profile-v1 operations retain frozen exact-resume behavior.
 
 A complete, read-back Issue decomposition gains one Decomposition publication record, an exact dependency-ready frontier, and one composite handoff binding the upstream publication and handoff, current operation receipt, plus the publication identity and digest. A wide mechanical refactor that cannot stay green as vertical slices uses expand-contract instead.

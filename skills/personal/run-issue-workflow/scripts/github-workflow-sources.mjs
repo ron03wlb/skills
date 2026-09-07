@@ -1,11 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { assessRunPreparation, assessBootstrapHandoff, readManualAttestation } from "./run-preparation.mjs";
 import { reduceRun, reduceRunReadyHandoff } from "./run-core.mjs";
 import { bodyDigest, readWorkflowRecords, legacyCompletionAllowed } from "./github-workflow-records.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, deriveExecuteIssueOperationIdentity, assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
+import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
 const one = (values, label) => {
@@ -169,7 +171,34 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         }
       }
 
-      const lifecycle = issue.records.filter(({ record }) => ["implementation_complete", "implementation_blocked"].includes(record.kind));
+      const { lifecycle, historicalBlocks, adoptedCompletion, previousAuthorities } = selectRevisionLifecycle({ snapshot, issue, repositoryId });
+      for (const previous of previousAuthorities) {
+        const checkpoint = checkpointRead({ ...previous, spec: snapshot.spec });
+        const handoff = previous.handoff.record;
+        const original = previous.publication.record.authority;
+        if (checkpoint.state !== "COMPLETED" || checkpoint.producerCommand !== "to-tickets"
+          || checkpoint.target !== original.target || checkpoint.planningSeal !== original.planningSeal
+          || checkpoint.approvedScopeHash !== original.approvedScopeHash || checkpoint.classification !== "MULTI"
+          || checkpoint.transactionIdentity !== handoff.transactionIdentity
+          || checkpoint.handoffIdentity !== previous.handoff.identity
+          || !isDeepStrictEqual(handoff.operationReceipt, { transactionIdentity: checkpoint.transactionIdentity,
+            decompositionReadBack: checkpoint.stageReceipts.decompositionReadBack, readyStateReadBack: checkpoint.stageReceipts.readyStateReadBack })
+          || !isDeepStrictEqual(checkpoint.stageReceipts.decompositionReadBack, {
+            decompositionIdentity: previous.decomposition.identity, decompositionDigest: previous.decomposition.bodySha256 })) {
+          throw new Error("Previous decomposition checkpoint is incomplete or differs from its handoff");
+        }
+      }
+      if (historicalBlocks.length || adoptedCompletion) {
+        // A revision never takes ownership of an older Run's task or unresolved intent.
+        for (const runId of store.listRunIds()) {
+          const events = store.readEvents(runId);
+          const grant = events.findLast(event => event.type === "grant.recorded");
+          if (grant?.runIdentity.specId === authority.specId
+            && grant.runIdentity.approvedScopeHash !== authority.approvedScopeHash) {
+            throw new Error("Previous revision has a Run Grant; reconcile its owning Run before revision continuation");
+          }
+        }
+      }
       if (lifecycle.length === 0 && issue.comments.some(({ body }) => /\bimplementation_complete\b/u.test(body))) {
         throw new Error(`Issue #${issue.number} has unclassified legacy completion evidence; preserve its lane`);
       }
@@ -204,7 +233,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (record.workflowArtifacts === undefined && !legacy("workflow_artifacts_contract_adopted:v1")) throw new Error("Completion is outside the exact artifact compatibility frontier");
         if (record.operationIdentity) {
           const publication = record.operationIdentity.approvedPublicationIdentity;
-          if (![authority.approvedScopeHash, snapshot.publication.identity, snapshot.decomposition?.identity].filter(Boolean).includes(publication)) throw new Error("Completion publication is outside current proven authority");
+          if (completion !== adoptedCompletion && ![authority.approvedScopeHash, snapshot.publication.identity, snapshot.decomposition?.identity].filter(Boolean).includes(publication)) throw new Error("Completion publication is outside current proven authority");
           assertWorkflowOperationIdentity(record.operationIdentity, deriveExecuteIssueOperationIdentity({ repositoryId, specId: authority.specId, approvedPublicationIdentity: publication, issueId: issue.node_id }));
         } else if (!legacy("workflow_operation_identity_contract_adopted:v1")) throw new Error("Completion is outside the exact operation compatibility frontier");
         if (sql) {
@@ -224,6 +253,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           node.worktreeState = "PRESENT";
         } else if (matching.length) throw new Error("Completion worktree is missing but still registered");
         node.candidateReachable = ancestor(record.candidate, target.head);
+        if (adoptedCompletion && (node.worktreeState !== "ABSENT" || !node.candidateReachable || task)) throw new Error("Adopted completion still has live ownership or is not integrated");
         node.closeAuthorityEvidence = { trackerIdentity: `${issue.node_id}:${bodyDigest(issue.body)}`, targetHead: target.head,
           candidateCommit: record.candidate, completionEvidenceId: completion.identity, completionBodySha256: completion.bodySha256,
           worktreeIdentity: bodyDigest(JSON.stringify({ gitCommonDir, path: record.worktree, topic: record.topic })) };
