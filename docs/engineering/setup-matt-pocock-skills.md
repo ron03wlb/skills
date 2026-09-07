@@ -56,6 +56,10 @@ The diagnostic is deliberately read-only. It does not install or repair a separa
 
 ## Common questions
 
+**A producer says its adapter is missing. Will re-running setup install it?**
+
+No. Setup writes tracker, label and domain-document configuration, and inspects installed workflow capabilities. A missing concrete producer adapter needs its owning package's installation or explicit repository binding. GitLab tracker-only Spec publication uses the personal coordinator's GitLab producer binding; automatic Run host support remains a separate capability. An interface document marked present is not evidence that a concrete GitLab implementation is configured.
+
 **Do I have to use GitHub?**
 
 No. GitHub, GitLab and local markdown under `.scratch/` all ship as ready-made templates, and anything else works through the "other" path. This is the most-repeated question in the record, in roughly these words: *"hard locked to github"*, *"can I use GitLab / Jira"*, *"what about Azure DevOps"*. The answer every time is that the tracker is a setup answer, not a skill property.

@@ -1,0 +1,68 @@
+# GitLab Spec producer binding
+
+This binding supplies the planning, checkpoint, tracker and handoff adapters for tracker-only `to-spec@v2` publication. It supports primary reservation and revision of the same existing Spec. It does not classify a Spec, grant approval, write glossary/ADR changes, decompose children, or provide an automatic GitLab Run host. Those operations keep their existing owners.
+
+## Configure once, inspect without mutation
+
+Resolve this reference and its sibling scripts from the current harness's installed personal coordinator. Do not substitute another checkout or a per-Run script. The package must include `gitlab-producer-entry.mjs`, `gitlab-producer-adapters.mjs`, `gitlab-producer-transport.mjs`, the existing checkpoint and operation-identity modules, and the `to-spec` planning entry.
+
+After explicit authorization to bind a repository, run from any directory:
+
+```text
+node <installed-coordinator>/scripts/gitlab-producer-entry.mjs configure <repository>
+node <installed-coordinator>/scripts/gitlab-producer-entry.mjs inspect <repository>
+```
+
+`configure` reads the HTTP(S) origin, project and authenticated GitLab identity, then creates or reuses `docs/agents/gitlab-producer.json`. It preserves an existing binding and rejects a different project. SSH consumers first supply this same static JSON with the actual web origin. It contains no credentials, Spec IDs, task IDs or receipts:
+
+```json
+{
+  "schema": "gitlab-producer:v1",
+  "baseUrl": "https://gitlab.example",
+  "project": "group/subgroup/project"
+}
+```
+
+Credentials remain in the configured `glab` account. `inspect` only reads this file, the remote, project and authenticated identity. It creates no producer state and reports the source that is missing or mismatched. It does not prove write permission or Run readiness. Setup diagnostics may invoke `inspect`; they must never invoke `configure`.
+
+## Invoke the owner adapters
+
+The reusable CLI accepts one structured JSON request through stdin:
+
+```text
+node <installed-coordinator>/scripts/gitlab-producer-entry.mjs invoke <repository>
+```
+
+Every request carries `action`, `target` (local branch name), `publication`, optional `specId` (positive project IID or exact configured Issue URL), and the action's `request`. `publication` has the approved `title`, exact canonical `body`, `classification: SINGLE|MULTI`, and optional `readyLabel` (default `ready-for-agent`). The configured label must already exist. The owner still validates its template, AC mappings, approvals, SQL preparation and authoritative next command before mutation. Unsupported GitLab quick actions in the body stop before publication.
+
+The same API is available as `createGitLabProducerAdapters({repository, configuration, target, publication, specId})` from `scripts/gitlab-producer-adapters.mjs`. An injected `transport` is a fixture seam, never a production substitute for GitLab read-back.
+
+| CLI action | Adapter | Request and result |
+| --- | --- | --- |
+| `reserve` | `tracker.reserve` | Primary: `{mode:"primary", proposedSpecIdentity}` with no `specId`; returns the reserved Issue identity and version. Revision: select the existing `specId` and use `{mode:"revision"}`. |
+| `read` | `tracker.read` | Returns native Issue ID, exact Issue URL as `trackerIdentity`, body, labels, comments and opaque `version`. |
+| `baseline` | `planning.readBaseline` | `{baseline, trackerVersion, relevantFacts, acceptedChanges:[]}`. Facts map relevant normalized repository file paths to `git-blob:<object-id>` from the settled baseline. Returns the existing planning entry's `COMPATIBLE` or `DRIFTED` result. |
+| `identity` | `checkpoint.identity` | `{baseline, relevantFacts}` using the revalidated baseline. Returns one fully bound current `to-spec@v2` checkpoint identity. Preserve that exact object for all retries. |
+| `checkpoint-read` | `checkpoint.read` | The exact identity object; returns zero or one matching transaction. |
+| `checkpoint-create` | `checkpoint.create` | The same identity; uses the existing operation-scoped store. An observed downstream record without its transaction stops. |
+| `seal` | `planningSeal.read` | `{identity}`; independently verifies the reused seal and relevant current source. Returns `{target, planningSeal, state:"reused"}`. |
+| `checkpoint-advance` | `checkpoint.advance` | `{identity, stage, receipt}`; independently reads the stage's owning evidence before passing the exact receipt to the store. |
+| `publish` | `tracker.publish` | `{identity, expectedVersion, expectedLabels}`; preserve the version and labels from the same pre-publication `read` for retries. Requires the exact Planning Seal stage. Returns a native publication note identity, note-body digest, observed version and scope bindings. |
+| `handoff-append` | `handoff.append` | `{identity, preparation}`; requires completed publication read-back. Preparation is the already verified owner packet, not generated permission. Returns native handoff identity and digest. |
+| `handoff-read` | `handoff.read` | `{identity}`; validates the publication checkpoint and reads zero or one exact handoff. |
+
+Order: resolve/reserve the tracker identity, revalidate baseline, read/create the exact producer transaction, read and advance `planning_seal.read_back`, publish and advance `publication.read_back`, append/read handoff and advance `handoff.completed`. Re-entry preserves the identity and starts at the first unsatisfied stage after reading earlier receipts. Do not regenerate its baseline or scope bindings merely because an unrelated target commit moved.
+
+Revision never reserves a replacement Issue. Primary reservation retains its native Issue identity locally so retry still selects it after the draft marker is replaced by the canonical body. A target-only publication reuses the seal without an empty commit. Accepted glossary/ADR writes require a separately bound planning writer; this implementation fails closed for a nonempty `acceptedChanges` list.
+
+## Evidence and uncertainty
+
+The checkpoint's approved publication identity hashes the approved title, canonical body, classification and effective ready label together. A title-only revision therefore has its own operation, while an exact retry retains the same identity. `authority.approvedScopeHash` separately hashes only the canonical body. Publication records bind the exact expected post-write label set (the observed pre-write labels plus the ready label); both initial read-back and retries verify that set.
+
+The repository identity includes GitLab host and complete project path. Spec identity is the exact project Issue URL. Native note IDs plus SHA-256 of exact note bodies identify immutable observations; GitLab notes remain editable, so every receipt consumer verifies the digest again. Producer records use one `workflow-record` JSON fence with `schema: gitlab-producer-record:v1`. Publication carries `authority` and the exact transaction; handoff carries that authority, checkpoint identity, transaction, publication identity/digest and preparation. Only notes authored by a current project Developer or higher are accepted. Duplicate, malformed, foreign or changed records stop rather than merging evidence.
+
+The transport uses the GitLab [Issues API](https://docs.gitlab.com/api/issues/) and [Notes API](https://docs.gitlab.com/api/notes/) through [glab api](https://docs.gitlab.com/cli/api/). JSON is sent through stdin. Publication is immediate pre-read/write/read-back (`READ_WRITE_READBACK`), not atomic CAS; an atomicity requirement must stop before this binding is selected. Existing labels are preserved and only the configured existing ready label is added.
+
+Local mutation intents contain hashes and operation identities, not Issue bodies or credentials. A response lost after an applied write is resolved only by exact owner read-back. If a retained intent has no matching result, stop as `GITLAB_PRODUCER_UNKNOWN`; never blindly resend, delete the intent, or infer failure from absence. A crashed producer lock also stops without automatic reclamation. Human recovery must first resolve any in-flight provider write and exact ownership; there is no force route. Legacy checkpoint receipts and per-Run adapters are preserved; this binding does not migrate or copy them.
+
+Producer handoff completion does not imply GitLab automatic Run support. The installed Codex Run entry still has its own host, package and tracker-reader requirements. A consumer can inspect the producer independently of those requirements.
