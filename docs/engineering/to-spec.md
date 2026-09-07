@@ -21,6 +21,8 @@ The owner-local planning adapter enforces this distinction before publication. T
 
 GitLab tracker-only publication has a reusable producer binding for primary reservation and revision of an existing Spec. It verifies project identity, source baseline, Issue versions and native note receipts, and reuses the existing checkpoint store. Its explicit repository configuration is separate from read-only setup diagnostics. It does not supply an automatic GitLab Run host or a writer for accepted glossary/ADR changes.
 
+For GitLab publication failures, the installed [producer binding](../../skills/personal/run-issue-workflow/references/gitlab-producer-adapters.md#recover-a-rejected-write) distinguishes a recorded HTTP rejection from an unresolved write. Only an explicitly requested retry of an exact rejected operation may send another request. Legacy requests without recorded outcomes retain their evidence and require the publication owner to resolve the missing provider result.
+
 ## One optimistic publication
 
 Before publication or a Planning Seal write, `to-spec` re-reads only relevant glossary, ADR, and source facts. Compatible target movement binds the latest baseline. Relevant semantic drift returns the changed fact, the owning source, the smallest human action, preserved progress, and the same `/to-spec` retry after renewed confirmation.
