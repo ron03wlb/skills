@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess, { execFileSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -189,10 +189,14 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
         turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] }] }] };
       if (name.endsWith("send_message_to_thread")) {
         nativeMessages++; nativePrompt = args.prompt;
-        if (nativeMessages === 1) git("merge", "--ff-only", packet.candidate);
+        if (nativeMessages === 1) {
+          git("merge", "--ff-only", packet.candidate);
+          git("worktree", "remove", lane);
+          mkdirSync(lane); // Reproduce Windows partial removal: registration gone, empty directory remains.
+        }
         else if (nativeMessages === 2) {
           assert.match(nativePrompt, /Close continuation: .*"attempt":1/u);
-          git("worktree", "remove", lane); fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
+          rmdirSync(lane); fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
         } else throw new Error("Duplicate completed close mutation");
         throw new Error("response lost after accepted close action");
       }
@@ -209,6 +213,20 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const partial = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(partial.nodes[0].close.candidateReachable, true);
     assert.equal(partial.nodes[0].close.worktreeState, "PRESENT");
+    const pendingCleanup = await refresh();
+    assert.equal(pendingCleanup.facts.nodes[0].completionState, "COMPLETE");
+    assert.deepEqual(pendingCleanup.facts.contradictions, []);
+    writeFileSync(join(lane, "unowned.txt"), "must preserve\n");
+    assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u);
+    rmSync(join(lane, "unowned.txt"));
+    git("branch", "-f", "issue-one", seal);
+    assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u);
+    git("branch", "-f", "issue-one", packet.candidate);
+    rmdirSync(lane); symlinkSync(root, lane, "junction");
+    assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u);
+    rmSync(lane); symlinkSync(`${root}-missing`, lane, "junction");
+    assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u, "a dangling link is not physical absence");
+    rmSync(lane); mkdirSync(lane);
     const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
     assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");

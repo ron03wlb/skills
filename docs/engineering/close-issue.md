@@ -14,6 +14,8 @@ Any number of Issue worktrees may execute concurrently. Reach for this once per 
 
 ## Three observable actions
 
+On Windows, Git can remove a worktree registration while leaving its empty directory. This is pending cleanup, so the original completion remains valid and the Issue stays open until the exact directory is removed. Tool policy rejection requires resolution at that boundary; another tool is not a cleanup workaround.
+
 The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate makes that action complete; otherwise Git deterministically fast-forwards when possible and creates the ordinary merge only for diverged histories. A dirty target stops before mutation; after preserving that work, the human makes the target clean and retries `/close-issue <Issue-ID>`. This does not rerun execution or the full suite. A conflict is aborted and target restoration verified, with the worktree and Issue left open; the human or same authorized coordinator can then return to execution in the same lane when resolution stays inside the original Acceptance Criteria.
 
 A new ordinary merge combination receives the integration checks required by its approved plan before cleanup; unchanged candidate verification is reused when its inputs still match. This remains separate from the aggregate push gate.

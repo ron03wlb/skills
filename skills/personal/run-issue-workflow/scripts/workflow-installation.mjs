@@ -14,7 +14,8 @@ const versionFields = ["id", "sourceCommit", "sourceRepository", "protocolVersio
 const sameVersion = (left, right) => versionFields.every((field) => left?.[field] === right?.[field]);
 const directoryLink = (target, path) => symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-const safePath = (path) => typeof path === "string" && (path.startsWith("skills/") || path === "docs/agents/run-preparation.md")
+const sharedReferences = ["docs/agents/run-preparation.md", "docs/agents/references/approved-pre-run-workflow-maintenance.md"];
+const safePath = (path) => typeof path === "string" && (path.startsWith("skills/") || sharedReferences.includes(path))
   && !path.split(/[\\/]/u).some((part) => ["", ".", ".."].includes(part));
 
 function validateCatalog(catalog) {
@@ -145,7 +146,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const tree = execFileSync("git", ["-C", sourceRepository, "ls-tree", "-rz", "--full-tree", sourceCommit, "--", "skills", "docs/agents/run-preparation.md"], { encoding: "utf8" });
+  const tree = execFileSync("git", ["-C", sourceRepository, "ls-tree", "-rz", "--full-tree", sourceCommit, "--", "skills", ...sharedReferences], { encoding: "utf8" });
   const files = tree.split("\0").filter(Boolean).map((line) => {
     const match = line.match(/^(100644|100755) blob [a-f0-9]+\t(.+)$/u);
     if (!match || !safePath(match[2])) throw new Error("Workflow package contains an unsupported path or link");
@@ -164,7 +165,7 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
   try {
     mkdirSync(versionsDirectory, { recursive: true });
     mkdirSync(staging);
-    const archive = execFileSync("git", ["-C", sourceRepository, "-c", "core.autocrlf=false", "archive", sourceCommit, "skills", ...(files.some(file => file.path === "docs/agents/run-preparation.md") ? ["docs/agents/run-preparation.md"] : [])], { maxBuffer: 32 * 1024 * 1024 });
+    const archive = execFileSync("git", ["-C", sourceRepository, "-c", "core.autocrlf=false", "archive", sourceCommit, "skills", ...sharedReferences.filter(path => files.some(file => file.path === path))], { maxBuffer: 32 * 1024 * 1024 });
     execFileSync("tar", ["-x", "-C", staging], { input: archive });
     for (const file of files) file.sha256 = sha256(readFileSync(join(staging, file.path)));
     const id = sha256(JSON.stringify({ sourceCommit, files }));

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { assessRunPreparation, assessBootstrapHandoff, readManualAttestation } from "./run-preparation.mjs";
@@ -246,10 +246,24 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         } else if (record.manualAttestations.length) throw new Error("Completion consumes undeclared Manual prerequisites");
         if (!record.planningSeal || !ancestor(record.planningSeal, record.baseline)) throw new Error("Completion Planning Seal is not proven at its recorded baseline");
         if (!ancestor(record.baseline, record.candidate)) throw new Error("Candidate does not contain its recorded baseline");
-        const matching = worktrees().filter(({ worktree, branch }) => worktree === worktreePath(record.worktree) && branch === `refs/heads/${record.topic}`);
-        if (existsSync(record.worktree)) {
-          if (matching.length !== 1 || realpathSync.native(resolve(record.worktree, command("git", ["-C", record.worktree, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Completion worktree ownership differs");
-          if (!repairing && (matching[0].HEAD !== record.candidate || command("git", ["-C", record.worktree, "status", "--porcelain=v1"]))) throw new Error("Reviewed candidate or clean worktree changed");
+        const registered = worktrees();
+        const exactPath = worktreePath(record.worktree);
+        const topicRef = `refs/heads/${record.topic}`;
+        const matching = registered.filter(({ worktree, branch }) => worktree === exactPath && branch === topicRef);
+        const directory = lstatSync(record.worktree, { throwIfNoEntry: false });
+        if (directory) {
+          if (directory.isSymbolicLink() || !directory.isDirectory()) throw new Error("Completion worktree ownership differs");
+          if (matching.length === 0) {
+            // Windows can remove registration/content before the final directory removal fails.
+            // This remains PRESENT, so neither Issue nor parent closure can skip physical cleanup.
+            if (repairing || registered.some(({ worktree, branch }) => worktree === exactPath || branch === topicRef)
+              || readdirSync(record.worktree).length !== 0
+              || git("rev-parse", "--verify", `${topicRef}^{commit}`) !== record.candidate
+              || !ancestor(record.candidate, target.head)) throw new Error("Completion worktree ownership differs");
+          } else {
+            if (matching.length !== 1 || realpathSync.native(resolve(record.worktree, command("git", ["-C", record.worktree, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Completion worktree ownership differs");
+            if (!repairing && (matching[0].HEAD !== record.candidate || command("git", ["-C", record.worktree, "status", "--porcelain=v1"]))) throw new Error("Reviewed candidate or clean worktree changed");
+          }
           node.worktreeState = "PRESENT";
         } else if (matching.length) throw new Error("Completion worktree is missing but still registered");
         node.candidateReachable = ancestor(record.candidate, target.head);

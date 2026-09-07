@@ -1951,7 +1951,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(closeDocs, /repository close lease.*same Git common dir.*repository.*target.*order.*reverse/isu);
   assert.match(close, /repository close lease.*target mutation writer.*order/isu);
   assert.doesNotMatch(closeDocs, /preservation|closeout receipt|integration receipt/iu);
-  assert.match(close, /If the worktree is already absent, this action is satisfied/iu);
+  assert.match(close, /Cleanup is satisfied only when both registration and directory are absent/iu);
   const alreadyClosed = close.match(/If it is already closed,[^\n]+/u)?.[0] ?? "";
   assert.match(alreadyClosed, /same candidate.*reachable.*worktree.*absent/iu);
   assert.match(close, /never repairs product code/iu);

@@ -43,16 +43,20 @@ test("an installed entry update preserves a running workflow's exact executable 
   const git = (...args) => execFileSync("git", ["-C", sourceRepository, ...args], { encoding: "utf8" }).trim();
   mkdirSync(join(sourceRepository, "docs/agents"), { recursive: true });
   writeFileSync(join(sourceRepository, "docs/agents/run-preparation.md"), "Shared planning preparation contract\n");
+  const maintenanceReference = "docs/agents/references/approved-pre-run-workflow-maintenance.md";
+  mkdirSync(join(sourceRepository, "docs/agents/references"));
+  writeFileSync(join(sourceRepository, maintenanceReference), "Approved maintenance owner\n");
   const commit = (version) => {
     writeFileSync(join(sourceRepository, entry), `console.log(${JSON.stringify(version)});\n`);
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), `---\nname: run-issue-workflow\ndescription: Run approved work.\n---\n${version}\n`);
-    git("add", "skills", "docs/agents/run-preparation.md");
+    git("add", "skills", "docs/agents/run-preparation.md", maintenanceReference);
     git("-c", "user.name=Workflow Test", "-c", "user.email=workflow@example.test", "commit", "-m", version);
     return git("rev-parse", "HEAD");
   };
   try {
     git("init", "-b", "main");
     const first = installWorkflow({ sourceRepository, sourceCommit: commit("v1"), cacheDirectory, skillDirectory });
+    assert.equal(readFileSync(join(first.root, maintenanceReference), "utf8"), "Approved maintenance owner\n");
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
     const secondCommit = commit("v2");
     const originalSymlink = fs.symlinkSync;

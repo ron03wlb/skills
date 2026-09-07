@@ -38,31 +38,53 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
     : undefined;
 
   const reconcile = async ({ request, tracker: trackerSnapshot, journal, tasks: taskAdapter = tasks }) => {
-    const current = await sources.reconciliation.read({
-      request,
-      tracker: trackerSnapshot,
-      journal,
-      tasks: taskAdapter,
-    });
-    if (!isRecord(current?.runIdentity) || !isRecord(current?.facts?.run)) {
-      throw new TypeError("Reconciliation owning source must return one normalized Run identity and fact set");
+    let current, target;
+    let targetUnstable = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) trackerSnapshot = await sources.tracker.read(request);
+      current = await sources.reconciliation.read({
+        request,
+        tracker: trackerSnapshot,
+        journal,
+        tasks: taskAdapter,
+      });
+      if (!isRecord(current?.runIdentity) || !isRecord(current?.facts?.run)) {
+        throw new TypeError("Reconciliation owning source must return one normalized Run identity and fact set");
+      }
+      target = await sources.target.read({
+        request,
+        tracker: trackerSnapshot,
+        journal,
+        current,
+      });
+      if (!isRecord(target) || !["CLEAN", "DIRTY", "UNKNOWN"].includes(target.state)) {
+        throw new TypeError("Target owning source must return CLEAN, DIRTY, or UNKNOWN");
+      }
+      if (target.ownership !== undefined
+        && !["NONE", "EXACT_PRODUCER", "UNOWNED", "UNKNOWN"].includes(target.ownership)) {
+        throw new TypeError("Target owning source returned an unsupported ownership state");
+      }
+      const closeoutRelevant = current.facts.nodes?.some(({ completionState }) => completionState === "COMPLETE") ?? false;
+      if (closeoutRelevant && !gitObjectPattern.test(target.head)) {
+        throw new TypeError("Target owning source must return the current Git head for closeout");
+      }
+      const changed = closeoutRelevant && ((gitObjectPattern.test(current.facts.run.targetHead)
+        && current.facts.run.targetHead !== target.head)
+        || current.facts.run.targetState !== target.state);
+      if (!changed) break;
+      // Rebuild ancestry, worktree and tracker facts; relabeling node HEADs would authorize stale evidence.
+      if (attempt === 2) {
+        targetUnstable = true;
+      }
     }
-    const target = await sources.target.read({
-      request,
-      tracker: trackerSnapshot,
-      journal,
-      current,
-    });
-    if (!isRecord(target) || !["CLEAN", "DIRTY", "UNKNOWN"].includes(target.state)) {
-      throw new TypeError("Target owning source must return CLEAN, DIRTY, or UNKNOWN");
-    }
-    if (target.ownership !== undefined
-      && !["NONE", "EXACT_PRODUCER", "UNOWNED", "UNKNOWN"].includes(target.ownership)) {
-      throw new TypeError("Target owning source returned an unsupported ownership state");
-    }
-    const closeoutRelevant = current.facts.nodes?.some(({ completionState }) => completionState === "COMPLETE") ?? false;
-    if (closeoutRelevant && !gitObjectPattern.test(target.head)) {
-      throw new TypeError("Target owning source must return the current Git head for closeout");
+    if (targetUnstable) {
+      current = { ...current, facts: { ...current.facts,
+        contradictions: [...(current.facts.contradictions ?? []), {
+          code: "target_changed_during_read", affectedNodes: current.facts.nodes.map(node => node.issueId),
+          evidence: ["Target changed during three reconciliation reads; preserve the original Run and retry after target state stabilizes"],
+        }],
+      } };
+      target = { ...target, state: "UNKNOWN", ownership: "UNKNOWN" };
     }
 
     const repositoryCloseLeaseObservation = store.observeRepositoryCloseLease();
@@ -121,7 +143,7 @@ export function createRunAuthorityAdapters({ sources, store, tasks }) {
         run: {
           ...current.facts.run,
           targetState: target.state,
-          targetHead: gitObjectPattern.test(target.head) ? target.head : current.facts.run.targetHead ?? null,
+          targetHead: !targetUnstable && gitObjectPattern.test(target.head) ? target.head : current.facts.run.targetHead ?? null,
           repositoryCloseLeaseOperationId: repositoryCloseLeaseObservation.state === "ABSENT"
             ? null
             : repositoryCloseLeaseOwner?.operationId ?? "UNKNOWN",
