@@ -15,9 +15,11 @@ Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-
 - Tracker-only publication: settled scope, source identities, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
 - Actual glossary or ADR writes: the exact registered isolated lane and shared target writer.
 
-The owner-local planning adapter enforces this distinction before publication; compare-and-set still protects the tracker version.
+The owner-local planning adapter enforces this distinction before publication. The tracker adapter uses the verified publication mode; unsupported atomic compare-and-set is never assumed.
 
-[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) must have configured the tracker, triage labels, publication adapters, and Workflow checkpoint store. The document-write branch additionally consumes the shared Target mutation writer and active task's exact worktree handoff.
+[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) configures the tracker and triage labels, and only diagnoses the separately installed publication adapters and Workflow checkpoint store. Missing adapters require their owning package's installation or binding entry. The document-write branch additionally consumes the shared Target mutation writer and active task's exact worktree handoff.
+
+GitLab tracker-only publication has a reusable producer binding for primary reservation and revision of an existing Spec. It verifies project identity, source baseline, Issue versions and native note receipts, and reuses the existing checkpoint store. Its explicit repository configuration is separate from read-only setup diagnostics. It does not supply an automatic GitLab Run host or a writer for accepted glossary/ADR changes.
 
 ## One optimistic publication
 

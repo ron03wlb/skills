@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Synthesize what is already settled; do not restart the interview. Use repository evidence and domain vocabulary, respect relevant ADRs, and use existing verification seams.
 
-The configured issue tracker, triage labels, current Workflow checkpoint profiles, concrete publication adapters must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. Accepted glossary or ADR writes additionally require the shared Target mutation writer. Never repair these authority seams here.
+Tracker and triage configuration must exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. Checkpoint profiles and concrete adapters require package installation. For GitLab tracker-only publication, read [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) for configuration. Setup cannot install adapters. Accepted glossary/ADR writes require the shared Target mutation writer. Never repair these authority seams here.
 
 ## 1. Consume the planning lane handoff
 

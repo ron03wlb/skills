@@ -40,3 +40,5 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - `/to-questionnaire`, `/wait-what`, `/handoff`, `/teach`, handle their named collaboration need. `/writing-for-agents` handles substantive instruction, structure, or routing changes; simple wording edits stay inline. `/resolving-merge-conflicts` handles an in-progress merge or rebase conflict.
 
 Use `/setup-matt-pocock-skills` when tracker, labels, or domain-doc layout is not configured.
+
+For missing GitLab publication adapters, use the installed [producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) and its explicitly authorized configuration entry. Setup only inspects it; automatic Run host support remains separate.

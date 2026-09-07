@@ -42,3 +42,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 ## Installed Codex GitHub binding
 
 For this configured host, serialize the existing owner-verified publication and handoff fields through [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The installed reader consumes exact native comment IDs and body digests; it never creates or repairs producer checkpoints. The producer remains responsible for approval, ordered stage writes, and independent read-back.
+
+## Installed GitLab producer binding
+
+For GitLab tracker-only publication, use the separately installed [GitLab producer adapters](../../../personal/run-issue-workflow/references/gitlab-producer-adapters.md). The repository's `docs/agents/gitlab-producer.json` binds the host and project; the reusable entry supplies the concrete planning, checkpoint, tracker and handoff operations above. It supports primary and revision `to-spec@v2` publication with native Issue/note identities, exact body digests and read/write/read-back semantics. Setup may inspect this binding but cannot install or repair it. Accepted document writes, decomposition and automatic Run composition remain separate owner capabilities.

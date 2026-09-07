@@ -45,6 +45,8 @@ Run `glab issue view <number> --comments`.
 
 ## Setup diagnostics
 
+For tracker-only `to-spec@v2`, use the separately installed personal coordinator's `references/gitlab-producer-adapters.md` and `scripts/gitlab-producer-entry.mjs`. Its explicitly authorized `configure` action binds `docs/agents/gitlab-producer.json`; setup diagnostics may only call `inspect`. A tracker template or interface document alone does not prove that the concrete producer is available. This binding does not configure an automatic GitLab Run host.
+
 `setup-matt-pocock-skills` may use one project-scoped, read-only `glab issue view --output json` or `glab issue list --output json` call to confirm that this configured tracker is reachable. When `triage` is installed, also run `glab label list --output json`, compare exact names with every configured label in `docs/agents/triage-labels.md`, and report a missing label as `MISSING` without creating it. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit an Issue, label, or note.
 
 ## Wayfinding operations
