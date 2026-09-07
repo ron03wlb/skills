@@ -19,3 +19,12 @@ Installed-state finding: the current personal coordinator resolves to a retained
 - Verify: `node --test tests/ron-workflow/*.test.mjs`; strict UTF-8/no BOM and `git diff --check` in both repositories.
 
 Recovery: Persist a secret-free mutation intent before a write. After uncertainty, re-read the exact owner result; if it remains absent or conflicting, stop without automatic repeat, rollback, lease reclamation or success attribution. Fixture failures block completion. Live publication remains a separate `to-spec` action.
+
+### Authorized repair: HTTP transport and exact rejected-write recovery
+
+**Goal:** Repair the observed missing JSON Content-Type and distinguish a provider rejection from an unresolved write, preserving all existing operation identities and evidence.
+**Acceptance:** Real `glab` requests send the exact JSON body and configured HTTP origin. Persist only sanitized HTTP status/request identity, never response content or credentials. Preserve the original intent and append attempt/result records. A publication retry requires an explicit `retryRejected:true`, an exact prior rejected HTTP result, unchanged payload fingerprint, current authority and the original Issue version. Timeouts, 5xx, malformed responses, interrupted attempts and legacy intents without recorded outcomes remain unresolved; absence alone never permits replay. Recovery inspection is read-only. No forced recovery, automatic legacy migration, Issue-body changes or fabricated receipts are included in maintenance. The authorized installed-package update may commit the isolated repair and install that exact commit; no push or main-branch integration is included.
+
+- Work: Send an explicit JSON header, preserve sanitized transport outcomes, expose exact publication mutation inspection, and permit one explicit attempt after a recorded terminal rejection. Keep checkpoint semantics with their existing owner. Retain installed versions and both public entry backups.
+- Verify: Real local HTTP fixtures using the installed `glab`; regression tests for rejection, retry, timeout, 5xx, legacy unknown intents, concurrent attempts and exact payload identity; independent Standards/Spec review; immutable package verification and read-only #169 inspection.
+- Recovery limit: A legacy request whose provider response was discarded cannot be declared rejected by this repair. Preserve it and report the missing terminal provider evidence to its publication owner.

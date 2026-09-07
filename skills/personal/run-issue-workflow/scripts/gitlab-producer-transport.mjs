@@ -1,6 +1,6 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, rmdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, rmdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 export const digest = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -29,21 +29,44 @@ export function configurationFromRemote(repository) {
   return validateConfiguration({ schema: "gitlab-producer:v1", baseUrl: url.origin, project: url.pathname.slice(1).replace(/\.git$/u, "") });
 }
 
-export function createGlabTransport({ repository, configuration, execute = execFileSync }) {
+const executeGlab = (command, args, options) => new Promise((resolveResult, reject) => {
+  const child = execFile(command, args, options, (error, stdout) => {
+    if (error) { error.stdout = stdout; reject(error); } else resolveResult(stdout);
+  });
+  child.stdin.on("error", () => {}); // The process callback owns broken-pipe/exit outcomes.
+  child.stdin.end(options.input);
+});
+export const isRejectedStatus = status => [400, 401, 403, 404, 405, 406, 411, 413, 414, 415, 422].includes(status);
+function responseEnvelope(output) {
+  const match = String(output ?? "").match(/^HTTP\/\S+ (\d{3})[^\r\n]*\r?\n([\s\S]*?)\r?\n\r?\n([\s\S]*)$/u);
+  if (!match) return { httpStatus: null, requestId: null, body: null };
+  const requestId = match[2].match(/^x-request-id:\s*([a-zA-Z0-9_.-]{1,128})\s*$/imu)?.[1] ?? null;
+  return { httpStatus: Number(match[1]), requestId, body: match[3] };
+}
+export function createGlabTransport({ repository, configuration, execute = executeGlab }) {
   validateConfiguration(configuration);
   return async ({ method = "GET", path, body }) => {
     if (!/^(?:projects\/|user$)/u.test(path) || path.includes("..")) throw conflict("Unsupported GitLab API path");
-    const args = ["api", "--hostname", new URL(configuration.baseUrl).host, "--method", method, path];
-    if (body !== undefined) args.push("--input", "-");
+    // The absolute endpoint binds protocol/port too; glab's host config can otherwise override them.
+    const args = ["api", "--hostname", new URL(configuration.baseUrl).hostname, "--method", method,
+      `${configuration.baseUrl}/api/v4/${path}`, "--include"];
+    if (body !== undefined) args.push("--input", "-", "--header", "Content-Type: application/json");
+    let envelope = { httpStatus: null, requestId: null };
     try {
-      return JSON.parse(execute("glab", args, {
+      const output = await execute("glab", args, {
         cwd: repository, input: body === undefined ? undefined : JSON.stringify(body), encoding: "utf8",
         windowsHide: true, maxBuffer: 16 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env, GITLAB_API_PROTOCOL: new URL(configuration.baseUrl).protocol.slice(0, -1) },
-      }));
-    } catch {
+      });
+      envelope = responseEnvelope(output);
+      if (envelope.httpStatus === null || envelope.httpStatus < 200 || envelope.httpStatus >= 300) throw new Error("Unexpected HTTP response");
+      return JSON.parse(envelope.body);
+    } catch (error) {
+      if (error.stdout !== undefined) envelope = responseEnvelope(error.stdout);
       // Provider stderr can contain credentials or request content. Keep it out of receipts and logs.
-      throw Object.assign(new Error(`GitLab ${method} request failed; inspect the configured CLI access separately.`), { code: "GITLAB_PRODUCER_TRANSPORT" });
+      throw Object.assign(new Error(`GitLab ${method} request failed${envelope.httpStatus === null ? " without a verified HTTP result" : ` (HTTP ${envelope.httpStatus})`}.`),
+        { code: "GITLAB_PRODUCER_TRANSPORT", httpStatus: envelope.httpStatus, requestId: envelope.requestId,
+          outcome: isRejectedStatus(envelope.httpStatus) ? "REJECTED" : "UNRESOLVED" });
     }
   };
 }
@@ -92,28 +115,4 @@ export async function withProducerLock(connection, scope, action) {
     throw error;
   }
   try { return await action(); } finally { rmdirSync(path); }
-}
-
-// A retained intent prevents a second write after timeout, process loss or interrupted read-back.
-export async function mutateOnce(connection, { key, payload, observe, write }) {
-  const root = join(connection.gitCommonDir, "matt-workflow-control", "gitlab-producer-intents");
-  const fingerprint = digest(JSON.stringify(payload));
-  const path = join(root, `${digest(`${connection.repositoryId}:${key}`).slice(7)}.json`);
-  let attempted = false;
-  if (existsSync(path)) {
-    const intent = JSON.parse(readFileSync(path, "utf8"));
-    if (intent.schema !== "gitlab-producer-intent:v1" || intent.key !== key || intent.fingerprint !== fingerprint) throw conflict("Mutation intent differs from the requested retry");
-    attempted = true;
-  }
-  const prior = await observe(attempted);
-  if (prior) return prior;
-  if (attempted) throw uncertain();
-  mkdirSync(root, { recursive: true });
-  const fd = openSync(path, "wx");
-  try { writeFileSync(fd, JSON.stringify({ schema: "gitlab-producer-intent:v1", key, fingerprint })); fsyncSync(fd); }
-  finally { closeSync(fd); }
-  try { await write(); } catch { /* Only exact owner read-back can resolve a lost response. */ }
-  const result = await observe(true);
-  if (!result) throw uncertain();
-  return result;
 }
