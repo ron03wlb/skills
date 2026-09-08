@@ -10,7 +10,7 @@ import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
-import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, validateVerificationResolution, validateExecutionResolution, sameRecoveryTask, readRepairProgress } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, validateVerificationResolution, validateExecutionResolution, sameRecoveryTask, readRepairProgress, readMaintenanceProgress } from "./recovery-evidence.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
@@ -428,6 +428,12 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (failure?.diagnosis?.classification === "WORKFLOW_DEFECT" && failure.diagnosis.scopeCompatible === true) {
           const source = failure.diagnosis.maintenance?.sourceRepository;
           if (!source || !workflowVersion?.sourceRepository || realpathSync.native(source) !== realpathSync.native(workflowVersion.sourceRepository)) throw new Error("Maintenance canonical source is not proven against the affected governing package");
+          if (!journal.some(event => event.type === "recovery.intent" && event.phase === "MAINTENANCE" && event.failure.identity === failure.identity)) {
+            const maintenance = await readMaintenanceProgress({ scope: failure.diagnosis.maintenance, journal,
+              readTask: ref => tasks.read(ref), readInstalled: recordedVersion => installationCacheDirectory
+                ? selectWorkflowVersion({ cacheDirectory: installationCacheDirectory, recordedVersion }) : null });
+            failure = bindTechnicalFailure({ ...failure, diagnosis: { ...failure.diagnosis, maintenance } });
+          }
         }
         if (failure) node.recovery = failure;
         delete node.closeConflict;

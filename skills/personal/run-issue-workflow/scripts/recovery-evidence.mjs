@@ -130,6 +130,26 @@ export function nextMaintenanceWave({ failure, journal }) {
   return previous + 1;
 }
 
+export async function readMaintenanceProgress({ scope, journal, readTask, readInstalled }) {
+  const history = journal.filter(event => event.type === "recovery.intent" && event.phase === "MAINTENANCE"
+    && event.failure.diagnosis.maintenance.operationId === scope.operationId);
+  const intent = history.at(-1);
+  if (!intent) return scope;
+  const previous = intent.failure.diagnosis.maintenance;
+  if (["repositoryId", "sourceRepository", "target", "approvedScopeHash", "authority", "installationAuthority"].some(key => scope[key] !== previous[key])) {
+    throw new Error("Maintenance operation scope changed; preserve its existing progress");
+  }
+  const transfer = journal.find(event => event.type === "recovery.task" && event.requestIdentity === intent.requestIdentity);
+  if (!transfer) throw new Error("Previous maintenance ownership remains unresolved; its budget cannot reset");
+  const task = await readTask(transfer.taskRef);
+  if (task?.state !== "RESUMABLE" || task.recoveryRequest?.requestIdentity !== intent.requestIdentity
+    || !task.recoveryResult?.maintenance) throw new Error("Previous maintenance result or settlement is unproved; its budget cannot reset");
+  const proof = validateMaintenanceResult({ result: task.recoveryResult, intent,
+    installed: await readInstalled(task.recoveryResult.maintenance.packageVersion) });
+  if (scope.repairWaveCount != null && (!Number.isInteger(scope.repairWaveCount) || scope.repairWaveCount < 0 || scope.repairWaveCount > 10)) throw new Error("Maintenance progress is malformed");
+  return { ...scope, repairWaveCount: Math.max(scope.repairWaveCount ?? proof.repairWaveCount, proof.repairWaveCount, ...history.map(event => event.wave)) };
+}
+
 export function validateMaintenanceResult({ result, intent, installed }) {
   const scope = intent.failure.diagnosis.maintenance;
   const proof = result?.maintenance;

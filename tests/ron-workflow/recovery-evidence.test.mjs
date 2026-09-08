@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
 test("material recovery carries original and journaled counts; maintenance has one separate scoped budget", () => {
   const failure = { issueId: "I_1", repairWaveCount: 7, diagnosis: { maintenance: { operationId: "maintenance", repairWaveCount: 2 } } };
@@ -75,4 +75,28 @@ test("non-material hand-back rejects stale attempts, unchanged failures and inve
     { ...result.resolution, mode: "OUTCOME_READ_BACK", inputs: attempt.inputs, exitCode: 0 }]) {
     assert.throws(() => validateVerificationResolution({ result: { ...result, resolution }, intent, verification }), /recovery/u);
   }
+});
+
+test("the maintenance record consumer carries verified native review waves into the next same-operation reservation", async () => {
+  const scope = { repositoryId: "repo", sourceRepository: "canonical", target: "main", approvedScopeHash: "scope", authority: "approved", installationAuthority: "install", operationId: "same-operation", repairWaveCount: 0 };
+  const intent = { type: "recovery.intent", phase: "MAINTENANCE", requestIdentity: "request-1", wave: 1, failure: { identity: "failure-1", diagnosis: { maintenance: scope } } };
+  const taskRef = { threadId: "maintenance", hostId: "local" };
+  const journal = [intent, { type: "recovery.task", requestIdentity: intent.requestIdentity, taskRef }];
+  const packageVersion = { id: "retained-package", sourceCommit: "reviewed-candidate", sourceRepository: "canonical" };
+  const result = { requestIdentity: intent.requestIdentity, failureIdentity: intent.failure.identity, maintenance: { repositoryId: "repo", target: "main", operationId: "same-operation", candidate: packageVersion.sourceCommit, packageVersion,
+    repairWaveCount: 8, standards: "clean", spec: "clean", verification: [{ command: "verified source suite", result: "PASS" }], installation: { authority: "install", packageVersionId: packageVersion.id } } };
+  const task = { state: "RESUMABLE", recoveryRequest: { requestIdentity: intent.requestIdentity }, recoveryResult: result };
+  const input = { scope, journal, readTask: async ref => { assert.deepEqual(ref, taskRef); return task; },
+    readInstalled: async recordedVersion => { assert.deepEqual(recordedVersion, packageVersion); return { state: "AVAILABLE", version: packageVersion }; } };
+  const carried = await readMaintenanceProgress(input);
+  assert.equal(carried.repairWaveCount, 8);
+  const failure = { diagnosis: { maintenance: carried } };
+  const nextWave = nextMaintenanceWave({ failure, journal });
+  assert.equal(nextWave, 9, "stale scope zero and reserved wave one cannot erase eight verified review waves");
+  assert.throws(() => validateMaintenanceResult({ result: { ...result, maintenance: { ...result.maintenance, repairWaveCount: 2 } }, intent: { ...intent, wave: nextWave }, installed: { state: "AVAILABLE", version: packageVersion } }), /budget/u);
+  await assert.rejects(readMaintenanceProgress({ ...input, readTask: async () => ({ ...task, state: "RUNNING" }) }), /settlement/u);
+  await assert.rejects(readMaintenanceProgress({ ...input, readInstalled: async () => ({ state: "UNAVAILABLE" }) }), /read-back/u);
+  result.maintenance.repairWaveCount = 10;
+  const exhausted = await readMaintenanceProgress(input);
+  assert.throws(() => nextMaintenanceWave({ failure: { diagnosis: { maintenance: exhausted } }, journal }), /exhausted/u);
 });
