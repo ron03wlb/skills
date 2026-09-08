@@ -34,7 +34,7 @@ function fixture({ legacyRuntime = false } = {}) {
   const cacheDirectory = join(root, "packages");
   initialize(source); initialize(repository);
   cpSync(fileURLToPath(new URL(`../../${scriptsPath}`, import.meta.url)), join(source, scriptsPath), { recursive: true });
-  if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), "throw new Error('A different retained runtime must not be imported without verified re-entry compatibility');\n");
+  if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), "export async function runCodexWorkflow() { throw new Error('Legacy runtime must not execute an existing Run'); }\nexport const prepareCodexWorkflow = runCodexWorkflow;\n");
   writeFileSync(join(source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package v1\n");
   git(source, "add", "skills"); git(source, "commit", "-m", "package v1");
   const install = () => installWorkflow({ sourceRepository: source, sourceCommit: git(source, "rev-parse", "HEAD"), cacheDirectory, skillDirectory: join(root, "entry") });
@@ -380,7 +380,7 @@ test("completed replay gates rebuild from owner history across disposable snapsh
   } finally { f.close(); }
 });
 
-test("an unavailable current package cannot fall back from a newer entry into a different retained runtime", async () => {
+test("a newer entry requires completed re-entry support in the selected runtime", async () => {
   const f = fixture({ legacyRuntime: true });
   try {
     const { issue, runIdentity } = f.addCompleted();
@@ -398,13 +398,23 @@ test("an unavailable current package cannot fall back from a newer entry into a 
       assert.equal(result.state, "UNAVAILABLE");
       assert.match(result.recovery, /Restore this exact trusted package/u);
       assert.deepEqual(f.store.readEvents(runIdentity.runId), journal);
-      assert.deepEqual(f.calls, [], "recovery precedes runtime composition and host calls even without a terminal snapshot");
+      assert.deepEqual(f.calls, [], "recovery precedes runtime invocation and host calls even without a terminal snapshot");
     } finally { writeFileSync(skillPath, skillBytes); }
     issue.state = "closed";
     const restored = await runInstalledEntry({ repository: f.repository, host: f.host, specId: "I_1" });
     assert.equal(restored.status.run.state, "SUCCEEDED");
     assert.deepEqual(f.store.readEvents(runIdentity.runId).slice(0, journal.length), journal);
     assert.deepEqual(f.store.readEvents(runIdentity.runId).at(-1).workflowVersion, current.version);
+    installWorkflow({ sourceRepository: f.source, sourceCommit: f.retained.version.sourceCommit,
+      cacheDirectory: f.cacheDirectory, skillDirectory: join(f.root, "entry") });
+    issue.state = "open";
+    const beforeDowngrade = f.store.readEvents(runIdentity.runId);
+    const callsBefore = f.calls.length;
+    const downgraded = await runInstalledEntry({ repository: f.repository, host: f.host, specId: "1" });
+    assert.equal(downgraded.state, "UNAVAILABLE", "verified source/protocol alone cannot prove completed re-entry support");
+    assert.match(downgraded.recovery, /compatible/u);
+    assert.deepEqual(f.store.readEvents(runIdentity.runId), beforeDowngrade);
+    assert.equal(f.calls.length, callsBefore);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
   } finally { f.close(); }
 });

@@ -24,7 +24,7 @@ Explicit numeric or native Spec selection also finds completed Runs for the curr
 
 For an OPEN member or Multi-Issue parent in an existing Run, reconciliation reads paginated native GitHub closure history against the exact current Spec publication. Closure under that publication followed by OPEN state blocks replay even when the local snapshot is missing or a temporary target blocker intervenes. Unreadable history or unprovable ordering stays blocked; closures before the current publication do not establish completion of the current scope.
 
-When no compatible current runtime is verified, this entry can fall back only to its own verified recorded package. Entering a different retained runtime could lose newer reconciliation gates, so that case returns explicit package recovery before runtime import or task calls, regardless of the cached Run state. Restore the reviewed compatible current package and retry with the original Run evidence intact.
+A verified runtime must also support completed Run reconciliation before an existing Run can enter it. An older runtime without that support returns explicit package recovery before runtime invocation or task calls, even when its protocol/source matches, whether selected as current or retained fallback, and regardless of the cached Run state. Restore a reviewed compatible runtime and retry with the original Run evidence intact.
 
 ## Install and retain versions
 

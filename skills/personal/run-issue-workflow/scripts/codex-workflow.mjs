@@ -9,6 +9,8 @@ import { planCloseContinuation, closeContinuationSuffix } from "./close-continua
 import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
 
+export const supportsCompletedRunReentry = true;
+
 export async function prepareCodexWorkflow({ repository, specId, runIdentity, workflowVersion, compatibleRecordedVersion, packageRoot, host }) {
   const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
   if (configuration.schema !== "codex-workflow-host:v1") throw new Error("Unknown static workflow host configuration");

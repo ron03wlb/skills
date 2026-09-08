@@ -68,15 +68,15 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   const compatible = previousGrant && current.state === "AVAILABLE"
     && current.version.protocolVersion === selected.version.protocolVersion
     && current.version.sourceRepository === selected.version.sourceRepository;
-  // A different retained runtime may predate this entry's reconciliation gates.
-  // Never use a disposable terminal snapshot to decide whether that downgrade is safe.
-  if (previousGrant && !compatible && realpathSync(selected.root) !== realpathSync(packageRoot)) {
-    if (current.state !== "AVAILABLE") return current;
-    return { state: "UNAVAILABLE", reason: "Current package is incompatible and fallback would enter a different retained runtime",
-      recovery: "Restore a reviewed compatible current package; preserve the original Run, Grant and retained package before retrying this entry." };
-  }
   const runtime = compatible ? current : selected;
   const composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
+  // Protocol/source compatibility alone does not prove the runtime has this entry's replay gates.
+  // A disposable terminal snapshot cannot decide whether missing support is safe.
+  if (previousGrant && composition.supportsCompletedRunReentry !== true) {
+    if (current.state !== "AVAILABLE") return current;
+    return { state: "UNAVAILABLE", reason: "Selected runtime does not support completed Run re-entry",
+      recovery: "Restore a reviewed compatible runtime with completed Run re-entry support; preserve the original Run, Grant and retained package before retrying this entry." };
+  }
   const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
     runIdentity: previousGrant?.runIdentity, workflowVersion: runtime.version,
     compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host };
