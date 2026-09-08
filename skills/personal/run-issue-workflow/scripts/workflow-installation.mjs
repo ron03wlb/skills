@@ -152,7 +152,8 @@ function installUnlocked({ sourceRepository, sourceCommit, cacheDirectory, skill
     if (!match || !safePath(match[2])) throw new Error("Workflow package contains an unsupported path or link");
     return { path: match[2], mode: match[1] };
   });
-  for (const required of [`${skillPath}/SKILL.md`, `${skillPath}/scripts/installed-entry.mjs`]) {
+  for (const required of [`${skillPath}/SKILL.md`, `${skillPath}/scripts/installed-entry.mjs`,
+    `${skillPath}/scripts/codex-host-driver.js`, `${skillPath}/references/codex-host-driver.md`]) {
     if (!files.some(({ path }) => path === required)) throw new Error(`Workflow package lacks ${required}`);
   }
   const versionsDirectory = join(cacheDirectory, "versions");

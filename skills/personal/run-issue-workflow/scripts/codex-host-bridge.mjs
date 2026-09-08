@@ -1,20 +1,15 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
-export const CODEX_HOST_TOOLS = Object.freeze([
-  "mcp__codex_app__list_projects",
-  "mcp__codex_app__list_threads",
-  "mcp__codex_app__create_thread",
-  "mcp__codex_app__read_thread",
-  "mcp__codex_app__wait_threads",
-  "mcp__codex_app__send_message_to_thread",
-  "mcp__codex_app__open_in_codex",
-]);
+const driverSource = readFileSync(new URL("./codex-host-driver.js", import.meta.url), "utf8");
+export const { allowed: CODEX_HOST_TOOLS } = new Function(`return (\n${driverSource}\n);`)();
 
 // Only the active Codex task forwards these requests to its available desktop tools.
 export function createCodexHostBridge({ input = process.stdin, output = process.stdout, idleTimeoutMs = 90000 } = {}) {
   const reader = createInterface({ input, terminal: false });
   const pending = new Map();
+  const accepted = new Map();
   let closed = false;
   const controls = new Map();
   let toolCalls = 0;
@@ -40,6 +35,11 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
       const message = JSON.parse(line);
       armIdleTimer();
       if (message.heartbeat === true) return;
+      if (message.inspectRequests === true) {
+        for (const [id, entry] of pending) emit({ type: "request-state", id, state: "pending", request: entry.message });
+        for (const [id, entry] of accepted) emit({ type: "request-state", id, state: "accepted", request: entry.message });
+        return;
+      }
       if (typeof message.control === "string") {
         const control = message.runId ? controls.get(message.runId) : controls.size === 1 ? [...controls.values()][0] : null;
         if (!control) throw new Error("Select one active Run ID for control");
@@ -50,11 +50,22 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
         return;
       }
       const request = pending.get(message.id);
+      const previous = accepted.get(message.id);
+      const hasResult = Object.hasOwn(message, "result"), hasError = Object.hasOwn(message, "error");
+      if (hasResult === hasError || hasError && (typeof message.error !== "string" || !message.error)) {
+        throw new Error("Desktop response must have exactly one result or error");
+      }
+      const response = JSON.stringify(hasResult ? { result: message.result } : { error: message.error });
+      if (previous) {
+        if (previous.response !== response) throw new Error("Conflicting desktop response for original request");
+        emit({ type: "response-accepted", id: message.id }); return;
+      }
       if (!request) throw new Error("Unknown desktop response");
+      accepted.set(message.id, { message: request.message, response });
       pending.delete(message.id);
-      if (message.error) request.reject(new Error(String(message.error)));
-      else if (Object.hasOwn(message, "result")) request.resolve(message.result);
-      else request.reject(new Error("Desktop response has no result"));
+      emit({ type: "response-accepted", id: message.id });
+      if (hasError) request.reject(new Error(message.error));
+      else request.resolve(message.result);
     } catch (error) {
       emit({ type: "input-error", message: error.message });
     }
@@ -66,8 +77,9 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
       toolCalls += 1;
       const id = randomUUID();
       return new Promise((resolve, reject) => {
-        pending.set(id, { resolve, reject });
-        emit({ type: "tool", id, name, arguments: args });
+        const message = { type: "tool", id, name, arguments: args };
+        pending.set(id, { resolve, reject, message });
+        emit(message);
       });
     },
     controls: {

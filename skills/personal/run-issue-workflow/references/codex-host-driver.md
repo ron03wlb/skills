@@ -1,97 +1,49 @@
 # Active Codex host driver
 
-Read only after the human explicitly starts the selected Run, including its Issue tasks and later messages to those tasks. The entry itself verifies producer handoff and scope before requesting a task. This driver calls only the current task's available desktop tools; it is not an App Server client or a daemon.
+Use after the human starts the selected Run. The installed entry owns authority, task creation and Run reconciliation. This driver only forwards its requests through the current task's available tools. Keep the selected immutable package for the whole session.
 
-The entry uses Node native raw mode for TTY input on Windows and Unix and restores the prior mode on exit. A startup/package failure before Run creation returns to [approved pre-Run maintenance](../../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) when its exact human scope already exists. The active task completes that isolated handoff and returns here without a new human command; never launch a caller-built coordinator.
+## Load and drive
 
-Launch the installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID or comma-separated Spec batch] [Run-ID]` through `tools.exec_command` with `tty:true`, `yield_time_ms:1000`, and the consumer as `workdir`. Shell-quote each path or ID. Save its `session_id` and `output` using `store("workflow.host", {sessionId: result.session_id, buffer: result.output})`. Always preserve the session for subsequent ticks; do not launch a second coordinator while it is active.
-
-Run the driver below in one active `functions.exec` cell. It yields after each bounded tick; use `functions.wait` to collect progress from that same cell while doing independent work. Full tool payloads remain transport data and are not reprinted into the coordinator context. For batches, set `workflow.control` to `{control: "PAUSE", runId: "<exact-Run-ID>"}` (likewise Resume, Stop or Refresh). An unqualified batch control is rejected. A single-Run text control is set with `store("workflow.control", "PAUSE")` (or `RESUME`, `STOP`, `REFRESH`) before the next heartbeat. Keep this cell active while the host session exists and report meaningful progress at least once a minute. A pending native tool call receives heartbeats too: a slow read is not evidence that the coordinator disconnected. Each request is forwarded once and its actual result retains the original request ID. If the app or coordinator disconnects, the entry stops dispatching and releases its writer after 90 seconds without a heartbeat. Worker tasks may still finish their already-dispatched work.
-
-The current host accepts at most 50 non-pinned tasks in `list_threads`. The driver bounds that read-only parameter for retained versions that requested more. It does not change Run identity, task creation, or evidence; an unresolved creation intent still prevents a duplicate task.
+Load the verified package's `scripts/codex-host-driver.js` **before** launching the installed entry, so initial requests receive prompt heartbeats. It is a dependency-free JavaScript expression, shared by the Node bridge and deterministic tests. The current `functions.exec` host provides `Function`, `load`, `store`, timers and tools; it provides no Node `process`, `require`, filesystem imports or URL global. Read the source through the available shell tool. Substitute the exact verified package path below; shell-quote it as a PowerShell literal.
 
 ```js
-const allowed = new Set([
-  "mcp__codex_app__list_projects", "mcp__codex_app__list_threads",
-  "mcp__codex_app__create_thread", "mcp__codex_app__read_thread",
-  "mcp__codex_app__wait_threads", "mcp__codex_app__send_message_to_thread",
-  "mcp__codex_app__open_in_codex",
-]);
-const report = (message) => {
-  if (message.type !== "status") { text(message); return; }
-  const status = message.status;
-  text({type: "status", run: status.run, nodes: status.nodes,
-    actions: status.legalActions?.map(({type, issueId}) => ({type, issueId})),
-    diagnoses: status.diagnoses});
-};
-async function tick() {
-  const lane = load("workflow.host");
-  if (!lane?.sessionId) throw new Error("No active installed workflow session");
-  const accept = (result) => {
-    lane.buffer += result.output ?? "";
-    if (result.exit_code !== undefined) lane.sessionId = null;
-    store("workflow.host", lane);
-  };
-  const heartbeat = async () => {
-    if (!lane.sessionId) return;
-    const control = load("workflow.control");
-    store("workflow.control", null);
-    const message = control ? (typeof control === "string" ? {control} : control) : {heartbeat:true};
-    accept(await tools.write_stdin({session_id: lane.sessionId,
-      chars: JSON.stringify(message) + "\n", yield_time_ms:1000, max_output_tokens:16000}));
-  };
-  const callHost = async (name, args) => {
-    const pending = Promise.resolve().then(() => tools[name](args))
-      .then(result => ({settled:true, result}), error => ({settled:true, error}));
-    while (true) {
-      let timer;
-      const outcome = await Promise.race([pending, new Promise(resolve => {
-        timer = setTimeout(() => resolve({settled:false}), 15000);
-      })]);
-      clearTimeout(timer);
-      if (outcome.settled) {
-        if (Object.hasOwn(outcome, "error")) throw outcome.error;
-        return outcome.result;
-      }
-      await heartbeat();
-      if (!lane.sessionId) throw new Error("Host exited while native request was pending; preserve its identity");
-    }
-  };
-  await heartbeat();
-  const until = Date.now() + 35000;
-  while ((lane.sessionId || lane.buffer.includes("\n")) && (Date.now() < until || !lane.sessionId)) {
-    const newline = lane.buffer.indexOf("\n");
-    if (newline < 0) {
-      accept(await tools.write_stdin({session_id:lane.sessionId, chars:"", yield_time_ms:1000, max_output_tokens:16000}));
-      continue;
-    }
-    const line = lane.buffer.slice(0,newline).replace(/\r$/u,"");
-    lane.buffer = lane.buffer.slice(newline+1);
-    if (!line.startsWith("workflow-host ")) { if (line.trim()) text({transport:line}); continue; }
-    const message = JSON.parse(line.slice("workflow-host ".length));
-    if (message.type !== "tool") { report(message); continue; }
-    if (!lane.sessionId) { text({unansweredRequest:message.id, reason:"Host process exited"}); continue; }
-    if (!allowed.has(message.name) || typeof tools[message.name] !== "function") {
-      throw new Error("Installed host requested an unavailable or unsupported tool");
-    }
-    const args = message.name === "mcp__codex_app__list_threads" && message.arguments.limit > 50
-      ? {...message.arguments, limit:50} : message.arguments;
-    let response;
-    try { response = {id:message.id, result:await callHost(message.name, args)}; }
-    catch (error) { response = {id:message.id, error:error.message}; }
-    if (lane.sessionId) accept(await tools.write_stdin({session_id:lane.sessionId,
-      chars:JSON.stringify(response)+"\n", yield_time_ms:1000, max_output_tokens:16000}));
-  }
-  store("workflow.host", lane);
-  text({active:Boolean(lane.sessionId)});
-}
-if (!load("workflow.host")?.sessionId) throw new Error("No active installed workflow session");
-while (load("workflow.host")?.sessionId) {
-  await tick();
-  await yield_control();
-}
+const loaded = await tools.exec_command({
+  cmd: "Get-Content -Raw -LiteralPath '<verified-package>/skills/personal/run-issue-workflow/scripts/codex-host-driver.js'",
+  max_output_tokens: 16000,
+});
+if (loaded.exit_code !== 0) throw new Error("Driver source unavailable; preserve the original Run");
+store("workflow.driverSource", loaded.output);
+const driverApi = new Function("return (\n" + loaded.output + "\n);")();
 ```
 
-On a human pause, submit `PAUSE` for each selected Run through the active cell and read back the control result before ending the driver when possible. If the cell is interrupted first, stop driving that session; the existing disconnect timeout preserves the Runs. Already accepted worker work may finish. Retain the exact session and Run identities for reconciliation, and never start another coordinator while the previous process remains active.
+Before process launch, inspect `load("workflow.host")`. An active original session, active driver cell or unresolved native request requires that original owner to reconcile first. Keep its state; never overwrite it to start another coordinator. After confirmed process exit and original-owner reconciliation, archive that state under a distinct store key before the installed entry resumes the same Run. A startup/package failure uses [approved pre-Run maintenance](../../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) only under its existing authority.
 
-When the process exits, consume any remaining complete `workflow-host` lines in its buffer and report its exact terminal result. `error` or `UNAVAILABLE` is not completion. Keep Run and task IDs for the next invocation; the entry selects the recorded package before resuming. Do not renew a stopped Run or grant new scope through a text control.
+Launch the selected installed `scripts/installed-entry.mjs <consumer-repository> [Spec-ID or comma-separated Spec batch] [Run-ID]` with `tools.exec_command`, `tty:true`, `yield_time_ms:1000` and the consumer `workdir`. Shell-quote each argument. The entry owns raw-mode restoration. Immediately save the returned session and all output using `store("workflow.host", driverApi.createLane({sessionId: result.session_id, output: result.output, exit_code: result.exit_code}))`. If launch already exited without a session ID, preserve its entire result separately and parse its output with `driverApi.parseTransport(result.output, true)`; exit code alone proves no workflow completion.
+
+In one active `functions.exec` cell, run:
+
+```js
+const api = new Function("return (\n" + load("workflow.driverSource") + "\n);")();
+const driver = api.createDriver({
+  driverId: "host-cell-" + Date.now(), tools, load, store, report: text, setTimeout, clearTimeout,
+  persist: api.createCheckpointWriter({tools, path: "<absolute-Git-common-directory>/workflow-host/<original-session>.json"}),
+  readControl: api.createControlReader({tools, path: "<absolute-Git-common-directory>/workflow-host/<original-session>-control.json"}),
+});
+await driver.run(yield_control);
+```
+
+Use one exact checkpoint path under the consumer Git common directory, unique to the original session. The writer uses available PowerShell file operations, waits for atomic publication before dispatch/forwarding, and fails closed on write errors. It stores only request/session identities, progress and pending-control metadata. Native arguments/results, panel URLs, raw frames and terminal payloads remain in the active cell: the existing bridge-token secret boundary also applies to checkpoint files.
+
+Collect yields with `functions.wait` from that same cell. Keep it alive while its session or native Promise is pending; report meaningful progress at least once a minute. The tested implementation owns the allowlist, the host's 50-task read limit, bounded transport reads and heartbeats during slow native calls. Tool payloads and raw malformed frames stay in stored state; summaries omit them.
+
+## Controls and interrupted requests
+
+An active `functions.exec` cell reads a snapshot of `store`; concurrent cells cannot update its controls. For the documented driver, write `{id:"<unique-control-ID>",control:"PAUSE",runId:"<exact-Run-ID>"}` to its exact control JSON file through the shell tool (likewise RESUME, STOP or REFRESH). The driver freshly reads that file each heartbeat and deduplicates the ID against its durable control history. Wait for the actual `control-result` before replacing it with another ID. Preserve the same ID on a write retry. Batch controls require the exact Run ID; a single Run may omit it. `workflow.control` remains available only to an embedding caller using the in-cell control adapter. The driver saves controls before consuming the queue and retains sending/returned states and actual control results. An uncertain control remains pending; reconcile the original Run status before deciding another action.
+
+The driver preserves received, dispatched, returned, forwarding and acknowledged-forwarded states under each original request ID. It records state before dispatch or transport writes. The bridge acknowledges responses and answers read-only `inspectRequests` messages over the existing stdin transport. Lost forwarding is reconciled against that original bridge: accepted results are acknowledged locally; a still-pending request permits redelivery of its saved result, never another native call.
+
+The current host does not retain an interrupted active cell's uncommitted `store` updates. After confirmed cell termination, load the exact disk checkpoint with the shell tool and save `api.restoreCheckpoint(JSON.parse(output))` as `workflow.host` before resuming. The restored driver queries the original bridge to recover request payloads; a saved returned state without its actual payload requires owner reconciliation. Omitted partial bytes stay observable as a count and require original-owner inspection, never synthetic workflow output.
+
+After a driver cell is **confirmed stopped**, reuse the same session with a new driver instance and `driver.resume({previousDriverId, stoppedEvidence})`, naming the exact prior driver ID and observed stopped-cell evidence. An active or pending original cell must continue through `functions.wait`; a slow call is not evidence of disconnection. If its native outcome is uncertain, the driver preserves `dispatched` and reports `reconciliation-required`. Read the original task/creation intent/message or other owning evidence before supplying the recovered actual outcome through `await driver.reconcileNative({id, result, ownerEvidence:{requestId:id, observation}})` (or an observed `error`). Missing evidence cannot authorize replay. This interface records the caller's owner read-back; it cannot itself prove a native mutation did or did not occur. No automatic native retry or exactly-once delivery is claimed.
+
+If the original coordinator exits or disconnects, retain its session, terminal result, native outcomes, malformed diagnostics and partial buffer. Drain final complete frames even after exit. `error`, `UNAVAILABLE`, disconnect and exit code alone are not completion. The entry stops dispatching and releases its writer after its existing 90-second heartbeat timeout; already-dispatched workers may finish. The installed entry owns subsequent Run/package selection once the original coordinator and uncertain calls are reconciled.

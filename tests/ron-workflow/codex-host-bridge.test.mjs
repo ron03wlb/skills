@@ -53,3 +53,45 @@ test("host disconnection wakes an active text controller", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.match(failure?.message ?? "", /DISCONNECTED/u);
 });
+
+test("original owner preserves malformed responses, acknowledges delivery and reconciles lost acknowledgements", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    const pending = bridge.call("mcp__codex_app__list_projects", {});
+    const request = messages.at(-1);
+    input.write(JSON.stringify({ id: request.id }) + "\n");
+    input.write('{"inspectRequests":true}\n');
+    assert.equal(messages.at(-1).state, "pending");
+    const response = { id: request.id, result: { original: true } };
+    input.write(JSON.stringify(response) + "\n");
+    assert.deepEqual(await pending, response.result);
+    assert.equal(messages.at(-1).type, "response-accepted");
+    input.write('{"inspectRequests":true}\n');
+    assert.equal(messages.at(-1).state, "accepted");
+    assert.deepEqual(messages.at(-1).request, request);
+    input.write(JSON.stringify(response) + "\n");
+    assert.equal(messages.at(-1).type, "response-accepted");
+    input.write(JSON.stringify({ ...response, result: { different: true } }) + "\n");
+    assert.equal(messages.at(-1).type, "input-error");
+  } finally { bridge.close(); }
+});
+
+test("batch text controls require an exact Run and echo its identity", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [], commands = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    for (const runId of ["run-a", "run-b"]) await bridge.controls.connect({
+      readStatus: async () => ({ run: { runId } }),
+      submitControl: async command => { commands.push({ runId, command }); return { accepted: true }; },
+    });
+    input.write('{"control":"PAUSE"}\n');
+    assert.equal(messages.at(-1).type, "input-error");
+    input.write('{"control":"PAUSE","runId":"run-b"}\n');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(commands, [{ runId: "run-b", command: "PAUSE" }]);
+    assert.equal(messages.at(-1).runId, "run-b");
+  } finally { bridge.close(); }
+});

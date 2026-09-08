@@ -1,63 +1,260 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 
-const markdown = readFileSync(new URL("../../skills/personal/run-issue-workflow/references/codex-host-driver.md", import.meta.url), "utf8");
-const extract = text => text.replaceAll("\r\n", "\n").split("```js\n")[1].split("\n```")[0];
-const Driver = Object.getPrototypeOf(async function () {}).constructor;
+const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-driver.js", import.meta.url), "utf8");
+const api = runInNewContext(source);
+const plain = value => JSON.parse(JSON.stringify(value));
+const frame = value => `workflow-host ${JSON.stringify(value)}\n`;
+const request = { type: "tool", id: "original-id", name: "mcp__codex_app__list_threads", arguments: { limit: 100 } };
 
-async function drive({ exitWhilePending = false, lineEnding = "\n" } = {}) {
-  const source = extract(markdown.replaceAll("\r\n", "\n").replaceAll("\n", lineEnding));
-  const request = { type: "tool", id: "exact-request", name: "mcp__codex_app__list_projects", arguments: {} };
-  const values = new Map([["workflow.host", { sessionId: 42, buffer: `workflow-host ${JSON.stringify(request)}\n` }]]);
-  const writes = [], output = [];
+test("the same dependency-free source loads without Node globals", () => {
+  assert.equal(typeof api.createDriver, "function");
+  assert.equal(typeof api.parseTransport, "function");
+});
+
+for (const ending of ["\n", "\r\n"]) {
+  test(`fragmentation, payload and observed column-80 repeated-character redraw survive ${JSON.stringify(ending)}`, () => {
+    const message = { ...request, arguments: { text: "same  spaces 漢字 \\n \\u001b[31m", limit: 100 } };
+    const line = frame(message).trimEnd(), split = 79;
+    const raw = `\x1b[?25l\x1b[2J\x1b[H${line.slice(0, split)}\r\n\x1b[4;80H${line[split - 1]}${line.slice(split)}${ending}`;
+    let buffer = "", frames = [];
+    for (const char of raw) {
+      const parsed = api.parseTransport(buffer + char);
+      buffer = parsed.remaining;
+      frames.push(...parsed.frames);
+    }
+    const last = api.parseTransport(buffer, true);
+    frames.push(...last.frames);
+    assert.equal(frames.filter(item => item.kind === "message").length, 1);
+    assert.deepEqual(plain(frames.find(item => item.kind === "message").message), message);
+    assert.equal(frames.map(item => item.raw).join(""), raw);
+    assert.equal(last.remaining, "");
+  });
+}
+
+test("unknown/malformed framing is observable and incomplete final data remains buffered", () => {
+  for (const raw of ['workflow-host {oops}\n', frame({ type: "invented" }), '\x1b[99zworkflow-host {}\n']) {
+    const parsed = api.parseTransport(raw, true);
+    assert.equal(parsed.frames[0].kind, "diagnostic");
+    assert.equal(parsed.frames[0].raw, raw);
+  }
+  const wrong = 'workflow-host {"type":"res\r\n\x1b[2;80HXult"}\n';
+  assert.ok(api.parseTransport(wrong, true).frames.every(item => item.kind === "diagnostic"));
+  const partial = 'workflow-host {"type":"res';
+  assert.equal(api.parseTransport(partial, true).remaining, partial);
+  const final = frame({ type: "result", result: { state: "UNAVAILABLE" } }).trimEnd();
+  assert.equal(api.parseTransport(final, true).frames[0].raw, final);
+  assert.equal(api.parseTransport(final, true).remaining, "");
+});
+
+function harness({ native, write, checkpoint } = {}) {
+  const values = new Map(), writes = [], output = [];
+  let durable;
   let calls = 0;
-  const result = { content: [{ type: "text", text: "actual native result" }] };
-  const terminal = { type: "result", result: { state: "PRESERVED" } };
-  const tools = {
-    async mcp__codex_app__list_projects() {
-      calls += 1;
-      values.set("workflow.control", { control: "PAUSE", runId: "exact-run" });
-      await sleep(35);
-      return result;
+  values.set("workflow.host", api.createLane({ sessionId: 42, output: frame(request) }));
+  const dependencies = {
+    driverId: "first-cell", load: key => plain(values.get(key) ?? null),
+    store: (key, value) => values.set(key, plain(value)), report: value => output.push(plain(value)),
+    tools: {
+      async mcp__codex_app__list_threads(args) { calls++; assert.equal(args.limit, 50); return native ? native() : { ok: true }; },
+      async write_stdin(args) {
+        assert.equal(args.session_id, 42);
+        const message = args.chars ? JSON.parse(args.chars) : null;
+        writes.push(message);
+        if (write) return write(message);
+        return { output: message?.id ? frame({ type: "response-accepted", id: message.id })
+          : message?.inspectRequests ? frame({ type: "request-state", id: request.id, state: "pending", request }) : "" };
+      },
     },
-    async write_stdin({ session_id, chars }) {
-      assert.equal(session_id, 42);
-      if (chars) writes.push(JSON.parse(chars));
-      const last = writes.at(-1);
-      if (last?.id === request.id || exitWhilePending && calls && last?.control === "PAUSE") {
-        return { output: `workflow-host ${JSON.stringify(terminal)}\n`, exit_code: 0 };
-      }
-      return { output: "" };
-    },
+    persist: async value => { durable = plain(value); },
+    setTimeout: fn => setTimeout(fn, 2), clearTimeout, heartbeatMs: 2, tickMs: 12, checkpoint,
   };
-  await new Driver("tools", "load", "store", "text", "yield_control", "setTimeout", "clearTimeout", source)(
-    tools, key => values.get(key), (key, value) => values.set(key, value), value => output.push(value), async () => {},
-    (callback, milliseconds) => { assert.equal(milliseconds, 15000); return setTimeout(callback, 2); }, clearTimeout,
+  return { values, writes, output, dependencies, driver: api.createDriver(dependencies),
+    lane: () => values.get("workflow.host"), calls: () => calls, durable: () => durable };
+}
+
+test("slow native calls retain original ID, continue heartbeats, preserve controls and forward once", async () => {
+  const h = harness({ native: async () => { await sleep(35); return { ok: true }; } });
+  h.values.set("workflow.control", { control: "PAUSE", runId: "exact-run" });
+  for (let i = 0; i < 20 && h.lane().requests[0]?.state !== "forwarded"; i++) await h.driver.tick();
+  assert.equal(h.calls(), 1);
+  assert.ok(h.writes.filter(item => item?.heartbeat).length > 2);
+  assert.deepEqual(h.writes.filter(item => item?.control), [{ control: "PAUSE", runId: "exact-run" }]);
+  assert.deepEqual(h.writes.filter(item => item?.id), [{ id: request.id, result: { ok: true } }]);
+  assert.deepEqual(h.lane().requests[0].history, ["received", "dispatched", "returned", "forwarding", "forwarded"]);
+});
+
+for (const boundary of ["received", "dispatched", "returned", "forwarding"]) {
+  test(`interruption at ${boundary} preserves identity without replaying uncertain native work`, async () => {
+    let injected = false;
+    const h = harness({ checkpoint: state => { if (!injected && state === boundary) { injected = true; throw new Error("INTERRUPTED"); } } });
+    await assert.rejects(h.driver.tick(), /INTERRUPTED/);
+    assert.equal(h.lane().requests[0].id, request.id);
+    assert.equal(h.lane().requests[0].state, boundary);
+    const second = api.createDriver({ ...h.dependencies, driverId: "second-cell", checkpoint: undefined });
+    await assert.rejects(second.tick(), /active driver/);
+    second.resume({ previousDriverId: "first-cell", stoppedEvidence: "original functions cell confirmed terminated" });
+    await second.tick();
+    assert.equal(h.calls(), boundary === "dispatched" ? 0 : 1);
+    if (boundary === "dispatched") {
+      assert.equal(h.lane().requests[0].state, "dispatched");
+      assert.ok(h.output.some(item => item.type === "reconciliation-required"));
+      await assert.rejects(second.reconcileNative({ id: request.id, result: {} }), /owner evidence/);
+      await second.reconcileNative({ id: request.id, result: { recovered: true }, ownerEvidence: { requestId: request.id, observation: "original task/intent read-back" } });
+      await second.tick();
+      assert.equal(h.calls(), 0);
+    }
+  });
+}
+
+test("lost forwarding acknowledgement reconciles from the original bridge before redelivery", async () => {
+  let accepted = false;
+  const h = harness({ write: message => {
+    if (message?.id) { accepted = true; throw new Error("response lost"); }
+    if (message?.inspectRequests) return { output: frame({ type: "request-state", id: request.id, state: accepted ? "accepted" : "pending", request }) };
+    return { output: "" };
+  } });
+  await h.driver.tick();
+  assert.equal(h.lane().requests[0].state, "forwarding");
+  await h.driver.tick();
+  assert.equal(h.lane().requests[0].state, "forwarded");
+  assert.equal(h.calls(), 1);
+  assert.equal(h.writes.filter(item => item?.id).length, 1);
+});
+
+test("exit drains final frames, retains partial bytes, session identity and a pending native outcome", async () => {
+  const terminal = { type: "result", result: { state: "UNAVAILABLE" } };
+  const h = harness({ native: async () => { await sleep(20); return { actual: true }; }, write: () => ({ output: frame(terminal) + 'workflow-host {"partial":', exit_code: 0 }) });
+  await h.driver.tick();
+  await sleep(25);
+  await h.driver.tick();
+  assert.equal(h.lane().sessionId, 42);
+  assert.equal(h.lane().active, false);
+  assert.equal(h.lane().exitCode, 0);
+  assert.equal(h.lane().buffer, 'workflow-host {"partial":');
+  assert.equal(h.lane().requests[0].state, "returned");
+  assert.ok(h.output.some(item => item.type === "result" && item.result.state === "UNAVAILABLE"));
+  assert.equal(h.writes.filter(item => item?.id).length, 0);
+});
+
+test("duplicate IDs with conflicting content and disallowed tools never dispatch", async () => {
+  const h = harness(), lane = h.lane();
+  lane.buffer = frame({ ...request, name: "mcp__codex_app__consume_usage_reset" });
+  h.values.set("workflow.host", lane);
+  await h.driver.tick();
+  assert.equal(h.calls(), 0);
+  assert.equal(h.lane().requests[0].state, "received");
+  const next = h.lane(); next.buffer = frame(request); h.values.set("workflow.host", next);
+  await h.driver.tick();
+  assert.equal(h.calls(), 0);
+  assert.ok(h.lane().diagnostics.some(item => item.reason === "Conflicting request identity"));
+});
+
+test("a still-pending response is redelivered only after original-owner read-back, without native replay", async () => {
+  let delivery = 0;
+  const h = harness({ write: message => {
+    if (message?.id) {
+      if (++delivery === 1) throw new Error("write interrupted before delivery");
+      return { output: frame({ type: "response-accepted", id: request.id }) };
+    }
+    return { output: message?.inspectRequests ? frame({ type: "request-state", id: request.id, state: "pending", request }) : "" };
+  } });
+  await h.driver.tick(); await h.driver.tick();
+  assert.equal(h.calls(), 1);
+  assert.equal(delivery, 2);
+  const redelivery = h.writes.findLastIndex(item => item?.id);
+  assert.equal(h.writes[redelivery - 1].inspectRequests, true);
+  assert.equal(h.lane().requests[0].state, "forwarded");
+});
+
+test("a second concurrent tick cannot duplicate a pending native request", async () => {
+  const h = harness({ native: () => sleep(20) });
+  const first = h.driver.tick();
+  await assert.rejects(h.driver.tick(), /active driver/);
+  await first;
+  assert.equal(h.calls(), 1);
+});
+
+test("the documented loader and run entry use the same tested source", async () => {
+  const markdown = readFileSync(new URL("../../skills/personal/run-issue-workflow/references/codex-host-driver.md", import.meta.url), "utf8");
+  const snippets = [...markdown.replaceAll("\r\n", "\n").matchAll(/```js\n([\s\S]*?)\n```/gu)].map(match => match[1]);
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const values = new Map();
+  await new AsyncFunction("tools", "store", snippets[0])({ exec_command: async () => ({ exit_code: 0, output: source }) }, (key, value) => values.set(key, value));
+  assert.equal(values.get("workflow.driverSource"), source);
+  values.set("workflow.host", api.createLane({ sessionId: 7, output: frame({ type: "result", result: { state: "PRESERVED" } }), exit_code: 0 }));
+  const reports = [];
+  await new AsyncFunction("tools", "load", "store", "text", "setTimeout", "clearTimeout", "yield_control", snippets[1].replaceAll("<absolute-Git-common-directory>", "C:/fixture/.git"))(
+    { exec_command: async () => ({ exit_code: 0 }) }, key => values.get(key), (key, value) => values.set(key, value), value => reports.push(value), setTimeout, clearTimeout, async () => {},
   );
-  return { calls, writes, output, result, terminal, lane: values.get("workflow.host") };
-}
-
-for (const lineEnding of ["\n", "\r\n"]) {
-test("documented driver keeps a slow native request alive, sends queued control and forwards its result once", async () => {
-  const observed = await drive({ lineEnding });
-  assert.equal(observed.calls, 1);
-  assert.ok(observed.writes.filter(item => item.heartbeat).length > 1);
-  assert.deepEqual(observed.writes.filter(item => item.control), [{ control: "PAUSE", runId: "exact-run" }]);
-  assert.deepEqual(observed.writes.filter(item => item.id), [{ id: "exact-request", result: observed.result }]);
-  assert.ok(observed.output.some(item => item === observed.terminal || JSON.stringify(item) === JSON.stringify(observed.terminal)));
-  assert.equal(observed.lane.sessionId, null);
-  assert.equal(observed.lane.buffer, "");
+  assert.ok(reports.some(item => item.type === "result" && item.result.state === "PRESERVED"));
 });
 
-test("documented driver drains terminal output after host exit without replaying a pending native request", async () => {
-  const observed = await drive({ exitWhilePending: true, lineEnding });
-  assert.equal(observed.calls, 1);
-  assert.deepEqual(observed.writes.filter(item => item.id), []);
-  assert.ok(observed.output.some(item => item.type === "result" && item.result.state === "PRESERVED"));
-  assert.equal(observed.lane.sessionId, null);
-  assert.equal(observed.lane.buffer, "");
+test("observed live Windows prefixes and OSC title preserve exact workflow bytes", () => {
+  const setup = '\x1b[?9001h\x1b[?1004h\x1b[?25l\x1b[2J\x1b[m\x1b[H';
+  const title = '\x1b]0;C:\\host\\pwsh.exe\x07\x1b[?25h';
+  const parsed = api.parseTransport(setup + frame(request).replaceAll("\n", "\r\n") + title);
+  assert.deepEqual(plain(parsed.frames[0].message), request);
+  assert.equal(parsed.frames[1].kind, "terminal");
+  assert.equal(parsed.remaining, "");
 });
 
+for (const boundary of ["received", "dispatched", "returned", "forwarding"]) {
+  test(`durable ${boundary} survives loss of every active-cell store update`, async () => {
+    const h = harness({ checkpoint: state => { if (state === boundary) throw new Error("CELL_TERMINATED"); } });
+    await assert.rejects(h.driver.tick(), /CELL_TERMINATED/);
+    assert.equal(h.durable().requests[0].state, boundary);
+    h.values.clear();
+    h.values.set("workflow.host", plain(api.restoreCheckpoint(h.durable())));
+    const resumed = api.createDriver({ ...h.dependencies, checkpoint: undefined, driverId: "recovered-cell" });
+    resumed.resume({ previousDriverId: "first-cell", stoppedEvidence: "confirmed cell termination" });
+    await resumed.tick();
+    assert.equal(h.calls(), boundary === "dispatched" ? 0 : 1);
+    if (["returned", "forwarding"].includes(boundary)) {
+      assert.equal(h.writes.filter(item => item?.id).length, 0, "omitted response content requires original-owner recovery");
+      await resumed.reconcileNative({ id: request.id, result: { recovered: true }, ownerEvidence: { requestId: request.id, observation: "original native task read-back" } });
+      await resumed.tick();
+      assert.equal(h.writes.filter(item => item?.id).length, 1);
+      assert.equal(h.calls(), 1);
+    }
+  });
 }
+
+test("durable checkpoints exclude bridge credentials and all native payloads", () => {
+  const secret = "fixture-bridge-secret", lane = api.createLane({ sessionId: 1, output: `raw ${secret}` });
+  lane.requests.push({ id: "original-panel", request: { type: "tool", id: "original-panel", name: "mcp__codex_app__open_in_codex",
+    arguments: { target: { url: `http://localhost/?token=${secret}` } } }, state: "returned", history: ["received", "dispatched", "returned"],
+    response: { result: { content: [{ text: secret }] } }, raw: secret, ownerEvidence: { observation: secret } });
+  lane.diagnostics.push({ raw: secret, reason: secret });
+  lane.pendingIo = { kind: "response", state: "sending", message: { result: secret }, error: secret };
+  lane.terminal = { type: "error", message: secret };
+  const serialized = JSON.stringify(api.checkpointState(lane));
+  assert.equal(serialized.includes(secret), false);
+  assert.equal(serialized.includes("http:"), false);
+  assert.equal(JSON.parse(serialized).requests[0].id, "original-panel");
+});
+
+test("failed checkpoint publication prevents native dispatch", async () => {
+  const h = harness();
+  const driver = api.createDriver({ ...h.dependencies, persist: async () => { throw new Error("disk unavailable"); } });
+  await assert.rejects(driver.tick(), /disk unavailable/);
+  assert.equal(h.calls(), 0);
+});
+
+test("fresh file controls retain exact Run identity and do not replay the same ID after restore", async () => {
+  const h = harness();
+  let queued = null;
+  const driver = api.createDriver({ ...h.dependencies, readControl: async () => queued });
+  await driver.tick();
+  queued = { id: "control-1", control: "PAUSE", runId: "exact-run" };
+  await driver.tick(); await driver.tick();
+  assert.deepEqual(h.writes.filter(item => item?.control), [{ control: "PAUSE", runId: "exact-run" }]);
+  h.values.set("workflow.host", api.restoreCheckpoint(h.durable()));
+  const resumed = api.createDriver({ ...h.dependencies, driverId: "new-cell", readControl: async () => queued });
+  resumed.resume({ previousDriverId: "first-cell", stoppedEvidence: "cell ended" });
+  await resumed.tick();
+  assert.equal(h.writes.filter(item => item?.control).length, 1);
+});

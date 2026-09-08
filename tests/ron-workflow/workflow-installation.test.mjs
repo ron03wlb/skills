@@ -9,6 +9,15 @@ import test from "node:test";
 import { installWorkflow, selectWorkflowVersion } from "../../skills/personal/run-issue-workflow/scripts/workflow-installation.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
+const hostAssets = ["scripts/codex-host-driver.js", "references/codex-host-driver.md"];
+function copyHostAssets(repository) {
+  for (const path of hostAssets) {
+    const target = join(repository, "skills/personal/run-issue-workflow", path);
+    mkdirSync(join(target, ".."), { recursive: true });
+    writeFileSync(target, readFileSync(new URL(`../../skills/personal/run-issue-workflow/${path}`, import.meta.url)));
+  }
+}
+
 test("Run renewal preserves its journaled workflow version across coordinator re-entry", () => {
   const root = mkdtempSync(join(tmpdir(), "workflow-version-run-"));
   execFileSync("git", ["init", "-b", "main", root], { stdio: "ignore" });
@@ -47,6 +56,7 @@ test("an installed entry update preserves a running workflow's exact executable 
   mkdirSync(join(sourceRepository, "docs/agents/references"));
   writeFileSync(join(sourceRepository, maintenanceReference), "Approved maintenance owner\n");
   const commit = (version) => {
+    copyHostAssets(sourceRepository);
     writeFileSync(join(sourceRepository, entry), `console.log(${JSON.stringify(version)});\n`);
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), `---\nname: run-issue-workflow\ndescription: Run approved work.\n---\n${version}\n`);
     git("add", "skills", "docs/agents/run-preparation.md", maintenanceReference);
@@ -56,6 +66,8 @@ test("an installed entry update preserves a running workflow's exact executable 
   try {
     git("init", "-b", "main");
     const first = installWorkflow({ sourceRepository, sourceCommit: commit("v1"), cacheDirectory, skillDirectory });
+    for (const path of hostAssets) assert.deepEqual(readFileSync(join(first.root, "skills/personal/run-issue-workflow", path)),
+      execFileSync("git", ["-C", sourceRepository, "show", `${first.version.sourceCommit}:skills/personal/run-issue-workflow/${path}`]));
     assert.equal(readFileSync(join(first.root, maintenanceReference), "utf8"), "Approved maintenance owner\n");
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
     const secondCommit = commit("v2");
@@ -128,6 +140,7 @@ test("the exact install command recovers repeated interruptions before the catal
     git("init", "-b", "main");
     writeFileSync(join(sourceRepository, entry), "console.log('installed');\n");
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), "Workflow entry\n");
+    copyHostAssets(sourceRepository);
     git("add", "skills");
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-m", "entry");
     const sourceCommit = git("rev-parse", "HEAD");
