@@ -39,6 +39,10 @@ export function readRepairProgress({ records, issueId, operationId, count }) {
 
 export function nextRecoveryPhase(failure) {
   bindTechnicalFailure(failure);
+  if (failure.diagnosis?.executionReady) {
+    validateExecutionResolution({ failure, resolution: failure.diagnosis.executionReady });
+    return "CONTINUE";
+  }
   const classification = failure.diagnosis?.classification ?? "UNDIAGNOSED";
   if (classification === "UNDIAGNOSED") return "DIAGNOSE";
   if (classification === "OUTCOME_UNKNOWN" && !failure.diagnosis.readBackAttempted) return "READBACK";
@@ -49,6 +53,33 @@ export function nextRecoveryPhase(failure) {
   if (classification === "ISSUE_DEFECT" && failure.diagnosis.scopeCompatible === true) return "REPAIR";
   if (classification === "WORKFLOW_DEFECT" && failure.diagnosis.scopeCompatible === true) return "MAINTENANCE";
   return null;
+}
+
+export function validateExecutionResolution({ failure, resolution }) {
+  if (failure.completionIdentity != null || failure.verificationIdentity != null || resolution?.mode !== "EXECUTION_READY"
+    || resolution.candidate !== failure.candidate || resolution.targetHead !== failure.targetHead
+    || recoveryDigest(resolution.command) !== recoveryDigest(failure.command) || resolution.exitCode !== 0
+    || !text(resolution.source) || !text(resolution.evidence)) throw new Error("Execution recovery lacks the exact initial failure and successful native read-back");
+  return resolution;
+}
+
+// A settled native recovery can return verification to its owner; it cannot manufacture integration PASS.
+export function validateVerificationResolution({ result, intent, verification }) {
+  const resolution = result?.resolution;
+  const attempt = verification?.results?.find(item => item.identity === resolution?.attemptIdentity);
+  if (!["READBACK", "ENVIRONMENT"].includes(intent?.phase) || result?.requestIdentity !== intent.requestIdentity
+    || result.failureIdentity !== intent.failure.identity || !attempt || attempt.state === "PASS"
+    || verification.identity !== intent.failure.verificationIdentity || resolution.targetHead !== attempt.targetHead
+    || recoveryDigest(resolution.command) !== recoveryDigest(intent.failure.command)
+    || recoveryDigest(resolution.command) !== recoveryDigest(attempt.command)
+    || !text(resolution.source) || !text(resolution.evidence) || resolution.inputs?.external == null
+    || !resolution.inputs.environment || !Array.isArray(resolution.inputs.configuration)) throw new Error("Verification recovery resolution lacks its exact failed attempt and native evidence");
+  const sameInputs = recoveryDigest(resolution.inputs) === recoveryDigest(attempt.inputs);
+  if (resolution.mode === "CHANGED_INPUTS" ? sameInputs
+    : resolution.mode !== "OUTCOME_READ_BACK" || attempt.state !== "UNKNOWN" || !sameInputs || resolution.exitCode !== 0) {
+    throw new Error("Verification recovery must prove changed inputs or the exact unknown outcome");
+  }
+  return { requestIdentity: intent.requestIdentity, failureIdentity: intent.failure.identity, resolution };
 }
 
 export function nextRepairWave({ failure, journal }) {
@@ -63,14 +94,15 @@ export function nextRepairWave({ failure, journal }) {
 
 export function validateRecoveryIntent(event) {
   const failure = bindTechnicalFailure(event.failure);
-  if (event.issueId !== failure.issueId || !["DIAGNOSE", "READBACK", "ENVIRONMENT", "REPAIR", "MAINTENANCE"].includes(event.phase)
+  if (event.issueId !== failure.issueId || !["DIAGNOSE", "READBACK", "ENVIRONMENT", "CONTINUE", "REPAIR", "MAINTENANCE"].includes(event.phase)
     || event.phase !== nextRecoveryPhase(failure) || !text(event.originalTaskRef?.threadId) || !text(event.originalTaskRef?.hostId)
     || event.requestIdentity !== recoveryDigest({ failure, phase: event.phase, wave: event.wave })) throw new Error("Recovery intent differs from failure, phase or ownership");
   if (["REPAIR", "MAINTENANCE"].includes(event.phase) ? !Number.isInteger(event.wave) || event.wave < 1 || event.wave > 10 : event.wave !== null) throw new Error("Recovery wave is invalid for this phase");
 }
 
 export function validateRepairCompletion({ failure, transfer, completion, previousCompletion, ancestor }) {
-  if (!failure || !transfer || transfer.phase !== "REPAIR" || transfer.failureIdentity !== failure.identity || !sameRecoveryTask(transfer.originalTaskRef, failure.ownerTaskRef)
+  if (!failure || !transfer || !["REPAIR", "CONTINUE"].includes(transfer.phase) || transfer.phase === "CONTINUE" && (previousCompletion || !failure.diagnosis?.executionReady)
+    || transfer.failureIdentity !== failure.identity || !sameRecoveryTask(transfer.originalTaskRef, failure.ownerTaskRef)
     || completion?.record?.recovery?.failureIdentity !== failure.identity
     || completion.record.recovery.requestIdentity !== transfer.requestIdentity
     || !sameRecoveryTask(completion.record.recovery.taskRef, transfer.taskRef)
@@ -78,9 +110,9 @@ export function validateRepairCompletion({ failure, transfer, completion, previo
     || completion.record.recovery.previousCompletionIdentity !== (previousCompletion?.identity ?? null)
     || completion.record.recovery.previousCompletionBodySha256 !== (previousCompletion?.bodySha256 ?? null)
     || (previousCompletion?.identity ?? null) !== failure.completionIdentity || (previousCompletion?.bodySha256 ?? null) !== failure.completionBodySha256
-    || completion.record.candidate === failure.candidate || completion.record.worktree !== failure.worktree
+    || transfer.phase === "REPAIR" && completion.record.candidate === failure.candidate || completion.record.worktree !== failure.worktree
     || completion.record.topic !== failure.topic || !Number.isInteger(completion.record.repairWaveCount)
-    || completion.record.repairWaveCount < transfer.wave || completion.record.repairWaveCount > 10
+    || !Number.isInteger(failure.repairWaveCount) || completion.record.repairWaveCount < Math.max(failure.repairWaveCount, transfer.wave ?? 0) || completion.record.repairWaveCount > 10
     || !completion.record.verification?.some(item => JSON.stringify(item.argv) === JSON.stringify(failure.command) && /^(PASS|SUCCEEDED)\b/u.test(item.result))
     || !ancestor(failure.candidate, completion.record.candidate) || !ancestor(failure.targetHead, completion.record.candidate)) {
     throw new Error("Repair completion lacks exact failure, owner, completion or Git lineage");

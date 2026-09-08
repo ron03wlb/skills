@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
 test("material recovery carries original and journaled counts; maintenance has one separate scoped budget", () => {
   const failure = { issueId: "I_1", repairWaveCount: 7, diagnosis: { maintenance: { operationId: "maintenance", repairWaveCount: 2 } } };
@@ -62,4 +62,17 @@ test("maintenance installation evidence cannot invent authority, switch candidat
   assert.equal(validateMaintenanceResult({ result, intent, installed }), result.maintenance);
   for (const changed of [{ ...installed, state: "UNAVAILABLE" }, { ...installed, version: { ...installed.version, sourceCommit: "foreign" } }]) assert.throws(() => validateMaintenanceResult({ result, intent, installed: changed }), /installation read-back/u);
   assert.throws(() => validateMaintenanceResult({ result, intent: { ...intent, failure: { ...intent.failure, diagnosis: { maintenance: { ...scope, installationAuthority: null } } } }, installed }), /installation read-back/u);
+});
+
+test("non-material hand-back rejects stale attempts, unchanged failures and invented unknown success", () => {
+  const attempt = { identity: "attempt", targetHead: "target", command: ["check"], state: "FAIL", inputs: { environment: { runtime: "old" }, external: {}, configuration: [] } };
+  const verification = { identity: "verification", results: [attempt] };
+  const intent = { phase: "ENVIRONMENT", requestIdentity: "request", failure: { identity: "failure", verificationIdentity: "verification", command: ["check"] } };
+  const result = { requestIdentity: "request", failureIdentity: "failure", resolution: { mode: "CHANGED_INPUTS", attemptIdentity: "attempt", targetHead: "target", command: ["check"],
+    inputs: { ...attempt.inputs, environment: { runtime: "new" } }, source: "native", evidence: "bounded remedy read back" } };
+  assert.equal(validateVerificationResolution({ result, intent, verification }).requestIdentity, "request");
+  for (const resolution of [{ ...result.resolution, inputs: attempt.inputs }, { ...result.resolution, attemptIdentity: "foreign" },
+    { ...result.resolution, mode: "OUTCOME_READ_BACK", inputs: attempt.inputs, exitCode: 0 }]) {
+    assert.throws(() => validateVerificationResolution({ result: { ...result, resolution }, intent, verification }), /recovery/u);
+  }
 });

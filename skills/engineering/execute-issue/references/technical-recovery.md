@@ -18,6 +18,14 @@ Bind the original Run, Issue operation, task, worktree/topic, candidate, target 
 
 Newly discovered necessary files and technical failures do not themselves alter scope. New requirements, target, exclusions or applicable authority return to planning.
 
+Successful `READBACK` or `ENVIRONMENT` returns a `resolution` in the same native result. The coordinator validates its exact failure/attempt before handing back work; prose success never establishes integration PASS.
+
+| Resolution | Required evidence and continuation |
+| --- | --- |
+| `CHANGED_INPUTS` | Bind `attemptIdentity`, `targetHead`, exact `command`, fresh `inputs: {environment, external, configuration}`, owning `source` and `evidence`. Relevant inputs must differ from the failed attempt. The original close owner reads them again and verifies the unchanged obligation. |
+| `OUTCOME_READ_BACK` | Bind those same fields to an UNKNOWN attempt with unchanged inputs and `exitCode: 0`. The close owner independently reads the exact native process result through the check's `readOutcome(attempt)` callback, returning `{attemptIdentity, exitCode, source, evidence}`. Only the durable verification owner can reconcile UNKNOWN; it retains the old observation and does not rerun the command. |
+| `EXECUTION_READY` | Initial execution with no completion binds exact `candidate`, `targetHead`, `command`, `exitCode: 0`, `source` and `evidence`. A persisted non-material `CONTINUE` request returns to `execute-issue` in the same exclusive recovery task. Keep the proved cumulative count; material edits require the next recorded wave. Publish verified completion with the ordinary recovery lineage and null previous-completion fields. An unchanged initial candidate is allowed. |
+
 ## Exclusive Issue repair
 
 The existing journal records `recovery.intent` before task creation/message dispatch and `recovery.task` after native ownership read-back. The previous task must be settled in the exact worktree; the new task receives the same worktree through a same-directory fork and preserves original history. The immutable handoff and fork intents survive lost responses and pending setup; adopt exactly one native match and retain ambiguity rather than create another writer. Reuse this repair task for the same Issue operation. An original task becoming active invalidates the transfer until its exact owner settles.
@@ -32,6 +40,6 @@ The verification entries include the original failed command as exact `argv` and
 
 The diagnosis names `maintenance: {repositoryId, sourceRepository, target, approvedScopeHash, authority, operationId, repairWaveCount}` and, when applicable, exact `installationAuthority`. Resolve these against the existing human-approved repair scope. A dedicated task receives an isolated worktree from the unique saved canonical source project. The product task and main session do not modify the active package, Grant, journal or another owner's state.
 
-The maintenance operation retains its own ten-wave budget and task intent across retries; a new fingerprint does not authorize resetting the same operation. Verify and independently review its source candidate. The installation owner acts only under exact installation authority and returns native/read-back evidence; missing installation authority preserves the product lane and names that owner.
+The maintenance operation retains its own ten-wave budget and task intent across retries; a new fingerprint does not authorize resetting the same operation. Verify and independently review its source candidate. The installation owner acts only under exact installation authority and returns native/read-back evidence; missing installation authority preserves the product lane and names that owner. A later installation does not invalidate the historical receipt of an already closed Issue.
 
 Return `Workflow recovery result: <JSON>` with the accepted request/failure identities and `maintenance: {repositoryId, target, operationId, candidate, packageVersion, repairWaveCount, standards, spec, verification, installation: {authority, packageVersionId}}`. The coordinator verifies the installed package through the existing installation catalog and content verifier, checks scoped review/verification and budget evidence, and freshly enters the same Run with the verified compatible runtime. The retained Grant and package history remain unchanged. Closed-Issue aggregate findings keep their separate owner; no reopening or receipt migration is implied.

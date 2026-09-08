@@ -40,3 +40,25 @@ test("integration obligations preserve unknown outcomes, reevaluate changed inpu
     assert.throws(() => owner().read(), /malformed/u);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("the integration owner resolves an unknown attempt by exact native read-back without rerunning it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "integration-readback-"));
+  const owner = createIntegrationVerification({ gitCommonDir: root, operationId: "operation", issueId: "I_1", candidate: "a".repeat(40) });
+  let calls = 0;
+  const check = { command: ["check"], environment: { runtime: "fixture" }, readExternalInputs: async () => ({}),
+    run: async () => { calls++; throw new Error("native result lost"); } };
+  const verify = () => owner.verify({ targetHead: "b".repeat(40), checks: [check], repository: root, assertCurrent() {} });
+  try {
+    const unknown = await verify();
+    check.readOutcome = async attempt => ({ attemptIdentity: "foreign", exitCode: 0, source: "native-process", evidence: "observed exit 0" });
+    await assert.rejects(verify(), /read-back/u);
+    assert.equal(owner.read().attempts[0].state, "UNKNOWN");
+    check.readOutcome = async attempt => ({ attemptIdentity: attempt.identity, exitCode: 0, source: "native-process", evidence: "observed exact process exit 0" });
+    const passed = await verify();
+    assert.equal(passed.state, "PASS");
+    assert.equal(passed.results[0].identity, unknown.results[0].identity);
+    assert.equal(passed.results[0].outcomeReadBack.previousEvidence, "native result lost");
+    assert.equal((await verify()).state, "PASS");
+    assert.equal(calls, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

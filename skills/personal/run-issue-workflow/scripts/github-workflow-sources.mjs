@@ -10,7 +10,7 @@ import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
-import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, sameRecoveryTask, readRepairProgress } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, validateVerificationResolution, validateExecutionResolution, sameRecoveryTask, readRepairProgress } from "./recovery-evidence.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
@@ -239,10 +239,10 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);
       const recoveryTask = recoveryTransfer ? await tasks.read(recoveryTransfer.taskRef) : null;
       const acceptedRecovery = recoveryTransfer && recoveryTask?.recoveryRequest?.requestIdentity === recoveryIntent.requestIdentity;
-      const maintenanceProof = acceptedRecovery && recoveryIntent.phase === "MAINTENANCE" && recoveryTask.state === "RESUMABLE" && recoveryTask.recoveryResult?.maintenance
+      const maintenanceProof = issue.state !== "closed" && acceptedRecovery && recoveryIntent.phase === "MAINTENANCE" && recoveryTask.state === "RESUMABLE" && recoveryTask.recoveryResult?.maintenance
         ? validateMaintenanceResult({ result: recoveryTask.recoveryResult, intent: recoveryIntent,
           installed: installationCacheDirectory ? selectWorkflowVersion({ cacheDirectory: installationCacheDirectory }) : null }) : null;
-      const recoveryWriting = acceptedRecovery && recoveryIntent.phase === "REPAIR" && recoveryTask.state === "RUNNING";
+      const recoveryWriting = acceptedRecovery && ["REPAIR", "CONTINUE"].includes(recoveryIntent.phase) && recoveryTask.state === "RUNNING";
       const repair = journal.findLast(event => event.type === "repair.recorded" && event.issueId === issue.node_id);
       const acceptedRepair = repair && repair.candidate === completion?.record.candidate
         && task?.repairRequest?.requestIdentity === repair.requestIdentity && task.repairRequest.runId === selectedIdentity.runId;
@@ -313,7 +313,8 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             node.integrationVerification = integration.current ?? { state: "UNKNOWN", issueId: issue.node_id, candidate: record.candidate,
               targetHead: target.head, identity: bodyDigest(JSON.stringify(integration)), results: integration.attempts };
             if (issue.state !== "closed" && node.integrationVerification.targetHead !== target.head && node.integrationVerification.state === "PASS") {
-              node.integrationVerification = { ...node.integrationVerification, state: "UNKNOWN" };
+              // Historical PASS authorized any completed cleanup. The close owner must verify the new combination.
+              node.integrationRecheck = { previousVerificationIdentity: node.integrationVerification.identity, targetHead: target.head };
             }
             if (node.integrationVerification.state !== "PASS" && (issue.state === "closed" || node.worktreeState === "ABSENT")) throw new Error("Cleanup or closure contradicts the unresolved integration obligation; retain the closed-Issue owner boundary");
           }
@@ -325,7 +326,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           node.repairLineage = validateRepairCompletion({ failure: intent?.failure, transfer, completion, previousCompletion, ancestor });
           if (record.repairWaveCount < repairCount(record.operationIdentity.key, record.repairWaveCount)) throw new Error("Replacement completion resets the recorded material repair budget");
         }
-        if (recoveryIntent?.phase === "REPAIR" && record.candidate !== recoveryIntent.failure.candidate && !record.recovery) throw new Error("Replacement completion omits its required repair lineage");
+        if (["REPAIR", "CONTINUE"].includes(recoveryIntent?.phase) && (record.candidate !== recoveryIntent.failure.candidate || recoveryIntent.phase === "CONTINUE") && !record.recovery) throw new Error("Replacement completion omits its required repair lineage");
         if (task?.closeResult?.state === "HOST_CLEANUP_BLOCKED") {
           const cleanup = planCloseContinuation({ task, requestIdentity: task.closeRequest?.requestIdentity,
             requestEvidence: { runIdentity: selectedIdentity, issueId: issue.node_id, candidateReachable: node.candidateReachable,
@@ -334,13 +335,22 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             affectedNodes: [issue.node_id], evidence: cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`) });
         }
       }
+      const verificationProof = issue.state !== "closed" && completion && acceptedRecovery && ["READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase)
+        && recoveryTask.state === "RESUMABLE" && recoveryTask.recoveryResult?.resolution
+        ? validateVerificationResolution({ result: recoveryTask.recoveryResult, intent: recoveryIntent,
+          verification: recoveryIntent.failure.verificationSnapshot ?? node.integrationVerification }) : null;
+      if (verificationProof && task?.closeRequest?.evidence?.verificationRecovery?.requestIdentity === verificationProof.requestIdentity
+        && node.integrationVerification?.state === "PASS") node.verificationRecovery = verificationProof;
+      if (maintenanceProof && task?.closeRequest?.evidence?.maintenanceRecoveryIdentity === recoveryIntent.requestIdentity
+        && node.integrationVerification?.state === "PASS") node.maintenanceRecoveryIdentity = recoveryIntent.requestIdentity;
       const renewedCloseActive = (node.repairLineage || maintenanceProof && workflowVersion?.id === maintenanceProof.packageVersion.id
-        && task?.closeRequest?.evidence?.maintenanceRecoveryIdentity === recoveryIntent.requestIdentity) && task?.state === "RUNNING"
+        && task?.closeRequest?.evidence?.maintenanceRecoveryIdentity === recoveryIntent.requestIdentity
+        || verificationProof && task?.closeRequest?.evidence?.verificationRecovery?.requestIdentity === verificationProof.requestIdentity) && task?.state === "RUNNING"
         && task.closeRequest?.runId === selectedIdentity.runId && task.closeRequest?.issueId === issue.node_id
         && task.closeRequest.evidence?.authorityEvidence?.candidateCommit === completion?.record.candidate
         && task.closeRequest.evidence?.authorityEvidence?.completionEvidenceId === completion?.identity
         && recoveryTask?.state === "RESUMABLE";
-      if (recoveryTransfer && task?.state !== "RESUMABLE" && !renewedCloseActive) throw new Error("Original writer is active or uncertain after exclusive recovery transfer");
+      if (issue.state !== "closed" && recoveryTransfer && task?.state !== "RESUMABLE" && !renewedCloseActive) throw new Error("Original writer is active or uncertain after exclusive recovery transfer");
       if (renewedCloseActive) { node.closeActive = true; node.taskState = "EXECUTING"; }
       const conflict = task?.closeResult;
       if (completion && !repairing && conflict?.schema === "issue-close-result:v1" && conflict.state === "CONFLICT"
@@ -351,7 +361,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       }
       let failure = latest?.record.kind === "implementation_blocked" ? latest.record.failure : null;
       if (!failure && latest?.record.kind === "implementation_blocked" && recoveryIntent?.failure.blockedEvidenceIdentity === latest.identity) failure = recoveryIntent.failure;
-      if (!failure && latest?.record.kind === "implementation_blocked" && originalTaskRef && task?.cwd) {
+      if (!failure && latest?.record.kind === "implementation_blocked" && (!completion || !closeOnly) && originalTaskRef && task?.cwd) {
         const registered = worktrees().filter(item => item.worktree === worktreePath(task.cwd));
         if (registered.length !== 1 || realpathSync.native(resolve(task.cwd, command("git", ["-C", task.cwd, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Blocked execution has no exact owned worktree for diagnosis");
         failure = bindTechnicalFailure({ runId: selectedIdentity.runId, issueId: issue.node_id,
@@ -375,7 +385,9 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           command: failedCheck?.command ?? ["git", "merge", record.candidate], observedResult: failedCheck?.evidence ?? (verification ? "Integration outcome unknown" : "Merge conflict; target restoration verified"),
           verificationIdentity: verification?.identity ?? null, completionIdentity: completion.identity, completionBodySha256: completion.bodySha256,
           ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(record.operationIdentity?.key, record.repairWaveCount),
-          maintenanceEvaluation: task?.closeRequest?.evidence?.maintenanceRecoveryIdentity ?? null });
+          verificationSnapshot: verification ?? null,
+          maintenanceEvaluation: task?.closeRequest?.evidence?.maintenanceRecoveryIdentity ?? null,
+          verificationEvaluation: task?.closeRequest?.evidence?.verificationRecovery?.requestIdentity ?? null });
       }
       if (renewedCloseActive) failure = null; // Let the legitimate close owner settle before consuming its next outcome.
       if (failure && issue.state !== "closed") {
@@ -387,11 +399,20 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (recoveryIntent?.failure.identity === failure.identity && acceptedRecovery && recoveryTask.state === "RESUMABLE") {
           const result = recoveryTask.recoveryResult;
           if (result && (result.requestIdentity !== recoveryIntent.requestIdentity || result.failureIdentity !== failure.identity)) throw new Error("Recovery response differs from the exact failure request");
-          if (["DIAGNOSE", "READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase) && result?.diagnosis) failure = bindTechnicalFailure({ ...failure, diagnosis: {
+          if (!completion && ["READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase) && result?.resolution) {
+            const executionReady = validateExecutionResolution({ failure, resolution: result.resolution });
+            failure = bindTechnicalFailure({ ...failure, diagnosis: { ...failure.diagnosis, executionReady } });
+          }
+          else if (verificationProof) {
+            node.verificationRecovery = verificationProof;
+            delete node.integrationVerification; // The durable obligation remains unresolved until its close owner verifies it.
+            failure = null;
+          }
+          else if (["DIAGNOSE", "READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase) && result?.diagnosis) failure = bindTechnicalFailure({ ...failure, diagnosis: {
             ...result.diagnosis, ...(recoveryIntent.phase === "READBACK" ? { readBackAttempted: true } : {}),
             ...(recoveryIntent.phase === "ENVIRONMENT" ? { remediationAttempted: true } : {}),
           } });
-          else if (recoveryIntent.phase === "REPAIR") throw new Error("Repair settled without a verified replacement completion; inspect its owned evidence");
+          else if (["REPAIR", "CONTINUE"].includes(recoveryIntent.phase)) throw new Error("Repair settled without a verified replacement completion; inspect its owned evidence");
           else if (recoveryIntent.phase === "MAINTENANCE" && result?.maintenance) {
             const proof = maintenanceProof;
             if (workflowVersion?.id !== proof.packageVersion.id) {

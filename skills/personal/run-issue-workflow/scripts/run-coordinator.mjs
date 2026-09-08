@@ -72,7 +72,7 @@ const canonicalize = (value) => {
   return value;
 };
 const closeRequestAuthority = (evidence) => {
-  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, ...authority } = evidence;
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, integrationRecheck, ...authority } = evidence;
   if (authority.authorityEvidence) {
     const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
     authority.authorityEvidence = fixed;
@@ -660,10 +660,16 @@ export function createCoordinator({
         ? `Read back the exact uncertain command/mutation through its owning native source and logs. Inspect current state before retry; do not repeat a mutation, edit source, install, integrate or close. For environment evidence, identify the exact fingerprint and whether the existing gradle-loopback-safe adapter applies. Return Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with a refreshed diagnosis {classification,source,reason,nextOwner,fingerprint}. If evidence remains unavailable, name its exact owner and missing predicate; this bounded read-back is not a material repair wave.`
       : phase === "ENVIRONMENT"
         ? `The exact Windows Selector.open loopback fingerprint has one recorded remediation cycle for this dispatch. Call the Skill tool with "gradle-loopback-safe" using its installed generic host source. Apply only that reversible process-local remediation and rerun the exact failed command in this worktree. Do not edit source, commit, install, acquire close leases or close. Return Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with diagnosis {classification,source,reason,nextOwner,fingerprint} and exact observed command/outcome. If the adapter is unavailable or the fingerprint persists, report its exact evidence; no second cycle or material repair count is authorized.`
+      : phase === "CONTINUE"
+        ? `Call the Skill tool with "execute-issue" and continue the original initial execution in this exclusively transferred worktree under unchanged authority. The exact non-material obstacle has successful native read-back. Preserve operation and proved repairWaveCount ${failure.repairWaveCount}; any material edit still records its next wave before editing. Complete required focused checks, configured typechecking, full suite and independent Standards/Spec review. Publish/read implementation_complete with the original failed command as exact argv and PASS, and recovery {failureIdentity,requestIdentity,taskRef,previousCompletionIdentity:null,previousCompletionBodySha256:null}. An unchanged candidate is permitted only for this initial non-material continuation. No integration, closeout or installation.`
       : phase === "REPAIR"
         ? `Use $execute-issue for the original Issue operation in this exclusively transferred original worktree. Material repair wave ${intent.wave}/10 is already recorded; do not count it again or reset the budget. Capture the latest target baseline and merge that exact commit into the topic without resetting, rebasing or rolling back a successful integration. Repair only unchanged approved requirements. Run focused checks including the original failed command, configured typechecking, full suite and independent Standards/Spec review. Record the original failed command as an exact argv array with its PASS result in verification. Publish/read a new implementation_complete containing repairWaveCount and recovery {failureIdentity, requestIdentity, taskRef, previousCompletionIdentity, previousCompletionBodySha256}, bound to the supplied original completion. Preserve prior notes. No closeout or installation.`
         : `Execute only the exact approved governing-workflow maintenance in this separate canonical-source worktree. Its own material wave ${intent.wave}/10 is recorded; return repairWaveCount ${intent.wave}. Preserve the product worktree and its pinned package. Verify/review the maintenance candidate and, only with its exact installation authority, let the installation owner install it. Return Workflow recovery result: <JSON> binding requestIdentity, failureIdentity and maintenance {repositoryId,target,operationId,candidate,packageVersion,standards,spec,verification,installation}. Otherwise return the precise missing predicate and owning next action. A new task never resets the maintenance operation budget.`;
-    await tasks.message(transfer.taskRef, `${work}\nOriginal failure and authority: ${JSON.stringify(failure)}\nRecovery request: ${JSON.stringify(request)}`);
+    const resolution = ["READBACK", "ENVIRONMENT"].includes(phase) && failure.verificationSnapshot
+      ? ` On success, include resolution {mode: CHANGED_INPUTS|OUTCOME_READ_BACK,attemptIdentity,targetHead,command,inputs,source,evidence,exitCode} bound to the exact failed attempt. CHANGED_INPUTS proves fresh relevant environment/external/configuration inputs; OUTCOME_READ_BACK proves exitCode 0 for the exact UNKNOWN native attempt with unchanged inputs. Preserve the original evidence. This returns verification to the original close owner and is never integration PASS or permission to close.`
+      : ["READBACK", "ENVIRONMENT"].includes(phase) && failure.completionIdentity == null
+        ? ` On successful initial-execution recovery, include resolution {mode:EXECUTION_READY,candidate,targetHead,command,exitCode:0,source,evidence} proving the exact failed operation. The coordinator will continue execution in this same exclusive task without spending a material wave; this result is not completion.` : "";
+    await tasks.message(transfer.taskRef, `${work}${resolution}\nOriginal failure and authority: ${JSON.stringify(failure)}\nRecovery request: ${JSON.stringify(request)}`);
   };
 
   const closeIssue = async ({ action, current, status, step = false }) => {
@@ -696,6 +702,8 @@ export function createCoordinator({
       worktreeState: node.close.worktreeState,
       authorityEvidence: sourceNode.closeAuthorityEvidence,
       ...(sourceNode.integrationVerification ? { integrationVerification: sourceNode.integrationVerification } : {}),
+      ...(sourceNode.integrationRecheck ? { integrationRecheck: sourceNode.integrationRecheck } : {}),
+      ...(sourceNode.verificationRecovery ? { verificationRecovery: sourceNode.verificationRecovery } : {}),
       ...(sourceNode.maintenanceRecoveryIdentity ? { maintenanceRecoveryIdentity: sourceNode.maintenanceRecoveryIdentity } : {}),
     };
     let requestIdentity = closeRequestIdentityFor(requestEvidence);
@@ -705,7 +713,7 @@ export function createCoordinator({
       && task.closeRequest.issueId === action.issueId;
     if (acceptedForLane && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity) requestIdentity = task.closeRequest.requestIdentity;
     const repair = store.readEvents(current.runIdentity.runId).findLast(event => event.type === "repair.recorded" && event.issueId === action.issueId);
-    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && (sourceNode.maintenanceRecoveryIdentity
+    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && (sourceNode.maintenanceRecoveryIdentity || sourceNode.verificationRecovery
       || sourceNode.repairLineage
       && sourceNode.repairLineage.previousCandidate === task.closeRequest.evidence?.authorityEvidence?.candidateCommit
       && sourceNode.repairLineage.previousCompletionIdentity === task.closeRequest.evidence?.authorityEvidence?.completionEvidenceId

@@ -93,6 +93,22 @@ export function createIntegrationVerification({ gitCommonDir, operationId, issue
             }
           } catch (error) { attempt.evidence = error.message; }
           write(record);
+        } else if (attempt.state === "UNKNOWN" && typeof check.readOutcome === "function") {
+          const observed = await check.readOutcome(structuredClone(attempt));
+          assertCurrent();
+          if (observed != null) {
+            if (observed.attemptIdentity !== attempt.identity || !Number.isInteger(observed.exitCode)
+              || typeof observed.source !== "string" || !observed.source
+              || typeof observed.evidence !== "string" || !observed.evidence) throw new Error("Native outcome read-back differs from the exact integration attempt");
+            const after = await inputs();
+            if (before.external != null && after.external != null && JSON.stringify(canonical(before)) === JSON.stringify(canonical(after))) {
+              attempt.outcomeReadBack = { ...observed, previousEvidence: attempt.evidence ?? null, previousState: "UNKNOWN" };
+              attempt.state = observed.exitCode === 0 ? "PASS" : "FAIL";
+              attempt.exitCode = observed.exitCode;
+              attempt.evidence = observed.evidence;
+              write(record);
+            }
+          }
         }
         results.push(attempt);
       }

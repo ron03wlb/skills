@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { renderWorkflowRecord, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
-for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKind} recovery carries real failed integration to renewed close`, async () => {
+for (const recoveryKind of ["issue", "maintenance", "environment", "readback", "execution_environment"]) test(`packaged ${recoveryKind} recovery carries real failed integration to renewed close`, async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "technical-recovery-")));
   const repository = join(root, "repository"), lane = join(root, "issue"), packageRoot = join(root, "package");
   const maintenanceLane = join(root, "maintenance"), cacheDirectory = join(root, "packages");
@@ -28,6 +28,8 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
     const { createCoordinator } = await moduleAt("personal/run-issue-workflow/scripts/run-coordinator.mjs");
     const { withCloseIssueLeases } = await moduleAt("engineering/close-issue/scripts/close-lease.mjs");
     const { mergeCandidate, verifyIntegratedCandidate } = await moduleAt("engineering/close-issue/scripts/merge-candidate.mjs");
+    const { createIntegrationVerification } = await moduleAt("engineering/execute-issue/scripts/verification-cache.mjs");
+    const { WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } = await moduleAt("personal/run-issue-workflow/scripts/recovery-evidence.mjs");
     const { installWorkflow, selectWorkflowVersion } = await moduleAt("personal/run-issue-workflow/scripts/workflow-installation.mjs");
     const policyPath = "skills/personal/run-issue-workflow/scripts/fixture-policy.json";
     let installed;
@@ -66,6 +68,8 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
       baseline, candidate: oldCandidate, planningSeal: baseline, operationIdentity, repairWaveCount: 3, workflowArtifacts: [],
       standards: "clean", spec: "clean", worktreeState: "clean", manualAttestations: [], verification: [{ command: "original unit fixture", result: "PASS" }] };
     const oldCompletion = comment("IC_done", completion);
+    const initialExecution = recoveryKind === "execution_environment";
+    const firstSuccessfulClose = initialExecution ? 1 : 2;
     const fixture = { node_id: "I_1", number: 1, state: "open", body, comments: [
       comment("IC_pub", { kind: "spec_publication", repositoryId: "github:example/repo", authority }),
       comment("IC_hand", { kind: "producer_handoff", ...authority, producerCommand: "to-spec", checkpointIdentity: identity,
@@ -80,8 +84,19 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
     const originalRef = { threadId: "original", hostId: "local" }, repairRef = { threadId: "repair", hostId: "local" };
     const histories = new Map([["original", []]]);
     let closeMessages = 0, forks = 0, repairs = 0, maintenanceCreates = 0, runIdentity, repairRecord, activeOriginal = false;
+    let environmentInput = "unavailable", observedOutcome;
     const argv = recoveryKind === "maintenance" ? [process.execPath, "--input-type=module", "-e", `import {readFileSync} from "node:fs"; import assert from "node:assert/strict"; import {selectWorkflowVersion} from ${JSON.stringify(pathToFileURL(join(packageRoot, "skills/personal/run-issue-workflow/scripts/workflow-installation.mjs")).href)}; const selected=selectWorkflowVersion({cacheDirectory:${JSON.stringify(cacheDirectory)}}); assert.equal(selected.state,"AVAILABLE"); assert.equal(readFileSync("behavior.txt","utf8"),JSON.parse(readFileSync(selected.root+"/${policyPath}","utf8")).expected);`] : [process.execPath, "-e", "require('node:assert/strict').equal(require('node:fs').readFileSync('behavior.txt','utf8'),'fixed')"];
-    const checks = [{ command: argv, environment: { node: process.version }, readExternalInputs: async () => recoveryKind === "maintenance" ? { packageVersion: selectWorkflowVersion({ cacheDirectory }).version.id } : {} }];
+    if (["environment", "readback", "execution_environment"].includes(recoveryKind)) argv[2] = argv[2].replace("'fixed'", "'broken'");
+    if (initialExecution) fixture.comments[2] = comment("IC_blocked", { kind: "implementation_blocked", issueId: "I_1", specId: "I_1", operationIdentity, repairWaveCount: 3,
+      reasonCode: "technical_failure", reason: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT, owningSource: "fixture native process", command: argv });
+    const checks = [{ command: argv, environment: { node: process.version }, readExternalInputs: async () => recoveryKind === "maintenance" ? { packageVersion: selectWorkflowVersion({ cacheDirectory }).version.id }
+      : recoveryKind === "environment" ? { environmentInput } : {} }];
+    if (["environment", "readback"].includes(recoveryKind)) checks[0].run = async command => {
+      if (recoveryKind === "environment" && environmentInput === "unavailable") return { exitCode: 1, evidence: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT };
+      originalExec(command[0], command.slice(1), { cwd: repository });
+      if (recoveryKind === "readback" && !observedOutcome) { observedOutcome = { exitCode: 0, source: "fixture native process", evidence: "exact recorded process exited 0" }; throw new Error("native result lost"); }
+      return { exitCode: 0 };
+    };
     const host = { async call(name, args) {
       if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: args.threadId === "maintenance" ? maintenanceLane : lane, status: { type: activeOriginal && args.threadId === "original" ? "active" : "idle" } }, turns: histories.get(args.threadId) };
       if (name.endsWith("list_threads")) return { threads: forks ? [{ id: "repair", hostId: "local", kind: "codex", cwd: lane }] : [] };
@@ -105,7 +120,28 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
           assert.equal(args.threadId, request.phase === "MAINTENANCE" ? "maintenance" : "repair", "the original task never performs repair edits");
           const failure = JSON.parse(args.prompt.match(/^Original failure and authority: (\{.+\})$/mu)[1]);
           if (request.phase === "DIAGNOSE") turn.items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow recovery result: ${JSON.stringify({ requestIdentity: request.requestIdentity, failureIdentity: request.failureIdentity,
-            diagnosis: recoveryKind === "maintenance" ? { classification: "WORKFLOW_DEFECT", source: policyPath, reason: "The governing check contradicts the settled requirement", scopeCompatible: true, maintenance: maintenanceScope } : { classification: "ISSUE_DEFECT", source: "behavior.txt", reason: "Concrete test proves settled behavior is broken", scopeCompatible: true } })}` });
+            diagnosis: recoveryKind === "maintenance" ? { classification: "WORKFLOW_DEFECT", source: policyPath, reason: "The governing check contradicts the settled requirement", scopeCompatible: true, maintenance: maintenanceScope }
+              : ["environment", "execution_environment"].includes(recoveryKind) ? { classification: "ENVIRONMENT", source: "fixture native process", reason: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT, fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT }
+              : recoveryKind === "readback" ? { classification: "OUTCOME_UNKNOWN", source: "fixture native process", reason: "native result lost" }
+              : { classification: "ISSUE_DEFECT", source: "behavior.txt", reason: "Concrete test proves settled behavior is broken", scopeCompatible: true } })}` });
+          else if (["ENVIRONMENT", "READBACK"].includes(request.phase)) {
+            assert.equal(request.wave, null); assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
+            const attempt = failure.verificationSnapshot?.results[0];
+            if (request.phase === "ENVIRONMENT") environmentInput = "available";
+            const resolution = initialExecution ? { mode: "EXECUTION_READY", candidate: failure.candidate, targetHead: failure.targetHead, command: argv, exitCode: 0, source: "fixture native process", evidence: "bounded initial recovery and exact command succeeded" }
+              : { mode: request.phase === "ENVIRONMENT" ? "CHANGED_INPUTS" : "OUTCOME_READ_BACK", attemptIdentity: attempt.identity,
+              command: argv, targetHead: failure.targetHead, inputs: { ...attempt.inputs, external: await checks[0].readExternalInputs() },
+              source: "fixture native process", evidence: request.phase === "ENVIRONMENT" ? "bounded environment remedy proved available" : observedOutcome.evidence, exitCode: 0 };
+            turn.items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow recovery result: ${JSON.stringify({ requestIdentity: request.requestIdentity, failureIdentity: request.failureIdentity, resolution })}` });
+            assert.equal(gitAt(lane, "rev-parse", "HEAD"), oldCandidate);
+          }
+          else if (request.phase === "CONTINUE") {
+            assert.equal(initialExecution, true); assert.equal(request.wave, null);
+            originalExec(argv[0], argv.slice(1), { cwd: lane });
+            repairRecord = { ...completion, repairWaveCount: 3, verification: [{ command: argv.join(" "), argv, result: "PASS" }],
+              recovery: { failureIdentity: failure.identity, requestIdentity: request.requestIdentity, taskRef: repairRef, previousCompletionIdentity: null, previousCompletionBodySha256: null } };
+            fixture.comments.push(comment("IC_repaired", repairRecord));
+          }
           else if (request.phase === "MAINTENANCE") {
             assert.equal(request.wave, 1); assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
             writeFileSync(join(maintenanceLane, policyPath), JSON.stringify({ expected: "broken" }));
@@ -138,11 +174,15 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
           assert.equal(args.threadId, "original"); closeMessages++;
           const request = JSON.parse(args.prompt.match(/Current close request evidence: (\{.+\})/u)[1]);
           const candidate = request.authorityEvidence.candidateCommit;
-          if (closeMessages === 2) { activeOriginal = true; assert.deepEqual((await refresh()).facts.contradictions, [], "the original close owner may run after repair settlement"); activeOriginal = false; }
+          if (closeMessages === firstSuccessfulClose) { activeOriginal = true; assert.deepEqual((await refresh()).facts.contradictions, [], "the original close owner may run after repair settlement"); activeOriginal = false; }
+          if (request.verificationRecovery?.resolution.mode === "OUTCOME_READ_BACK") checks[0].readOutcome = async attempt => ({ ...observedOutcome, attemptIdentity: attempt.identity });
           await withCloseIssueLeases({ store, target: "main", repositoryId: "github:example/repo", specId: "I_1", issueId: "I_1", approvedPublicationIdentity: authority.approvedScopeHash }, async leases => {
             mergeCandidate({ leases, targetWorktree: repository, candidate });
             const verification = await verifyIntegratedCandidate({ leases, targetWorktree: repository, candidate, issueId: "I_1", operationId: operationIdentity.key, checks });
-            if (verification.state === "PASS") { git("worktree", "remove", lane); fixture.state = "closed"; }
+            if (verification.state === "PASS") {
+              if (existsSync(lane)) git("worktree", "remove", lane);
+              if (closeMessages > firstSuccessfulClose) fixture.state = "closed"; // A real partial close: cleanup succeeded but tracker mutation has not.
+            }
           });
         }
         throw new Error("response lost after accepted action");
@@ -160,9 +200,9 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
     const options = { store, tasks, tracker: owners.sources.tracker, reconcile: args => owners.sources.reconciliation.read(args),
       handoff: { read: async ({ current }) => current.runReadyAuthority }, now: () => "2026-09-08T00:00:00.000Z", sleep: async () => {} };
     const step = () => createCoordinator(options).run({ specId: "I_1", mode: "step" });
-    await step();
-    assert.equal((await refresh()).facts.nodes[0].integrationVerification.state, "FAIL");
-    assert.equal(existsSync(lane), true); assert.equal(fixture.state, "open"); assert.equal(git("rev-parse", "HEAD"), oldCandidate);
+    if (!initialExecution) await step();
+    if (!initialExecution) assert.equal((await refresh()).facts.nodes[0].integrationVerification.state, recoveryKind === "readback" ? "UNKNOWN" : "FAIL");
+    assert.equal(existsSync(lane), true); assert.equal(fixture.state, "open"); assert.equal(git("rev-parse", "HEAD"), initialExecution ? baseline : oldCandidate);
     if (recoveryKind === "issue") {
       const beforeProgress = (await refresh()).facts.nodes[0].recovery;
       fixture.comments.push(comment("IC_progress", { kind: "implementation_progress", issueId: "I_1", operationIdentity, repairWaveCount: 4, candidate: oldCandidate }));
@@ -172,6 +212,7 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
     }
     await step(); // Settled handoff, lost fork response, diagnosis.
     const repairStatus = await step(); // Same isolated task, material repair, renewed completion.
+    if (initialExecution) await step(); // Successful environment recovery continues execution in the same exclusive task.
     if (recoveryKind === "maintenance") {
       assert.equal(repairs, 0); assert.equal(maintenanceCreates, 1);
       const stopped = await createCoordinator(options).run({ specId: "I_1" });
@@ -181,7 +222,7 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
       const newRuntime = await import(pathToFileURL(join(installed.root, "skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs")).href);
       owners = newRuntime.createGitHubWorkflowSources({ repository, repositoryName: "example/repo", store, tasks, workflowVersion: installed.version, installationCacheDirectory: cacheDirectory });
       assert.ok((await refresh()).facts.nodes[0].maintenanceRecoveryIdentity);
-    } else {
+    } else if (recoveryKind === "issue") {
     assert.equal(repairs, 1, JSON.stringify({failures: store.readEvents(runIdentity.runId).filter(e=>e.type === "action.failed"), forks, histories: [...histories.keys()], status: repairStatus.run})); assert.equal(closeMessages, 1);
     assert.equal((await refresh()).facts.nodes[0].repairLineage.previousCandidate, oldCandidate);
     const valid = fixture.comments.at(-1).body;
@@ -190,20 +231,40 @@ for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKi
     fixture.comments.at(-1).body = renderWorkflowRecord({ ...repairRecord, verification: [{ command: "different command", argv: ["skip"], result: "PASS" }] });
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /Repair completion/u);
     fixture.comments.at(-1).body = valid;
+    } else if (initialExecution) {
+      assert.equal(repairRecord.candidate, oldCandidate); assert.equal(repairRecord.repairWaveCount, 3);
+      const resumed = await refresh(); assert.deepEqual(resumed.facts.contradictions, []); assert.ok(resumed.facts.nodes[0].repairLineage);
+    } else {
+      assert.equal(repairs, 0); assert.equal(maintenanceCreates, 0);
+      assert.ok((await refresh()).facts.nodes[0].verificationRecovery);
+      assert.notEqual(createIntegrationVerification({ gitCommonDir: common, operationId: operationIdentity.key, issueId: "I_1", candidate: oldCandidate }).read().current.state, "PASS", "the native resolution cannot manufacture durable PASS");
     }
+    await step();
+    assert.equal(existsSync(lane), false); assert.equal(fixture.state, "open");
+    writeFileSync(join(repository, "partial.txt"), "independent contribution while tracker close is pending"); git("add", "partial.txt"); git("commit", "-m", "Advance target during partial close");
+    const partial = await refresh();
+    assert.deepEqual(partial.facts.contradictions, [], "historical PASS still justifies already completed cleanup");
+    assert.ok(partial.facts.nodes[0].integrationRecheck, "the new target combination must return to its close verification owner");
     const completed = await step();
     assert.equal(completed.run.state, "SUCCEEDED", JSON.stringify(completed));
     assert.equal((await step()).run.state, "SUCCEEDED");
-    assert.equal(forks, 1); assert.equal(closeMessages, 2); assert.equal(fixture.state, "closed"); assert.equal(existsSync(lane), false);
-    assert.equal(git("rev-parse", "main"), recoveryKind === "maintenance" ? oldCandidate : repairRecord.candidate);
+    assert.equal(forks, 1); assert.equal(closeMessages, firstSuccessfulClose + 1); assert.equal(fixture.state, "closed"); assert.equal(existsSync(lane), false);
+    git("merge-base", "--is-ancestor", repairRecord?.candidate ?? oldCandidate, "main");
     writeFileSync(join(repository, "independent.txt"), "later authorized contribution"); git("add", "independent.txt"); git("commit", "-m", "Advance target after completed delivery");
     assert.deepEqual((await refresh()).facts.contradictions, [], "historical integration PASS survives future target movement after closure");
     assert.equal((await step()).run.state, "SUCCEEDED");
+    if (recoveryKind === "maintenance") {
+      writeFileSync(join(maintenanceLane, "later.txt"), "later authorized package release"); gitAt(maintenanceLane, "add", "later.txt"); gitAt(maintenanceLane, "commit", "-m", "Later independent package");
+      const nextPackage = install(gitAt(maintenanceLane, "rev-parse", "HEAD"));
+      assert.notEqual(nextPackage.version.id, installed.version.id);
+      assert.deepEqual((await refresh()).facts.contradictions, [], "completed maintenance retains its historical package receipt after later installation");
+      assert.equal((await step()).run.state, "SUCCEEDED");
+    }
     const journal = store.readEvents(runIdentity.runId);
     assert.equal(journal.filter(event => event.type === "grant.recorded").length, 1);
     assert.equal(journal.filter(event => event.type === "dispatch.recorded").length, 1);
     assert.equal(journal.filter(event => event.type === "repair.recorded").length, 0, "integration repair never fabricates conflict history");
-    assert.deepEqual(journal.filter(event => event.type === "recovery.intent").map(event => event.wave), [null, recoveryKind === "maintenance" ? 1 : 5]);
+    assert.deepEqual(journal.filter(event => event.type === "recovery.intent").map(event => event.wave), initialExecution ? [null, null, null] : [null, recoveryKind === "maintenance" ? 1 : recoveryKind === "issue" ? 5 : null]);
     assert.equal(store.readTargetMutationWriterLock("main"), null); assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
   } finally { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });
