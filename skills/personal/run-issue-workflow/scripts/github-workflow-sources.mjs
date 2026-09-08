@@ -10,7 +10,7 @@ import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
-import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, validateVerificationResolution, validateExecutionResolution, sameRecoveryTask, readRepairProgress, readMaintenanceProgress } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, validateVerificationResolution, validateExecutionResolution, sameRecoveryTask, readRepairProgress, readRepairWaveCount, readMaintenanceProgress } from "./recovery-evidence.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
@@ -198,7 +198,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       }
 
       const { lifecycle, historicalBlocks, adoptedCompletion, previousAuthorities } = selectRevisionLifecycle({ snapshot, issue, repositoryId });
-      const repairCount = (operationId, count) => readRepairProgress({ records: issue.records, issueId: issue.node_id, operationId, count });
+      const repairCount = (operationId, record) => readRepairProgress({ records: issue.records, issueId: issue.node_id, operationId, count: readRepairWaveCount(record) });
       for (const previous of previousAuthorities) {
         const checkpoint = checkpointRead({ ...previous, spec: snapshot.spec });
         const handoff = previous.handoff.record;
@@ -234,7 +234,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const closeOnly = latest?.record.kind === "implementation_blocked" && ["target_dirty", "merge_conflict", "partial_close"].includes(latest.record.reasonCode);
       const completion = latest?.record.kind === "implementation_complete" || closeOnly || latest?.record.failure && completed ? completed : null;
       const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id]) : null;
-      const originalTaskRef = journal.find(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
+      const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
       const recoveryIntent = journal.findLast(event => event.type === "recovery.intent" && event.issueId === issue.node_id);
       const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);
       const recoveryTask = recoveryTransfer ? await tasks.read(recoveryTransfer.taskRef) : null;
@@ -259,6 +259,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       if (task?.state === "RESUMABLE" && !latest) node.taskState = "TRANSIENT_FAILURE";
       if (completion) {
         const record = completion.record;
+        readRepairWaveCount(record); // Reject conflicting legacy/current spellings without altering historical receipt bytes.
         if (record.issueId !== issue.node_id || record.specId !== authority.specId || record.target !== authority.target
           || record.standards !== "clean" || record.spec !== "clean" || record.worktreeState !== "clean"
           || !Array.isArray(record.verification) || record.verification.length === 0
@@ -324,7 +325,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           const intent = transfer && journal.find(event => event.type === "recovery.intent" && event.requestIdentity === transfer.requestIdentity);
           const previousCompletion = lifecycle.find(item => item.identity === record.recovery.previousCompletionIdentity);
           node.repairLineage = validateRepairCompletion({ failure: intent?.failure, transfer, completion, previousCompletion, ancestor });
-          if (record.repairWaveCount < repairCount(record.operationIdentity.key, record.repairWaveCount)) throw new Error("Replacement completion resets the recorded material repair budget");
+          if (readRepairWaveCount(record) < repairCount(record.operationIdentity.key, record)) throw new Error("Replacement completion resets the recorded material repair budget");
         }
         if (["REPAIR", "CONTINUE"].includes(recoveryIntent?.phase) && (record.candidate !== recoveryIntent.failure.candidate || recoveryIntent.phase === "CONTINUE") && !record.recovery) throw new Error("Replacement completion omits its required repair lineage");
         if (task?.closeResult?.state === "HOST_CLEANUP_BLOCKED") {
@@ -371,7 +372,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           observedResult: latest.record.reason ?? latest.record.reasonCode ?? "Execution reported a blocked outcome requiring diagnosis",
           blockedEvidenceIdentity: latest.identity,
           completionIdentity: completion?.identity ?? null, completionBodySha256: completion?.bodySha256 ?? null,
-          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(latest.record.operationIdentity?.key, latest.record.repairWaveCount) });
+          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(latest.record.operationIdentity?.key, latest.record) });
         node.worktreeState = "PRESENT";
       }
       if (completion && (node.integrationVerification && node.integrationVerification.state !== "PASS" || node.closeConflict)) {
@@ -384,14 +385,14 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           owningSource: "skills/engineering/close-issue/references/executable-closeout.md",
           command: failedCheck?.command ?? ["git", "merge", record.candidate], observedResult: failedCheck?.evidence ?? (verification ? "Integration outcome unknown" : "Merge conflict; target restoration verified"),
           verificationIdentity: verification?.identity ?? null, completionIdentity: completion.identity, completionBodySha256: completion.bodySha256,
-          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(record.operationIdentity?.key, record.repairWaveCount),
+          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(record.operationIdentity?.key, record),
           verificationSnapshot: verification ?? null,
           maintenanceEvaluation: task?.closeRequest?.evidence?.maintenanceRecoveryIdentity ?? null,
           verificationEvaluation: task?.closeRequest?.evidence?.verificationRecovery?.requestIdentity ?? null });
       }
       if (renewedCloseActive) failure = null; // Let the legitimate close owner settle before consuming its next outcome.
       if (failure && issue.state !== "closed") {
-        failure = bindTechnicalFailure({ ...failure, repairWaveCount: repairCount(failure.operationId, failure.repairWaveCount) });
+        failure = bindTechnicalFailure({ ...failure, repairWaveCount: repairCount(failure.operationId, failure) });
         if (recoveryIntent?.failure.identity === failure.identity && recoveryIntent.failure.diagnosis) {
           failure = bindTechnicalFailure({ ...failure, diagnosis: recoveryIntent.failure.diagnosis });
         }

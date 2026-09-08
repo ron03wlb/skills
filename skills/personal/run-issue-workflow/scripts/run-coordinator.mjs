@@ -616,7 +616,7 @@ export function createCoordinator({
     const journal = store.readEvents(current.runIdentity.runId);
     const phase = nextRecoveryPhase(failure);
     if (!phase) throw new Error(`Recovery requires the ${failure.diagnosis.classification} owner: ${failure.diagnosis.reason}`);
-    const originalTaskRef = journal.find(event => event.type === "dispatch.recorded" && event.issueId === action.issueId)?.taskRef;
+    const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === action.issueId)?.taskRef;
     if (!isTaskRef(originalTaskRef) || !sameRecoveryTask(originalTaskRef, failure.ownerTaskRef)) throw new Error("Recovery original task identity is unproved");
     let intent = journal.findLast(event => event.type === "recovery.intent" && event.failure.identity === failure.identity && event.phase === phase);
     if (!intent) {

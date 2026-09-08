@@ -24,7 +24,9 @@ An approved Multi-Issue revision may include `decomposition:v1.adoptedCompletion
 
 ## execute-issue owner
 
-Only after the completion-evidence reference's checks pass, encode its existing payload with `kind: implementation_complete`, `issueId` and `specId` (immutable node IDs), `target`, `targetWorktree`, `topic`, `worktree` (the exact Issue path), `baseline`, `candidate`, full `operationIdentity`, `planningSeal`, `manualAttestations`, `workflowArtifacts`, `standards: clean`, `spec: clean`, nonempty `verification` command/result entries, `repairWaves`, and `worktreeState: clean`. Required adoption records remain separate and keep their existing contracts.
+Only after the completion-evidence reference's checks pass, encode its existing payload with `kind: implementation_complete`, `issueId` and `specId` (immutable node IDs), `target`, `targetWorktree`, `topic`, `worktree` (the exact Issue path), `baseline`, `candidate`, full `operationIdentity`, `planningSeal`, `manualAttestations`, `workflowArtifacts`, `standards: clean`, `spec: clean`, nonempty `verification` command/result entries, `repairWaveCount`, and `worktreeState: clean`. Required adoption records remain separate and keep their existing contracts.
+
+Historical `repairWaves` is the same cumulative count. Read either spelling without rewriting receipts; both fields must agree when present. Known counts must be integers from zero through ten. Missing/null counts stay unknown, and malformed or conflicting values stop recovery.
 
 A genuine blocked exit uses `kind: implementation_blocked`, exact Issue/Spec identities, reason and available lane/evidence fields. New blocked records supersede completion only under execute-issue's existing invalidation rule; a target-only close problem must not be encoded as an implementation failure.
 

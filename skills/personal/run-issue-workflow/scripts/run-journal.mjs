@@ -292,9 +292,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
   }
   if (event.type === "recovery.intent") {
     const grant = events.find(item => item.type === "grant.recorded");
-    const dispatch = events.find(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
     if (event.failure.runId !== grant?.runIdentity.runId || !dispatch
-      || !sameRecoveryTask(dispatch.taskRef, event.originalTaskRef)
+      || !sameRecoveryTask(dispatch.taskRef, event.originalTaskRef) || !sameRecoveryTask(event.failure.ownerTaskRef, event.originalTaskRef)
       || events.some(item => item.type === "recovery.intent" && item.requestIdentity === event.requestIdentity)) throw new Error("Recovery intent must bind the original Run and dispatched task exactly once");
     if (event.phase === "REPAIR" && event.wave !== nextRepairWave({ failure: event.failure, journal: events })) throw new Error("Recovery must preserve the cumulative material repair count");
     if (event.phase === "MAINTENANCE" && event.wave !== nextMaintenanceWave({ failure: event.failure, journal: events })) throw new Error("Maintenance must preserve its scoped operation budget");

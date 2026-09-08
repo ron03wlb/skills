@@ -5,8 +5,9 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { validateEventSemantics } from "../../skills/personal/run-issue-workflow/scripts/run-journal.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress, readRepairWaveCount } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
 test("material recovery carries original and journaled counts; maintenance has one separate scoped budget", () => {
   const failure = { issueId: "I_1", repairWaveCount: 7, diagnosis: { maintenance: { operationId: "maintenance", repairWaveCount: 2 } } };
@@ -14,6 +15,39 @@ test("material recovery carries original and journaled counts; maintenance has o
   assert.throws(() => nextRepairWave({ failure: { ...failure, repairWaveCount: null }, journal: [] }), /unproved/u);
   assert.throws(() => nextRepairWave({ failure: { ...failure, repairWaveCount: 10 }, journal: [] }), /exhausted/u);
   assert.equal(nextMaintenanceWave({ failure, journal: [{ type: "recovery.intent", phase: "MAINTENANCE", failure, wave: 5 }] }), 6);
+});
+
+test("legacy and current receipt count spellings preserve proved progress and reject conflicting authority", () => {
+  assert.equal(readRepairWaveCount({ repairWaves: 8 }), 8);
+  assert.equal(readRepairWaveCount({ repairWaveCount: 8 }), 8);
+  assert.equal(readRepairWaveCount({ repairWaves: 8, repairWaveCount: 8 }), 8);
+  assert.equal(readRepairWaveCount({ repairWaves: 0 }), 0);
+  assert.equal(readRepairWaveCount({}), null);
+  assert.equal(readRepairWaveCount({ repairWaveCount: null }), null);
+  assert.equal(nextRepairWave({ failure: { issueId: "I_1", repairWaveCount: readRepairWaveCount({ repairWaves: 8 }) }, journal: [] }), 9);
+  for (const record of [{ repairWaves: 8, repairWaveCount: 3 }, { repairWaves: 8, repairWaveCount: null }, { repairWaves: "8" }, { repairWaveCount: -1 }, { repairWaves: 11 }]) {
+    assert.throws(() => readRepairWaveCount(record), /malformed or conflicting/u);
+  }
+});
+
+test("recovery uses the current authorized replacement while preserving superseded dispatch history", () => {
+  const oldRef = { threadId: "retired", hostId: "local" }, currentRef = { threadId: "current", hostId: "local" };
+  const events = [{ type: "grant.recorded", runIdentity: { runId: "run" } },
+    { type: "dispatch.recorded", issueId: "I_1", attempt: 1, taskRef: oldRef }];
+  const retained = structuredClone(events);
+  const dispatch = { type: "dispatch.recorded", issueId: "I_1", attempt: 2, taskRef: currentRef };
+  assert.throws(() => validateEventSemantics(events, dispatch), /matching retry fact/u);
+  const retry = { type: "retry.recorded", issueId: "I_1", attempt: 1, priorTaskRef: oldRef, reason: "Native terminal failure with inactive prior task",
+    replacement: { supersedesAttempt: 1, nextTaskRef: currentRef, inactiveEvidence: ["native terminal failure, no active turn"] } };
+  validateEventSemantics(events, retry); events.push(retry);
+  assert.throws(() => validateEventSemantics(events, { ...dispatch, taskRef: { ...currentRef, threadId: "foreign" } }), /not authorized/u);
+  validateEventSemantics(events, dispatch); events.push(dispatch);
+  const intent = { type: "recovery.intent", issueId: "I_1", phase: "DIAGNOSE", requestIdentity: "request",
+    originalTaskRef: currentRef, failure: { runId: "run", ownerTaskRef: currentRef } };
+  validateEventSemantics(events, intent);
+  assert.throws(() => validateEventSemantics(events, { ...intent, originalTaskRef: oldRef }), /dispatched task/u);
+  assert.throws(() => validateEventSemantics(events, { ...intent, failure: { ...intent.failure, ownerTaskRef: oldRef } }), /dispatched task/u);
+  assert.deepEqual(events.slice(0, 2), retained);
 });
 
 test("native maintenance adopts one separate canonical worktree after lost setup and retains its operation across failures", async () => {

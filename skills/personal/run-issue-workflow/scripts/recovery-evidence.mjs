@@ -22,6 +22,14 @@ export function bindTechnicalFailure(facts) {
   return { ...basis, repairWaveCount: repairWaveCount ?? null, identity: expected, ...(diagnosis ? { diagnosis } : {}) };
 }
 
+export function readRepairWaveCount(record) {
+  const counts = [record?.repairWaveCount, record?.repairWaves].filter(value => value !== undefined);
+  if (counts.some(value => value !== null && (!Number.isInteger(value) || value < 0 || value > 10)) || new Set(counts).size > 1) {
+    throw new Error("Material repair count fields are malformed or conflicting");
+  }
+  return counts[0] ?? null;
+}
+
 export function readRepairProgress({ records, issueId, operationId, count }) {
   let previous;
   for (const { record } of records) {
@@ -29,9 +37,9 @@ export function readRepairProgress({ records, issueId, operationId, count }) {
     if (!text(record.operationIdentity?.key)) throw new Error("Material repair progress has no proven operation");
     if (record.operationIdentity.key !== operationId) continue;
     assertWorkflowOperationIdentity(record.operationIdentity, { key: operationId, issueId });
-    if (!Number.isInteger(record.repairWaveCount) || record.repairWaveCount < 0 || record.repairWaveCount > 10
-      || previous !== undefined && record.repairWaveCount < previous) throw new Error("Material repair progress is malformed or resets the operation budget");
-    previous = record.repairWaveCount;
+    const progress = readRepairWaveCount(record);
+    if (progress === null || previous !== undefined && progress < previous) throw new Error("Material repair progress is malformed or resets the operation budget");
+    previous = progress;
   }
   if (count != null && (!Number.isInteger(count) || count < 0 || count > 10)) throw new Error("Completion repair count is malformed");
   return previous === undefined ? count ?? null : Math.max(count ?? 0, previous);
@@ -101,6 +109,7 @@ export function validateRecoveryIntent(event) {
 }
 
 export function validateRepairCompletion({ failure, transfer, completion, previousCompletion, ancestor }) {
+  const repairWaveCount = readRepairWaveCount(completion?.record);
   if (!failure || !transfer || !["REPAIR", "CONTINUE"].includes(transfer.phase) || transfer.phase === "CONTINUE" && (previousCompletion || !failure.diagnosis?.executionReady)
     || transfer.failureIdentity !== failure.identity || !sameRecoveryTask(transfer.originalTaskRef, failure.ownerTaskRef)
     || completion?.record?.recovery?.failureIdentity !== failure.identity
@@ -111,8 +120,8 @@ export function validateRepairCompletion({ failure, transfer, completion, previo
     || completion.record.recovery.previousCompletionBodySha256 !== (previousCompletion?.bodySha256 ?? null)
     || (previousCompletion?.identity ?? null) !== failure.completionIdentity || (previousCompletion?.bodySha256 ?? null) !== failure.completionBodySha256
     || transfer.phase === "REPAIR" && completion.record.candidate === failure.candidate || completion.record.worktree !== failure.worktree
-    || completion.record.topic !== failure.topic || !Number.isInteger(completion.record.repairWaveCount)
-    || !Number.isInteger(failure.repairWaveCount) || completion.record.repairWaveCount < Math.max(failure.repairWaveCount, transfer.wave ?? 0) || completion.record.repairWaveCount > 10
+    || completion.record.topic !== failure.topic || !Number.isInteger(repairWaveCount)
+    || !Number.isInteger(failure.repairWaveCount) || repairWaveCount < Math.max(failure.repairWaveCount, transfer.wave ?? 0)
     || !completion.record.verification?.some(item => JSON.stringify(item.argv) === JSON.stringify(failure.command) && /^(PASS|SUCCEEDED)\b/u.test(item.result))
     || !ancestor(failure.candidate, completion.record.candidate) || !ancestor(failure.targetHead, completion.record.candidate)) {
     throw new Error("Repair completion lacks exact failure, owner, completion or Git lineage");
