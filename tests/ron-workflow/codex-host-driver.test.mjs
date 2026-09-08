@@ -258,3 +258,37 @@ test("fresh file controls retain exact Run identity and do not replay the same I
   await resumed.tick();
   assert.equal(h.writes.filter(item => item?.control).length, 1);
 });
+
+test("EOF drains complete ANSI and redraw frames without a final line separator", () => {
+  const message = { type: "result", result: { state: "PRESERVED", detail: "a".repeat(90) } };
+  const line = frame(message).trimEnd();
+  const redraw = line.slice(0, 79) + '\r\n\x1b[4;80H' + line[78] + line.slice(79);
+  for (const raw of ['\x1b[?25l' + line, redraw, '\x1b[?9001h' + redraw]) {
+    const parsed = api.parseTransport(raw, true);
+    assert.equal(parsed.remaining, "");
+    assert.deepEqual(plain(parsed.frames[0].message), message);
+    assert.equal(parsed.frames[0].raw, raw);
+  }
+  const partial = '\x1b[?25lworkflow-host {"type":"res';
+  assert.equal(api.parseTransport(partial, true).remaining, partial);
+});
+
+test("malformed transport secrets remain transient and never enter public diagnostics", async () => {
+  const h = harness(), secret = "fixture-secret-value";
+  h.values.set("workflow.host", api.createLane({ sessionId: 42, output: `workflow-host ${secret}\n`, exit_code: 0 }));
+  await h.driver.tick();
+  assert.ok(h.lane().diagnostics.some(item => item.raw.includes(secret)));
+  assert.equal(JSON.stringify(h.output).includes(secret), false);
+  assert.equal(JSON.stringify(h.durable()).includes(secret), false);
+});
+
+test("unresolved omitted partial bytes survive repeated restore, checkpoint and reporting", async () => {
+  const h = harness(), partial = 'workflow-host {"type":"res';
+  let saved = api.checkpointState(api.createLane({ sessionId: 42, output: partial, exit_code: 0 }));
+  for (let i = 0; i < 3; i++) saved = api.checkpointState(api.restoreCheckpoint(saved));
+  assert.equal(saved.partialBytes, partial.length);
+  h.values.set("workflow.host", api.restoreCheckpoint(saved));
+  await h.driver.tick();
+  assert.equal(h.durable().partialBytes, partial.length);
+  assert.equal(h.output.at(-1).partialBytes, partial.length);
+});

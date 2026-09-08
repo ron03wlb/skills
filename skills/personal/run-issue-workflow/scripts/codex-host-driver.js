@@ -14,7 +14,8 @@
 
   function parseTransport(input, ended = false) {
     const frames = [];
-    let remaining = input;
+    const virtualNewline = ended && input && !input.endsWith("\n");
+    let remaining = virtualNewline ? input + "\n" : input;
     while (remaining.includes("\n")) {
       let newline = remaining.indexOf("\n"), rawEnd = newline + 1;
       let line = remaining.slice(0, newline).replace(/\r$/u, "");
@@ -33,11 +34,19 @@
         line += remaining.slice(rawEnd + redraw[0].length, newline).replace(/\r$/u, "");
         rawEnd = newline + 1;
       }
-      const raw = remaining.slice(0, rawEnd);
+      const atVirtualNewline = virtualNewline && rawEnd === remaining.length;
+      const raw = remaining.slice(0, rawEnd - (atVirtualNewline ? 1 : 0));
+      if (line === "" && raw.replace(/\r?\n$/u, "").replace(decoration, "") === "") {
+        frames.push({ kind: "terminal", raw }); remaining = remaining.slice(rawEnd); continue;
+      }
       let message;
       try {
         if (malformed || !line.startsWith(prefix)) throw new Error("Unknown transport framing");
-        message = JSON.parse(line.slice(prefix.length));
+        try { message = JSON.parse(line.slice(prefix.length)); }
+        catch {
+          if (atVirtualNewline) return { frames, remaining: remaining.slice(0, -1) };
+          throw new Error("Malformed workflow JSON");
+        }
         if (!record(message) || !types.has(message.type)) throw new Error("Unknown workflow frame");
         if (message.type === "tool" && (typeof message.id !== "string" || !message.id
           || typeof message.name !== "string" || !record(message.arguments))) throw new Error("Malformed tool request");
@@ -49,17 +58,6 @@
     }
     if (remaining && remaining.replace(decoration, "") === "") {
       frames.push({ kind: "terminal", raw: remaining }); remaining = "";
-    }
-    if (ended && remaining) {
-      // A process may flush complete JSON without its final line separator.
-      try {
-        JSON.parse(remaining.slice(prefix.length));
-        if (remaining.startsWith(prefix)) {
-          const final = parseTransport(remaining + "\n", true);
-          frames.push(...final.frames.map(item => ({ ...item, raw: item.raw.slice(0, -1) })));
-          remaining = "";
-        }
-      } catch { /* Preserve genuinely partial terminal bytes. */ }
     }
     return { frames, remaining };
   }
@@ -73,11 +71,12 @@
 
   // Durable receipts carry identity/progress only. Native payloads, panel URLs,
   // terminal bytes and returned tool content may contain the bridge credential.
+  const partialBytes = lane => lane.buffer.length + (lane.omittedPartialBytes ?? 0);
   function checkpointState(lane) {
     return { schema: "codex-host-checkpoint:v1", sessionId: lane.sessionId, active: lane.active,
-      exitCode: lane.exitCode, driverId: lane.driver?.id, partialBytes: lane.buffer.length,
+      exitCode: lane.exitCode, driverId: lane.driver?.id, partialBytes: partialBytes(lane),
       requests: lane.requests.map(({ id, request, state, history, conflict }) => ({ id,
-        name: allowed.includes(request.name) ? request.name : "unsupported", state, history, conflict: Boolean(conflict) })),
+        name: allowed.includes(request.name) ? request.name : "unsupported", state, history: [...history], conflict: Boolean(conflict) })),
       controls: lane.controls.map(({ message, state, sourceId }) => ({ message: { control: message.control, runId: message.runId }, state, sourceId })),
       diagnostics: lane.diagnostics.map(() => ({ reason: "Retained transport diagnostic; raw bytes stay in the original cell" })),
       pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state } : null };
@@ -293,7 +292,7 @@
       await drain(); await flush();
       report({ type: "driver", active: lane.active, sessionId: lane.sessionId,
         pending: lane.requests.filter(item => item.state !== "forwarded").map(({ id, state }) => ({ id, state })),
-        partialBytes: lane.buffer.length });
+        partialBytes: partialBytes(lane) });
     };
     const boundedTick = async () => {
       if (ticking) throw new Error("Original active driver tick is still pending");
