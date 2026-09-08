@@ -34,6 +34,9 @@ function fixture({ legacyRuntime = false } = {}) {
   const cacheDirectory = join(root, "packages");
   initialize(source); initialize(repository);
   cpSync(fileURLToPath(new URL(`../../${scriptsPath}`, import.meta.url)), join(source, scriptsPath), { recursive: true });
+  const referencesPath = "skills/personal/run-issue-workflow/references";
+  mkdirSync(join(source, referencesPath), { recursive: true });
+  cpSync(fileURLToPath(new URL(`../../${referencesPath}/codex-host-driver.md`, import.meta.url)), join(source, referencesPath, "codex-host-driver.md"));
   if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), "export async function runCodexWorkflow() { throw new Error('Legacy runtime must not execute an existing Run'); }\nexport const prepareCodexWorkflow = runCodexWorkflow;\n");
   writeFileSync(join(source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package v1\n");
   git(source, "add", "skills"); git(source, "commit", "-m", "package v1");
