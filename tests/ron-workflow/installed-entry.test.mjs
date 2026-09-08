@@ -27,13 +27,14 @@ const note = (node_id, record) => ({ node_id, created_at: "2026-09-08T00:00:00Z"
 const closure = number => ({ node_id: `IE_closed_${number}`, event: "closed", created_at: "2026-09-08T00:02:00Z" });
 
 // Real installed packages, Git, checkpoints, journals and reconciliation; only external CLI/host I/O is substituted.
-function fixture() {
+function fixture({ legacyRuntime = false } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "installed-entry-")));
   const source = join(root, "source");
   const repository = join(root, "consumer");
   const cacheDirectory = join(root, "packages");
   initialize(source); initialize(repository);
   cpSync(fileURLToPath(new URL(`../../${scriptsPath}`, import.meta.url)), join(source, scriptsPath), { recursive: true });
+  if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), "throw new Error('A different retained runtime must not be imported without verified re-entry compatibility');\n");
   writeFileSync(join(source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package v1\n");
   git(source, "add", "skills"); git(source, "commit", "-m", "package v1");
   const install = () => installWorkflow({ sourceRepository: source, sourceCommit: git(source, "rev-parse", "HEAD"), cacheDirectory, skillDirectory: join(root, "entry") });
@@ -376,6 +377,35 @@ test("completed replay gates rebuild from owner history across disposable snapsh
     assert.deepEqual(f.store.readEvents(single.runIdentity.runId), journal);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
     assert.equal(git(f.repository, "status", "--porcelain=v1"), "");
+  } finally { f.close(); }
+});
+
+test("an unavailable current package cannot fall back from a newer entry into a different retained runtime", async () => {
+  const f = fixture({ legacyRuntime: true });
+  try {
+    const { issue, runIdentity } = f.addCompleted();
+    const journal = f.store.readEvents(runIdentity.runId);
+    cpSync(fileURLToPath(new URL(`../../${scriptsPath}`, import.meta.url)), join(f.source, scriptsPath), { recursive: true });
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "current runtime with completed re-entry reconciliation");
+    const current = f.install();
+    const { runInstalledEntry } = await import(pathToFileURL(join(current.root, scriptsPath, "installed-entry.mjs")).href);
+    const skillPath = join(current.root, "skills/personal/run-issue-workflow/SKILL.md");
+    const skillBytes = readFileSync(skillPath);
+    issue.state = "open";
+    writeFileSync(skillPath, "modified current package\n");
+    try {
+      const result = await runInstalledEntry({ repository: f.repository, host: f.host, specId: "1" });
+      assert.equal(result.state, "UNAVAILABLE");
+      assert.match(result.recovery, /Restore this exact trusted package/u);
+      assert.deepEqual(f.store.readEvents(runIdentity.runId), journal);
+      assert.deepEqual(f.calls, [], "recovery precedes runtime composition and host calls even without a terminal snapshot");
+    } finally { writeFileSync(skillPath, skillBytes); }
+    issue.state = "closed";
+    const restored = await runInstalledEntry({ repository: f.repository, host: f.host, specId: "I_1" });
+    assert.equal(restored.status.run.state, "SUCCEEDED");
+    assert.deepEqual(f.store.readEvents(runIdentity.runId).slice(0, journal.length), journal);
+    assert.deepEqual(f.store.readEvents(runIdentity.runId).at(-1).workflowVersion, current.version);
+    assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
   } finally { f.close(); }
 });
 

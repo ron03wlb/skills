@@ -68,6 +68,13 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   const compatible = previousGrant && current.state === "AVAILABLE"
     && current.version.protocolVersion === selected.version.protocolVersion
     && current.version.sourceRepository === selected.version.sourceRepository;
+  // A different retained runtime may predate this entry's reconciliation gates.
+  // Never use a disposable terminal snapshot to decide whether that downgrade is safe.
+  if (previousGrant && !compatible && realpathSync(selected.root) !== realpathSync(packageRoot)) {
+    if (current.state !== "AVAILABLE") return current;
+    return { state: "UNAVAILABLE", reason: "Current package is incompatible and fallback would enter a different retained runtime",
+      recovery: "Restore a reviewed compatible current package; preserve the original Run, Grant and retained package before retrying this entry." };
+  }
   const runtime = compatible ? current : selected;
   const composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
   const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
