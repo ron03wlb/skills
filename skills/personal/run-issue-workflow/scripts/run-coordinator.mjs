@@ -1240,8 +1240,9 @@ export function createCoordinator({
               ...(workflowVersion === undefined ? {} : { workflowVersion }),
             });
             const priorRuntime = store.readEvents(runIdentity.runId).findLast(({ type }) => type === "runtime.observed");
-            if (previousGrant && !sameWorkflowVersion(previousGrant.workflowVersion, workflowVersion)
-              && !sameWorkflowVersion(priorRuntime?.workflowVersion, workflowVersion)) writer.append({ type: "runtime.observed", at: now(), workflowVersion });
+            if (previousGrant && !sameWorkflowVersion(priorRuntime?.workflowVersion ?? previousGrant.workflowVersion, workflowVersion)) {
+              writer.append({ type: "runtime.observed", at: now(), workflowVersion });
+            }
             grantRecorded = true;
             lastStatus = rebuildStatus(current.facts);
             const panelStopped = await openPanel(lastStatus);

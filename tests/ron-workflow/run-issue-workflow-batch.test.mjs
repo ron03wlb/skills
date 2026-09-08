@@ -2,6 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { runBatch } from "../../skills/personal/run-issue-workflow/scripts/run-batch.mjs";
 
+test("completed members do no work while active lanes serialize closeout", async () => {
+  const closed = new Set();
+  const trace = [];
+  let closing = false;
+  const result = await runBatch({ maxWorkers: 1, sleep: async () => {}, lanes: [
+    { specId: "completed", async run({ mode }) {
+      assert.equal(mode, "snapshot");
+      return { run: { specId: "completed", state: "SUCCEEDED" }, nodes: [], legalActions: [] };
+    } },
+    ...["first", "second"].map(specId => ({ specId, async run({ mode }) {
+      if (mode === "step") {
+        assert.equal(closing, false);
+        closing = true; trace.push(specId);
+        await Promise.resolve();
+        closed.add(specId); closing = false;
+      }
+      return { run: { specId, state: closed.has(specId) ? "SUCCEEDED" : "RUNNING" }, nodes: [],
+        legalActions: closed.has(specId) ? [] : [{ type: "close_issue" }] };
+    } })),
+  ] });
+  assert.equal(result.state, "SUCCEEDED");
+  assert.deepEqual(trace, ["first", "second"]);
+});
+
 test("disconnect before the first observation preserves every selected Spec without claiming success", async () => {
   const result = await runBatch({
     lanes: ["a", "b"].map(specId => ({ specId, async run() { assert.fail("Disconnected entry must not observe or dispatch"); } })),

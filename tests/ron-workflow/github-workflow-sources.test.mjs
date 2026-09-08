@@ -45,7 +45,7 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     ] };
     writeFileSync(fixturePath, JSON.stringify(fixture));
     const bin = join(root, ".git", "bin"); mkdirSync(bin);
-    writeFileSync(join(bin, "gh"), `#!/usr/bin/env node\nconst fs=require('node:fs');const data=JSON.parse(fs.readFileSync(${JSON.stringify(fixturePath)},'utf8'));const route=process.argv[3];console.log(JSON.stringify(route==='graphql'?{data:{node:{id:'I_1',number:1,repository:{nameWithOwner:'example/repo'}}}}:route.includes('comments')?[data.comments]:route.includes('blocked_by')?[[]]:[data]));\n`);
+    writeFileSync(join(bin, "gh"), `#!/usr/bin/env node\nconst fs=require('node:fs');const data=JSON.parse(fs.readFileSync(${JSON.stringify(fixturePath)},'utf8'));const route=process.argv[3];console.log(JSON.stringify(route==='graphql'?{data:{node:{id:'I_1',number:1,repository:{nameWithOwner:'example/repo'}}}}:route.includes('comments')?[data.comments]:route.includes('events?')?[[]]:route.includes('blocked_by')?[[]]:[data]));\n`);
     // Invoke the fixture through Node on every host; Windows does not execute Unix shebangs.
     chmodSync(join(bin, "gh"), 0o755);
     childProcess.execFileSync = (name, args, options) => name === "gh"
