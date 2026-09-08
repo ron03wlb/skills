@@ -26,15 +26,16 @@ export async function inspectGitLabProducer({ repository, transport }) {
   const connected = await connectGitLabProducer({ repository, configuration, transport });
   return { state: "PRESENT", owningSource: fileURLToPath(new URL("./gitlab-producer-adapters.mjs", import.meta.url)),
     configuration: path, repositoryId: connected.repositoryId, projectId: connected.projectId, publicationMode: "READ_WRITE_READBACK",
-    support: { producer: "to-spec@v2", modes: ["primary", "revision"], planning: "tracker-only", automaticRunHost: false } };
+    support: { producer: "to-spec@v2", modes: ["primary", "revision"], planning: "registered-documents-and-tracker-only", automaticRunHost: false } };
 }
 
 export async function invokeGitLabProducer({ repository, input, transport }) {
   const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/gitlab-producer.json"), "utf8"));
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
+    "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "seal-write": ["planningSeal", "write"],
     identity: ["checkpoint", "identity"], "checkpoint-read": ["checkpoint", "read"], "checkpoint-create": ["checkpoint", "create"],
-    "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"],
+    "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"], "mutation-read": ["tracker", "readMutation"],
     "handoff-read": ["handoff", "read"], "handoff-append": ["handoff", "append"],
   };
   if (!Object.hasOwn(allowed, input?.action)) throw conflict("Unknown producer action");

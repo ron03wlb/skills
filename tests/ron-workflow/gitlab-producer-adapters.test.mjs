@@ -7,7 +7,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGitLabProducerAdapters } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-adapters.mjs";
 import { configureGitLabProducer, inspectGitLabProducer, invokeGitLabProducer } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-entry.mjs";
-import { createGlabTransport } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
+import { createGlabTransport, digest } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
+import { mutateOnce } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-mutations.mjs";
 
 const publication = { title: "Account display", body: "# Settled Spec\n\n完整帳號 `00123`\n", classification: "SINGLE" };
 function fixture(t, project = "group/sub/project") {
@@ -30,6 +31,11 @@ function fixture(t, project = "group/sub/project") {
     if (path === `projects/${encodeURIComponent(project)}`) return { id: 31, path_with_namespace: project, web_url: projectUrl };
     if (path === "user") return { id: 7 };
     if (path === "projects/31/members/all/7") return { id: 7, access_level: 40 };
+    if (method !== "GET" && failures.rejectionMethod === method) {
+      failures.rejectionMethod = null;
+      throw Object.assign(new Error("Rejected fixture request"), { code: "GITLAB_PRODUCER_TRANSPORT", httpStatus: 415,
+        outcome: "REJECTED", requestId: "fixture-rejection" });
+    }
     if (method !== "GET" && failures.beforeWrite === method) { failures.beforeWrite = null; throw new Error("timeout before delivery"); }
     const url = new URL(path, "https://fixture/");
     const route = url.pathname;
@@ -212,19 +218,20 @@ test("configure preserves existing bindings and inspect performs only reads with
 test("JSON bodies use stdin and provider failures do not leak secrets", async () => {
   let invocation;
   const configuration = { schema: "gitlab-producer:v1", baseUrl: "http://gitlab.example", project: "group/project" };
-  const transport = createGlabTransport({ repository: ".", configuration, execute: (...args) => { invocation = args; return "{}"; } });
+  const transport = createGlabTransport({ repository: ".", configuration, execute: (...args) => { invocation = args; return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"; } });
   const body = { description: "中文\n`$(secret)`\n\"quoted\"" };
   await transport({ method: "PUT", path: "projects/31/issues/169", body });
   assert.deepEqual(JSON.parse(invocation[2].input), body);
   assert.equal(invocation[1].includes(body.description), false);
+  assert.ok(invocation[1].includes("Content-Type: application/json"));
   assert.equal(invocation[2].env.GITLAB_API_PROTOCOL, "http");
   const failing = createGlabTransport({ repository: ".", configuration, execute: () => { throw new Error("secret-token"); } });
   await assert.rejects(() => failing({ path: "user" }), error => !error.message.includes("secret-token"));
 });
 
-test("document writes and quick actions stop without creating producer state", async t => {
+test("unregistered document writes and quick actions stop without creating producer state", async t => {
   const f = fixture(t); const adapter = await createGitLabProducerAdapters(f.options); const current = await adapter.tracker.read();
-  await assert.rejects(() => adapter.planning.readBaseline({ baseline: f.git("rev-parse", "HEAD"), trackerVersion: current.version, relevantFacts: {}, acceptedChanges: [{ path: "CONTEXT.md" }] }), /planning writer/u);
+  await assert.rejects(() => adapter.planning.readBaseline({ baseline: f.git("rev-parse", "HEAD"), trackerVersion: current.version, relevantFacts: {}, acceptedChanges: [{ path: "CONTEXT.md" }] }), /planning lane/u);
   await assert.rejects(() => createGitLabProducerAdapters({ ...f.options, publication: { ...publication, body: "# Spec\n/close" } }), /quick actions/u);
   assert.equal(f.writes().length, 0);
 });
@@ -238,4 +245,124 @@ test("CLI inspect executes through the installed directory junction without exte
   const output = execFileSync(process.execPath, [join(linked, "gitlab-producer-entry.mjs"), "inspect", repository], { encoding: "utf8", windowsHide: true });
   assert.equal(JSON.parse(output).state, "MISSING");
   assert.equal(existsSync(join(repository, ".git")), false);
+});
+
+test("publication retries a rejected PUT or receipt POST only with explicit exact authority", async t => {
+  for (const method of ["PUT", "POST"]) {
+    const f = fixture(t), ctx = await prepared(f);
+    f.failures.rejectionMethod = method;
+    await assert.rejects(() => ctx.adapter.tracker.publish(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+    assert.equal(ctx.adapter.tracker.readMutation(ctx).state, method === "PUT" ? "REJECTED" : "ACKNOWLEDGED");
+    const before = f.writes().length;
+    await assert.rejects(() => ctx.adapter.tracker.publish(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+    assert.equal(f.writes().length, before);
+    const adapter = await createGitLabProducerAdapters(f.options);
+    assert.equal((await complete(f, { ...ctx, adapter, retryRejected: true })).state, "COMPLETED");
+    assert.equal(f.writes().length, 4);
+  }
+});
+
+test("primary reservation and handoff retain their exact identity after a rejected POST", async t => {
+  const f = fixture(t);
+  const adapter = await createGitLabProducerAdapters({ ...f.options, specId: undefined });
+  f.failures.rejectionMethod = "POST";
+  await assert.rejects(() => adapter.tracker.reserve({ proposedSpecIdentity: "rejected-primary" }), { code: "GITLAB_PRODUCER_REJECTED" });
+  const reserved = await adapter.tracker.reserve({ proposedSpecIdentity: "rejected-primary", retryRejected: true });
+  const ctx = await prepared(f, { specId: reserved.trackerIdentity });
+  const receipt = await ctx.adapter.tracker.publish(ctx);
+  await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "publication.read_back", receipt });
+  f.failures.rejectionMethod = "POST";
+  await assert.rejects(() => ctx.adapter.handoff.append(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+  const before = f.writes().length;
+  await assert.rejects(() => ctx.adapter.handoff.append(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+  assert.equal(f.writes().length, before);
+  const handoff = await ctx.adapter.handoff.append({ ...ctx, retryRejected: true });
+  assert.equal((await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "handoff.completed", receipt: handoff })).state, "COMPLETED");
+  assert.equal(f.notes.get(Number(reserved.issue.iid)).length, 2);
+});
+
+test("GitLab final LF removal completes without changing approved identity or duplicating writes", async t => {
+  const f = fixture(t), ctx = await prepared(f);
+  f.failures.afterPut = current => { current.description = current.description.slice(0, -1); };
+  assert.equal((await complete(f, ctx)).state, "COMPLETED");
+  const native = await ctx.adapter.tracker.read();
+  assert.equal(native.body, publication.body.slice(0, -1));
+  const receipt = await ctx.adapter.tracker.readPublication(ctx.identity);
+  assert.equal(receipt.version, native.version);
+  const record = JSON.parse(f.notes.get(169)[0].body.match(/^```workflow-record\n([\s\S]+)\n```$/u)[1]);
+  assert.equal(record.authority.approvedScopeHash, digest(publication.body));
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal(adapter.checkpoint.identity({ baseline: ctx.identity.baseline, relevantFacts: ctx.identity.bindings.relevantFacts }).operationId, ctx.identity.operationId);
+  await complete(f, { ...ctx, adapter });
+  assert.equal(f.writes().length, 3);
+});
+
+test("acknowledged pre-fix LF mismatch resumes its original intent without another PUT", async t => {
+  const f = fixture(t), ctx = await prepared(f);
+  const labels = [...ctx.expectedLabels, "ready-for-agent"].sort();
+  // Reproduce the old reader failing after the native PUT was acknowledged.
+  await assert.rejects(() => mutateOnce({ gitCommonDir: join(f.repository, ".git"), repositoryId: ctx.identity.repositoryId }, {
+    key: `${ctx.identity.operationId}:issue-body`,
+    payload: { body: publication.body, title: publication.title, labels, expectedVersion: ctx.expectedVersion, trackerIdentity: ctx.identity.specId },
+    observe: async () => null,
+    write: async () => {
+      await f.transport({ method: "PUT", path: "projects/31/issues/169", body: { title: publication.title, description: publication.body, add_labels: "ready-for-agent" } });
+      f.issues.get(169).description = publication.body.slice(0, -1);
+    },
+  }), { code: "GITLAB_PRODUCER_UNKNOWN" });
+  const mutation = ctx.adapter.tracker.readMutation(ctx);
+  assert.equal(mutation.state, "ACKNOWLEDGED");
+  assert.equal(mutation.attempt, 1);
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal((await complete(f, { ...ctx, adapter })).state, "COMPLETED");
+  assert.deepEqual(adapter.tracker.readMutation(ctx), mutation);
+  assert.equal(f.writes().filter(call => call.method === "PUT").length, 1);
+  assert.equal(f.writes().length, 3);
+});
+
+test("final LF tolerance does not accept other body or native state changes", async t => {
+  for (const alter of [
+    current => { current.description = ` ${current.description}`; },
+    current => { current.description = current.description.replace("\n\n", "\n"); },
+    current => { current.description = current.description.slice(0, -2); },
+    current => { current.description += "\n"; },
+    current => { current.description = current.description.slice(0, -1); current.title += " changed"; },
+    current => { current.description = current.description.slice(0, -1); current.state = "closed"; },
+  ]) {
+    const f = fixture(t), ctx = await prepared(f);
+    f.failures.afterPut = alter;
+    await assert.rejects(() => complete(f, ctx), { code: "GITLAB_PRODUCER_CONFLICT" });
+    const adapter = await createGitLabProducerAdapters(f.options);
+    await assert.rejects(() => complete(f, { ...ctx, adapter }), { code: "GITLAB_PRODUCER_CONFLICT" });
+    assert.equal(f.writes().length, 1);
+    assert.equal(adapter.checkpoint.read(ctx.identity).progress.length, 1);
+  }
+});
+
+test("entry registers accepted documents, writes a seal and completes the same Spec with native read-back", async t => {
+  const f = fixture(t);
+  await configureGitLabProducer(f.options);
+  const worktree = `${f.repository}-planning`;
+  t.after(() => rmSync(worktree, { recursive: true, force: true }));
+  const baseline = f.git("rev-parse", "HEAD");
+  f.git("worktree", "add", "-b", "planning", worktree, baseline);
+  writeFileSync(join(worktree, "CONTEXT.md"), "Accepted glossary\n");
+  const authority = { path: join(f.repository, "handoff.md"), contentIdentity: digest("Explicit accepted glossary\n") };
+  writeFileSync(authority.path, "Explicit accepted glossary\n");
+  const acceptedChanges = [{ path: "CONTEXT.md", contentIdentity: digest(readFileSync(join(worktree, "CONTEXT.md"))) }];
+  const invoke = (action, request) => invokeGitLabProducer({ ...f.options, input: { action, request, specId: 169, target: "target", publication } });
+  const current = await invoke("read");
+  const lane = await invoke("lane-register", { taskId: "accepted-task", worktree, baseline, acceptedChanges, authority });
+  const request = { baseline, trackerVersion: current.version, relevantFacts: {}, acceptedChanges, lane };
+  assert.equal((await invoke("baseline", request)).requiresPlanningLane, true);
+  const seal = await invoke("seal-write", request);
+  const identity = await invoke("identity", { baseline: seal.planningSeal, relevantFacts: seal.relevantFacts, sealOperationId: seal.operationId });
+  await invoke("checkpoint-create", identity);
+  await invoke("checkpoint-advance", { identity, stage: "planning_seal.read_back", receipt: await invoke("seal", { identity }) });
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal((await complete(f, { adapter, identity, expectedVersion: current.version, expectedLabels: current.labels })).state, "COMPLETED");
+  assert.equal(f.issues.get(169).description, publication.body);
+  assert.equal(f.writes().length, 3);
+  assert.equal(f.git("rev-list", "--count", `${baseline}..HEAD`), "1");
+  assert.equal((await invoke("seal-write", request)).planningSeal, seal.planningSeal);
 });

@@ -19,7 +19,9 @@ The owner-local planning adapter enforces this distinction before publication. T
 
 [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) configures the tracker and triage labels, and only diagnoses the separately installed publication adapters and Workflow checkpoint store. Missing adapters require their owning package's installation or binding entry. The document-write branch additionally consumes the shared Target mutation writer and active task's exact worktree handoff.
 
-GitLab tracker-only publication has a reusable producer binding for primary reservation and revision of an existing Spec. It verifies project identity, source baseline, Issue versions and native note receipts, and reuses the existing checkpoint store. Its explicit repository configuration is separate from read-only setup diagnostics. It does not supply an automatic GitLab Run host or a writer for accepted glossary/ADR changes.
+GitLab publication has a reusable producer binding for primary reservation and revision of an existing Spec. Its installed document writer registers the exact accepted handoff, checks original document content against the current target, and retains one candidate for interruption recovery. It shares the delivery writer lock, preserves unrelated work, and stops on overlapping edits. Tracker-only publication still creates no seal commit. Repository configuration remains separate from read-only setup diagnostics; an automatic GitLab Run host remains a separate capability.
+
+For GitLab publication failures, the installed producer binding distinguishes a recorded HTTP rejection from an unresolved write. Only an explicitly requested retry of an exact rejected operation may send another request. Legacy requests without recorded outcomes retain their evidence and require the publication owner to resolve the missing provider result.
 
 ## One optimistic publication
 
