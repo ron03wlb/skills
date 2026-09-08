@@ -14,3 +14,4 @@ Skills tied to my own setup, not promoted in the plugin.
 - **[obsidian-vault](./obsidian-vault/SKILL.md)** — Search, create, and manage notes in an Obsidian vault with wikilinks and index notes.
 - **[run-issue-workflow](./run-issue-workflow/SKILL.md)** — Reduce one exact producer handoff to READY, bind a deterministic Run identity, then coordinate concurrent per-Spec Issue DAGs with bounded writer waits and an automatic control panel.
 - **[start-project](./start-project/SKILL.md)** — Guide a greenfield software project through discovery and stop at Matt `to-spec`.
+- **[workflow-retro](./workflow-retro/SKILL.md)** — Diagnose recent Codex task interruptions and settle evidence-based improvement handoffs.

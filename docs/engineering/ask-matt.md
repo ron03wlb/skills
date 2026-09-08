@@ -75,6 +75,8 @@ For a new software project without a governing Spec, the personal `/start-projec
 
 For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 
+For repeated Codex task interruptions, manually invoke the personal `/workflow-retro` skill. It examines recent task evidence, distinguishes avoidable interruptions from necessary stops, and settles improvement decisions for a human `/to-spec` handoff. It performs diagnosis only and remains outside promoted packaging.
+
 Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) governs substantive instruction, structure, and routing changes.
 
 At a phase boundary, choose whether to continue, clear, create a [handoff](https://aihero.dev/skills-handoff), delegate a bounded subtask, or compact. Do not switch context strategies mid-phase unless the remaining work can be split cleanly.
