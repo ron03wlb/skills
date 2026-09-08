@@ -1,4 +1,4 @@
 interface:
   display_name: "Execute Issue"
   short_description: "Execute one human- or DAG-authorized Issue"
-  default_prompt: "Use $execute-issue to implement this Issue and stop after verified completion read-back."
+  default_prompt: "Use $execute-issue to implement this Issue and stop after verified completion read-back or an eligible complete repair-wave model yield."

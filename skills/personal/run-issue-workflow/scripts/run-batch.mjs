@@ -23,7 +23,7 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
       if (terminal(status) || status.run.state === "UNAVAILABLE") continue;
       const used = [...statuses.values()].reduce((count, current) => count + occupied(current), 0);
       const slots = [...statuses.values()].some(current => current.capacityUnknown || current.run.state === "UNAVAILABLE") ? 0 : Math.max(0, maxWorkers - used);
-      if (!(status.legalActions ?? []).some(action => slots > 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type))) continue;
+      if (!(status.legalActions ?? []).some(action => slots > 0 || !["dispatch_issue", "remediate_environment", "repair_issue", "upgrade_issue"].includes(action.type))) continue;
       try {
         statuses.set(lane.specId, await lane.run({ mode: "step", executionSlots: slots }));
         progressed = true;

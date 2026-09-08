@@ -1,10 +1,14 @@
 import { validateCloseWaitEvidence } from "./run-target-writer-wait.mjs";
+import { validateModelPolicy, validateModelSetting } from "./issue-model-policy.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
 export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
+  "model.acceptance",
+  "model.substitution",
+  "model.upgrade",
   "runtime.observed",
   "repair.recorded",
   "action.failed",
@@ -30,10 +34,13 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
+  ["model.upgrade", new Set(["type", "at", "issueId", "requestIdentity", "yieldIdentity", "taskRef", "candidate", "worktree", "topic", "repairWaves", "model", "thinking", "reason"])],
+  ["model.substitution", new Set(["type", "at", "issueId", "requestIdentity", "fromModel", "model", "thinking", "reason"])],
+  ["model.acceptance", new Set(["type", "at", "issueId", "requestIdentity", "model", "thinking", "phase", "acceptance", "effectiveReadBack", "evidence"])],
   ["action.failed", new Set(["type", "at", "issueId", "actionType", "progressIdentity", "attempt", "evidence"])],
-  ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity"])],
+  ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity", "priorRepairWaves"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
-  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion"])],
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion", "modelPolicy"])],
   ["control.revised", new Set(["type", "at", "revision", "command"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
   ["retry.recorded", new Set([
@@ -134,9 +141,35 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
   assertExactFields(event, allowedFields, `${event.type} event`);
   requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
+    case "model.upgrade":
+      validateModelSetting(event);
+      validateTaskRef(event.taskRef, "Model upgrade task");
+      for (const key of ["issueId", "worktree", "topic", "reason"]) requireText(event[key], `Model upgrade ${key}`);
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity) || !/^sha256:[a-f0-9]{64}$/u.test(event.yieldIdentity)
+        || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(event.candidate)
+        || !Number.isInteger(event.repairWaves) || event.repairWaves < 2 || event.repairWaves >= 10
+        || event.model !== "gpt-6-astra" || !["high", "xhigh", "max", "ultra"].includes(event.thinking)) throw new TypeError("Invalid model upgrade reservation");
+      break;
+    case "model.substitution":
+      validateModelSetting(event);
+      requireText(event.issueId, "Model substitution Issue");
+      requireText(event.reason, "Model substitution reason");
+      if (!["gpt-5.6-terra", "gpt-5.6-sol"].includes(event.fromModel) || event.model !== "gpt-6-astra"
+        || !["high", "xhigh", "max", "ultra"].includes(event.thinking)
+        || !/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity)) throw new TypeError("Invalid pre-creation Astra substitution");
+      break;
+    case "model.acceptance":
+      requireText(event.issueId, "Model acceptance Issue");
+      requireText(event.evidence, "Model acceptance evidence");
+      validateModelSetting(event);
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity)
+        || !["creation", "substitution", "upgrade"].includes(event.phase)
+        || !["accepted", "unknown", "unavailable"].includes(event.acceptance)
+        || event.effectiveReadBack !== "unavailable") throw new TypeError("Invalid native model acceptance evidence");
+      break;
     case "action.failed":
       requireText(event.issueId, "failed action Issue");
-      if (!["dispatch_issue", "repair_issue", "close_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
+      if (!["dispatch_issue", "repair_issue", "close_issue", "upgrade_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
       if (!/^sha256:[a-f0-9]{64}$/u.test(event.progressIdentity)) throw new TypeError("Failed action requires exact progress identity");
       requirePositiveInteger(event.attempt, "failed action attempt", 3);
       requireText(event.evidence, "failed action evidence");
@@ -144,6 +177,8 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
     case "repair.recorded":
       requireText(event.issueId, "repair Issue");
       requirePositiveInteger(event.wave, "repair wave", 10);
+      if (event.priorRepairWaves !== undefined && (!Number.isInteger(event.priorRepairWaves) || event.priorRepairWaves < 0
+        || event.priorRepairWaves >= 10 || event.wave !== event.priorRepairWaves + 1)) throw new TypeError("Repair must preserve the execution owner's cumulative budget");
       validateTaskRef(event.taskRef, "repair task");
       for (const field of ["candidate", "targetHead"]) if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(event[field])) throw new TypeError("Repair requires exact Git commits");
       if (!/^sha256:[a-f0-9]{64}$/u.test(event.requestIdentity)) throw new TypeError("Repair request identity is invalid");
@@ -166,6 +201,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       }
       if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
       if (event.workflowVersion !== undefined) validateWorkflowVersion(event.workflowVersion);
+      if (event.modelPolicy !== undefined) validateModelPolicy(event.modelPolicy, event.runIdentity);
       break;
     case "control.revised":
       requirePositiveInteger(event.revision, "control revision");
@@ -262,6 +298,26 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       if (!sameWorkflowVersion(previous.workflowVersion, event.workflowVersion)) {
         throw new TypeError("A renewed grant must preserve its workflow version");
       }
+      if (JSON.stringify(previous.modelPolicy) !== JSON.stringify(event.modelPolicy)) throw new TypeError("A renewed grant must preserve model policy membership");
+    }
+  }
+  if (event.type === "model.acceptance" && !events.find(item => item.type === "grant.recorded")?.modelPolicy) {
+    throw new TypeError("Model acceptance requires a policy-bound Run");
+  }
+  if (event.type === "model.substitution") {
+    const rejection = events.findLast(item => item.type === "model.acceptance" && item.issueId === event.issueId);
+    if (!events.find(item => item.type === "grant.recorded")?.modelPolicy
+      || !rejection || rejection.phase !== "creation" || rejection.acceptance !== "unavailable" || rejection.model !== event.fromModel
+      || events.some(item => item.issueId === event.issueId && ["model.substitution", "dispatch.recorded"].includes(item.type))) {
+      throw new TypeError("Model substitution requires one confirmed pre-creation rejection");
+    }
+  }
+  if (event.type === "model.upgrade") {
+    const grant = events.find(item => item.type === "grant.recorded");
+    const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    if (!grant?.modelPolicy || !dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef)
+      || events.some(item => item.type === "model.upgrade" && item.issueId === event.issueId)) {
+      throw new TypeError("A model upgrade must reserve the sole allowance in the original policy-bound task");
     }
   }
   if (event.type === "action.failed") {
@@ -272,7 +328,8 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
   if (event.type === "repair.recorded") {
     const previous = events.filter(item => item.type === "repair.recorded" && item.issueId === event.issueId);
     const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
-    if (!dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef) || event.wave !== previous.length + 1
+    const priorCount = event.priorRepairWaves ?? previous.at(-1)?.wave ?? 0;
+    if (!dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef) || event.wave !== priorCount + 1 || priorCount < (previous.at(-1)?.wave ?? 0)
       || previous.some(item => item.candidate === event.candidate)) throw new TypeError("Repair must preserve its original dispatched lane and monotonic candidate budget");
   }
   if (event.type === "runtime.observed") {

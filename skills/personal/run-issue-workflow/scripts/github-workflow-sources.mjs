@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, lstatSync, readdirSync, realpathSync, readFileSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { assessRunPreparation, assessBootstrapHandoff, readManualAttestation } from "./run-preparation.mjs";
 import { reduceRun, reduceRunReadyHandoff } from "./run-core.mjs";
@@ -9,6 +9,8 @@ import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, de
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
+import { modelDecisionInput, modelEvidenceDigest, automaticUpgrade, creationUnavailable } from "./issue-model-policy.mjs";
+import { validateRepairYield } from "./model-repair-evidence.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
 const one = (values, label) => {
@@ -139,6 +141,8 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     const nodes = [];
     const contradictions = [];
     const preparedLanes = {};
+    const modelInputs = {};
+    const modelYields = {};
     const declaration = snapshot.publication.record.preparation;
     const supplied = snapshot.handoff.record.preparation;
     const alreadyStarted = journal.some(event => event.type === "grant.recorded");
@@ -173,6 +177,9 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     for (const issue of snapshot.issues) {
       try {
       if (snapshot.issueErrors?.has(issue.node_id)) throw new Error(snapshot.issueErrors.get(issue.node_id));
+      if (!taskRefs[issue.node_id] && creationUnavailable(journal, issue.node_id)) throw new Error("MODEL_UNAVAILABLE: native Astra rejection proved no task was submitted; independent Issues retain capacity");
+      modelInputs[issue.node_id] = modelDecisionInput({ issueId: issue.node_id, specId: authority.specId,
+        approvedScopeHash: authority.approvedScopeHash, issueBody: issue.body, specBody: snapshot.spec.body });
       reconcileClosureHistory(issue, [issue.node_id]);
       const sql = declaration?.sql?.find(item => item.issueId === issue.node_id);
       if (sql) {
@@ -238,12 +245,54 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: completion ? "COMPLETE" : latest?.record.kind === "implementation_blocked" ? "BLOCKED" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
+      if (task?.modelYield && !completion && task.state === "RESUMABLE") {
+        const intent = store.readHostTask({ runId: selectedIdentity.runId, issueId: issue.node_id });
+        const policy = journal.find(event => event.type === "grant.recorded")?.modelPolicy;
+        if (!policy || !intent?.modelDecision) throw new Error("A legacy or adopted task cannot request a policy upgrade");
+        const reserved = journal.find(event => event.type === "model.upgrade" && event.issueId === issue.node_id);
+        const substituted = journal.find(event => event.type === "model.substitution" && event.issueId === issue.node_id);
+        const recordedCounts = [
+          ...journal.filter(event => event.type === "repair.recorded" && event.issueId === issue.node_id).map(event => event.wave),
+          ...lifecycle.map(item => item.record.repairWaves),
+        ];
+        if (recordedCounts.some(count => !Number.isInteger(count) || count < 0 || count > 10)) throw new Error("Recorded cumulative repair count is missing or invalid");
+        const evidence = await validateRepairYield({ evidence: task.modelYield, runIdentity: selectedIdentity, issueId: issue.node_id,
+          recordedRepairWaves: Math.max(0, ...recordedCounts),
+          executionProgress: issue.records.filter(item => item.record.kind === "implementation_repair_progress"),
+          taskRef: taskRefs[issue.node_id], task, operationIdentity: deriveExecuteIssueOperationIdentity({ repositoryId,
+            specId: authority.specId, issueId: issue.node_id, approvedPublicationIdentity: authority.approvedScopeHash }),
+          inspectGit: async value => {
+            const registered = one(worktrees().filter(item => item.worktree === worktreePath(value.worktree) && item.branch === `refs/heads/${value.topic}`), "Yielded Issue worktree");
+            if (realpathSync.native(resolve(value.worktree, command("git", ["-C", value.worktree, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Yielded repository ownership differs");
+            return { candidate: registered.HEAD, topic: value.topic, clean: !command("git", ["-C", value.worktree, "status", "--porcelain=v1"]),
+              consecutive: value.waves.every(wave => ancestor(wave.before, wave.candidate)),
+              changedWaves: value.waves.map(wave => git("diff", "--name-only", wave.before, wave.candidate, "--").split(/\r?\n/u)
+                .some(path => /\.(?:mjs|cjs|js|jsx|ts|tsx|java|kt|py|go|rs|c|cpp|cs|rb|swift|sql)$/u.test(path))) };
+          },
+          readVerification: async (reference) => {
+            if (!/^[a-f0-9]{64}$/u.test(reference.key)) throw new Error("Malformed verification cache key");
+            const receipt = JSON.parse(readFileSync(join(gitCommonDir, "workflow-verification", task.modelYield.operationIdentity.key, `${reference.key}.json`), "utf8"));
+            if (modelEvidenceDigest(receipt) !== reference.bodySha256) throw new Error("Verification receipt digest differs");
+            return receipt;
+          },
+          readReview: async reference => {
+            if (!/^sha256:[a-f0-9]{64}$/u.test(reference.bodySha256)) throw new Error("Malformed independent review receipt digest");
+            const report = JSON.parse(readFileSync(join(gitCommonDir, "workflow-reviews", task.modelYield.operationIdentity.key, `${reference.bodySha256.slice(7)}.json`), "utf8"));
+            if (modelEvidenceDigest(report) !== reference.bodySha256 || report.operationId !== task.modelYield.operationIdentity.key) throw new Error("Independent review receipt identity differs");
+            return report;
+          },
+        });
+        const setting = reserved ?? automaticUpgrade(substituted ?? intent.modelDecision, evidence.repairWaves, false);
+        if (!setting || reserved && reserved.yieldIdentity !== evidence.yieldIdentity) throw new Error("Automatic upgrade allowance is unavailable");
+        modelYields[issue.node_id] = { ...evidence, setting: { model: setting.model, thinking: setting.thinking } };
+        node.taskState = "MODEL_YIELDED"; node.completionState = "NONE"; node.worktreeState = "PRESENT";
+      }
       if (completion && task?.closeRequest?.runId === selectedIdentity.runId
         && (task.closeRequest.issueId === issue.node_id || authority.classification === "MULTI" && task.closeRequest.issueId === authority.specId)) node.taskState = "NONE";
       if (repairing) { node.taskState = "EXECUTING"; node.completionState = "NONE"; }
       if (acceptedRepair && task.state === "RESUMABLE" && task.snapshot?.turns?.[0]?.status === "completed") throw new Error("Conflict repair settled without renewed completion; inspect the original lane's semantic or verification blocker");
       if (task?.state === "UNKNOWN") throw new Error(`Issue #${issue.number} task state is unknown`);
-      if (task?.state === "RESUMABLE" && !latest) node.taskState = "TRANSIENT_FAILURE";
+      if (task?.state === "RESUMABLE" && !latest && !modelYields[issue.node_id]) node.taskState = "TRANSIENT_FAILURE";
       if (completion) {
         const record = completion.record;
         if (record.issueId !== issue.node_id || record.specId !== authority.specId || record.target !== authority.target
@@ -307,7 +356,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         && conflict.issueId === issue.node_id && conflict.runId === selectedIdentity.runId && conflict.candidate === completion.record.candidate
         && conflict.requestIdentity === task.closeRequest?.requestIdentity && conflict.targetRestored === true) {
         if (target.state !== "CLEAN" || !ancestor(conflict.targetHead, target.head)) throw new Error("Conflict target restoration or current ownership is unproven");
-        node.closeConflict = { candidate: conflict.candidate, targetHead: target.head };
+        node.closeConflict = { candidate: conflict.candidate, targetHead: target.head, repairWaves: completion.record.repairWaves ?? 0 };
       }
       nodes.push(node);
       } catch (error) {
@@ -317,7 +366,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       }
     }
     const handoff = { ...snapshot.handoff.record, identity: snapshot.handoff.identity };
-    return { runIdentity: selectedIdentity, grant: { runIdentity: selectedIdentity, maxParallel: 3 }, planningSeal: authority.planningSeal, taskRefs, preparedLanes,
+    return { runIdentity: selectedIdentity, grant: { runIdentity: selectedIdentity, maxParallel: 3 }, planningSeal: authority.planningSeal, taskRefs, preparedLanes, modelInputs, modelYields,
       runReadyAuthority: { schema: "run-ready-handoff-facts:v1", authority, preparation, checkpoint: checkpointRead(snapshot), handoff,
         targetState: target.state, targetOwnership: target.ownership, evidence: [],
         trackerRecordIdentities: snapshot.decomposition ? [snapshot.publication.identity, snapshot.decomposition.identity] : [snapshot.publication.identity],
@@ -363,6 +412,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     return evidence;
   };
   return {
+    async readModelInputs(specId) {
+      const snapshot = await trackerRead({ specId });
+      if (snapshot.issueErrors.size) throw authorityConflict([...snapshot.issueErrors.values()].join("; "));
+      return { authority: snapshot.authority, inputs: snapshot.issues.map(issue => modelDecisionInput({
+        issueId: issue.node_id, specId: snapshot.authority.specId, approvedScopeHash: snapshot.authority.approvedScopeHash,
+        issueBody: issue.body, specBody: snapshot.spec.body })) };
+    },
     // The active Codex task supplies its freshly read human handoff/control; this source owns
     // tracker, checkpoint, Git and journal evidence and performs no task or Run mutation.
     async readBootstrapHandoff({ specId, human, control }) {

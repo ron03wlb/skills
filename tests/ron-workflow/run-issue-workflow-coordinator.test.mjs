@@ -11,6 +11,7 @@ import {
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
 import { runBatch } from "../../skills/personal/run-issue-workflow/scripts/run-batch.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
+import { modelDecisionInput } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -197,6 +198,56 @@ const reconciliation = ({
     nodes: nodes.map(withCloseAuthorityEvidence),
     contradictions,
   },
+});
+
+test("model routing binds only a new Run and forwards validated semantic input to its first dispatch", async () => {
+  for (const legacy of [false, true]) {
+    const { root, store } = createStoreFixture();
+    const modelPolicy = { version: "issue-model-policy:v1", specId: identity.specId, target: identity.target,
+      approvedScopeHash: identity.approvedScopeHash, authorization: "Human approved this Run model pool and one bounded upgrade" };
+    if (legacy) { const writer = store.acquireWriter(identity.runId); writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity: identity }); writer.release(); }
+    const input = modelDecisionInput({ issueId: "15", specId: "15", approvedScopeHash: identity.approvedScopeHash, issueBody: "Issue contract", specBody: "Spec contract" });
+    const decision = { inputIdentity: input.inputIdentity, reason: "coordinator selection" };
+    let active = false, received;
+    const coordinator = createCoordinator({ store, tracker: { async read() { return {}; } },
+      tasks: { async findIssueLane() { return []; }, async create(args) { received = args; active = true; return { threadId: "worker", hostId: "local" }; },
+        async read() { return { state: "RUNNING" }; }, async message() {}, async wait() { throw new Error("step does not wait"); } },
+      reconcile: async () => ({ ...reconciliation({ nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: active ? "EXECUTING" : "NONE", completionState: "NONE", candidateReachable: false, worktreeState: "ABSENT" }] }), modelInputs: { 15: input } }),
+      now: () => "2026-09-08T00:00:00.000Z", sleep: async () => {},
+    });
+    try {
+      await coordinator.run({ specId: "15", mode: "step", modelRouting: { policy: modelPolicy, decisions: { 15: decision } } });
+      assert.deepEqual(received.modelInput, input);
+      assert.deepEqual(received.modelDecision, decision);
+      assert.deepEqual(store.readEvents(identity.runId)[0].modelPolicy, legacy ? undefined : modelPolicy);
+      assert.equal(store.readEvents(identity.runId).filter(event => event.type === "grant.recorded").length, 1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("model routing yields reserve one same-task upgrade without consuming a dispatch retry", async () => {
+  const { root, store } = createStoreFixture();
+  const ref = { threadId: "worker", hostId: "local" };
+  const writer = store.acquireWriter(identity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity: identity,
+    modelPolicy: { version: "issue-model-policy:v1", specId: identity.specId, target: identity.target, approvedScopeHash: identity.approvedScopeHash, authorization: "Approved model policy" } });
+  writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: "15", attempt: 1, taskRef: ref }); writer.release();
+  let continued = false, received;
+  const coordinator = createCoordinator({ store, tracker: { async read() { return {}; } },
+    tasks: { async findIssueLane() { return [ref]; }, async create() { throw new Error("No replacement task"); }, async read() { return { state: continued ? "RUNNING" : "RESUMABLE" }; },
+      async message() { throw new Error("Use explicit upgrade continuation"); }, async wait() {},
+      async upgrade(args) { received = args; continued = true; assert.equal(store.readEvents(identity.runId).at(-1).type, "model.upgrade"); } },
+    reconcile: async () => ({ ...reconciliation({ taskRefs: { 15: ref }, nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: continued ? "EXECUTING" : "MODEL_YIELDED", completionState: "NONE", candidateReachable: false, worktreeState: "PRESENT" }] }),
+      modelYields: { 15: { candidate: "a".repeat(40), worktree: "/lane", topic: "topic", repairWaves: 2, yieldIdentity: "sha256:" + "b".repeat(64), finding: { identity: "F1" }, setting: { model: "gpt-6-astra", thinking: "high" } } } }),
+    now: () => "2026-09-08T00:00:00.000Z", sleep: async () => {},
+  });
+  try {
+    await coordinator.run({ specId: "15", mode: "step", executionSlots: 0 }); assert.equal(continued, false);
+    const status = await coordinator.run({ specId: "15", mode: "step", executionSlots: 1 });
+    assert.deepEqual(received.ref, ref); assert.equal(received.intent.repairWaves, 2);
+    assert.equal(status.frontier.active.length, 1);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "dispatch.recorded").length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("Run-ready handoff INCOMPLETE and UNKNOWN stop before cleanup, writer, Grant, panel, or task mutation", async () => {

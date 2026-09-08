@@ -1672,7 +1672,7 @@ test("the versioned runtime interface publishes the accepted state machines", ()
     "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
   ]);
   assert.deepEqual(NODE_STATES, [
-    "PENDING", "READY", "DISPATCHED", "EXECUTING", "RETRYING",
+    "PENDING", "READY", "DISPATCHED", "EXECUTING", "MODEL_YIELDED", "RETRYING",
     "IMPLEMENTATION_COMPLETE", "CLOSING", "SUCCEEDED", "BLOCKED", "FAILED",
   ]);
   assert.deepEqual(CONTROL_COMMANDS, ["PAUSE", "RESUME", "STOP"]);

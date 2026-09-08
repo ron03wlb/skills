@@ -45,9 +45,13 @@ Successful verification is reused only while the candidate, exact command, relev
 
 ## It's working if
 
+- For newly policy-bound Issue tasks, the coordinator selects a suitable [model](https://www.aihero.dev/ai-coding-dictionary/model) once and may grant one stronger continuation after the same confirmed defect survives two complete repair waves. Each wave has a read-back progress record that preserves its cumulative number across interruptions.
+- Older tasks retain their settings.
+- A controlled yield reports a clean verified and independently reviewed candidate; host acceptance and unavailable independent effective-setting read-back remain distinct.
 - Implementation stays in the exact Issue worktree and preserves the recorded target and Acceptance Criteria.
 - Focused checks, the required full suite, and both review axes pass for one clean candidate SHA.
 - The completion note binds that candidate and its required evidence without merging, closing, pushing, or deploying it.
+- An eligible model upgrade preserves the existing task, candidate and cumulative repair count.
 
 ## Where it fits
 
