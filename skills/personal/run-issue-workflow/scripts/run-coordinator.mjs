@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
-import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
@@ -15,8 +15,7 @@ import {
 } from "./run-target-writer-wait.mjs";
 
 const TRACKER_PROBE_DELAYS_MS = Object.freeze([5_000, 15_000, 30_000]);
-export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT =
-  "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
+export { WINDOWS_GRADLE_LOOPBACK_FINGERPRINT };
 const RUN_IDENTITY_KEYS = Object.freeze([
   "runId",
   "specId",
@@ -645,10 +644,22 @@ export function createCoordinator({
     if (task.recoveryRequest?.requestIdentity === intent.requestIdentity) return;
     if (task.state === "RUNNING") return;
     if (task.state !== "RESUMABLE") throw new Error("Repair task has unresolved active work; preserve it");
+    if (phase === "ENVIRONMENT") {
+      const attempt = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === action.issueId).attempt;
+      const prior = journal.find(event => event.type === "remediation.recorded" && event.issueId === action.issueId
+        && (event.attempt ?? attempt) === attempt && event.fingerprint === WINDOWS_GRADLE_LOOPBACK_FINGERPRINT);
+      if (prior && prior.sequence < intent.sequence) throw new Error("The existing one-cycle environment remediation budget is exhausted for this dispatch and fingerprint");
+      if (!prior) writer.append({ type: "remediation.recorded", at: now(), issueId: action.issueId, attempt,
+        fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT, cycle: 1, adapter: "gradle-loopback-safe" });
+    }
     const request = { runId: current.runIdentity.runId, issueId: action.issueId, operationId: failure.operationId,
       requestIdentity: intent.requestIdentity, phase, wave: intent.wave, failureIdentity: failure.identity };
     const work = phase === "DIAGNOSE"
       ? `Read-only diagnosis: inspect the owning source, failed command and exact observed evidence below. Distinguish ISSUE_DEFECT, ENVIRONMENT, WORKFLOW_DEFECT, REQUIREMENT_CONFLICT, CAPABILITY_UNAVAILABLE and OUTCOME_UNKNOWN. Missing initial diagnosis is work to perform. Return one final line Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with diagnosis {classification, source, reason, scopeCompatible}; a WORKFLOW_DEFECT also names its exact approved maintenance source repository, target and scope authority. Do not edit, commit, install, integrate or close in this diagnosis phase.`
+      : phase === "READBACK"
+        ? `Read back the exact uncertain command/mutation through its owning native source and logs. Inspect current state before retry; do not repeat a mutation, edit source, install, integrate or close. For environment evidence, identify the exact fingerprint and whether the existing gradle-loopback-safe adapter applies. Return Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with a refreshed diagnosis {classification,source,reason,nextOwner,fingerprint}. If evidence remains unavailable, name its exact owner and missing predicate; this bounded read-back is not a material repair wave.`
+      : phase === "ENVIRONMENT"
+        ? `The exact Windows Selector.open loopback fingerprint has one recorded remediation cycle for this dispatch. Call the Skill tool with "gradle-loopback-safe" using its installed generic host source. Apply only that reversible process-local remediation and rerun the exact failed command in this worktree. Do not edit source, commit, install, acquire close leases or close. Return Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with diagnosis {classification,source,reason,nextOwner,fingerprint} and exact observed command/outcome. If the adapter is unavailable or the fingerprint persists, report its exact evidence; no second cycle or material repair count is authorized.`
       : phase === "REPAIR"
         ? `Use $execute-issue for the original Issue operation in this exclusively transferred original worktree. Material repair wave ${intent.wave}/10 is already recorded; do not count it again or reset the budget. Capture the latest target baseline and merge that exact commit into the topic without resetting, rebasing or rolling back a successful integration. Repair only unchanged approved requirements. Run focused checks including the original failed command, configured typechecking, full suite and independent Standards/Spec review. Record the original failed command as an exact argv array with its PASS result in verification. Publish/read a new implementation_complete containing repairWaveCount and recovery {failureIdentity, requestIdentity, taskRef, previousCompletionIdentity, previousCompletionBodySha256}, bound to the supplied original completion. Preserve prior notes. No closeout or installation.`
         : `Execute only the exact approved governing-workflow maintenance in this separate canonical-source worktree. Its own material wave ${intent.wave}/10 is recorded; return repairWaveCount ${intent.wave}. Preserve the product worktree and its pinned package. Verify/review the maintenance candidate and, only with its exact installation authority, let the installation owner install it. Return Workflow recovery result: <JSON> binding requestIdentity, failureIdentity and maintenance {repositoryId,target,operationId,candidate,packageVersion,standards,spec,verification,installation}. Otherwise return the precise missing predicate and owning next action. A new task never resets the maintenance operation budget.`;

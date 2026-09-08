@@ -201,7 +201,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const common = cwd => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const ref of new Map(hints.map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
         const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
-        if (userTexts(snapshot).includes(prompt) && snapshot.thread.cwd !== scope.sourceRepository && snapshot.thread.cwd !== failure.worktree
+        if (userTexts(snapshot).includes(prompt) && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(scope.sourceRepository)
+          && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(failure.worktree)
           && common(snapshot.thread.cwd) === common(scope.sourceRepository)) matches.push(ref);
       }
       if (matches.length !== 1) throw new Error(`Maintenance task creation is unresolved (${matches.length} exact matches); preserve its intent`);

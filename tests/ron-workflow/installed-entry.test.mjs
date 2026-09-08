@@ -40,7 +40,7 @@ function fixture({ legacyRuntime = false } = {}) {
   const referencesPath = "skills/personal/run-issue-workflow/references";
   mkdirSync(join(source, referencesPath), { recursive: true });
   cpSync(fileURLToPath(new URL(`../../${referencesPath}/codex-host-driver.md`, import.meta.url)), join(source, referencesPath, "codex-host-driver.md"));
-  if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), "export async function runCodexWorkflow() { throw new Error('Legacy runtime must not execute an existing Run'); }\nexport const prepareCodexWorkflow = runCodexWorkflow;\n");
+  if (legacyRuntime) writeFileSync(join(source, scriptsPath, "codex-workflow.mjs"), (legacyRuntime === "recovery-v0" ? "export const supportsCompletedRunReentry = true;\n" : "") + "export async function runCodexWorkflow() { throw new Error('Legacy runtime must not execute an existing Run'); }\nexport const prepareCodexWorkflow = runCodexWorkflow;\n");
   writeFileSync(join(source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package v1\n");
   git(source, "add", "skills"); git(source, "commit", "-m", "package v1");
   const install = () => installWorkflow({ sourceRepository: source, sourceCommit: git(source, "rev-parse", "HEAD"), cacheDirectory, skillDirectory: join(root, "entry") });
@@ -215,6 +215,39 @@ test("a mixed installed batch observes the existing active worker while retainin
     assert.ok(observations >= 4);
     assert.deepEqual([completed, active].map(({ runIdentity }) => f.store.readEvents(runIdentity.runId)), before);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
+  } finally { f.close(); }
+});
+
+test("a prior-format incomplete Run adopts recovery semantics without changing its Grant or accepted task intent", async () => {
+  const f = fixture({ legacyRuntime: "recovery-v0" });
+  try {
+    const { issue, runIdentity } = f.addCompleted();
+    const completion = issue.comments.pop(); issue.state = "open"; issue.events = [];
+    f.taskStates.set("task-1", "active");
+    const prompt = "Original accepted creation: every skill comes from the retained package";
+    f.store.reserveHostTask({ runId: runIdentity.runId, issueId: "I_1", prompt });
+    const originalIntent = f.store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" });
+    const prefix = f.store.readEvents(runIdentity.runId);
+    const rejected = await f.entry({ specId: "1" });
+    assert.equal(rejected.state, "UNAVAILABLE");
+    assert.equal(rejected.nextOwner, "workflow-maintenance");
+    assert.deepEqual(f.calls, [], "matching protocol and completed-reentry support alone cannot invoke the old runtime");
+    cpSync(fileURLToPath(new URL(`../../${scriptsPath}/codex-workflow.mjs`, import.meta.url)), join(f.source, scriptsPath, "codex-workflow.mjs"));
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "Reviewed runtime with recovery evidence reader");
+    const current = f.install();
+    let observations = 0;
+    f.readHooks.set(1, () => {
+      if (++observations === 5) { issue.state = "closed"; issue.comments.push(completion); f.taskStates.delete("task-1"); }
+    });
+    const result = await f.entry({ specIds: ["1"], maxWorkers: 1 });
+    assert.equal(result.state, "SUCCEEDED", JSON.stringify(result));
+    const events = f.store.readEvents(runIdentity.runId);
+    assert.deepEqual(events.slice(0, prefix.length), prefix);
+    assert.deepEqual(events.slice(prefix.length).map(event => event.type), ["runtime.observed"]);
+    assert.deepEqual(events.at(-1).workflowVersion, current.version);
+    assert.deepEqual(f.store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), originalIntent);
+    assert.equal(f.store.listRunIds().length, 1);
+    assert.ok(f.calls.every(({ name }) => !/create_thread|send_message/u.test(name)));
   } finally { f.close(); }
 });
 

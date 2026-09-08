@@ -10,7 +10,7 @@ import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
-import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, sameRecoveryTask } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, sameRecoveryTask, readRepairProgress } from "./recovery-evidence.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
@@ -198,6 +198,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       }
 
       const { lifecycle, historicalBlocks, adoptedCompletion, previousAuthorities } = selectRevisionLifecycle({ snapshot, issue, repositoryId });
+      const repairCount = (operationId, count) => readRepairProgress({ records: issue.records, issueId: issue.node_id, operationId, count });
       for (const previous of previousAuthorities) {
         const checkpoint = checkpointRead({ ...previous, spec: snapshot.spec });
         const handoff = previous.handoff.record;
@@ -238,6 +239,9 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);
       const recoveryTask = recoveryTransfer ? await tasks.read(recoveryTransfer.taskRef) : null;
       const acceptedRecovery = recoveryTransfer && recoveryTask?.recoveryRequest?.requestIdentity === recoveryIntent.requestIdentity;
+      const maintenanceProof = acceptedRecovery && recoveryIntent.phase === "MAINTENANCE" && recoveryTask.state === "RESUMABLE" && recoveryTask.recoveryResult?.maintenance
+        ? validateMaintenanceResult({ result: recoveryTask.recoveryResult, intent: recoveryIntent,
+          installed: installationCacheDirectory ? selectWorkflowVersion({ cacheDirectory: installationCacheDirectory }) : null }) : null;
       const recoveryWriting = acceptedRecovery && recoveryIntent.phase === "REPAIR" && recoveryTask.state === "RUNNING";
       const repair = journal.findLast(event => event.type === "repair.recorded" && event.issueId === issue.node_id);
       const acceptedRepair = repair && repair.candidate === completion?.record.candidate
@@ -308,7 +312,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           if (integration) {
             node.integrationVerification = integration.current ?? { state: "UNKNOWN", issueId: issue.node_id, candidate: record.candidate,
               targetHead: target.head, identity: bodyDigest(JSON.stringify(integration)), results: integration.attempts };
-            if (node.integrationVerification.targetHead !== target.head && node.integrationVerification.state === "PASS") {
+            if (issue.state !== "closed" && node.integrationVerification.targetHead !== target.head && node.integrationVerification.state === "PASS") {
               node.integrationVerification = { ...node.integrationVerification, state: "UNKNOWN" };
             }
             if (node.integrationVerification.state !== "PASS" && (issue.state === "closed" || node.worktreeState === "ABSENT")) throw new Error("Cleanup or closure contradicts the unresolved integration obligation; retain the closed-Issue owner boundary");
@@ -319,6 +323,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           const intent = transfer && journal.find(event => event.type === "recovery.intent" && event.requestIdentity === transfer.requestIdentity);
           const previousCompletion = lifecycle.find(item => item.identity === record.recovery.previousCompletionIdentity);
           node.repairLineage = validateRepairCompletion({ failure: intent?.failure, transfer, completion, previousCompletion, ancestor });
+          if (record.repairWaveCount < repairCount(record.operationIdentity.key, record.repairWaveCount)) throw new Error("Replacement completion resets the recorded material repair budget");
         }
         if (recoveryIntent?.phase === "REPAIR" && record.candidate !== recoveryIntent.failure.candidate && !record.recovery) throw new Error("Replacement completion omits its required repair lineage");
         if (task?.closeResult?.state === "HOST_CLEANUP_BLOCKED") {
@@ -329,12 +334,14 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             affectedNodes: [issue.node_id], evidence: cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`) });
         }
       }
-      const renewedCloseActive = node.repairLineage && task?.state === "RUNNING"
+      const renewedCloseActive = (node.repairLineage || maintenanceProof && workflowVersion?.id === maintenanceProof.packageVersion.id
+        && task?.closeRequest?.evidence?.maintenanceRecoveryIdentity === recoveryIntent.requestIdentity) && task?.state === "RUNNING"
         && task.closeRequest?.runId === selectedIdentity.runId && task.closeRequest?.issueId === issue.node_id
         && task.closeRequest.evidence?.authorityEvidence?.candidateCommit === completion?.record.candidate
         && task.closeRequest.evidence?.authorityEvidence?.completionEvidenceId === completion?.identity
         && recoveryTask?.state === "RESUMABLE";
       if (recoveryTransfer && task?.state !== "RESUMABLE" && !renewedCloseActive) throw new Error("Original writer is active or uncertain after exclusive recovery transfer");
+      if (renewedCloseActive) { node.closeActive = true; node.taskState = "EXECUTING"; }
       const conflict = task?.closeResult;
       if (completion && !repairing && conflict?.schema === "issue-close-result:v1" && conflict.state === "CONFLICT"
         && conflict.issueId === issue.node_id && conflict.runId === selectedIdentity.runId && conflict.candidate === completion.record.candidate
@@ -354,7 +361,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           observedResult: latest.record.reason ?? latest.record.reasonCode ?? "Execution reported a blocked outcome requiring diagnosis",
           blockedEvidenceIdentity: latest.identity,
           completionIdentity: completion?.identity ?? null, completionBodySha256: completion?.bodySha256 ?? null,
-          ownerTaskRef: originalTaskRef, repairWaveCount: latest.record.repairWaveCount ?? null });
+          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(latest.record.operationIdentity?.key, latest.record.repairWaveCount) });
         node.worktreeState = "PRESENT";
       }
       if (completion && (node.integrationVerification && node.integrationVerification.state !== "PASS" || node.closeConflict)) {
@@ -367,11 +374,12 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           owningSource: "skills/engineering/close-issue/references/executable-closeout.md",
           command: failedCheck?.command ?? ["git", "merge", record.candidate], observedResult: failedCheck?.evidence ?? (verification ? "Integration outcome unknown" : "Merge conflict; target restoration verified"),
           verificationIdentity: verification?.identity ?? null, completionIdentity: completion.identity, completionBodySha256: completion.bodySha256,
-          ownerTaskRef: originalTaskRef, repairWaveCount: record.repairWaveCount ?? null,
+          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(record.operationIdentity?.key, record.repairWaveCount),
           maintenanceEvaluation: task?.closeRequest?.evidence?.maintenanceRecoveryIdentity ?? null });
       }
+      if (renewedCloseActive) failure = null; // Let the legitimate close owner settle before consuming its next outcome.
       if (failure && issue.state !== "closed") {
-        failure = bindTechnicalFailure(failure);
+        failure = bindTechnicalFailure({ ...failure, repairWaveCount: repairCount(failure.operationId, failure.repairWaveCount) });
         if (recoveryIntent?.failure.identity === failure.identity && recoveryIntent.failure.diagnosis) {
           failure = bindTechnicalFailure({ ...failure, diagnosis: recoveryIntent.failure.diagnosis });
         }
@@ -379,11 +387,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (recoveryIntent?.failure.identity === failure.identity && acceptedRecovery && recoveryTask.state === "RESUMABLE") {
           const result = recoveryTask.recoveryResult;
           if (result && (result.requestIdentity !== recoveryIntent.requestIdentity || result.failureIdentity !== failure.identity)) throw new Error("Recovery response differs from the exact failure request");
-          if (recoveryIntent.phase === "DIAGNOSE" && result?.diagnosis) failure = bindTechnicalFailure({ ...failure, diagnosis: result.diagnosis });
+          if (["DIAGNOSE", "READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase) && result?.diagnosis) failure = bindTechnicalFailure({ ...failure, diagnosis: {
+            ...result.diagnosis, ...(recoveryIntent.phase === "READBACK" ? { readBackAttempted: true } : {}),
+            ...(recoveryIntent.phase === "ENVIRONMENT" ? { remediationAttempted: true } : {}),
+          } });
           else if (recoveryIntent.phase === "REPAIR") throw new Error("Repair settled without a verified replacement completion; inspect its owned evidence");
           else if (recoveryIntent.phase === "MAINTENANCE" && result?.maintenance) {
-            const installed = installationCacheDirectory ? selectWorkflowVersion({ cacheDirectory: installationCacheDirectory }) : null;
-            const proof = validateMaintenanceResult({ result, intent: recoveryIntent, installed });
+            const proof = maintenanceProof;
             if (workflowVersion?.id !== proof.packageVersion.id) {
               contradictions.push({ code: "workflow_runtime_reentry_required", reasonCode: "workflow_runtime_reentry_required", affectedNodes: [issue.node_id], evidence: ["Verified maintenance installation requires the installed entry to freshly reconcile this same Run with the proven package."] });
             } else {
@@ -393,6 +403,10 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             }
           }
           else if (!result) throw new Error("Recovery task settled without its diagnosis result; preserve the task and evidence");
+        }
+        if (failure?.diagnosis?.classification === "WORKFLOW_DEFECT" && failure.diagnosis.scopeCompatible === true) {
+          const source = failure.diagnosis.maintenance?.sourceRepository;
+          if (!source || !workflowVersion?.sourceRepository || realpathSync.native(source) !== realpathSync.native(workflowVersion.sourceRepository)) throw new Error("Maintenance canonical source is not proven against the affected governing package");
         }
         if (failure) node.recovery = failure;
         delete node.closeConflict;

@@ -34,7 +34,15 @@ If closeout stops because the target is dirty or close progress is partial, invo
 - Direct entry retries `/close-issue <Issue-ID>`.
 - The continuing authorized coordinator reconciles before returning to that owner.
 
-After a technical failure, an isolated task diagnoses the owning source and exact failed command. Issue repair retains the original operation, branch and worktree after the previous writer settles, and shares the same ten-wave budget. Governing-workflow repair uses a separate maintenance worktree. A replacement completion becomes current only after required verification, independent review and exact failure/ownership lineage; requirement conflicts return to planning. The main session coordinates without repair edits.
+After a technical failure, an isolated task diagnoses the owning source and exact failed command. The main session coordinates without repair edits.
+
+| Finding | Next owner |
+| --- | --- |
+| Issue defect under settled requirements | Repair retains the original operation, branch and worktree after writer settlement, sharing the ten-wave budget. |
+| Governing-workflow defect | A separate maintenance task and worktree. |
+| Requirement conflict | Planning resolves the changed requirement. |
+
+A replacement completion becomes current after required verification, independent review and exact failure/ownership lineage.
 
 Any number of Issue worktrees may complete concurrently against the same recorded target. Their completion notes remain valid while `close-issue` serially advances that target.
 

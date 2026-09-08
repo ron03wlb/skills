@@ -9,9 +9,10 @@ import { pathToFileURL } from "node:url";
 import { renderWorkflowRecord, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
-test("packaged sources and native task adapter carry a real failed merge verification through isolated repair and renewed close", async () => {
+for (const recoveryKind of ["issue", "maintenance"]) test(`packaged ${recoveryKind} recovery carries real failed integration to renewed close`, async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "technical-recovery-")));
   const repository = join(root, "repository"), lane = join(root, "issue"), packageRoot = join(root, "package");
+  const maintenanceLane = join(root, "maintenance"), cacheDirectory = join(root, "packages");
   const originalExec = childProcess.execFileSync;
   const gitAt = (cwd, ...args) => originalExec("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   const git = (...args) => gitAt(repository, ...args);
@@ -27,6 +28,22 @@ test("packaged sources and native task adapter carry a real failed merge verific
     const { createCoordinator } = await moduleAt("personal/run-issue-workflow/scripts/run-coordinator.mjs");
     const { withCloseIssueLeases } = await moduleAt("engineering/close-issue/scripts/close-lease.mjs");
     const { mergeCandidate, verifyIntegratedCandidate } = await moduleAt("engineering/close-issue/scripts/merge-candidate.mjs");
+    const { installWorkflow, selectWorkflowVersion } = await moduleAt("personal/run-issue-workflow/scripts/workflow-installation.mjs");
+    const policyPath = "skills/personal/run-issue-workflow/scripts/fixture-policy.json";
+    let installed;
+    const install = candidate => installWorkflow({ sourceRepository: packageRoot, sourceCommit: candidate, cacheDirectory, skillDirectory: join(root, "entry") });
+    if (recoveryKind === "maintenance") {
+      originalExec("git", ["init", "-b", "main", packageRoot], { stdio: "ignore" });
+      gitAt(packageRoot, "config", "user.name", "Fixture"); gitAt(packageRoot, "config", "user.email", "fixture@example.invalid");
+      writeFileSync(join(packageRoot, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture workflow source\n");
+      mkdirSync(join(packageRoot, "skills/personal/run-issue-workflow/references"), { recursive: true });
+      cpSync(resolve("skills/personal/run-issue-workflow/references/codex-host-driver.md"), join(packageRoot, "skills/personal/run-issue-workflow/references/codex-host-driver.md"));
+      writeFileSync(join(packageRoot, policyPath), JSON.stringify({ expected: "fixed" }));
+      gitAt(packageRoot, "add", "skills"); gitAt(packageRoot, "commit", "-m", "Governing package with faulty check");
+      installed = install(gitAt(packageRoot, "rev-parse", "HEAD"));
+    }
+    const retainedVersion = installed?.version;
+    const maintenanceScope = { repositoryId: "github:example/workflow", sourceRepository: packageRoot, target: "main", approvedScopeHash: "fixture-scoped-policy-fix", authority: "fixture-human-maintenance-approval", installationAuthority: "fixture-exact-installation-approval", operationId: "fixture-maintenance-operation", repairWaveCount: 0 };
     originalExec("git", ["init", "-b", "main", repository], { stdio: "ignore" });
     git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
     git("remote", "add", "origin", "https://github.com/example/repo.git");
@@ -36,7 +53,7 @@ test("packaged sources and native task adapter carry a real failed merge verific
     writeFileSync(join(lane, "behavior.txt"), "broken"); gitAt(lane, "commit", "-am", "original Issue candidate");
     const oldCandidate = gitAt(lane, "rev-parse", "HEAD");
     const common = join(repository, ".git"), store = createRunStore({ gitCommonDir: common });
-    const body = "Settled requirements: behavior is fixed";
+    const body = `Settled requirements: behavior is ${recoveryKind === "issue" ? "fixed" : "broken"}`;
     const authority = { specId: "I_1", target: "main", planningSeal: baseline, classification: "SINGLE", approvedScopeHash: bodyDigest(body), decompositionIdentity: null };
     const identity = bindProducerCheckpointOperationIdentity({ repositoryId: "github:example/repo", specId: "I_1", producerCommand: "to-spec", profileVersion: "v2", target: "main", baseline,
       bindings: { approvedScopeIdentity: authority.approvedScopeHash, classification: "SINGLE", planningSeal: baseline } });
@@ -62,12 +79,19 @@ test("packaged sources and native task adapter carry a real failed merge verific
     syncBuiltinESMExports();
     const originalRef = { threadId: "original", hostId: "local" }, repairRef = { threadId: "repair", hostId: "local" };
     const histories = new Map([["original", []]]);
-    let closeMessages = 0, forks = 0, repairs = 0, runIdentity, repairRecord, activeOriginal = false;
-    const argv = [process.execPath, "-e", "require('node:assert/strict').equal(require('node:fs').readFileSync('behavior.txt','utf8'),'fixed')"];
-    const checks = [{ command: argv, environment: { node: process.version }, readExternalInputs: async () => ({}) }];
+    let closeMessages = 0, forks = 0, repairs = 0, maintenanceCreates = 0, runIdentity, repairRecord, activeOriginal = false;
+    const argv = recoveryKind === "maintenance" ? [process.execPath, "--input-type=module", "-e", `import {readFileSync} from "node:fs"; import assert from "node:assert/strict"; import {selectWorkflowVersion} from ${JSON.stringify(pathToFileURL(join(packageRoot, "skills/personal/run-issue-workflow/scripts/workflow-installation.mjs")).href)}; const selected=selectWorkflowVersion({cacheDirectory:${JSON.stringify(cacheDirectory)}}); assert.equal(selected.state,"AVAILABLE"); assert.equal(readFileSync("behavior.txt","utf8"),JSON.parse(readFileSync(selected.root+"/${policyPath}","utf8")).expected);`] : [process.execPath, "-e", "require('node:assert/strict').equal(require('node:fs').readFileSync('behavior.txt','utf8'),'fixed')"];
+    const checks = [{ command: argv, environment: { node: process.version }, readExternalInputs: async () => recoveryKind === "maintenance" ? { packageVersion: selectWorkflowVersion({ cacheDirectory }).version.id } : {} }];
     const host = { async call(name, args) {
-      if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: lane, status: { type: activeOriginal && args.threadId === "original" ? "active" : "idle" } }, turns: histories.get(args.threadId) };
+      if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: args.threadId === "maintenance" ? maintenanceLane : lane, status: { type: activeOriginal && args.threadId === "original" ? "active" : "idle" } }, turns: histories.get(args.threadId) };
       if (name.endsWith("list_threads")) return { threads: forks ? [{ id: "repair", hostId: "local", kind: "codex", cwd: lane }] : [] };
+      if (name.endsWith("list_projects")) return { projects: [{ id: "workflow", hostId: "local", path: packageRoot, isGitRepository: true }] };
+      if (name.endsWith("create_thread")) {
+        maintenanceCreates++; assert.equal(args.target.projectId, "workflow");
+        gitAt(packageRoot, "worktree", "add", "-b", "maintenance", maintenanceLane, "main");
+        histories.set("maintenance", [{ id: "setup", status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: args.prompt }] }] }]);
+        return { threadId: "maintenance", hostId: "local" };
+      }
       if (name.endsWith("fork_thread")) {
         forks++; histories.set("repair", structuredClone(histories.get("original")));
         throw new Error("response lost after exact same-directory fork");
@@ -77,13 +101,27 @@ test("packaged sources and native task adapter carry a real failed merge verific
         histories.get(args.threadId).unshift(turn);
         const recovery = args.prompt.match(/^Recovery request: (\{.+\})$/mu);
         if (recovery) {
-          assert.equal(args.threadId, "repair", "the original task never performs repair edits");
           const request = JSON.parse(recovery[1]);
+          assert.equal(args.threadId, request.phase === "MAINTENANCE" ? "maintenance" : "repair", "the original task never performs repair edits");
           const failure = JSON.parse(args.prompt.match(/^Original failure and authority: (\{.+\})$/mu)[1]);
           if (request.phase === "DIAGNOSE") turn.items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow recovery result: ${JSON.stringify({ requestIdentity: request.requestIdentity, failureIdentity: request.failureIdentity,
-            diagnosis: { classification: "ISSUE_DEFECT", source: "behavior.txt", reason: "Concrete test proves settled behavior is broken", scopeCompatible: true } })}` });
-          else {
-            assert.equal(request.phase, "REPAIR"); assert.equal(request.wave, 4); repairs++;
+            diagnosis: recoveryKind === "maintenance" ? { classification: "WORKFLOW_DEFECT", source: policyPath, reason: "The governing check contradicts the settled requirement", scopeCompatible: true, maintenance: maintenanceScope } : { classification: "ISSUE_DEFECT", source: "behavior.txt", reason: "Concrete test proves settled behavior is broken", scopeCompatible: true } })}` });
+          else if (request.phase === "MAINTENANCE") {
+            assert.equal(request.wave, 1); assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
+            writeFileSync(join(maintenanceLane, policyPath), JSON.stringify({ expected: "broken" }));
+            gitAt(maintenanceLane, "commit", "-am", "Repair scoped governing verification policy");
+            const candidate = gitAt(maintenanceLane, "rev-parse", "HEAD");
+            const check = [process.execPath, "-e", `require('node:assert/strict').equal(require('./${policyPath}').expected,'broken')`];
+            originalExec(check[0], check.slice(1), { cwd: maintenanceLane });
+            installed = install(candidate);
+            assert.equal(gitAt(packageRoot, "status", "--porcelain"), "", "shared canonical checkout remains unchanged");
+            assert.equal(gitAt(lane, "rev-parse", "HEAD"), oldCandidate, "product candidate remains unchanged");
+            assert.equal(selectWorkflowVersion({ cacheDirectory, recordedVersion: retainedVersion }).version.id, retainedVersion.id);
+            turn.items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow recovery result: ${JSON.stringify({ requestIdentity: request.requestIdentity, failureIdentity: request.failureIdentity,
+              maintenance: { repositoryId: maintenanceScope.repositoryId, target: "main", operationId: maintenanceScope.operationId, candidate, packageVersion: installed.version,
+                repairWaveCount: 1, standards: "clean", spec: "clean", verification: [{ command: check.join(" "), result: "PASS" }], installation: { authority: maintenanceScope.installationAuthority, packageVersionId: installed.version.id } } })}` });
+          } else {
+            assert.equal(request.phase, "REPAIR"); assert.equal(request.wave, 5); repairs++;
             assert.equal(store.readEvents(runIdentity.runId).at(-1).type, "recovery.task");
             assert.equal(store.readTargetMutationWriterLock("main"), null);
             assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
@@ -91,7 +129,7 @@ test("packaged sources and native task adapter carry a real failed merge verific
             writeFileSync(join(lane, "behavior.txt"), "fixed"); gitAt(lane, "commit", "-am", "Repair settled Issue behavior");
             originalExec(argv[0], argv.slice(1), { cwd: lane });
             // Reviews are explicit fixture inputs. This test executes Git and verification, not an LLM review.
-            repairRecord = { ...completion, baseline: capturedTarget, candidate: gitAt(lane, "rev-parse", "HEAD"), repairWaveCount: 4,
+            repairRecord = { ...completion, baseline: capturedTarget, candidate: gitAt(lane, "rev-parse", "HEAD"), repairWaveCount: 5,
               verification: [{ command: argv.join(" "), argv, result: "PASS" }], recovery: { failureIdentity: failure.identity, requestIdentity: request.requestIdentity, taskRef: repairRef,
                 previousCompletionIdentity: "IC_done", previousCompletionBodySha256: bodyDigest(oldCompletion.body) } };
             fixture.comments.push(comment("IC_repaired", repairRecord));
@@ -113,7 +151,7 @@ test("packaged sources and native task adapter carry a real failed merge verific
     } };
     histories.get("original").push({ id: "execution", status: "completed", items: [] });
     const tasks = createCodexWorkflowTasks({ host, store, project: { path: repository, hostId: "local" }, packageRoot, issueNumber: async () => 1, sleep: async () => {}, discoverTasks: async () => [] });
-    const owners = createGitHubWorkflowSources({ repository, repositoryName: "example/repo", store, tasks });
+    let owners = createGitHubWorkflowSources({ repository, repositoryName: "example/repo", store, tasks, workflowVersion: installed?.version, installationCacheDirectory: cacheDirectory });
     const refresh = () => owners.sources.tracker.read({ specId: "I_1" }).then(tracker => owners.sources.reconciliation.read({ tracker, journal: runIdentity ? store.readEvents(runIdentity.runId) : [], request: {} }));
     runIdentity = (await refresh()).runIdentity;
     const writer = store.acquireWriter(runIdentity.runId);
@@ -125,8 +163,25 @@ test("packaged sources and native task adapter carry a real failed merge verific
     await step();
     assert.equal((await refresh()).facts.nodes[0].integrationVerification.state, "FAIL");
     assert.equal(existsSync(lane), true); assert.equal(fixture.state, "open"); assert.equal(git("rev-parse", "HEAD"), oldCandidate);
+    if (recoveryKind === "issue") {
+      const beforeProgress = (await refresh()).facts.nodes[0].recovery;
+      fixture.comments.push(comment("IC_progress", { kind: "implementation_progress", issueId: "I_1", operationIdentity, repairWaveCount: 4, candidate: oldCandidate }));
+      const afterProgress = (await refresh()).facts.nodes[0].recovery;
+      assert.equal(afterProgress.repairWaveCount, 4, "owner progress is joined even while the retained completion records an older count");
+      assert.equal(afterProgress.identity, beforeProgress.identity, "progress must not discard the failure or task lineage");
+    }
     await step(); // Settled handoff, lost fork response, diagnosis.
     const repairStatus = await step(); // Same isolated task, material repair, renewed completion.
+    if (recoveryKind === "maintenance") {
+      assert.equal(repairs, 0); assert.equal(maintenanceCreates, 1);
+      const stopped = await createCoordinator(options).run({ specId: "I_1" });
+      assert.equal(stopped.run.state, "BLOCKED", JSON.stringify(stopped));
+      assert.equal(stopped.legalActions.length, 0, "completed maintenance cannot spin the accepted recovery action");
+      assert.equal(stopped.diagnoses.find(item => item.reasonCode === "workflow_runtime_reentry_required").nextOwner, "installed-entry");
+      const newRuntime = await import(pathToFileURL(join(installed.root, "skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs")).href);
+      owners = newRuntime.createGitHubWorkflowSources({ repository, repositoryName: "example/repo", store, tasks, workflowVersion: installed.version, installationCacheDirectory: cacheDirectory });
+      assert.ok((await refresh()).facts.nodes[0].maintenanceRecoveryIdentity);
+    } else {
     assert.equal(repairs, 1, JSON.stringify({failures: store.readEvents(runIdentity.runId).filter(e=>e.type === "action.failed"), forks, histories: [...histories.keys()], status: repairStatus.run})); assert.equal(closeMessages, 1);
     assert.equal((await refresh()).facts.nodes[0].repairLineage.previousCandidate, oldCandidate);
     const valid = fixture.comments.at(-1).body;
@@ -135,16 +190,20 @@ test("packaged sources and native task adapter carry a real failed merge verific
     fixture.comments.at(-1).body = renderWorkflowRecord({ ...repairRecord, verification: [{ command: "different command", argv: ["skip"], result: "PASS" }] });
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /Repair completion/u);
     fixture.comments.at(-1).body = valid;
+    }
     const completed = await step();
     assert.equal(completed.run.state, "SUCCEEDED", JSON.stringify(completed));
     assert.equal((await step()).run.state, "SUCCEEDED");
     assert.equal(forks, 1); assert.equal(closeMessages, 2); assert.equal(fixture.state, "closed"); assert.equal(existsSync(lane), false);
-    assert.equal(git("rev-parse", "main"), repairRecord.candidate);
+    assert.equal(git("rev-parse", "main"), recoveryKind === "maintenance" ? oldCandidate : repairRecord.candidate);
+    writeFileSync(join(repository, "independent.txt"), "later authorized contribution"); git("add", "independent.txt"); git("commit", "-m", "Advance target after completed delivery");
+    assert.deepEqual((await refresh()).facts.contradictions, [], "historical integration PASS survives future target movement after closure");
+    assert.equal((await step()).run.state, "SUCCEEDED");
     const journal = store.readEvents(runIdentity.runId);
     assert.equal(journal.filter(event => event.type === "grant.recorded").length, 1);
     assert.equal(journal.filter(event => event.type === "dispatch.recorded").length, 1);
     assert.equal(journal.filter(event => event.type === "repair.recorded").length, 0, "integration repair never fabricates conflict history");
-    assert.deepEqual(journal.filter(event => event.type === "recovery.intent").map(event => event.wave), [null, 4]);
+    assert.deepEqual(journal.filter(event => event.type === "recovery.intent").map(event => event.wave), [null, recoveryKind === "maintenance" ? 1 : 5]);
     assert.equal(store.readTargetMutationWriterLock("main"), null); assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
   } finally { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); }
 });

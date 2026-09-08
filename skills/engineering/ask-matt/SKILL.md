@@ -19,7 +19,7 @@ Route the situation; do not perform the work.
 
 The personal `/run-issue-workflow` uses its installed entry and current-host tools, preserves each Run’s original Grant and retained package with compatible runtime observations, and offers available text controls when the panel cannot open. Explicit Spec/batch re-entry reconciles completed members without replay; active members share existing worker limits. It carries approved pre-Run maintenance through [its owner](../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) without repeated leaf commands. A Spec-writing request ends at planning/publication; consumer configuration stays static.
 
-Read [route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
+Read [workflow route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
 
 Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration.
 

@@ -10,11 +10,11 @@ Bind the original Run, Issue operation, task, worktree/topic, candidate, target 
 | --- | --- |
 | `UNDIAGNOSED` | Continue permitted source/command diagnosis; absence of an initial diagnosis is not a permission gate. |
 | `ISSUE_DEFECT` | The isolated Issue repair task, only when settled requirements cover the change. |
-| `ENVIRONMENT` | The existing exact environment adapter and its original one-cycle bound; an unavailable adapter is reported with evidence. |
+| `ENVIRONMENT` | Read back an unclassified fingerprint, then invoke the exact existing `gradle-loopback-safe` adapter once per dispatch/fingerprint. Other adapters remain unavailable. |
 | `WORKFLOW_DEFECT` | A separate maintenance task in the canonical workflow-source repository. |
 | `REQUIREMENT_CONFLICT` | Human design/planning decision. |
 | `CAPABILITY_UNAVAILABLE` | The named capability owner, with evidence of the unavailable operation. |
-| `OUTCOME_UNKNOWN` | Read back the exact mutation/result before any retry. |
+| `OUTCOME_UNKNOWN` | Dispatch one bounded read-only `READBACK` phase through the isolated task before any retry. Unresolved evidence names the actual owning source and next action. |
 
 Newly discovered necessary files and technical failures do not themselves alter scope. New requirements, target, exclusions or applicable authority return to planning.
 
@@ -22,7 +22,7 @@ Newly discovered necessary files and technical failures do not themselves alter 
 
 The existing journal records `recovery.intent` before task creation/message dispatch and `recovery.task` after native ownership read-back. The previous task must be settled in the exact worktree; the new task receives the same worktree through a same-directory fork and preserves original history. The immutable handoff and fork intents survive lost responses and pending setup; adopt exactly one native match and retain ambiguity rather than create another writer. Reuse this repair task for the same Issue operation. An original task becoming active invalidates the transfer until its exact owner settles.
 
-Before material edits, consume the already recorded `REPAIR` wave and the proved cumulative count. Original execution review repairs, conflict repair, integration recovery, task changes and restart share a maximum of ten material waves. Diagnosis, polling and environment observations are not material waves. Never assume an unknown count is zero or count a coordinator-reserved wave twice. Further confirmed review repairs increment and read back the same operation's progress before editing.
+Before material edits, consume the already recorded `REPAIR` wave and the proved cumulative count. Original execution review repairs, conflict repair, integration recovery, task changes and restart share a maximum of ten material waves. Diagnosis, polling and environment observations are not material waves. Never assume an unknown count is zero or count a coordinator-reserved wave twice. Further confirmed review repairs increment and read back the same operation's progress before editing. GitHub progress uses a trusted `implementation_progress` record with the full `operationIdentity`, `issueId` and cumulative `repairWaveCount`; this is existing execution progress encoding, not completion or new authority. The source reader joins these counts and rejects resets.
 
 Capture the latest target as this attempt's baseline; merge that exact commit into the topic without reset, rebase or rollback of a successful merge. Preserve the old candidate and all completion notes. Run the original failed command, affected focused checks, configured typechecking, full suite and independent Standards/Spec review at the new committed candidate. Required checks must prove actual behavior, including integration obligations; ancestry alone is insufficient.
 

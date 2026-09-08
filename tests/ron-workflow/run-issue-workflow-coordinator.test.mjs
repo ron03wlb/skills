@@ -88,6 +88,39 @@ const multiIdentity = {
   decompositionIdentity: "decomposition:12:01-05",
 };
 
+for (const classification of ["OUTCOME_UNKNOWN", "ENVIRONMENT"]) test(`${classification} dispatches its bounded owning action without a material wave`, async () => {
+  const { root, store } = createStoreFixture();
+  const original = { threadId: "original", hostId: "local" }, repair = { threadId: "repair", hostId: "local" };
+  let recoveryRequest, attempted = false;
+  const prompts = [];
+  const failure = () => bindTechnicalFailure({ runId: identity.runId, issueId: "15", operationId: "original-operation", candidate: "b".repeat(40), targetHead: "a".repeat(40),
+    worktree: root, topic: "issue", owningSource: "native command output", command: ["gradle", "test"], observedResult: "missing result", ownerTaskRef: original, repairWaveCount: null,
+    diagnosis: { classification, source: "native command owner", nextOwner: "native command owner", reason: "Read exact command output",
+      ...(classification === "ENVIRONMENT" ? { fingerprint: WINDOWS_GRADLE_LOOPBACK_FINGERPRINT, remediationAttempted: attempted } : { readBackAttempted: attempted }) } });
+  const tasks = { findIssueLane: async () => [original], create: async () => { throw new Error("No replacement"); }, wait: async () => { throw new Error("A step yields"); }, read: async ref => ({ state: "RESUMABLE", cwd: root, snapshot: { turns: [{ status: "completed" }] }, ...(ref.threadId === "repair" ? { recoveryRequest } : {}) }),
+    ensureRecoveryTask: async () => ({ taskRef: repair, previousOwner: { taskRef: original, state: "SETTLED", worktree: root, turnId: "settled" } }),
+    message: async (ref, prompt) => { assert.deepEqual(ref, repair); prompts.push(prompt); recoveryRequest = JSON.parse(prompt.match(/^Recovery request: (\{.+\})$/mu)[1]); } };
+  const options = { store, tasks, tracker: { read: async () => ({}) }, now: () => "2026-09-08T00:00:00.000Z", sleep: async () => {},
+    reconcile: async () => reconciliation({ taskRefs: { 15: original }, nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: "NONE", completionState: "BLOCKED", candidateReachable: false, worktreeState: "PRESENT", recovery: failure() }] }) };
+  try {
+    const writer = store.acquireWriter(identity.runId);
+    writer.append({ type: "grant.recorded", at: options.now(), runIdentity: identity });
+    writer.append({ type: "dispatch.recorded", at: options.now(), issueId: "15", attempt: 1, taskRef: original }); writer.release();
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(prompts.length, 1);
+    assert.equal(recoveryRequest.phase, classification === "ENVIRONMENT" ? "ENVIRONMENT" : "READBACK");
+    assert.equal(recoveryRequest.wave, null, "an unproved material budget does not prevent read-back or exact bounded tool remediation");
+    assert.match(prompts[0], classification === "ENVIRONMENT" ? /gradle-loopback-safe/u : /Read back the exact uncertain command/u);
+    const events = store.readEvents(identity.runId);
+    assert.equal(events.filter(event => event.type === "remediation.recorded").length, classification === "ENVIRONMENT" ? 1 : 0);
+    attempted = true;
+    const stopped = await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(stopped.legalActions.length, 0); assert.equal(stopped.diagnoses[0].nextOwner, "native command owner");
+    assert.equal(prompts.length, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 const selectedPlanningSeal = "c".repeat(40);
 
 test("cooperative batch steps read fresh activity, dispatch once, and preserve the existing Grant", async () => {

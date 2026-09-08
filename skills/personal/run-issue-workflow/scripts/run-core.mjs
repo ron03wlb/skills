@@ -470,10 +470,11 @@ export function reduceRunReadyHandoff(input) {
 }
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
+  if (node.closeActive) return "CLOSING";
   if (node.recoveryActive) return "EXECUTING";
   if (node.recovery) return "BLOCKED";
   if (node.completionState === "BLOCKED") return "BLOCKED";
-  if (!node.recoveryActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+  if (!node.recoveryActive && !node.closeActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
     return "BLOCKED";
   }
   if (node.completionState === "COMPLETE") {
@@ -845,7 +846,7 @@ export function reduceRun(input) {
     if (node.recovery && !node.recoveryActive) {
       return [diagnosis({ reasonCode: "technical_failure_recovery", evidence: [node.recovery.observedResult],
         noAutomaticTransition: "Only the exact failure owner may diagnose or repair within approved scope.", affectedNodes: [node.issueId], allNodes: allNodeIds,
-        nextOwner: nextRecoveryPhase(node.recovery) ? "isolated-recovery-task" : node.recovery.diagnosis?.classification === "REQUIREMENT_CONFLICT" ? "planning-human" : "named-technical-owner",
+        nextOwner: nextRecoveryPhase(node.recovery) ? "isolated-recovery-task" : node.recovery.diagnosis?.classification === "REQUIREMENT_CONFLICT" ? "planning-human" : node.recovery.diagnosis?.nextOwner ?? node.recovery.diagnosis?.source,
         resumePredicates: ["failure_diagnosed_and_required_verification_proved"] })];
     }
     if (node.completionState === "BLOCKED" && !node.recoveryActive) {
@@ -931,7 +932,7 @@ export function reduceRun(input) {
         affectedNodes: [node.issueId],
       }];
     }
-    if (!node.recoveryActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+    if (!node.recoveryActive && !node.closeActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
       return [{
         code: "completion_while_task_active",
         reasonCode: REASON_CODES.evidenceContradiction,
@@ -1019,7 +1020,8 @@ export function reduceRun(input) {
         : "Contradictory authoritative evidence has no safe precedence.",
       affectedNodes: [...contradiction.affectedNodes].sort(compareIds),
       allNodes: allNodeIds,
-      nextOwner: contradiction.code === "host_cleanup_blocked" ? "close-issue" : "human",
+      nextOwner: contradiction.code === "host_cleanup_blocked" ? "close-issue"
+        : contradiction.code === "workflow_runtime_reentry_required" ? "installed-entry" : "human",
       resumePredicates: contradiction.code === "host_cleanup_blocked"
         ? ["exact_worktree_physical_absence_proven_or_supported_host_release_resolved_by_same_close_owner"]
         : [`resolve_contradiction:${contradiction.code}`],
@@ -1099,7 +1101,7 @@ export function reduceRun(input) {
       cycle: 1,
     }];
   }).slice(0, slots);
-  const recoveries = normalizedNodes.filter(node => node.recovery && !node.recoveryActive && node.trackerState === "OPEN"
+  const recoveries = normalizedNodes.filter(node => !isolated.has(node.issueId) && node.recovery && !node.recoveryActive && node.trackerState === "OPEN"
     && node.blockers.every(id => stateById.get(id) === "SUCCEEDED")).flatMap(node => {
     const phase = nextRecoveryPhase(node.recovery);
     if (!phase) return [];

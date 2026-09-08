@@ -132,7 +132,7 @@ test("moved workflow detail has an exact conditional owner-local reference and s
         "skills/engineering/close-issue/references/executable-closeout.md",
         "skills/engineering/close-issue/references/parent-closeout.md",
       ],
-      trigger: /Read \[close coordination\]\(references\/close-coordination\.md\) before any lease acquisition.*exactly three ordered executable actions.*\[executable closeout\]\(references\/executable-closeout\.md\).*For a Multi-Issue parent.*\[parent closeout\]\(references\/parent-closeout\.md\)/isu,
+      trigger: /Read \[close coordination\]\(references\/close-coordination\.md\) before any lease acquisition.*For executable actions.*\[executable closeout\]\(references\/executable-closeout\.md\).*For a Multi-Issue parent.*\[parent closeout\]\(references\/parent-closeout\.md\)/isu,
     },
   ];
 
@@ -1926,20 +1926,21 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.doesNotMatch(close, /durable FIFO queue|waiter registry|queue-specific reclaim/iu);
   assert.match(close, /exactly three ordered.*merge.*remove.*close/isu);
   assert.match(close, /candidate.*already.*ancestor.*target.*merge.*satisfied/isu);
-  assert.match(close, /merge exact `C`.*latest target.*without rebasing.*refreshing.*editing/isu);
+  assert.match(close, /merge unchanged `C` into the latest target/iu);
+  assert.match(close, /Do not rebase, refresh, edit `C`/iu);
   assert.match(close, /target.*ancestor of `C`.*git merge --ff-only <C>.*diverged histories.*git merge --no-ff --no-edit <C>.*merge\.ff/isu);
   assert.match(close, /merge conflicts.*git merge --abort.*Issue worktree registered.*Issue open/isu);
   assert.match(close, /never.*append `implementation_blocked`.*invoke `execute-issue`/isu);
   assert.match(close, /target worktree is dirty.*stop before mutation.*never stash.*commit.*clean.*reset.*move/isu);
-  assert.match(close, /dirty.*human.*preserve.*resolve.*Direct entry.*retr.*`\/close-issue <Issue-ID>`.*authorized coordinator.*same close owner.*fresh reconciliation.*Neither repeats.*execution review.*full suite/isu);
-  assert.match(close, /derive current progress.*Git ancestry.*worktree registration.*tracker state/isu);
+  assert.match(close, /human resolves dirt.*direct `\/close-issue <Issue-ID>`.*authorized coordinator resumes this owner after reconciliation.*without repeating execution review or a full suite/isu);
+  assert.match(close, /Recheck Git ancestry, worktree registration and tracker state.*skip only satisfied actions/isu);
   assert.match(close, /Before any action.*already-closed Issue.*unreachable.*worktree\/directory.*contradictory.*stop/isu);
   assert.match(close, /git worktree remove/u);
-  assert.match(close, /exact registered Issue worktree.*path.*topic branch.*clean state.*`HEAD == C`/isu);
+  assert.match(close, /exact registered worktree.*path.*topic branch.*clean state.*`HEAD == C`/isu);
   assert.match(close, /If the Issue is open, close it/iu);
   assert.match(close, /read it back once/iu);
   assert.match(close, /retry skips completed actions.*resumes the next one/isu);
-  assert.match(close, /human or same authorized coordinator may rerun `execute-issue`.*same topic branch.*Issue worktree.*latest target.*original Acceptance Criteria.*Scope change.*planning/isu);
+  assert.match(close, /Authorized execution recovery retains the topic\/worktree, latest target and original Acceptance Criteria.*Scope change.*planning/isu);
   assert.match(close, /Multi-Issue Spec.*Decomposition publication record.*every exact child is closed.*candidate.*reachable.*same target/isu);
   assert.match(close, /returns to `\/to-tickets <Parent-ID>` reconciliation/iu);
   assert.match(close, /parent closure never claims `push_ready`/iu);

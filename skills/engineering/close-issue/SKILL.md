@@ -5,7 +5,7 @@ description: Close one completed Issue or Multi-Issue Spec against its recorded 
 
 # Close Issue
 
-Close one completed Executable Issue through three ordered actions, or a Multi-Issue parent through parent-only closeout. Never repairs product code, invokes `execute-issue`, reruns Issue review or aggregate verification, pushes, or deploys.
+Close one completed Executable Issue through exactly three ordered actions, or a Multi-Issue parent through parent-only closeout. Never repairs product code, invokes `execute-issue`, reruns Issue review or aggregate verification, pushes, or deploys.
 
 ## 1. Bind entry and owners
 
