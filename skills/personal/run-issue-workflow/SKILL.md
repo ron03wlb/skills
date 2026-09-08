@@ -14,6 +14,8 @@ Run one bounded Tracker Spec as a Codex-native DAG, or an explicitly selected ba
 
 `/run-issue-workflow <Spec-A>,<Spec-B>` explicitly selects a batch. It shares a worker bound (default three), observes all existing selected workers before dispatch, and rotates one ready action per Run while preserving each Run limit. Close waits consume no worker slot. Unselected Specs never start.
 
+Explicit Spec or batch selection includes matching completed Runs: reconcile current canonical identity and scope against their original Grants and retained packages. A cached `SUCCEEDED` is only a discovery hint; observed completion permits no execution, verification or close replay. STOPPED, changed scope and ambiguous identities retain their gates.
+
 A no-argument invocation resumes only one unique non-terminal Run from current journals and live tracker evidence. Zero candidates require a Spec ID; multiple candidates require explicit selection; otherwise take no workflow action. Never select from a global queue, title, recency, or label alone.
 
 Bind an immutable Run identity to the exact Spec, Issue target branch, classification, approved scope hash, and, for Multi-Issue, exact decomposition identity. A Single-Issue Run contains only the Spec Issue. A Multi-Issue Run contains every mapped child, and published blocker edges alone determine the ready frontier; never infer edges from paths, symbols, modules, titles, or overlap.
@@ -49,6 +51,6 @@ Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur onl
 
 Read [Run recovery](references/recovery.md) only after a worker, tracker, environment, writer, or coordinator failure. Apply its bounded retries, tracker probes, and single recognized environment adapter exactly. Unknown ownership or contradictory identity always fails closed; never steal a lease, guess a lane, synthesize a handoff, repair product code, or silently expand scope.
 
-Stop at `SUCCEEDED`, `STOPPED`, or any state with no legal action. A blocked, failed, or paused result must name exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates. Re-entry always reacquires live evidence and resumes only the next legal action without duplication.
+Stop at reconciled `SUCCEEDED`, `STOPPED`, or a state with no legal action and no pending owning result. Keep healthy waits and pending native calls with their original owner. For a real gate, use [the recovery diagnosis](references/recovery.md#stop-with-a-diagnosis); check existing human authority and the rule's precondition before interpreting a Skill as requiring another approval. Re-entry resumes only the next legal action from fresh evidence.
 
 This personal coordinator uses only current-host Codex task capabilities and the shared installed package. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.

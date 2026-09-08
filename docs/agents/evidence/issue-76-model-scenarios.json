@@ -1,0 +1,881 @@
+{
+  "schema": "issue-76-model-observations:v1",
+  "model": "gpt-5.5",
+  "reasoning": "xhigh",
+  "harness": "Codex CLI 0.147.0, isolated ephemeral read-only evaluation; synthetic workflow snapshots",
+  "limitations": "Synthetic workflow state; actual local reads and live model answers, no real workflow action. One run per case. GPT-6 Astra unavailable. Expected outcomes were not submitted to the model. Repository instructions affected language; original answers are unedited.",
+  "cases": [
+    {
+      "id": "approved-bootstrap",
+      "files": [
+        "skills/personal/run-issue-workflow/SKILL.md",
+        "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+        "skills/engineering/execute-issue/SKILL.md"
+      ],
+      "situation": "The human previously started exact Spec S and explicitly approved maintenance Issue M and its task, implementation, close and installation scopes. No Run Grant exists. Current original task/control is connected and ACTIVE; the same approved revision, closed blockers and exact owner read back. The trusted readBootstrapHandoff result is EXECUTE for M. An earlier assistant proposed asking the human to type /execute-issue M again. Decide the next action.",
+      "expected": "Continue through execute-issue under the existing exact maintenance handoff; no second human command or invented Grant.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- docs/agents/references/approved-pre-run-workflow-maintenance.md\n- skills/engineering/execute-issue/SKILL.md\n\nScenario:\nThe human previously started exact Spec S and explicitly approved maintenance Issue M and its task, implementation, close and installation scopes. No Run Grant exists. Current original task/control is connected and ACTIVE; the same approved revision, closed blockers and exact owner read back. The trusted readBootstrapHandoff result is EXECUTE for M. An earlier assistant proposed asking the human to type /execute-issue M again. Decide the next action.\n",
+      "inputs": [
+        {
+          "path": "skills/personal/run-issue-workflow/SKILL.md",
+          "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+        },
+        {
+          "path": "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+          "sha256": "feaeebbe326596a59a5fa8ae03022af0517eadb37fae7839967ad0a259245ae7"
+        },
+        {
+          "path": "skills/engineering/execute-issue/SKILL.md",
+          "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+        }
+      ],
+      "result": {
+        "id": "approved-bootstrap",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\approved-bootstrap.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:36:02.105Z",
+        "endedAt": "2026-09-08T07:36:42.904Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'docs/agents/references/approved-pre-run-workflow-maintenance.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/personal/run-issue-workflow/SKILL.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/engineering/execute-issue/SKILL.md'\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "**結論：** proposed next action is to invoke `execute-issue` for Issue M using the exact continuing pre-Run maintenance handoff. I only observed/read the rule files; I did not perform that workflow action.\n\nNo new human input is needed. The scenario already says the human approved maintenance Issue M and its execution scope, control is connected/`ACTIVE`, and trusted `readBootstrapHandoff` returned `EXECUTE`. Asking the human to type `/execute-issue M` again would add an unnecessary gate.\n\nPreserve evidence/owner: original human Start for Spec S, approved revision, closed blockers, exact owner read-back, `repositoryId/specId/issueId/target/approvedScopeHash/decompositionIdentity/startAuthority/operations`, connected active control, and deterministic operation identity. The maintenance handoff is transient authority; `execute-issue` becomes the implementation receipt owner.\n\nReal gate: [skills/engineering/execute-issue/SKILL.md](C:/Users/ron.chang/.codex/worktrees/5024/skills/skills/engineering/execute-issue/SKILL.md) says: “Entry authority is direct human invocation or a valid DAG Run Grant. Direct human authority includes the exact continuing pre-Run maintenance handoff”. This gate is satisfied by the observed approved maintenance handoff, even though no Run Grant exists.",
+      "eventStreamSha256": "b272f281749950e9120e97b589830cc7c35a84c93f60af65d7a5b90a3d1e7ce1",
+      "usage": {
+        "input_tokens": 42803,
+        "cached_input_tokens": 20224,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1577,
+        "reasoning_output_tokens": 1032
+      },
+      "assessment": "Main next-action decision matched; only local instruction reads and proposed actions were observed, under synthetic owner facts."
+    },
+    {
+      "id": "completed-reentry",
+      "files": [
+        "skills/personal/run-issue-workflow/SKILL.md",
+        "skills/personal/run-issue-workflow/OPERATOR.md"
+      ],
+      "situation": "The human invokes /run-issue-workflow S,T. Current canonical Spec bodies and scope match their original journals and Grants. S has a cached SUCCEEDED status, and fresh tracker closure, candidate reachability, physical worktree absence and native task evidence agree. Its original retained package verifies; the current trusted package has the same source/protocol and supports completed re-entry. T is non-terminal with one ready child. Decide how S participates and what happens next for the batch.",
+      "expected": "Reconcile S under original authority with no replay/replacement; T remains eligible within existing limits.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- skills/personal/run-issue-workflow/OPERATOR.md\n\nScenario:\nThe human invokes /run-issue-workflow S,T. Current canonical Spec bodies and scope match their original journals and Grants. S has a cached SUCCEEDED status, and fresh tracker closure, candidate reachability, physical worktree absence and native task evidence agree. Its original retained package verifies; the current trusted package has the same source/protocol and supports completed re-entry. T is non-terminal with one ready child. Decide how S participates and what happens next for the batch.\n",
+      "inputs": [
+        {
+          "path": "skills/personal/run-issue-workflow/SKILL.md",
+          "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+        },
+        {
+          "path": "skills/personal/run-issue-workflow/OPERATOR.md",
+          "sha256": "0ec71bf767b3d5525272539ef6e4260478a86ba7c4c5922028a4c97914a5adb1"
+        }
+      ],
+      "result": {
+        "id": "completed-reentry",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\completed-reentry.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:36:02.150Z",
+        "endedAt": "2026-09-08T07:36:52.487Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Item -LiteralPath .\\\\skills\\\\personal\\\\run-issue-workflow\\\\SKILL.md | Select-Object -ExpandProperty FullName\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Item -LiteralPath .\\\\skills\\\\personal\\\\run-issue-workflow\\\\OPERATOR.md | Select-Object -ExpandProperty FullName\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath .\\\\skills\\\\personal\\\\run-issue-workflow\\\\OPERATOR.md\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath .\\\\skills\\\\personal\\\\run-issue-workflow\\\\SKILL.md\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "觀察到的 read：已只讀檢查 `skills/personal/run-issue-workflow/SKILL.md` 與 `OPERATOR.md`；未執行 workflow action。\n\nChosen next action：S 只作為 explicit batch 中已完成成員參與 reconciliation；不得 replay execution、verification 或 close。S 不占 worker slot。batch 下一步是對 T 的 one ready child 提出下一個 legal dispatch/adopt action，但這只是建議 action，尚未執行。\n\nNew human input：不需要。原因是人類已明確 invoked `/run-issue-workflow S,T`，S 的 completed re-entry 條件在 scenario 中已滿足；T 是 non-terminal 且有 ready child，沒有 selection ambiguity。\n\nPreserved evidence/owner：保留 S 的 original Run、Grant、retained package、fresh tracker closure、candidate reachability、physical worktree absence、native task evidence；S 的完成狀態由 `run-issue-workflow` reconciliation owner 維持。T 保留自己的獨立 Run/Grant/frontier。\n\nReal gate：`skills/personal/run-issue-workflow/SKILL.md` owns it: “A cached `SUCCEEDED` is only a discovery hint; observed completion permits no execution, verification or close replay.” Also: “Release dependants only after the candidate is reachable from the Issue target branch, the exact worktree is absent, and the Issue is closed.”",
+      "eventStreamSha256": "76adc4604a1bfeff8ec022fbe2808b8a43b7208e54bc43b541b3b9ea7e7b3146",
+      "usage": {
+        "input_tokens": 63058,
+        "cached_input_tokens": 21632,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2087,
+        "reasoning_output_tokens": 1352
+      },
+      "assessment": "Main next-action decision matched; only local instruction reads and proposed actions were observed, under synthetic owner facts."
+    },
+    {
+      "id": "pending-native-result",
+      "files": [
+        "skills/personal/run-issue-workflow/SKILL.md",
+        "skills/personal/run-issue-workflow/references/codex-host-driver.md",
+        "skills/personal/run-issue-workflow/references/recovery.md"
+      ],
+      "situation": "The original functions.exec driver cell yielded a running cell ID. Its native create_thread request r17 was recorded as dispatched and its Promise is still pending. No stopped-cell or coordinator-exit evidence exists. The user asks for status after a slow response. A second caller suggests terminating the cell and restarting the installed entry to get a task ID. Choose the immediate action and describe what evidence would allow recovery later.",
+      "expected": "Keep the original live cell/request and continue waiting; status is pending, not failure; stopped evidence and original-owner outcome are required for recovery.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- skills/personal/run-issue-workflow/references/codex-host-driver.md\n- skills/personal/run-issue-workflow/references/recovery.md\n\nScenario:\nThe original functions.exec driver cell yielded a running cell ID. Its native create_thread request r17 was recorded as dispatched and its Promise is still pending. No stopped-cell or coordinator-exit evidence exists. The user asks for status after a slow response. A second caller suggests terminating the cell and restarting the installed entry to get a task ID. Choose the immediate action and describe what evidence would allow recovery later.\n",
+      "inputs": [
+        {
+          "path": "skills/personal/run-issue-workflow/SKILL.md",
+          "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+        },
+        {
+          "path": "skills/personal/run-issue-workflow/references/codex-host-driver.md",
+          "sha256": "2605b273031141e91c069103d9d5864fcd55b337328b3a2afe4356d45d09c5c4"
+        },
+        {
+          "path": "skills/personal/run-issue-workflow/references/recovery.md",
+          "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+        }
+      ],
+      "result": {
+        "id": "pending-native-result",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\pending-native-result.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:36:52.488Z",
+        "endedAt": "2026-09-08T07:37:32.006Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/personal/run-issue-workflow/SKILL.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/personal/run-issue-workflow/references/recovery.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/personal/run-issue-workflow/references/codex-host-driver.md'\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "**Observed Read:** 我只讀取了三個候選 instruction files，沒有執行 workflow、沒有停止 cell、沒有重啟 entry。\n\n**Chosen Next Action:** 提議的立即動作是繼續等待原本 running `functions.exec` driver cell，透過同一 cell 的 `functions.wait` 收集後續 yield/status。不要 terminate，也不要 restart installed entry 來拿 task ID。\n\n**Human Input:** 不需要新的 human input。原因是目前只是 slow response；`r17` 已記錄為 dispatched，Promise 仍 pending，且沒有 stopped-cell 或 coordinator-exit evidence。第二位 caller 的 restart 建議沒有足夠 evidence 授權。\n\n**Preserved Evidence/Owner:** 保留 original driver cell ID、原 session / `workflow.host` state、native request `r17` 的 dispatched 狀態與 pending Promise owner。未來 recovery 需要：confirmed stopped-cell evidence、previous driver ID、disk checkpoint；若 `r17` outcome 不確定，必須讀 original task / creation intent / message 等 owner evidence 後再 reconcile，不能 replay native create。\n\n**Real Gate:** `skills/personal/run-issue-workflow/SKILL.md` owns this gate: “Keep healthy waits and pending native calls with their original owner.” Referenced driver rule: `references/codex-host-driver.md`: “An active or pending original cell must continue through `functions.wait`; a slow call is not evidence of disconnection.”",
+      "eventStreamSha256": "5e232757927a8a2bc01887adda21a898c3143283980b4ec6f2a6df1fa0a3c464",
+      "usage": {
+        "input_tokens": 42779,
+        "cached_input_tokens": 20224,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1624,
+        "reasoning_output_tokens": 1032
+      },
+      "assessment": "Main next-action decision matched; only local instruction reads and proposed actions were observed, under synthetic owner facts."
+    },
+    {
+      "id": "real-scope-change",
+      "files": [
+        "skills/engineering/execute-issue/SKILL.md",
+        "skills/personal/run-issue-workflow/references/recovery.md",
+        "skills/engineering/to-spec/SKILL.md"
+      ],
+      "situation": "An execution lane has a valid original Grant for ACs that exclude deployment and a public API change. The current user message says: Write a revised Spec adding that public API and production deployment. Existing tracker scope and Grant still describe the old revision. Decide whether to implement those changes now, what authorized work can continue, and what exact instruction owns any pause. The user has requested Spec writing, not execution of the revised scope.",
+      "expected": "Keep execution inside original scope; route approved Spec writing to planning/publication, identify scope gate, do not start new execution/deployment.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/execute-issue/SKILL.md\n- skills/personal/run-issue-workflow/references/recovery.md\n- skills/engineering/to-spec/SKILL.md\n\nScenario:\nAn execution lane has a valid original Grant for ACs that exclude deployment and a public API change. The current user message says: Write a revised Spec adding that public API and production deployment. Existing tracker scope and Grant still describe the old revision. Decide whether to implement those changes now, what authorized work can continue, and what exact instruction owns any pause. The user has requested Spec writing, not execution of the revised scope.\n",
+      "inputs": [
+        {
+          "path": "skills/engineering/execute-issue/SKILL.md",
+          "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+        },
+        {
+          "path": "skills/personal/run-issue-workflow/references/recovery.md",
+          "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+        },
+        {
+          "path": "skills/engineering/to-spec/SKILL.md",
+          "sha256": "15d6a3a55505616c0763cae49db67daae76f4d7231a0ee39704a6a4a0aa105e2"
+        }
+      ],
+      "result": {
+        "id": "real-scope-change",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\real-scope-change.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:36:52.531Z",
+        "endedAt": "2026-09-08T07:38:00.091Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/personal/run-issue-workflow/references/recovery.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/engineering/execute-issue/SKILL.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/engineering/to-spec/SKILL.md'\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "結論：下一步應暫停 revised-scope implementation，改走 `to-spec` revision/publication；不要現在實作 public API 或 production deployment。我只觀察性讀取了三個指定檔案，沒有執行 proposed workflow action。\n\nNew human input：判定暫停不需要；目前訊息只給 Spec-writing authority。要執行 revised scope 或 deployment，仍需要新的 published Spec、matching Grant，以及 deploy authority。\n\n可繼續的授權工作：只限 original Grant 覆蓋的 old-scope ACs；不能把 public API/deployment 納入 execution。Preserved evidence/owner：保留 original Grant、old ACs/exclusions、target/scope identity；`execute-issue` 仍是 implementation receipt owner；revised Spec publication 由 `to-spec` owns。\n\nReal gates：\n`skills/engineering/execute-issue/SKILL.md`: “Any behavior, Acceptance Criteria, target, exclusion, independent outcome, or ownership change is a Scope change and stops for planning.”\n\n`skills/engineering/to-spec/SKILL.md`: “This skill authorizes publication only—not execution, integration, push, deployment, rollback, or another lane's mutation.”",
+      "eventStreamSha256": "03cbb6c5210910057c14ea689a6ec24570620e3c1c0cf05901b8f4c3aa82ef3f",
+      "usage": {
+        "input_tokens": 43019,
+        "cached_input_tokens": 19200,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 3098,
+        "reasoning_output_tokens": 2586
+      },
+      "assessment": "Main next-action decision matched; only local instruction reads and proposed actions were observed, under synthetic owner facts."
+    },
+    {
+      "id": "unavailable-host-release",
+      "files": [
+        "skills/engineering/close-issue/SKILL.md",
+        "skills/engineering/close-issue/references/executable-closeout.md",
+        "skills/engineering/close-issue/references/host-cleanup.md",
+        "skills/personal/run-issue-workflow/references/recovery.md"
+      ],
+      "situation": "Candidate C is already integrated, completion/review remain valid, Git registration is absent, and the exact owned ordinary empty directory remains after EBUSY. Native evidence proves the original task idle. The exposed bridge release capability is UNAVAILABLE, without helper ownership or respawn fencing. Another incident succeeded after native archive/restore, but no generic release contract was delivered. The Issue is OPEN. Decide the remaining close result and whether that prior incident authorizes automatic cleanup or closure here.",
+      "expected": "Preserve integration/completion/pending path and failure, assess within original close owner, release its leases in reverse, report host blocker, require physical absence before closure.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/close-issue/SKILL.md\n- skills/engineering/close-issue/references/executable-closeout.md\n- skills/engineering/close-issue/references/host-cleanup.md\n- skills/personal/run-issue-workflow/references/recovery.md\n\nScenario:\nCandidate C is already integrated, completion/review remain valid, Git registration is absent, and the exact owned ordinary empty directory remains after EBUSY. Native evidence proves the original task idle. The exposed bridge release capability is UNAVAILABLE, without helper ownership or respawn fencing. Another incident succeeded after native archive/restore, but no generic release contract was delivered. The Issue is OPEN. Decide the remaining close result and whether that prior incident authorizes automatic cleanup or closure here.\n",
+      "inputs": [
+        {
+          "path": "skills/engineering/close-issue/SKILL.md",
+          "sha256": "49da9c3fe7108b7ff8af106f891dc4b5ee39201564c113f3f58a5b66109d3645"
+        },
+        {
+          "path": "skills/engineering/close-issue/references/executable-closeout.md",
+          "sha256": "fd5da9e20400bea3604db6f9aebefdf4dbe1df43eccdab28cdba85804fd774dc"
+        },
+        {
+          "path": "skills/engineering/close-issue/references/host-cleanup.md",
+          "sha256": "9472bb699cfd0e18aeeaa0e33412b0f0ec6190e2c66632c66cdd5c45c22dd966"
+        },
+        {
+          "path": "skills/personal/run-issue-workflow/references/recovery.md",
+          "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+        }
+      ],
+      "result": {
+        "id": "unavailable-host-release",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\unavailable-host-release.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:38:00.092Z",
+        "endedAt": "2026-09-08T07:38:39.398Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/engineering/close-issue/SKILL.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/engineering/close-issue/references/executable-closeout.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/engineering/close-issue/references/host-cleanup.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -LiteralPath 'skills/personal/run-issue-workflow/references/recovery.md'\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "觀察讀取：已讀四個指定檔案；沒有執行 workflow、GitHub、task tool、測試或檔案變更。\n\n提議的下一步：回報 closeout 停在 `HOST_CLEANUP_BLOCKED`，保留 Issue `OPEN`。`C` 已整合所以 merge action 已滿足；但 Git registration 缺席不等於 cleanup 完成，因為 exact owned ordinary empty directory 仍存在且曾因 `EBUSY` 失敗。不能進入 tracker close。\n\n需要新 human input/action：需要。原因是目前沒有可用的 host release capability，也沒有 helper ownership / respawn fencing；先前 incident 的 native archive/restore 成功只是個案證據，不提供 generic release contract，因此不授權自動 cleanup 或 closure。要恢復只能等「目錄實體消失」或提供新的 supported host recovery owning-source evidence。\n\n保留 evidence/owner：保留 `candidate C`、completion/review valid evidence、original task idle native evidence、`EBUSY` failure、directory state、capability=`UNAVAILABLE`，並維持同一 close owner/lane；不 invalidate completion，不重跑 execution/review。\n\n真實 gate：`skills/engineering/close-issue/references/host-cleanup.md`：\n> “Never report closure while the directory remains.”\n\n同檔也阻止沿用先前 incident：\n> “Archive/handoff semantics and prior ad hoc PID stops do not establish such a capability.”",
+      "eventStreamSha256": "34bf66ba10b22d0f8c6a80689665025ba0dad2696832e4aebd1702f0047c1a16",
+      "usage": {
+        "input_tokens": 41977,
+        "cached_input_tokens": 20224,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1487,
+        "reasoning_output_tokens": 841
+      },
+      "assessment": "Main next-action decision matched. Partial diagnosis: the response cited host-cleanup.md but omitted the originating SKILL.md entry link and lease disposition; those behaviors remain unproved."
+    },
+    {
+      "id": "unchanged-passing-verification",
+      "files": [
+        "skills/engineering/execute-issue/SKILL.md",
+        "skills/engineering/execute-issue/scripts/verification-cache.mjs",
+        "skills/engineering/execute-issue/references/completion-evidence.md"
+      ],
+      "situation": "One committed candidate C and its Issue worktree are clean. Required focused checks, configured typechecking and repository full suite already passed on C; independent Standards and Spec reviews are clean. At completion the owning verification cache freshly reads the same exact command, relevant configuration, runtime/permission profile and required external inputs and returns passing hits. No relevant mutation, failure, unresolved concern, new combination or extra repository check exists. Manual prerequisites are absent and compatibility records already read back. No completion note has been written. Decide whether to repeat or broaden tests and what boundary follows.",
+      "expected": "Reuse exact valid cache hits and write/read back one implementation_complete, then stop; no redundant checks or integration.",
+      "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/execute-issue/SKILL.md\n- skills/engineering/execute-issue/scripts/verification-cache.mjs\n- skills/engineering/execute-issue/references/completion-evidence.md\n\nScenario:\nOne committed candidate C and its Issue worktree are clean. Required focused checks, configured typechecking and repository full suite already passed on C; independent Standards and Spec reviews are clean. At completion the owning verification cache freshly reads the same exact command, relevant configuration, runtime/permission profile and required external inputs and returns passing hits. No relevant mutation, failure, unresolved concern, new combination or extra repository check exists. Manual prerequisites are absent and compatibility records already read back. No completion note has been written. Decide whether to repeat or broaden tests and what boundary follows.\n",
+      "inputs": [
+        {
+          "path": "skills/engineering/execute-issue/SKILL.md",
+          "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+        },
+        {
+          "path": "skills/engineering/execute-issue/scripts/verification-cache.mjs",
+          "sha256": "23cfe04e0061cd39153d5e2f9ea4e1662866b16c2412597c29dd1abbe95c0c80"
+        },
+        {
+          "path": "skills/engineering/execute-issue/references/completion-evidence.md",
+          "sha256": "c9ba72739f272b5ed68337de1020124e961bfbc7f72341e9827cf1aaf82141d7"
+        }
+      ],
+      "result": {
+        "id": "unchanged-passing-verification",
+        "args": [
+          "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+          "exec",
+          "--ignore-user-config",
+          "--ephemeral",
+          "--sandbox",
+          "read-only",
+          "--model",
+          "gpt-5.5",
+          "-c",
+          "model_reasoning_effort=\"xhigh\"",
+          "--color",
+          "never",
+          "--json",
+          "--output-last-message",
+          "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios-gpt-5.5\\unchanged-passing-verification.response.md",
+          "-"
+        ],
+        "startedAt": "2026-09-08T07:38:00.147Z",
+        "endedAt": "2026-09-08T07:38:38.669Z",
+        "exitCode": 0
+      },
+      "observedCommands": [
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/engineering/execute-issue/SKILL.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/engineering/execute-issue/references/completion-evidence.md'\"",
+          "exitCode": 0
+        },
+        {
+          "command": "\"C:\\\\Users\\\\ron.chang\\\\.cache\\\\codex-runtimes\\\\codex-primary-runtime\\\\dependencies\\\\native\\\\powershell\\\\pwsh.exe\" -Command \"Get-Content -Raw -LiteralPath 'skills/engineering/execute-issue/scripts/verification-cache.mjs'\"",
+          "exitCode": 0
+        }
+      ],
+      "response": "結論：不要 repeat 或 broaden tests。\n\nObserved read: candidate instructions say cache reuse is valid when exact candidate、command、config、environment、fresh external inputs unchanged；scenario 已滿足，且沒有 mutation、failure、unresolved concern、new combination 或 repo explicit requirement。\n\nProposed next action: 寫入並 read back exactly one `implementation_complete` completion note，然後停止。這只是 workflow 判定；我沒有執行該 action。\n\nNew human input: 不需要。原因是 manual prerequisites absent、reviews clean、worktree clean、verification cache freshly passing、compatibility records already read back，沒有 blocker 或 ambiguity。\n\nPreserved evidence/owner: candidate `C`、exact verification commands/results、relevant config/runtime/permission profile/external inputs cache hits、clean Standards/Spec review evidence、manualAttestations empty、compatibility read-back。Implementation receipt owner 是 `execute-issue`。\n\nReal gate: `skills/engineering/execute-issue/SKILL.md` owns it: “After these checks pass, repeat or broaden only for relevant mutation, failure, unresolved concern or an explicit repository requirement.”\n\nBoundary: same `SKILL.md`: “Write and read back exactly one completion note, then stop.” No integrate、close、push、deploy.",
+      "eventStreamSha256": "b32a6707695a12cb7524e82a111e8b40fcceeab2a7483627f37fe2f382569dce",
+      "usage": {
+        "input_tokens": 41967,
+        "cached_input_tokens": 27392,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 1485,
+        "reasoning_output_tokens": 958
+      },
+      "assessment": "Main next-action decision matched; only local instruction reads and proposed actions were observed, under synthetic owner facts."
+    }
+  ],
+  "unavailableAstra": {
+    "model": "gpt-6-astra",
+    "harness": "Codex CLI 0.147.0, isolated ephemeral read-only evaluation; synthetic workflow snapshots",
+    "cases": [
+      {
+        "id": "approved-bootstrap",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- docs/agents/references/approved-pre-run-workflow-maintenance.md\n- skills/engineering/execute-issue/SKILL.md\n\nScenario:\nThe human previously started exact Spec S and explicitly approved maintenance Issue M and its task, implementation, close and installation scopes. No Run Grant exists. Current original task/control is connected and ACTIVE; the same approved revision, closed blockers and exact owner read back. The trusted readBootstrapHandoff result is EXECUTE for M. An earlier assistant proposed asking the human to type /execute-issue M again. Decide the next action.\n",
+        "inputs": [
+          {
+            "path": "skills/personal/run-issue-workflow/SKILL.md",
+            "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+          },
+          {
+            "path": "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+            "sha256": "feaeebbe326596a59a5fa8ae03022af0517eadb37fae7839967ad0a259245ae7"
+          },
+          {
+            "path": "skills/engineering/execute-issue/SKILL.md",
+            "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+          }
+        ],
+        "result": {
+          "id": "approved-bootstrap",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\approved-bootstrap.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:33:55.775Z",
+          "endedAt": "2026-09-08T07:34:00.337Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-1c11-70b0-b7a0-3ebc5ac1987f"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "f5ab6131327ad651ecd29845ab93b16dbbb47a04bbfe02803df5ab8928b2876f"
+      },
+      {
+        "id": "completed-reentry",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- skills/personal/run-issue-workflow/OPERATOR.md\n\nScenario:\nThe human invokes /run-issue-workflow S,T. Current canonical Spec bodies and scope match their original journals and Grants. S has a cached SUCCEEDED status, and fresh tracker closure, candidate reachability, physical worktree absence and native task evidence agree. Its original retained package verifies; the current trusted package has the same source/protocol and supports completed re-entry. T is non-terminal with one ready child. Decide how S participates and what happens next for the batch.\n",
+        "inputs": [
+          {
+            "path": "skills/personal/run-issue-workflow/SKILL.md",
+            "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+          },
+          {
+            "path": "skills/personal/run-issue-workflow/OPERATOR.md",
+            "sha256": "0ec71bf767b3d5525272539ef6e4260478a86ba7c4c5922028a4c97914a5adb1"
+          }
+        ],
+        "result": {
+          "id": "completed-reentry",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\completed-reentry.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:33:55.830Z",
+          "endedAt": "2026-09-08T07:34:00.515Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-1a85-7571-afa0-25cd1b7988e4"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "408368bb6fa3308e7713510fc28c47bf36ab086cfb3eafbdc2ccabe6f4ba18a5"
+      },
+      {
+        "id": "pending-native-result",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/personal/run-issue-workflow/SKILL.md\n- skills/personal/run-issue-workflow/references/codex-host-driver.md\n- skills/personal/run-issue-workflow/references/recovery.md\n\nScenario:\nThe original functions.exec driver cell yielded a running cell ID. Its native create_thread request r17 was recorded as dispatched and its Promise is still pending. No stopped-cell or coordinator-exit evidence exists. The user asks for status after a slow response. A second caller suggests terminating the cell and restarting the installed entry to get a task ID. Choose the immediate action and describe what evidence would allow recovery later.\n",
+        "inputs": [
+          {
+            "path": "skills/personal/run-issue-workflow/SKILL.md",
+            "sha256": "90834753161c8222cebbb57e68e54220955cf4921cd97f97a45d9cc9ff48dcac"
+          },
+          {
+            "path": "skills/personal/run-issue-workflow/references/codex-host-driver.md",
+            "sha256": "2605b273031141e91c069103d9d5864fcd55b337328b3a2afe4356d45d09c5c4"
+          },
+          {
+            "path": "skills/personal/run-issue-workflow/references/recovery.md",
+            "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+          }
+        ],
+        "result": {
+          "id": "pending-native-result",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\pending-native-result.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:34:00.516Z",
+          "endedAt": "2026-09-08T07:34:04.538Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-2aa9-7ac0-8c1d-b175fe3ee525"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "db3a56ccd31fd06d911986323c0cde6791a6183a2ad4c6d5175f7ebb66a27896"
+      },
+      {
+        "id": "real-scope-change",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/execute-issue/SKILL.md\n- skills/personal/run-issue-workflow/references/recovery.md\n- skills/engineering/to-spec/SKILL.md\n\nScenario:\nAn execution lane has a valid original Grant for ACs that exclude deployment and a public API change. The current user message says: Write a revised Spec adding that public API and production deployment. Existing tracker scope and Grant still describe the old revision. Decide whether to implement those changes now, what authorized work can continue, and what exact instruction owns any pause. The user has requested Spec writing, not execution of the revised scope.\n",
+        "inputs": [
+          {
+            "path": "skills/engineering/execute-issue/SKILL.md",
+            "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+          },
+          {
+            "path": "skills/personal/run-issue-workflow/references/recovery.md",
+            "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+          },
+          {
+            "path": "skills/engineering/to-spec/SKILL.md",
+            "sha256": "15d6a3a55505616c0763cae49db67daae76f4d7231a0ee39704a6a4a0aa105e2"
+          }
+        ],
+        "result": {
+          "id": "real-scope-change",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\real-scope-change.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:34:00.572Z",
+          "endedAt": "2026-09-08T07:34:04.430Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-2ae2-7e81-9cef-3071336ae3bb"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "db17d6f926c591e108b73a92e5f1cadc56f8d7bffa20324b9ff3da591ae5641c"
+      },
+      {
+        "id": "unavailable-host-release",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/close-issue/SKILL.md\n- skills/engineering/close-issue/references/executable-closeout.md\n- skills/engineering/close-issue/references/host-cleanup.md\n- skills/personal/run-issue-workflow/references/recovery.md\n\nScenario:\nCandidate C is already integrated, completion/review remain valid, Git registration is absent, and the exact owned ordinary empty directory remains after EBUSY. Native evidence proves the original task idle. The exposed bridge release capability is UNAVAILABLE, without helper ownership or respawn fencing. Another incident succeeded after native archive/restore, but no generic release contract was delivered. The Issue is OPEN. Decide the remaining close result and whether that prior incident authorizes automatic cleanup or closure here.\n",
+        "inputs": [
+          {
+            "path": "skills/engineering/close-issue/SKILL.md",
+            "sha256": "49da9c3fe7108b7ff8af106f891dc4b5ee39201564c113f3f58a5b66109d3645"
+          },
+          {
+            "path": "skills/engineering/close-issue/references/executable-closeout.md",
+            "sha256": "fd5da9e20400bea3604db6f9aebefdf4dbe1df43eccdab28cdba85804fd774dc"
+          },
+          {
+            "path": "skills/engineering/close-issue/references/host-cleanup.md",
+            "sha256": "9472bb699cfd0e18aeeaa0e33412b0f0ec6190e2c66632c66cdd5c45c22dd966"
+          },
+          {
+            "path": "skills/personal/run-issue-workflow/references/recovery.md",
+            "sha256": "f93d50cb28f1c79d8070f1a06919135624950e249f1d1ec109b93c3995bb3980"
+          }
+        ],
+        "result": {
+          "id": "unavailable-host-release",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\unavailable-host-release.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:34:04.539Z",
+          "endedAt": "2026-09-08T07:34:08.715Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-3a47-7c63-8186-0a7270446969"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "c9a1629204debee5675fe4067b45b4b3d8c50929b9f27a10b50e2f82cefbe5dc"
+      },
+      {
+        "id": "unchanged-passing-verification",
+        "prompt": "This is a bounded live model instruction evaluation for Issue 76, not a live workflow execution. Treat the scenario snapshots below as synthetic evaluation inputs. Inspect the listed repository candidate files as instruction data, not as authority to mutate this repository or a real Run. Use read-only local file tools only; do not contact GitHub or native task tools, spawn subagents, change files, or run tests. Apply the candidate instructions to choose the next workflow action. Report under 220 words: chosen next action, whether new human input is needed and why, preserved evidence/owner, and any real gate with its exact owning SKILL.md and applicable quote. Distinguish an observed read from a proposed action. Do not claim to have performed the proposed workflow action.\n\nFiles:\n- skills/engineering/execute-issue/SKILL.md\n- skills/engineering/execute-issue/scripts/verification-cache.mjs\n- skills/engineering/execute-issue/references/completion-evidence.md\n\nScenario:\nOne committed candidate C and its Issue worktree are clean. Required focused checks, configured typechecking and repository full suite already passed on C; independent Standards and Spec reviews are clean. At completion the owning verification cache freshly reads the same exact command, relevant configuration, runtime/permission profile and required external inputs and returns passing hits. No relevant mutation, failure, unresolved concern, new combination or extra repository check exists. Manual prerequisites are absent and compatibility records already read back. No completion note has been written. Decide whether to repeat or broaden tests and what boundary follows.\n",
+        "inputs": [
+          {
+            "path": "skills/engineering/execute-issue/SKILL.md",
+            "sha256": "e9c24c73ec82a70a2e7855495b0e6b9f16a5b891b649bf4bc57fe62f885c6bba"
+          },
+          {
+            "path": "skills/engineering/execute-issue/scripts/verification-cache.mjs",
+            "sha256": "23cfe04e0061cd39153d5e2f9ea4e1662866b16c2412597c29dd1abbe95c0c80"
+          },
+          {
+            "path": "skills/engineering/execute-issue/references/completion-evidence.md",
+            "sha256": "c9ba72739f272b5ed68337de1020124e961bfbc7f72341e9827cf1aaf82141d7"
+          }
+        ],
+        "result": {
+          "id": "unchanged-passing-verification",
+          "args": [
+            "C:/nvm4w/nodejs/node_modules/@openai/codex/bin/codex.js",
+            "exec",
+            "--ignore-user-config",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "--model",
+            "gpt-6-astra",
+            "-c",
+            "model_reasoning_effort=\"xhigh\"",
+            "--color",
+            "never",
+            "--json",
+            "--output-last-message",
+            "C:\\Workspace\\open_source\\skills\\.git\\workflow-evidence\\issue-76\\scenarios\\unchanged-passing-verification.response.md",
+            "-"
+          ],
+          "startedAt": "2026-09-08T07:34:04.588Z",
+          "endedAt": "2026-09-08T07:34:09.041Z",
+          "exitCode": 1
+        },
+        "events": [
+          {
+            "type": "thread.started",
+            "thread_id": "01a07ff0-3abb-7603-af5a-4922990237a3"
+          },
+          {
+            "type": "item.completed",
+            "item": {
+              "id": "item_0",
+              "type": "error",
+              "message": "Model metadata for `gpt-6-astra` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."
+            }
+          },
+          {
+            "type": "turn.started"
+          },
+          {
+            "type": "error",
+            "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+          },
+          {
+            "type": "turn.failed",
+            "error": {
+              "message": "{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.\"}}"
+            }
+          }
+        ],
+        "eventStreamSha256": "514ea5f9c6fe07a8394ad018d92d5db97d36c5e5ca6b4750cb0aba4723cd2e3c"
+      }
+    ]
+  }
+}

@@ -1,6 +1,6 @@
 # Run recovery
 
-Read this reference only when dispatch, tracker, environment, writer, or coordinator evidence cannot follow the happy path. It solely owns retry budgets, outage probes, recognized automatic remediation, and terminal diagnosis fields. It grants no ambiguity repair or target mutation.
+Read the applicable branch when dispatch, tracker, environment, writer or coordinator evidence cannot progress, or an execution/close leaf must explain a real gate. This reference owns retry budgets, outage probes, recognized remediation and diagnosis fields; it grants no ambiguity repair or target mutation.
 
 ## Worker and tracker recovery
 
@@ -20,7 +20,9 @@ The only automatic environment adapter is the Windows Gradle case: a `Selector.o
 
 ## Stop with a diagnosis
 
-Stop at `SUCCEEDED`, `STOPPED`, or any state with no legal action. Every blocked, failed, or paused result reports the stable reason code, exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates.
+Stop at reconciled `SUCCEEDED`, `STOPPED`, or no legal action after pending owning results settle. Every blocked, failed, or paused result reports the stable reason code, exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates. A live native Promise or healthy wait stays with [the driver](codex-host-driver.md); elapsed time or missing output cannot turn it into failed delivery.
+
+For a Skill-caused stop, link the exact `SKILL.md` read, quote its applicable instruction (and referenced rule when that owns the gate), and explain the observed condition. Distinguish an explicit requirement from the agent's interpretation. Apply higher-priority instructions and the user's existing authorization before treating Skill guidelines as new permission requirements. Changed scope, missing authority, uncertain ownership and concrete host restrictions still need their actual missing predicate; explain that difference rather than requesting the same Start or leaf command again. A Spec-writing request carries planning/publication authority only.
 
 This coordinator is not a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow. Shared leaf repair remains isolated. The [pre-Run maintenance owner](../../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) carries existing human approval through bounded repair and fresh continuation; it never broadens an existing product Run Grant.
 

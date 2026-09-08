@@ -6,7 +6,13 @@ It trusts the published delivery classification and records the branch from whic
 
 ## When to reach for it
 
-Type `/execute-issue <Issue-ID>` directly, or an authorized coordinator reaches for it when a valid DAG Run Grant binds that exact dependency-ready Issue. Without either authority, the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) stops before creating a worktree or changing state.
+The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) enters through one of these existing authorities:
+
+- Type `/execute-issue <Issue-ID>` for direct execution.
+- An authorized coordinator invokes the exact dependency-ready Issue under its valid DAG Run Grant.
+- An approved pre-Run repair continues through its original Start's [maintenance handoff](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md), without another human leaf command.
+
+Missing authority stops before worktree creation or mutation. A real Skill-caused pause identifies the exact instruction and why its condition applies; routine continuation reuses the existing authorization.
 
 - Published dependency-ready Issue: invoke this directly or through its authorized Run.
 - Approved Standalone Spec or explicit current-branch work: use [implement](https://aihero.dev/skills-implement).
@@ -23,7 +29,7 @@ Every new completion note also contains `workflowArtifacts`: either an explicit 
 
 After the clean candidate passes verification and review, execution independently appends or reuses one logical `workflow_operation_identity_contract_adopted:v1` record and the existing `workflow_artifacts_contract_adopted:v1` record in the parent or linked Spec before the first prospective completion for each field. Each binds the exact repository, tracker, Spec, and Issue target branch plus an explicit `legacyCompletionFrontier` of every already valid completion missing that record's field, using exact note identity or durable local locator and body SHA-256. A later missing field is legacy only when it matches the corresponding frozen list; neither record classifies the other field. Payload-identical records collapse idempotently, while malformed, conflicting, duplicate, unreadable, mismatched, or digest-mismatched evidence stops. A truly unadopted scope remains legacy-compatible. These records grant no workflow authority.
 
-If closeout stops because the target is dirty or close progress is partial, invoking `execute-issue` again only checks the recorded identities and evidence, reports the still-valid completion, and stops. It does not rerun baseline checks, focused checks, final verification, the full suite, review, commits, or tracker writes. Preserve and resolve the target work, then retry `/close-issue <Issue-ID>`.
+If closeout stops because the target is dirty or close progress is partial, invoking `execute-issue` again only checks recorded identities and evidence and reports the still-valid completion. It does not repeat verification, review, commits or tracker writes. The same authorized close owner retains remaining progress; human-owned target dirt still requires human resolution. Direct entry then retries `/close-issue <Issue-ID>`; the continuing coordinator reconciles before returning to that owner.
 
 After a safely aborted close conflict, the human or same authorized coordinator may start one successor attempt in the same branch and worktree from the latest target when the original Acceptance Criteria and ownership are unchanged. The coordinator preserves the original task/worktree and a ten-wave repair budget across re-entry. The new completion becomes current only after required verification and clean independent review; a scope change returns to planning.
 
@@ -43,5 +49,3 @@ Successful verification is reused only while the candidate, exact command, relev
 ## Where it fits
 
 `execute-issue` follows a Single-Issue [to-spec](https://aihero.dev/skills-to-spec) or ready [to-tickets](https://aihero.dev/skills-to-tickets) child and stops before integration. A human or the same authorized coordinator next invokes [close-issue](https://aihero.dev/skills-close-issue). After all desired closes, [verify-target-before-push](https://aihero.dev/skills-verify-target-before-push) proves the aggregate target. See [ask-matt](https://aihero.dev/skills-ask-matt) for routing.
-
-When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [its owner](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md). The leaf retains its normal ownership and verification; a second human command is unnecessary.

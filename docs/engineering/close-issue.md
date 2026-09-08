@@ -8,7 +8,13 @@ Closeout has two nested leases. One repository close lease covers the same Git c
 
 ## When to reach for it
 
-Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records `implementation_complete`, or an authorized coordinator reaches for it when its valid DAG Run Grant binds that exact Issue or completed parent. Without either authority, the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) stops before mutation.
+The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) enters after valid completion through one of these existing authorities:
+
+- Type `/close-issue <Issue-ID>` after [execute-issue](https://aihero.dev/skills-execute-issue) records completion.
+- An authorized coordinator invokes the exact Issue or completed parent under its valid DAG Run Grant.
+- An approved pre-Run repair continues through its original Start's [maintenance handoff](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md), without another human leaf command.
+
+Missing authority stops before mutation. A Skill-caused pause identifies its exact instruction and observed condition.
 
 Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue; repository serialization affects closeout only, while Issue execution and unrelated planning remain concurrent. Healthy contention continues through bounded observations without a fixed timeout that asks you to restart. Unknown ownership or proof mismatch preserves the affected closeout; healthy acquisition races return to observation. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 
@@ -16,7 +22,7 @@ Any number of Issue worktrees may execute concurrently. Reach for this once per 
 
 On Windows, Git can remove a worktree registration while leaving its empty directory. This is pending cleanup, so the original completion remains valid and the Issue stays open until the exact directory is removed. The current desktop bridge cannot safely release task helpers or prevent their respawn. A failed host cleanup returns its exact observations to the same close owner and releases its leases; unchanged failures do not trigger more cleanup messages or implementation replay. Independent Issues remain eligible. Tool policy rejection requires resolution at that boundary; another tool is not a cleanup workaround.
 
-The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate makes that action complete; otherwise Git deterministically fast-forwards when possible and creates the ordinary merge only for diverged histories. A dirty target stops before mutation; after preserving that work, the human makes the target clean and retries `/close-issue <Issue-ID>`. This does not rerun execution or the full suite. A conflict is aborted and target restoration verified, with the worktree and Issue left open; the human or same authorized coordinator can then return to execution in the same lane when resolution stays inside the original Acceptance Criteria.
+The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate makes that action complete; otherwise Git fast-forwards when possible and uses an ordinary merge for diverged histories. Target dirt requires human preservation and resolution. Direct entry then retries `/close-issue <Issue-ID>`; a continuing authorized coordinator reconciles before returning to the same close owner. Neither repeats execution or the full suite. A conflict is aborted and target restoration verified; the human or same authorized coordinator may return to the original execution lane under unchanged Acceptance Criteria.
 
 A new ordinary merge combination receives the integration checks required by its approved plan before cleanup; unchanged candidate verification is reused when its inputs still match. This remains separate from the aggregate push gate.
 
@@ -43,5 +49,3 @@ A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Dec
 Transient failures trigger bounded probes of Git or the tracker before retrying only an unsatisfied action. A lost response never causes a second completed merge, cleanup or closure.
 
 The coordinator can continue a settled partial close in its original task. Its native request keeps a three-attempt budget for unchanged progress across restarts, so only remaining actions run.
-
-When an approved workflow repair must run before its coordinator can start, the original human Start can supply the bounded maintenance handoff described in [its owner](https://github.com/ron03wlb/skills/blob/features/ron/docs/agents/references/approved-pre-run-workflow-maintenance.md). The leaf retains its normal ownership and verification; a second human command is unnecessary.

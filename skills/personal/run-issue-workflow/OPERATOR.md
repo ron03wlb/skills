@@ -55,13 +55,13 @@ Unknown owner evidence, coordinator loss, or changed immutable authority returns
 
 ## Diagnose before intervening
 
-Every non-progress result should name a stable reason, evidence, affected and unaffected nodes, attempted recovery, next owner, and Resume predicates. Resolve only the named predicate. Do not manually create a replacement lane, replay closeout, clean a dirty target, repair a merge conflict, or change Run identity while the Grant remains bound.
+For a real non-progress result, [the recovery diagnosis](references/recovery.md#stop-with-a-diagnosis) identifies the exact owning Skill instruction, observed gate and remaining predicate. Resolve only that predicate; the original owner keeps unchanged authority and progress. A healthy wait or pending native result is still in progress.
 
 Tracker outage probes are fixed at 5, 15, and 30 seconds. Transient Issue-lane attempts are capped at three. Only the exact recognized Windows Gradle loopback fingerprint receives one process-local remediation cycle.
 
 A successfully read tracker whose required authority record is missing or ambiguous reports `tracker_authority_conflict` immediately with the observed mismatch. Network backoff cannot repair a changed scope or publication; the planning owner resolves it while independent selected Runs continue. Actual transport failures retain the outage probes.
 
-If a native Codex tool never responds, retain its exact request and any known task identity. A local rollout can help locate the task, but does not replace the required native read-back. Report the unfinished boundary and resume the same installed entry when that owning source responds; do not count a preserved Run as delivered.
+For a pending or interrupted native call, follow [the active host driver](references/codex-host-driver.md#controls-and-interrupted-requests). Continue the live original cell; only confirmed termination permits checkpoint restoration and original-request reconciliation. A local rollout can locate a task but cannot prove native outcome. Resume the installed entry only after its original coordinator and uncertain calls reconcile; a preserved Run is not delivered.
 
 A native `notLoaded` task with a completed latest turn is settled for continuation; an active task remains running, and an unloaded task with unfinished or unreadable latest work remains unknown. This reads current host state without replaying valid implementation or review.
 

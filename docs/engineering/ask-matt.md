@@ -45,7 +45,7 @@ The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://
 - Simple wording edits: edit directly.
 
 
-The personal Run route uses an installed package connected to the current Codex host. Ongoing Runs retain their selected version, and text controls remain available when the panel cannot open.
+The personal Run route uses an installed package connected to the current Codex host. Explicit Spec or batch re-entry reconciles matching completed Runs under their original Grants and retained packages without replay. Active members retain their worker limits, and available text controls carry progress when the panel cannot open. Approved pre-Run maintenance returns through its original Start; a request to write a Spec ends at planning/publication. A real pause names its exact owning instruction and remaining condition.
 
 Known permissions and SQL prerequisites belong before Run-ready, through planning and [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue). An explicit comma-separated Spec batch keeps separate Runs and Grants while rotating ready work within a shared worker bound. Healthy waits continue across observation windows; same-scope conflicts return to the original Issue lane for bounded repair and renewed verification/review.
 
