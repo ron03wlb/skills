@@ -34,7 +34,7 @@ export async function invokeGitLabProducer({ repository, input, transport }) {
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
     identity: ["checkpoint", "identity"], "checkpoint-read": ["checkpoint", "read"], "checkpoint-create": ["checkpoint", "create"],
-    "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"],
+    "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"], "mutation-read": ["tracker", "readMutation"],
     "handoff-read": ["handoff", "read"], "handoff-append": ["handoff", "append"],
   };
   if (!Object.hasOwn(allowed, input?.action)) throw conflict("Unknown producer action");

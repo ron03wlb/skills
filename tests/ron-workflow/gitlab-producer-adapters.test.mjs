@@ -30,6 +30,11 @@ function fixture(t, project = "group/sub/project") {
     if (path === `projects/${encodeURIComponent(project)}`) return { id: 31, path_with_namespace: project, web_url: projectUrl };
     if (path === "user") return { id: 7 };
     if (path === "projects/31/members/all/7") return { id: 7, access_level: 40 };
+    if (method !== "GET" && failures.rejectionMethod === method) {
+      failures.rejectionMethod = null;
+      throw Object.assign(new Error("Rejected fixture request"), { code: "GITLAB_PRODUCER_TRANSPORT", httpStatus: 415,
+        outcome: "REJECTED", requestId: "fixture-rejection" });
+    }
     if (method !== "GET" && failures.beforeWrite === method) { failures.beforeWrite = null; throw new Error("timeout before delivery"); }
     const url = new URL(path, "https://fixture/");
     const route = url.pathname;
@@ -212,11 +217,12 @@ test("configure preserves existing bindings and inspect performs only reads with
 test("JSON bodies use stdin and provider failures do not leak secrets", async () => {
   let invocation;
   const configuration = { schema: "gitlab-producer:v1", baseUrl: "http://gitlab.example", project: "group/project" };
-  const transport = createGlabTransport({ repository: ".", configuration, execute: (...args) => { invocation = args; return "{}"; } });
+  const transport = createGlabTransport({ repository: ".", configuration, execute: (...args) => { invocation = args; return "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{}"; } });
   const body = { description: "中文\n`$(secret)`\n\"quoted\"" };
   await transport({ method: "PUT", path: "projects/31/issues/169", body });
   assert.deepEqual(JSON.parse(invocation[2].input), body);
   assert.equal(invocation[1].includes(body.description), false);
+  assert.ok(invocation[1].includes("Content-Type: application/json"));
   assert.equal(invocation[2].env.GITLAB_API_PROTOCOL, "http");
   const failing = createGlabTransport({ repository: ".", configuration, execute: () => { throw new Error("secret-token"); } });
   await assert.rejects(() => failing({ path: "user" }), error => !error.message.includes("secret-token"));
@@ -238,4 +244,38 @@ test("CLI inspect executes through the installed directory junction without exte
   const output = execFileSync(process.execPath, [join(linked, "gitlab-producer-entry.mjs"), "inspect", repository], { encoding: "utf8", windowsHide: true });
   assert.equal(JSON.parse(output).state, "MISSING");
   assert.equal(existsSync(join(repository, ".git")), false);
+});
+
+test("publication retries a rejected PUT or receipt POST only with explicit exact authority", async t => {
+  for (const method of ["PUT", "POST"]) {
+    const f = fixture(t), ctx = await prepared(f);
+    f.failures.rejectionMethod = method;
+    await assert.rejects(() => ctx.adapter.tracker.publish(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+    assert.equal(ctx.adapter.tracker.readMutation(ctx).state, method === "PUT" ? "REJECTED" : "ACKNOWLEDGED");
+    const before = f.writes().length;
+    await assert.rejects(() => ctx.adapter.tracker.publish(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+    assert.equal(f.writes().length, before);
+    const adapter = await createGitLabProducerAdapters(f.options);
+    assert.equal((await complete(f, { ...ctx, adapter, retryRejected: true })).state, "COMPLETED");
+    assert.equal(f.writes().length, 4);
+  }
+});
+
+test("primary reservation and handoff retain their exact identity after a rejected POST", async t => {
+  const f = fixture(t);
+  const adapter = await createGitLabProducerAdapters({ ...f.options, specId: undefined });
+  f.failures.rejectionMethod = "POST";
+  await assert.rejects(() => adapter.tracker.reserve({ proposedSpecIdentity: "rejected-primary" }), { code: "GITLAB_PRODUCER_REJECTED" });
+  const reserved = await adapter.tracker.reserve({ proposedSpecIdentity: "rejected-primary", retryRejected: true });
+  const ctx = await prepared(f, { specId: reserved.trackerIdentity });
+  const receipt = await ctx.adapter.tracker.publish(ctx);
+  await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "publication.read_back", receipt });
+  f.failures.rejectionMethod = "POST";
+  await assert.rejects(() => ctx.adapter.handoff.append(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+  const before = f.writes().length;
+  await assert.rejects(() => ctx.adapter.handoff.append(ctx), { code: "GITLAB_PRODUCER_REJECTED" });
+  assert.equal(f.writes().length, before);
+  const handoff = await ctx.adapter.handoff.append({ ...ctx, retryRejected: true });
+  assert.equal((await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "handoff.completed", receipt: handoff })).state, "COMPLETED");
+  assert.equal(f.notes.get(Number(reserved.issue.iid)).length, 2);
 });
