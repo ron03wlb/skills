@@ -8,6 +8,8 @@ import { selectWorkflowVersion } from "./workflow-installation.mjs";
 import { runBatch } from "./run-batch.mjs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { createRunStore } from "./run-store.mjs";
+import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
+import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const cacheDirectory = resolve(packageRoot, "../..");
@@ -25,30 +27,40 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   repository = realpathSync(repository);
   const common = realpathSync(resolve(repository, execFileSync("git", ["-C", repository, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
   const store = createRunStore({ gitCommonDir: common });
-  let approvedScopeHash;
-  if (specId && /^[1-9][0-9]*$/u.test(specId)) {
-    const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
-    const issue = JSON.parse(execFileSync("gh", ["issue", "view", specId, "--repo", configuration.repository, "--json", "id,body"], { encoding: "utf8" }));
-    specId = issue.id;
-    approvedScopeHash = bodyDigest(issue.body);
-  }
   let previousGrant;
-  if (runId) previousGrant = store.readEvents(runId).findLast(({ type }) => type === "grant.recorded");
-  else {
-    const active = store.listRunIds().flatMap((id) => {
-      if (["SUCCEEDED", "STOPPED"].includes(store.readStatus(id)?.run.state)) return [];
+  if (runId) {
+    previousGrant = store.readEvents(runId).findLast(({ type }) => type === "grant.recorded");
+    if (!previousGrant) return { state: "UNAVAILABLE", reason: "Selected Run has no recorded grant; preserve its files" };
+    specId ??= previousGrant.runIdentity.specId;
+  }
+  let approvedScopeHash;
+  let operationIdentity;
+  if (specId) {
+    const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
+    const owners = createGitHubWorkflowSources({ repository, repositoryName: configuration.repository });
+    const issue = await owners.readIssue(specId);
+    specId = issue.node_id;
+    approvedScopeHash = bodyDigest(issue.body);
+    operationIdentity = deriveRunOperationIdentity({ repositoryId: `github:${configuration.repository}`, specId, approvedPublicationIdentity: approvedScopeHash });
+  }
+  if (!runId) {
+    const candidates = store.listRunIds().flatMap((id) => {
+      // Terminal projections filter discovery only; explicit selection reconciles the original authority.
+      if (!specId && ["SUCCEEDED", "STOPPED"].includes(store.readStatus(id)?.run.state)) return [];
       const grant = store.readEvents(id).findLast(({ type }) => type === "grant.recorded");
       return grant ? [grant] : [];
     });
-    if (!specId && active.length !== 1) return { state: "SELECTION_REQUIRED", runs: active.map(({ runIdentity }) => runIdentity) };
-    const matching = specId ? active.filter(({ runIdentity }) => runIdentity.specId === specId && (!approvedScopeHash || runIdentity.approvedScopeHash === approvedScopeHash)) : active;
+    if (!specId && candidates.length !== 1) return { state: "SELECTION_REQUIRED", runs: candidates.map(({ runIdentity }) => runIdentity) };
+    const matching = specId ? candidates.filter(({ runIdentity }) => runIdentity.runId === operationIdentity.key
+      || runIdentity.specId === specId && runIdentity.approvedScopeHash === approvedScopeHash) : candidates;
     if (matching.length > 1) return { state: "SELECTION_REQUIRED", runs: matching.map(({ runIdentity }) => runIdentity) };
     previousGrant = matching[0];
   }
-  if (specId && previousGrant && previousGrant.runIdentity.specId !== specId) {
-    return { state: "UNAVAILABLE", reason: "Selected Run and Spec differ; preserve both" };
+  if (specId && previousGrant && (previousGrant.runIdentity.specId !== specId
+    || previousGrant.runIdentity.approvedScopeHash !== approvedScopeHash
+    || previousGrant.runIdentity.runId.startsWith("workflow-op-v1-") && previousGrant.runIdentity.runId !== operationIdentity.key)) {
+    return { state: "UNAVAILABLE", reason: "Selected Run and current Spec operation identity or scope differ; preserve both" };
   }
-  if (runId && !previousGrant) return { state: "UNAVAILABLE", reason: "Selected Run has no recorded grant; preserve its files" };
   if (previousGrant && !previousGrant.workflowVersion) return { state: "UNAVAILABLE", reason: "Selected Run has no proven package version; preserve its evidence for compatibility reconciliation" };
   const selected = selectWorkflowVersion({ cacheDirectory, recordedVersion: previousGrant?.workflowVersion });
   if (selected.state !== "AVAILABLE") return selected;
