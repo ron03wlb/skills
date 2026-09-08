@@ -5,6 +5,7 @@ import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint, deriveSpecReservationOperationIdentity } from "./workflow-operation-identity.mjs";
 import { connectGitLabProducer, conflict, digest, gitRead, withProducerLock } from "./gitlab-producer-transport.mjs";
 import { mutateOnce, readMutation } from "./gitlab-producer-mutations.mjs";
+import { createGitPlanningSeal } from "./git-planning-seal.mjs";
 
 const same = (a, b) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 const canonical = value => Array.isArray(value) ? value.map(canonical)
@@ -39,6 +40,7 @@ export async function createGitLabProducerAdapters(options) {
     return Number(raw);
   }
   const specId = () => { if (!iid) throw conflict("Reserve or select one Issue before this operation"); return `${projectUrl}/-/issues/${iid}`; };
+  const planningWriter = () => createGitPlanningSeal({ repository, repositoryId, specId: specId(), target, gitCommonDir: connection.gitCommonDir });
   const head = () => gitRead(repository, "rev-parse", "--verify", `refs/heads/${target}^{commit}`);
   const ancestry = new Set();
   const factObjects = new Map();
@@ -71,20 +73,31 @@ export async function createGitLabProducerAdapters(options) {
       || !same(normalizeLabels(current.labels), normalizeLabels(labels))
       || current.issue.state !== "opened") throw conflict("Published Issue body, title, labels or state differs");
   };
-  const factsAtHead = (facts, targetHead = head()) => Object.fromEntries(Object.keys(facts).map(path => {
-    if (!path || path.startsWith("/") || /[\\:\x00-\x1f]/u.test(path) || path.split("/").some(part => ["", ".", ".."].includes(part))) throw conflict("Relevant fact must be a normalized repository-relative file path");
-    const key = `${targetHead}:${path}`;
-    if (!factObjects.has(key)) {
-      const object = gitRead(repository, "rev-parse", "--verify", key);
-      if (gitRead(repository, "cat-file", "-t", object) !== "blob") throw conflict("Relevant fact is not a file");
-      factObjects.set(key, `git-blob:${object}`);
+  const factsAtHead = (facts, targetHead = head()) => {
+    const paths = Object.keys(facts);
+    for (const path of paths) {
+      if (!path || path.startsWith("/") || /[\\:\x00-\x1f]/u.test(path) || path.split("/").some(part => ["", ".", ".."].includes(part))) throw conflict("Relevant fact must be a normalized repository-relative file path");
     }
-    return [path, factObjects.get(key)];
-  }));
+    const missing = paths.filter(path => !factObjects.has(`${targetHead}:${path}`));
+    if (missing.length) {
+      const rows = gitRead(repository, "ls-tree", "-r", "-z", targetHead, "--", ...missing).split("\0").filter(Boolean);
+      const observed = new Map(rows.map(row => {
+        const offset = row.indexOf("\t");
+        const object = row.slice(0, offset).match(/^\d+ blob ([a-f0-9]{40,64})$/u)?.[1];
+        return [row.slice(offset + 1), object];
+      }));
+      for (const path of missing) {
+        if (!observed.get(path)) throw conflict(`Relevant fact is not a file: ${path}`);
+        factObjects.set(`${targetHead}:${path}`, `git-blob:${observed.get(path)}`);
+      }
+    }
+    return Object.fromEntries(paths.map(path => [path, factObjects.get(`${targetHead}:${path}`)]));
+  };
   const baseline = async request => {
-    if (!Array.isArray(request.acceptedChanges) || request.acceptedChanges.length) throw conflict("This binding supports tracker-only publication; use the owning planning writer for accepted document changes");
+    if (!Array.isArray(request.acceptedChanges)) throw conflict("acceptedChanges must be explicit");
     assertAncestor(request.baseline);
     return readPlanningBaseline({ request: { ...request, repositoryId, specId: specId(), target, approvedScopeIdentity }, adapter: {
+      readLane: lane => planningWriter().readLane(lane),
       async readCurrent() {
         const current = await snapshot();
         const currentHead = head();
@@ -93,23 +106,30 @@ export async function createGitLabProducerAdapters(options) {
       },
     } });
   };
-  const identity = ({ baseline: baselineSha, relevantFacts }) => {
+  const identity = ({ baseline: baselineSha, relevantFacts, sealOperationId }) => {
     if (!relevantFacts || typeof relevantFacts !== "object" || Array.isArray(relevantFacts)) throw conflict("Explicit relevantFacts are required");
     return bindProducerCheckpointOperationIdentity({ repositoryId, specId: specId(), producerCommand: "to-spec", profileVersion: "v2",
       target, baseline: baselineSha, bindings: { planningSeal: baselineSha, classification: publication.classification,
-        approvedScopeIdentity, trackerIdentity: specId(), relevantFacts } });
+        approvedScopeIdentity, trackerIdentity: specId(), relevantFacts, ...(sealOperationId ? { sealOperationId } : {}) } });
   };
   const validateIdentity = input => {
-    const expected = identity({ baseline: input?.baseline, relevantFacts: input?.bindings?.relevantFacts });
+    const expected = identity({ baseline: input?.baseline, relevantFacts: input?.bindings?.relevantFacts, sealOperationId: input?.bindings?.sealOperationId });
     if (!same(input, expected)) throw conflict("Checkpoint binding differs from the selected repository, Spec, target or publication");
     const currentHead = head();
     assertAncestor(input.baseline, currentHead);
     if (!same(factsAtHead(input.bindings.relevantFacts, currentHead), input.bindings.relevantFacts)) throw conflict("Relevant planning source changed; return to to-spec baseline revalidation");
+    if (input.bindings.sealOperationId && planningWriter().read({ operationId: input.bindings.sealOperationId }).planningSeal !== input.baseline) throw conflict("Planning Seal receipt differs from checkpoint baseline");
     return input;
   };
   const sealRead = ({ identity: input }) => {
     validateIdentity(input);
+    if (input.bindings.sealOperationId) return planningWriter().read({ operationId: input.bindings.sealOperationId });
     return { target, planningSeal: input.bindings.planningSeal, state: "reused" };
+  };
+  const sealWrite = async request => {
+    const receipt = await planningWriter().write({ request, revalidate: () => baseline(request) });
+    const factPaths = { ...request.relevantFacts, ...Object.fromEntries(request.acceptedChanges.map(change => [change.path, "sealed"])) };
+    return { ...receipt, relevantFacts: factsAtHead(factPaths, receipt.planningSeal) };
   };
   const getTransaction = input => {
     validateIdentity(input);
@@ -271,7 +291,8 @@ export async function createGitLabProducerAdapters(options) {
     return checkpoints.advanceCheckpoint({ identity: input, stage, receipt });
   };
   return { repositoryId, publicationMode: "READ_WRITE_READBACK", approvedScopeIdentity,
-    planning: { readBaseline: baseline }, planningSeal: { read: sealRead },
+    planning: { readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane) },
+    planningSeal: { read: sealRead, write: sealWrite },
     tracker: { read, reserve, publish, readPublication: publicationRead,
       readMutation: request => readMutation(connection, publicationMutation(request)) },
     checkpoint: { identity, read: input => { validateIdentity(input); return checkpoints.readCheckpoint(input); },

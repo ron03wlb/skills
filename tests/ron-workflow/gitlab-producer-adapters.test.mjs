@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGitLabProducerAdapters } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-adapters.mjs";
 import { configureGitLabProducer, inspectGitLabProducer, invokeGitLabProducer } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-entry.mjs";
-import { createGlabTransport } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
+import { createGlabTransport, digest } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
 
 const publication = { title: "Account display", body: "# Settled Spec\n\n完整帳號 `00123`\n", classification: "SINGLE" };
 function fixture(t, project = "group/sub/project") {
@@ -228,9 +228,9 @@ test("JSON bodies use stdin and provider failures do not leak secrets", async ()
   await assert.rejects(() => failing({ path: "user" }), error => !error.message.includes("secret-token"));
 });
 
-test("document writes and quick actions stop without creating producer state", async t => {
+test("unregistered document writes and quick actions stop without creating producer state", async t => {
   const f = fixture(t); const adapter = await createGitLabProducerAdapters(f.options); const current = await adapter.tracker.read();
-  await assert.rejects(() => adapter.planning.readBaseline({ baseline: f.git("rev-parse", "HEAD"), trackerVersion: current.version, relevantFacts: {}, acceptedChanges: [{ path: "CONTEXT.md" }] }), /planning writer/u);
+  await assert.rejects(() => adapter.planning.readBaseline({ baseline: f.git("rev-parse", "HEAD"), trackerVersion: current.version, relevantFacts: {}, acceptedChanges: [{ path: "CONTEXT.md" }] }), /planning lane/u);
   await assert.rejects(() => createGitLabProducerAdapters({ ...f.options, publication: { ...publication, body: "# Spec\n/close" } }), /quick actions/u);
   assert.equal(f.writes().length, 0);
 });
@@ -278,4 +278,32 @@ test("primary reservation and handoff retain their exact identity after a reject
   const handoff = await ctx.adapter.handoff.append({ ...ctx, retryRejected: true });
   assert.equal((await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "handoff.completed", receipt: handoff })).state, "COMPLETED");
   assert.equal(f.notes.get(Number(reserved.issue.iid)).length, 2);
+});
+
+test("entry registers accepted documents, writes a seal and completes the same Spec with native read-back", async t => {
+  const f = fixture(t);
+  await configureGitLabProducer(f.options);
+  const worktree = `${f.repository}-planning`;
+  t.after(() => rmSync(worktree, { recursive: true, force: true }));
+  const baseline = f.git("rev-parse", "HEAD");
+  f.git("worktree", "add", "-b", "planning", worktree, baseline);
+  writeFileSync(join(worktree, "CONTEXT.md"), "Accepted glossary\n");
+  const authority = { path: join(f.repository, "handoff.md"), contentIdentity: digest("Explicit accepted glossary\n") };
+  writeFileSync(authority.path, "Explicit accepted glossary\n");
+  const acceptedChanges = [{ path: "CONTEXT.md", contentIdentity: digest(readFileSync(join(worktree, "CONTEXT.md"))) }];
+  const invoke = (action, request) => invokeGitLabProducer({ ...f.options, input: { action, request, specId: 169, target: "target", publication } });
+  const current = await invoke("read");
+  const lane = await invoke("lane-register", { taskId: "accepted-task", worktree, baseline, acceptedChanges, authority });
+  const request = { baseline, trackerVersion: current.version, relevantFacts: {}, acceptedChanges, lane };
+  assert.equal((await invoke("baseline", request)).requiresPlanningLane, true);
+  const seal = await invoke("seal-write", request);
+  const identity = await invoke("identity", { baseline: seal.planningSeal, relevantFacts: seal.relevantFacts, sealOperationId: seal.operationId });
+  await invoke("checkpoint-create", identity);
+  await invoke("checkpoint-advance", { identity, stage: "planning_seal.read_back", receipt: await invoke("seal", { identity }) });
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal((await complete(f, { adapter, identity, expectedVersion: current.version, expectedLabels: current.labels })).state, "COMPLETED");
+  assert.equal(f.issues.get(169).description, publication.body);
+  assert.equal(f.writes().length, 3);
+  assert.equal(f.git("rev-list", "--count", `${baseline}..HEAD`), "1");
+  assert.equal((await invoke("seal-write", request)).planningSeal, seal.planningSeal);
 });

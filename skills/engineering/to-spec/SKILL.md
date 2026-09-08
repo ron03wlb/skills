@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Publish one settled scope; do not restart discovery. Use repository evidence, established domain vocabulary, and the highest practical verification seam.
 
-The configured tracker and triage labels must exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. Checkpoint profiles and concrete adapters require package installation. For GitLab tracker-only publication, read [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md). Setup cannot repair these seams. Accepted glossary or ADR writes require the shared Target mutation writer.
+The configured tracker and triage labels must exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. Checkpoint profiles and concrete adapters require package installation. For GitLab publication, read [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md), including its registered-document writer when the handoff has accepted changes. Setup cannot repair these seams. Accepted glossary or ADR writes require the shared Target mutation writer.
 
 ## 1. Consume the planning lane handoff
 

@@ -1,10 +1,10 @@
 # GitLab Spec producer binding
 
-This binding supplies the planning, checkpoint, tracker and handoff adapters for tracker-only `to-spec@v2` publication. It supports primary reservation and revision of the same existing Spec. It does not classify a Spec, grant approval, write glossary/ADR changes, decompose children, or provide an automatic GitLab Run host. Those operations keep their existing owners.
+This binding supplies the planning, checkpoint, tracker and handoff adapters for `to-spec@v2` publication, including exact accepted-document Planning Seals. It supports primary reservation and revision of the same existing Spec. It does not classify a Spec, grant approval, decompose children, or provide an automatic GitLab Run host. Those operations keep their existing owners.
 
 ## Configure once, inspect without mutation
 
-Resolve this reference and its sibling scripts from the current harness's installed personal coordinator. Do not substitute another checkout or a per-Run script. The package must include `gitlab-producer-entry.mjs`, `gitlab-producer-adapters.mjs`, `gitlab-producer-transport.mjs`, `gitlab-producer-mutations.mjs`, the existing checkpoint and operation-identity modules, and the `to-spec` planning entry.
+Resolve this reference and its sibling scripts from the current harness's installed personal coordinator. Do not substitute another checkout or a per-Run script. The package must include `gitlab-producer-entry.mjs`, `gitlab-producer-adapters.mjs`, `gitlab-producer-transport.mjs`, `gitlab-producer-mutations.mjs`, `git-planning-seal.mjs`, the existing Run store, checkpoint and operation-identity modules, and the `to-spec` planning entry.
 
 After explicit authorization to bind a repository, run from any directory:
 
@@ -42,7 +42,7 @@ The same API is available as `createGitLabProducerAdapters({repository, configur
 | `reserve` | `tracker.reserve` | Primary: `{mode:"primary", proposedSpecIdentity}` with no `specId`; returns the reserved Issue identity and version. Revision: select the existing `specId` and use `{mode:"revision"}`. |
 | `read` | `tracker.read` | Returns native Issue ID, exact Issue URL as `trackerIdentity`, body, labels, comments and opaque `version`. |
 | `baseline` | `planning.readBaseline` | `{baseline, trackerVersion, relevantFacts, acceptedChanges:[]}`. Facts map relevant normalized repository file paths to `git-blob:<object-id>` from the settled baseline. Returns the existing planning entry's `COMPATIBLE` or `DRIFTED` result. |
-| `identity` | `checkpoint.identity` | `{baseline, relevantFacts}` using the revalidated baseline. Returns one fully bound current `to-spec@v2` checkpoint identity. Preserve that exact object for all retries. |
+| `identity` | `checkpoint.identity` | `{baseline, relevantFacts, sealOperationId?}` using the revalidated baseline or written seal SHA and returned facts. Preserve the exact returned current `to-spec@v2` identity for all retries. |
 | `checkpoint-read` | `checkpoint.read` | The exact identity object; returns zero or one matching transaction. |
 | `checkpoint-create` | `checkpoint.create` | The same identity; uses the existing operation-scoped store. An observed downstream record without its transaction stops. |
 | `seal` | `planningSeal.read` | `{identity}`; independently verifies the reused seal and relevant current source. Returns `{target, planningSeal, state:"reused"}`. |
@@ -54,7 +54,25 @@ The same API is available as `createGitLabProducerAdapters({repository, configur
 
 Order: resolve/reserve the tracker identity, revalidate baseline, read/create the exact producer transaction, read and advance `planning_seal.read_back`, publish and advance `publication.read_back`, append/read handoff and advance `handoff.completed`. Re-entry preserves the identity and starts at the first unsatisfied stage after reading earlier receipts. Do not regenerate its baseline or scope bindings merely because an unrelated target commit moved.
 
-Revision never reserves a replacement Issue. Primary reservation retains its native Issue identity locally so retry still selects it after the draft marker is replaced by the canonical body. A target-only publication reuses the seal without an empty commit. Accepted glossary/ADR writes require a separately bound planning writer; this implementation fails closed for a nonempty `acceptedChanges` list.
+Revision never reserves a replacement Issue. Primary reservation retains its native Issue identity locally so retry still selects it after the draft marker is replaced by the canonical body. Tracker-only publication reuses the seal without an empty commit.
+
+## Seal accepted documents
+
+Only the explicit `to-spec` owner may register its accepted handoff. Registration records provenance; it grants no new scope. Supply a user-visible handoff file and its `sha256:<hex>` identity, and preserve any prior lane registry. The owner must verify that every declared document is accepted, including inherited decisions and generated documentation; dirt alone is never scope evidence. Supported whole-file paths are `CONTEXT.md` and Markdown/HTML under `docs/`. Runtime source, SQL, deletion, operational plans and unaccepted drafts remain outside this writer. For a partial-file handoff, prepare a separately reviewed exact document in the owned lane first; do not expand hunk authority automatically.
+
+| CLI action | Request and result |
+| --- | --- |
+| `lane-register` | `{taskId, worktree, baseline, authority:{path,contentIdentity}, acceptedChanges:[{path,contentIdentity}]}`. SHA-256 identities cover exact file bytes. Independently checks the common Git directory, native worktree registration, isolated lane HEAD, handoff and files; freezes baseline blobs and modes. Returns `{registrationId,taskId,worktree}`. Exact registration retry reuses the immutable record. |
+| `lane-read` | The returned lane object. Rechecks its exact registration and content and supplies the generic planning entry's lane evidence. |
+| `baseline` | With documents, include `lane` and the same nonempty `acceptedChanges`; keep the lane's original `baseline`, and declare current relevant facts explicitly. Compatible unrelated target movement returns the latest target SHA. |
+| `seal-write` | The same baseline request. Acquires the shared target writer, revalidates facts, commits the exact documents and fast-forwards the recorded target checkout. Returns `{target,planningSeal,state:"written",operationId,relevantFacts}`. Facts include the committed documents. |
+| `seal` | `{identity}` with `bindings.sealOperationId`. Reads the retained candidate, exact parent/diff, immutable registered content, target ancestry and current document blobs; returns the writer-owned receipt. Completed receipts remain readable after the handoff owner disposes its lane. |
+
+After `seal-write`, finalize the canonical Spec body with its returned seal SHA; then create the publication identity with `baseline:planningSeal`, the returned `relevantFacts`, and `sealOperationId:operationId`. Document provenance binds the repository, Spec, target and accepted handoff independently of the later canonical publication body. The transaction subsequently binds both identities. Never regenerate a started publication identity to accommodate body changes.
+
+The writer uses the existing Run store's target mutation lease, a private Git index, one candidate commit and native `merge --ff-only`. It preserves unrelated unstaged/untracked files and the original lane; a staged target index, overlapping dirt, target movement or document preimage change stops without stashing or discarding work. A preimage conflict requires the owner to reconcile the accepted document against the new target before a newly reviewed registration. Unchanged declared files must be removed from the accepted delta rather than producing an empty seal.
+
+Immutable lane and candidate intent records live under the common Git directory's `matt-workflow-control/planning-seals`; `refs/workflow/planning-seals/<operationId>` retains unapplied candidates against Git pruning. Retries keep the same request, read the same candidate and never repeat a successful target write. Preserve those records on interruption. A held or crashed target lease stops before a write; the existing lease recovery owner handles recovery without lock stealing. A retry after a completed seal validates its committed documents; publication still independently validates relevant current facts and tracker version.
 
 ## Evidence and uncertainty
 
