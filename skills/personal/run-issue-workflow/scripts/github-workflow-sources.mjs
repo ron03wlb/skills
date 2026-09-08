@@ -258,6 +258,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (recordedCounts.some(count => !Number.isInteger(count) || count < 0 || count > 10)) throw new Error("Recorded cumulative repair count is missing or invalid");
         const evidence = await validateRepairYield({ evidence: task.modelYield, runIdentity: selectedIdentity, issueId: issue.node_id,
           recordedRepairWaves: Math.max(0, ...recordedCounts),
+          executionProgress: issue.records.filter(item => item.record.kind === "implementation_repair_progress"),
           taskRef: taskRefs[issue.node_id], task, operationIdentity: deriveExecuteIssueOperationIdentity({ repositoryId,
             specId: authority.specId, issueId: issue.node_id, approvedPublicationIdentity: authority.approvedScopeHash }),
           inspectGit: async value => {

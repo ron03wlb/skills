@@ -10,7 +10,7 @@ const confirmed = value => value?.classification === "confirmed" && value.inScop
 // Callbacks read reviewer-owned reports, execution-owned verification receipts and actual Git.
 // A handoff's self-reported success fields alone cannot pass this boundary.
 export async function validateRepairYield({ evidence, runIdentity, issueId, taskRef, operationIdentity,
-  task, recordedRepairWaves, inspectGit, readVerification, readReview }) {
+  task, recordedRepairWaves, executionProgress, inspectGit, readVerification, readReview }) {
   if (evidence?.schema !== "issue-model-yield:v1" || evidence.runId !== runIdentity.runId || evidence.issueId !== issueId
     || evidence.target !== runIdentity.target || !sameTask(evidence.taskRef, taskRef)
     || task?.state !== "RESUMABLE" || evidence.writesStopped !== true || task.cwd !== evidence.worktree
@@ -20,6 +20,31 @@ export async function validateRepairYield({ evidence, runIdentity, issueId, task
     || !confirmed(evidence.finding)) throw new Error("Model yield lacks an in-scope Confirmed finding or remaining repair capacity");
   if (!Number.isInteger(recordedRepairWaves) || recordedRepairWaves < 0 || recordedRepairWaves >= 10
     || evidence.repairWaves < recordedRepairWaves) throw new Error("Model yield contradicts the recorded cumulative repair budget");
+  if (!Array.isArray(executionProgress) || !executionProgress.length) throw new Error("Execution-owned repair progress is required");
+  const progressByWave = new Map();
+  const progressByIdentity = new Map();
+  for (const item of executionProgress) {
+    const record = item.record;
+    if (!nonempty(item.identity) || !/^sha256:[a-f0-9]{64}$/u.test(item.bodySha256)
+      || record?.kind !== "implementation_repair_progress" || record.runId !== runIdentity.runId
+      || record.issueId !== issueId || record.specId !== runIdentity.specId || record.target !== runIdentity.target
+      || !sameTask(record.taskRef, taskRef) || record.worktree !== evidence.worktree || record.topic !== evidence.topic
+      || !commit(record.before) || !Number.isInteger(record.repairWaves) || record.repairWaves < 1 || record.repairWaves > 10) {
+      throw new Error("Execution repair progress identity or cumulative count differs");
+    }
+    assertWorkflowOperationIdentity(record.operationIdentity, operationIdentity);
+    const prior = progressByWave.get(record.repairWaves);
+    if (prior && modelEvidenceDigest(prior.record) !== modelEvidenceDigest(record)
+      || progressByIdentity.has(item.identity) && modelEvidenceDigest(progressByIdentity.get(item.identity)) !== modelEvidenceDigest(item)) {
+      throw new Error("Conflicting execution progress reused a repair wave or note identity");
+    }
+    progressByWave.set(record.repairWaves, item); progressByIdentity.set(item.identity, item);
+  }
+  const cumulative = Math.max(recordedRepairWaves, ...progressByWave.keys());
+  if (evidence.repairWaves !== cumulative || cumulative >= 10) throw new Error("Model yield contradicts cumulative execution progress");
+  for (let number = recordedRepairWaves + 1; number <= cumulative; number += 1) {
+    if (!progressByWave.has(number)) throw new Error("Prior execution repair progress is missing");
+  }
   const waves = evidence.waves;
   if (!Array.isArray(waves) || waves.length !== 2 || waves[0].number !== evidence.repairWaves - 1
     || waves[1].number !== evidence.repairWaves || waves[1].before !== waves[0].candidate
@@ -30,6 +55,9 @@ export async function validateRepairYield({ evidence, runIdentity, issueId, task
   if (!git.clean || !git.consecutive || git.topic !== evidence.topic || git.candidate !== evidence.candidate
     || git.changedWaves?.length !== 2 || !git.changedWaves.every(value => value === true)) throw new Error("Material code changes and clean fixed candidate are unproven");
   for (const wave of waves) {
+    const progress = progressByIdentity.get(wave.progress?.identity);
+    if (!progress || progress.bodySha256 !== wave.progress.bodySha256 || progress.record.repairWaves !== wave.number
+      || progress.record.before !== wave.before) throw new Error("Repair wave does not match its exact started-progress receipt");
     if (!Array.isArray(wave.verification) || !wave.verification.length) throw new Error("A repair wave requires renewed verification");
     for (const reference of wave.verification) {
       const receipt = await readVerification(reference, wave);

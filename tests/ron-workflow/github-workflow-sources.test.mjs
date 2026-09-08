@@ -9,7 +9,7 @@ import { createCoordinator } from "../../skills/personal/run-issue-workflow/scri
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
-import { renderWorkflowRecord, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
+import { renderWorkflowRecord, readWorkflowRecords, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 import { modelEvidenceDigest } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
@@ -153,6 +153,16 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const waves = [];
     for (const number of [1, 2]) {
       const before = issueGit("rev-parse", "HEAD");
+      fixture.comments.push({ node_id: `IC_progress_${number}`, author_association: "OWNER", body: renderWorkflowRecord({
+        kind: "implementation_repair_progress", operationIdentity: execution, runId: current.runIdentity.runId,
+        issueId: "I_1", specId: "I_1", target: "main", taskRef: { threadId: "task", hostId: "local" },
+        worktree: lane, topic: "issue-one", before, repairWaves: number,
+      }) });
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      const progressRead = await owner.sources.tracker.read({ specId: "1" });
+      const progress = progressRead.issues[0].records.find(item => item.identity === `IC_progress_${number}`);
+      assert.ok(progress, "execution progress is read back before code changes");
+      snapshot.issues[0].records.push(progress);
       writeFileSync(join(lane, "repair.mjs"), `export const value = ${number};\n`);
       issueGit("add", "repair.mjs"); issueGit("commit", "-m", `repair ${number}`);
       const candidate = issueGit("rev-parse", "HEAD");
@@ -173,7 +183,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
         mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, `${digest.slice(7)}.json`), JSON.stringify(report));
         return { reviewerId: report.reviewerId, axis, bodySha256: digest };
       });
-      waves.push({ number, before, candidate, verification: [{ key: receipt.key, bodySha256: modelEvidenceDigest(receipt) }], reviews });
+      waves.push({ number, before, candidate, progress: { identity: progress.identity, bodySha256: progress.bodySha256 },
+        verification: [{ key: receipt.key, bodySha256: modelEvidenceDigest(receipt) }], reviews });
     }
     const yieldEvidence = { schema: "issue-model-yield:v1", runId: current.runIdentity.runId, issueId: "I_1", operationIdentity: execution,
       target: "main", worktree: lane, topic: "issue-one", taskRef: { threadId: "task", hostId: "local" },
@@ -187,6 +198,18 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const modelCurrent = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal: modelJournal, request: {} });
     assert.equal(modelCurrent.facts.nodes[0].taskState, "MODEL_YIELDED", JSON.stringify(modelCurrent.facts.contradictions));
     assert.deepEqual(modelCurrent.modelYields.I_1.setting, { model: "gpt-6-astra", thinking: "high" });
+    const priorProgress = snapshot.issues[0].records.find(item => item.identity === "IC_progress_1");
+    const resetProgress = readWorkflowRecords([{ node_id: "IC_earlier_wave_one", author_association: "OWNER",
+      body: renderWorkflowRecord({ ...priorProgress.record, before: seal }) }])[0];
+    for (const records of [
+      snapshot.issues[0].records.filter(item => item.record.kind !== "implementation_repair_progress"),
+      [resetProgress, ...snapshot.issues[0].records],
+    ]) {
+      const tracker = { ...snapshot, issues: [{ ...snapshot.issues[0], records }] };
+      const reset = await modelOwner.sources.reconciliation.read({ tracker, journal: modelJournal, request: {} });
+      assert.equal(reset.modelYields.I_1, undefined, "missing progress or restarted numbering cannot authorize an upgrade");
+      assert.match(reset.facts.contradictions[0].evidence[0], /progress/u);
+    }
     for (const wave of [3, 10]) {
       const journal = [...modelJournal, { type: "repair.recorded", issueId: "I_1", wave, priorRepairWaves: wave - 1,
         candidate: waves[0].before, targetHead: seal, taskRef: yieldEvidence.taskRef, requestIdentity: "sha256:" + "e".repeat(64) }];
