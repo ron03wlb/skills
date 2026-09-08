@@ -28,7 +28,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - Vague needs or a solution-first idea → `/clarify-needs` for a user-confirmed goal, first-principles proposal comparison, and a Needs Summary; it converges when evidence is sufficient and preserves existing follow-up authorization.
 - A new software project without a governing Spec → personal `/start-project` for discovery; it hands off through `/grill-with-docs` when a Planning handoff packet is still missing, then `/to-spec`.
 - A personal daily reflection → `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
-- Codex interruptions → personal `/workflow-retro`; human `/to-spec` handoff.
+- Codex interruptions → personal `/workflow-retro`.
 - Raw request → `/triage`; failure whose cause is unknown → `/diagnosing-bugs`.
 - Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source comparison requiring a cited repository note → `/research`.
 - Architecture → `/improve-codebase-architecture`; changed domain concepts → `/domain-modeling`; module/public-interface design → `/codebase-design`. Existing-term lookups and routine fixes stay inline.
