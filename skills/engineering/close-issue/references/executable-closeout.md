@@ -1,10 +1,10 @@
 # Executable closeout
 
-Hold both close-owner leases after selecting completion.
+After selecting completion, hold both leases.
 
 ## Preconditions
 
-Before each action, read Git ancestry, exact worktree registration and tracker state. Require closed blockers and local candidate `C`. A present worktree must match its path, topic, clean state and `HEAD == C`; an absent worktree requires physical absence and target-reachable `C`. If the target worktree is dirty, stop before mutation: never stash, commit, clean, reset, or move unrelated work. The human resolves dirt, then direct `/close-issue <Issue-ID>` or the authorized coordinator resumes this owner after reconciliation, without repeating execution review or a full suite. Before any action, an already-closed Issue with unreachable `C` or a remaining exact worktree/directory is contradictory and stops.
+Before actions, read Git ancestry, exact worktree registration and tracker state. Require closed blockers and local candidate `C`. A present worktree must match its path, topic, clean state and `HEAD == C`; an absent worktree requires physical absence and target-reachable `C`. If target worktree is dirty, stop before mutation: never stash, commit, clean, reset, or move unrelated work. The human resolves dirt, then direct `/close-issue <Issue-ID>` or the authorized coordinator resumes this owner after reconciliation, without repeating execution review or a full suite. Before any action, an already-closed Issue with unreachable `C` or a remaining exact worktree/directory is contradictory and stops.
 
 ## 1. Merge unchanged candidate
 
@@ -12,7 +12,7 @@ Read latest target `HEAD` while holding the target writer. If `C` is already an 
 
 When merge conflicts, run `git merge --abort`, prove the target returned to its pre-merge commit and is clean, then stop with Issue worktree registered and Issue open. Never auto-resolve, create a replacement candidate, append `implementation_blocked`, or invoke `execute-issue`. Unexpected ref movement or abort failure stops with exact Git state. Authorized execution recovery retains the topic/worktree, latest target and original Acceptance Criteria; a Scope change returns to planning. For coordinator conflict, return exactly one native final-answer line `Workflow close result: <JSON>` with `schema: issue-close-result:v1`, `state: CONFLICT`, exact `runId`, `issueId`, accepted `requestIdentity`, candidate, pre-merge `targetHead`, `targetRestored: true`, and conflicted paths. The coordinator transfers repair ownership; closeout never repairs.
 
-After merge or reachable re-entry, invoke `verifyIntegratedCandidate` with both leases, execution operation ID, Issue, candidate and all approved integration checks; use `[]` only when none apply. Checks bind command, configuration, environment and fresh external inputs. For `verificationRecovery`, re-read changed inputs or supply `readOutcome(attempt)` with exact native `{attemptIdentity,exitCode,source,evidence}`. The owner persists obligations and UNKNOWN before execution, retaining PASS, FAIL and UNKNOWN evidence.
+After merge or reachable re-entry, invoke `verifyIntegratedCandidate` with both leases, execution operation ID, Issue, candidate and all approved integration checks; use `[]` only when none apply. Checks bind command, configuration, environment and fresh external inputs. For `verificationRecovery`, re-read changed inputs or supply `readOutcome(attempt)` with exact native `{attemptIdentity,exitCode,source,evidence}`. Persist obligations and UNKNOWN before execution, retaining PASS, FAIL and UNKNOWN evidence.
 
 A failed check preserves the merged commit, original completion and exact worktree and blocks cleanup/closure. An unchanged explicit failure is not executed again. Lost/unknown results require owning-source diagnosis; target movement, missing responses, skipped commands and ancestry never prove PASS. Changed relevant inputs receive their own evidence, while removing a required check from the same candidate's obligation is rejected. Before cleanup and again before tracker closure, prove all required checks PASS for the current clean combination. Target dirt stops.
 
