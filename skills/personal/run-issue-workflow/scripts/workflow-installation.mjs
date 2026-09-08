@@ -14,7 +14,11 @@ const versionFields = ["id", "sourceCommit", "sourceRepository", "protocolVersio
 const sameVersion = (left, right) => versionFields.every((field) => left?.[field] === right?.[field]);
 const directoryLink = (target, path) => symlinkSync(target, path, process.platform === "win32" ? "junction" : "dir");
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
-const sharedReferences = ["docs/agents/run-preparation.md", "docs/agents/references/approved-pre-run-workflow-maintenance.md"];
+const sharedReferences = [
+  "docs/agents/run-preparation.md",
+  "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+  "docs/agents/references/workflow-stop-diagnosis.md",
+];
 const safePath = (path) => typeof path === "string" && (path.startsWith("skills/") || sharedReferences.includes(path))
   && !path.split(/[\\/]/u).some((part) => ["", ".", ".."].includes(part));
 

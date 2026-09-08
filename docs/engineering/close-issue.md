@@ -22,7 +22,12 @@ Any number of Issue worktrees may execute concurrently. Reach for this once per 
 
 On Windows, Git can remove a worktree registration while leaving its empty directory. This is pending cleanup, so the original completion remains valid and the Issue stays open until the exact directory is removed. The current desktop bridge cannot safely release task helpers or prevent their respawn. A failed host cleanup returns its exact observations to the same close owner and releases its leases; unchanged failures do not trigger more cleanup messages or implementation replay. Independent Issues remain eligible. Tool policy rejection requires resolution at that boundary; another tool is not a cleanup workaround.
 
-The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate makes that action complete; otherwise Git fast-forwards when possible and uses an ordinary merge for diverged histories. Target dirt requires human preservation and resolution. Direct entry then retries `/close-issue <Issue-ID>`; a continuing authorized coordinator reconciles before returning to the same close owner. Neither repeats execution or the full suite. A conflict is aborted and target restoration verified; the human or same authorized coordinator may return to the original execution lane under unchanged Acceptance Criteria.
+The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate makes that action complete; otherwise Git fast-forwards when possible and uses an ordinary merge for diverged histories. Target dirt requires human preservation and resolution. After resolution:
+
+- Direct entry retries `/close-issue <Issue-ID>`.
+- A continuing authorized coordinator reconciles before returning to the same close owner.
+
+Neither repeats execution or the full suite. A conflict is aborted and target restoration verified; the human or same authorized coordinator may return to the original execution lane under unchanged Acceptance Criteria.
 
 A new ordinary merge combination receives the integration checks required by its approved plan before cleanup; unchanged candidate verification is reused when its inputs still match. This remains separate from the aggregate push gate.
 

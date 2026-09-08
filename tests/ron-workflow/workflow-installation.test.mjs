@@ -53,13 +53,15 @@ test("an installed entry update preserves a running workflow's exact executable 
   mkdirSync(join(sourceRepository, "docs/agents"), { recursive: true });
   writeFileSync(join(sourceRepository, "docs/agents/run-preparation.md"), "Shared planning preparation contract\n");
   const maintenanceReference = "docs/agents/references/approved-pre-run-workflow-maintenance.md";
+  const diagnosisReference = "docs/agents/references/workflow-stop-diagnosis.md";
   mkdirSync(join(sourceRepository, "docs/agents/references"));
   writeFileSync(join(sourceRepository, maintenanceReference), "Approved maintenance owner\n");
+  writeFileSync(join(sourceRepository, diagnosisReference), "Shared stop diagnosis owner\n");
   const commit = (version) => {
     copyHostAssets(sourceRepository);
     writeFileSync(join(sourceRepository, entry), `console.log(${JSON.stringify(version)});\n`);
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), `---\nname: run-issue-workflow\ndescription: Run approved work.\n---\n${version}\n`);
-    git("add", "skills", "docs/agents/run-preparation.md", maintenanceReference);
+    git("add", "skills", "docs/agents/run-preparation.md", maintenanceReference, diagnosisReference);
     git("-c", "user.name=Workflow Test", "-c", "user.email=workflow@example.test", "commit", "-m", version);
     return git("rev-parse", "HEAD");
   };
@@ -69,6 +71,7 @@ test("an installed entry update preserves a running workflow's exact executable 
     for (const path of hostAssets) assert.deepEqual(readFileSync(join(first.root, "skills/personal/run-issue-workflow", path)),
       execFileSync("git", ["-C", sourceRepository, "show", `${first.version.sourceCommit}:skills/personal/run-issue-workflow/${path}`]));
     assert.equal(readFileSync(join(first.root, maintenanceReference), "utf8"), "Approved maintenance owner\n");
+    assert.equal(readFileSync(join(first.root, diagnosisReference), "utf8"), "Shared stop diagnosis owner\n");
     assert.equal(execFileSync(process.execPath, [join(skillDirectory, "scripts/installed-entry.mjs")], { encoding: "utf8" }).trim(), "v1");
     const secondCommit = commit("v2");
     const originalSymlink = fs.symlinkSync;

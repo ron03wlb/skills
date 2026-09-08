@@ -3415,8 +3415,13 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(lifecycle, /panel-open failure.*continues through available text controls.*same writer.*without that control capability.*panel_unavailable.*before task action/isu);
   assert.match(skillEntry, /Explicit Spec or batch selection includes matching completed Runs.*original Grants.*cached `SUCCEEDED`.*no execution, verification or close replay/isu);
   const recovery = read("skills/personal/run-issue-workflow/references/recovery.md");
-  assert.match(recovery, /Skill-caused stop.*exact `SKILL.md`.*quote.*instruction.*referenced rule.*observed condition.*interpretation/isu);
-  assert.match(recovery, /existing authorization.*Changed scope, missing authority, uncertain ownership and concrete host restrictions.*Spec-writing request.*planning\/publication authority only/isu);
+  const diagnosis = read("docs/agents/references/workflow-stop-diagnosis.md");
+  assert.match(diagnosis, /Skill-caused stop.*exact `SKILL.md`.*quote.*instruction.*referenced rule.*observed condition.*interpretation/isu);
+  assert.match(diagnosis, /existing authorization.*Changed scope, missing authority, uncertain ownership and concrete host restrictions.*Spec-writing request.*planning\/publication authority only/isu);
+  for (const reader of [recovery, read("skills/engineering/execute-issue/SKILL.md"), read("skills/engineering/close-issue/SKILL.md")]) {
+    assert.match(reader, /docs\/agents\/references\/workflow-stop-diagnosis\.md/u);
+    assert.doesNotMatch(reader, /\.\.\/.*run-issue-workflow\/references\/recovery\.md/u);
+  }
   assert.match(recovery, /pending owning results settle.*live native Promise.*driver.*elapsed time.*cannot.*failed delivery/isu);
   assert.match(operator, /GRILL.*Spec.*`\/to-tickets`.*`\/run-issue-workflow <main Issue>`/isu);
   assert.match(operator, /Single-Issue.*Multi-Issue.*no-argument.*unique non-terminal Run/isu);

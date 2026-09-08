@@ -25,4 +25,4 @@ For a Multi-Issue parent, read [parent closeout](references/parent-closeout.md).
 
 ## 3. Disposition
 
-Closeout results are Git ancestry, physical worktree absence and tracker read-back. A conflict, unexpected target movement, ambiguous tracker/Git result or semantic scope uncertainty preserves the lane and uses [the recovery diagnosis](../../personal/run-issue-workflow/references/recovery.md#stop-with-a-diagnosis). Completion remains valid unless evidence invalidates its candidate, review or verification; target movement, partial progress or aggregate-gate failure never reopens execution. This skill authorizes only local closeout.
+Closeout results are Git ancestry, physical worktree absence and tracker read-back. A conflict, unexpected target movement, ambiguous tracker/Git result or semantic scope uncertainty preserves the lane and uses [workflow stop diagnosis](../../../docs/agents/references/workflow-stop-diagnosis.md). Completion remains valid unless evidence invalidates its candidate, review or verification; target movement, partial progress or aggregate-gate failure never reopens execution. This skill authorizes only local closeout.
