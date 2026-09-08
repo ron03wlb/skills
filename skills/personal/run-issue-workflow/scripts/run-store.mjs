@@ -1,4 +1,5 @@
 import { maintainLeaseHealth, readLeaseHealth } from "./lease-health.mjs";
+import { validateFrozenModelDecision } from "./issue-model-policy.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -492,14 +493,25 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     if (value.runId !== runId || value.issueId !== issueId || value.purpose !== purpose || typeof value.prompt !== "string") {
       throw new Error("Host task intent identity differs");
     }
+    if (value.modelDecision !== undefined || value.nativeRequest !== undefined) {
+      validateFrozenModelDecision(value.modelDecision);
+      if (value.nativeRequest?.prompt !== value.prompt || value.nativeRequest.model !== value.modelDecision.model
+        || value.nativeRequest.thinking !== value.modelDecision.thinking) throw new Error("Frozen native request differs from its model decision");
+    }
     assertNoToken(value);
     return value;
   };
-  const reserveHostTask = ({ runId, issueId, prompt, purpose }) => {
+  const reserveHostTask = ({ runId, issueId, prompt, purpose, modelDecision, nativeRequest }) => {
     const path = hostTaskPath(runId, issueId, purpose);
     const existing = readHostTask({ runId, issueId, purpose });
     if (existing) return { created: false, intent: existing };
-    const intent = { runId, issueId, prompt, ...(purpose ? { purpose } : {}), createdAt: new Date().toISOString() };
+    const intent = { runId, issueId, prompt, ...(purpose ? { purpose } : {}), createdAt: new Date().toISOString(),
+      ...(modelDecision === undefined ? {} : { modelDecision, nativeRequest }) };
+    if (modelDecision !== undefined) {
+      validateFrozenModelDecision(modelDecision);
+      if (nativeRequest?.prompt !== prompt || nativeRequest.model !== modelDecision.model
+        || nativeRequest.thinking !== modelDecision.thinking) throw new Error("Native request must match the frozen model decision");
+    }
     assertNoToken(intent);
     mkdirSync(dirname(path), { recursive: true });
     let descriptor;

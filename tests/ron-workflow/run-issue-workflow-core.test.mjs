@@ -28,6 +28,7 @@ import {
   RUN_STATES,
 } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { bindTechnicalFailure } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 import {
   createWorkflowControlStore,
@@ -153,6 +154,21 @@ const preWaitEvidenceFor = (input) => {
     controlRevision: status.run.controlRevision,
   });
 };
+
+test("model upgrades and isolated recovery share the same available execution slots", () => {
+  const recovery = bindTechnicalFailure({ runId: "run-12", issueId: "14", operationId: "issue-14", candidate: "b".repeat(40),
+    targetHead: "a".repeat(40), worktree: "/issue-14", topic: "issue-14", owningSource: "native process", observedResult: "failure",
+    command: ["check"], repairWaveCount: 5, ownerTaskRef: { threadId: "thread-14", hostId: "local" } });
+  const input = facts([{ ...node("13"), taskState: "MODEL_YIELDED", worktreeState: "PRESENT" },
+    { ...node("14"), completionState: "BLOCKED", worktreeState: "PRESENT", recovery }, node("15")]);
+  input.journal.push(dispatchEvent("13", 1, 2), dispatchEvent("14", 1, 3));
+  for (const maxParallel of [1, 2, 3]) {
+    const current = { ...input, journal: [{ ...grant, maxParallel }, ...input.journal.slice(1)] };
+    const actions = reduceRun(current).legalActions.filter(action => ["upgrade_issue", "recover_issue", "dispatch_issue"].includes(action.type));
+    assert.deepEqual(actions.map(action => action.type), ["upgrade_issue", "recover_issue", "dispatch_issue"].slice(0, maxParallel));
+    assert.equal(new Set(actions.map(action => action.issueId)).size, actions.length);
+  }
+});
 
 const createGitCommonDirFixture = (prefix) => {
   const root = mkdtempSync(join(tmpdir(), prefix));
@@ -1672,7 +1688,7 @@ test("the versioned runtime interface publishes the accepted state machines", ()
     "PAUSING", "PAUSED", "BLOCKED", "STOPPING", "STOPPED", "SUCCEEDED",
   ]);
   assert.deepEqual(NODE_STATES, [
-    "PENDING", "READY", "DISPATCHED", "EXECUTING", "RETRYING",
+    "PENDING", "READY", "DISPATCHED", "EXECUTING", "MODEL_YIELDED", "RETRYING",
     "IMPLEMENTATION_COMPLETE", "CLOSING", "SUCCEEDED", "BLOCKED", "FAILED",
   ]);
   assert.deepEqual(CONTROL_COMMANDS, ["PAUSE", "RESUME", "STOP"]);

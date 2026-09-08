@@ -9,10 +9,12 @@ import { createCoordinator } from "../../skills/personal/run-issue-workflow/scri
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
-import { renderWorkflowRecord, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
+import { renderWorkflowRecord, readWorkflowRecords, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
-import { bindProducerCheckpointOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
+import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
+import { modelEvidenceDigest } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { reduceRunReadyHandoff } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
+import { createVerificationCache } from "../../skills/engineering/execute-issue/scripts/verification-cache.mjs";
 
 test("the GitHub source joins CLI tracker read-back to the real Git checkpoint and target", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "github-source-")));
@@ -106,6 +108,9 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     assert.equal(reduceRunReadyHandoff(current.runReadyAuthority).state, "READY");
     assert.equal(current.facts.run.targetHead, seal);
     assert.equal(current.facts.nodes[0].completionState, "NONE");
+    assert.equal(current.modelInputs.I_1.issueBody, body);
+    assert.equal(current.modelInputs.I_1.specBody, body);
+    assert.equal((await owner.readModelInputs("1")).inputs[0].inputIdentity, current.modelInputs.I_1.inputIdentity);
     const unfinished = await owner.sources.reconciliation.read({ tracker: snapshot, journal: [{ type: "dispatch.recorded", issueId: "I_1", taskRef: { threadId: "task", hostId: "local" } }], request: {} });
     assert.equal(unfinished.facts.nodes[0].taskState, "TRANSIENT_FAILURE");
     const cleanup = await owner.readCleanupRuns();
@@ -143,6 +148,94 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     writeFileSync(join(lane, "change.sql"), "-- reviewed prerequisite fixture; no database connection\n");
     const issueGit = (...args) => execFileSync("git", ["-C", lane, ...args], { encoding: "utf8" }).trim();
     issueGit("add", "change.sql"); issueGit("commit", "-m", "prerequisite candidate");
+    const execution = deriveExecuteIssueOperationIdentity({ repositoryId: "github:example/repo", specId: "I_1", issueId: "I_1", approvedPublicationIdentity: authority.approvedScopeHash });
+    const finding = { identity: "F1", axis: "Spec", governingSource: "AC-1", summary: "Confirmed contract defect", classification: "confirmed", inScope: true };
+    const waves = [];
+    for (const number of [1, 2]) {
+      const before = issueGit("rev-parse", "HEAD");
+      fixture.comments.push({ node_id: `IC_progress_${number}`, author_association: "OWNER", body: renderWorkflowRecord({
+        kind: "implementation_repair_progress", operationIdentity: execution, runId: current.runIdentity.runId,
+        issueId: "I_1", specId: "I_1", target: "main", taskRef: { threadId: "task", hostId: "local" },
+        worktree: lane, topic: "issue-one", before, repairWaves: number,
+      }) });
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      const progressRead = await owner.sources.tracker.read({ specId: "1" });
+      const progress = progressRead.issues[0].records.find(item => item.identity === `IC_progress_${number}`);
+      assert.ok(progress, "execution progress is read back before code changes");
+      snapshot.issues[0].records.push(progress);
+      writeFileSync(join(lane, "repair.mjs"), `export const value = ${number};\n`);
+      issueGit("add", "repair.mjs"); issueGit("commit", "-m", `repair ${number}`);
+      const candidate = issueGit("rev-parse", "HEAD");
+      const cache = createVerificationCache({ repository: lane, operationId: execution.key });
+      const check = { candidate, command: [process.execPath, "--check", "repair.mjs"], environment: { node: process.version, fixture: true },
+        readExternalInputs: async () => ({ fixture: "local syntax check" }) };
+      const returned = await cache.verify(check);
+      const reused = await cache.verify(check);
+      assert.equal(returned.exitCode, 0); assert.equal(returned.reused, false); assert.equal(reused.reused, true);
+      const verificationDirectory = join(root, ".git", "workflow-verification", execution.key);
+      const receipt = JSON.parse(readFileSync(join(verificationDirectory, `${returned.key}.json`), "utf8"));
+      assert.notEqual(modelEvidenceDigest(returned), modelEvidenceDigest(receipt), "the fresh API return includes a non-persisted diagnostic");
+      assert.notEqual(modelEvidenceDigest(reused), modelEvidenceDigest(receipt), "the reused API return is not the stored receipt either");
+      const reviews = ["Standards", "Spec"].map(axis => {
+        const report = { schema: "issue-repair-review:v1", operationId: execution.key, reviewerId: `reviewer-${axis}`, axis, candidate, materialChange: true, findings: axis === "Spec" ? [finding] : [] };
+        const digest = modelEvidenceDigest(report);
+        const directory = join(root, ".git", "workflow-reviews", execution.key);
+        mkdirSync(directory, { recursive: true }); writeFileSync(join(directory, `${digest.slice(7)}.json`), JSON.stringify(report));
+        return { reviewerId: report.reviewerId, axis, bodySha256: digest };
+      });
+      waves.push({ number, before, candidate, progress: { identity: progress.identity, bodySha256: progress.bodySha256 },
+        verification: [{ key: receipt.key, bodySha256: modelEvidenceDigest(receipt) }], reviews });
+    }
+    const yieldEvidence = { schema: "issue-model-yield:v1", runId: current.runIdentity.runId, issueId: "I_1", operationIdentity: execution,
+      target: "main", worktree: lane, topic: "issue-one", taskRef: { threadId: "task", hostId: "local" },
+      candidate: waves[1].candidate, repairWaves: 2, writesStopped: true, finding, waves };
+    const modelJournal = [{ type: "grant.recorded", runIdentity: current.runIdentity,
+      modelPolicy: { version: "issue-model-policy:v1", specId: "I_1", target: "main", approvedScopeHash: authority.approvedScopeHash, authorization: "Approved policy" } },
+      { type: "dispatch.recorded", issueId: "I_1", attempt: 1, taskRef: yieldEvidence.taskRef }];
+    const modelOwner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo",
+      store: { readHostTask: () => ({ modelDecision: { model: "gpt-5.6-sol", thinking: "high" } }) },
+      tasks: { read: async () => ({ state: "RESUMABLE", cwd: lane, modelYield: yieldEvidence }) } });
+    const modelCurrent = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal: modelJournal, request: {} });
+    assert.equal(modelCurrent.facts.nodes[0].taskState, "MODEL_YIELDED", JSON.stringify(modelCurrent.facts.contradictions));
+    assert.deepEqual(modelCurrent.modelYields.I_1.setting, { model: "gpt-6-astra", thinking: "high" });
+    const recoveryProgress = readWorkflowRecords([{ node_id: "IC_recovery_progress_3", author_association: "OWNER",
+      body: renderWorkflowRecord({ kind: "implementation_progress", issueId: "I_1", operationIdentity: execution, repairWaveCount: 3 }) }])[0];
+    const afterRecovery = await modelOwner.sources.reconciliation.read({ tracker: { ...snapshot,
+      issues: [{ ...snapshot.issues[0], records: [...snapshot.issues[0].records, recoveryProgress] }] }, journal: modelJournal, request: {} });
+    assert.equal(afterRecovery.modelYields.I_1, undefined, "model selection cannot ignore a newer recovery-owner count");
+    assert.match(afterRecovery.facts.contradictions[0].evidence[0], /cumulative repair budget/u);
+    const blockedRecord = readWorkflowRecords([{ node_id: "IC_blocked_after_model_repairs", author_association: "OWNER",
+      body: renderWorkflowRecord({ kind: "implementation_blocked", issueId: "I_1", specId: "I_1", operationIdentity: execution,
+        repairWaves: 0, reason: "Observed technical failure after model repair work", owningSource: "repair.mjs", command: ["node", "--check", "repair.mjs"] }) }])[0];
+    const recoveryOwner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: {},
+      tasks: { read: async () => ({ state: "RESUMABLE", cwd: lane }) } });
+    const recoveryCurrent = await recoveryOwner.sources.reconciliation.read({ tracker: { ...snapshot,
+      issues: [{ ...snapshot.issues[0], records: [...snapshot.issues[0].records, blockedRecord] }] }, journal: modelJournal, request: {} });
+    assert.deepEqual(recoveryCurrent.facts.contradictions, []);
+    assert.equal(recoveryCurrent.facts.nodes[0].recovery.repairWaveCount, 2, "recovery reads legitimate model execution progress through the actual source consumer");
+    const priorProgress = snapshot.issues[0].records.find(item => item.identity === "IC_progress_1");
+    const resetProgress = readWorkflowRecords([{ node_id: "IC_earlier_wave_one", author_association: "OWNER",
+      body: renderWorkflowRecord({ ...priorProgress.record, before: seal }) }])[0];
+    for (const records of [
+      snapshot.issues[0].records.filter(item => item.record.kind !== "implementation_repair_progress"),
+      [resetProgress, ...snapshot.issues[0].records],
+    ]) {
+      const tracker = { ...snapshot, issues: [{ ...snapshot.issues[0], records }] };
+      const reset = await modelOwner.sources.reconciliation.read({ tracker, journal: modelJournal, request: {} });
+      assert.equal(reset.modelYields.I_1, undefined, "missing progress or restarted numbering cannot authorize an upgrade");
+      assert.match(reset.facts.contradictions[0].evidence[0], /progress/u);
+    }
+    for (const wave of [3, 10]) {
+      const journal = [...modelJournal, { type: "repair.recorded", issueId: "I_1", wave, priorRepairWaves: wave - 1,
+        candidate: waves[0].before, targetHead: seal, taskRef: yieldEvidence.taskRef, requestIdentity: "sha256:" + "e".repeat(64) }];
+      const spent = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal, request: {} });
+      assert.equal(spent.modelYields.I_1, undefined, "self-reported waves cannot regress persisted conflict-repair history");
+      assert.match(spent.facts.contradictions[0].evidence[0], /cumulative repair budget/u);
+    }
+    yieldEvidence.waves[1].reviews[0].bodySha256 = "sha256:" + "0".repeat(64);
+    const missingReview = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal: modelJournal, request: {} });
+    assert.equal(missingReview.modelYields.I_1, undefined);
+    assert.equal(missingReview.facts.nodes[0].taskState, "UNKNOWN", "missing independent review cannot become an upgrade action");
     const packet = { issueId: "I_1", artifact: "change.sql", environmentIdentity: "fixture-db", candidate: issueGit("rev-parse", "HEAD"), blob: issueGit("rev-parse", "HEAD:change.sql"),
       attestationIdentity: "IC_sql", owner: "human", recoveryPrepared: true, validation: "passed", standards: "clean", spec: "clean", outcome: "NO_OP", taskRef: { threadId: "task", hostId: "local" }, worktree: lane, topic: "issue-one" };
     publication.preparation.sql = [{ issueId: "I_1", artifact: packet.artifact, environmentIdentity: packet.environmentIdentity }];

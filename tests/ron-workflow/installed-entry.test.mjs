@@ -88,7 +88,7 @@ function fixture({ legacyRuntime = false } = {}) {
     return JSON.stringify([response]);
   };
   syncBuiltinESMExports();
-  const addCompleted = (number = 1, multi = false) => {
+  const addCompleted = (number = 1, multi = false, recordRun = true) => {
     const specId = `I_${number}`;
     const body = `Approved single Spec ${number}`;
     const authority = { specId, target: "main", planningSeal: seal, classification: multi ? "MULTI" : "SINGLE", approvedScopeHash: bodyDigest(body), decompositionIdentity: multi ? `IC_decomp_${number}` : null };
@@ -132,11 +132,13 @@ function fixture({ legacyRuntime = false } = {}) {
     issues.set(number, issue);
     const { planningSeal: ignored, ...runFields } = authority;
     const runIdentity = { ...runFields, runId: deriveRunOperationIdentity({ repositoryId: "github:example/repo", specId, approvedPublicationIdentity: authority.approvedScopeHash }).key };
-    const writer = store.acquireWriter(runIdentity.runId);
-    writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity, maxParallel: 3, workflowVersion: retained.version });
-    for (const member of multi ? children : [issue]) writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: member.node_id,
-      attempt: 1, taskRef: { threadId: `task-${member.number}`, hostId: "local" } });
-    writer.release();
+    if (recordRun) {
+      const writer = store.acquireWriter(runIdentity.runId);
+      writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity, maxParallel: 3, workflowVersion: retained.version });
+      for (const member of multi ? children : [issue]) writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: member.node_id,
+        attempt: 1, taskRef: { threadId: `task-${member.number}`, hostId: "local" } });
+      writer.release();
+    }
     return { issue, runIdentity };
   };
   return { root, source, repository, cacheDirectory, retained, store, issues, calls, host, taskStates, readHooks, addCompleted, install,
@@ -153,6 +155,25 @@ function fixture({ legacyRuntime = false } = {}) {
   };
 }
 
+test("installed packages bind a newly authorized model policy and contain its executable owners", async () => {
+  const f = fixture();
+  try {
+    const { runIdentity } = f.addCompleted(1, false, false);
+    const policyOwner = await import(pathToFileURL(join(f.retained.root, scriptsPath, "issue-model-policy.mjs")).href);
+    const repairOwner = await import(pathToFileURL(join(f.retained.root, scriptsPath, "model-repair-evidence.mjs")).href);
+    assert.equal(typeof repairOwner.validateRepairYield, "function");
+    const policy = { version: policyOwner.ISSUE_MODEL_POLICY_VERSION, specId: runIdentity.specId,
+      target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash,
+      authorization: "Approved Terra/Sol/Astra pool and one bounded upgrade for this exact scope" };
+    const first = await f.entry({ specId: "1", modelRouting: { policy } });
+    assert.equal(first.status.run.state, "SUCCEEDED", JSON.stringify(first.status));
+    assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy);
+    await f.entry({ specId: "1" });
+    assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy, "terminal re-entry preserves membership without repeating the input");
+    assert.ok(f.calls.every(({ name }) => !/create_thread|send_message/u.test(name)));
+  } finally { f.close(); }
+});
+
 test("explicit completed Spec re-entry preserves the original Run and Grant across a compatible package update", async () => {
   const f = fixture();
   try {
@@ -163,7 +184,9 @@ test("explicit completed Spec re-entry preserves the original Run and Grant acro
     writeFileSync(join(f.source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package v2\n");
     git(f.source, "add", "skills"); git(f.source, "commit", "-m", "package v2");
     const current = f.install();
-    const again = await f.entry({ specId: "1" });
+    const again = await f.entry({ specId: "1", modelRouting: { policy: { version: "issue-model-policy:v1",
+      specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash,
+      authorization: "New model policy requested after this legacy Run already existed" } } });
     assert.equal(again.status.run.state, "SUCCEEDED", JSON.stringify(again.status));
     assert.equal(again.status.run.runId, runIdentity.runId);
     const events = f.store.readEvents(runIdentity.runId);
@@ -171,6 +194,7 @@ test("explicit completed Spec re-entry preserves the original Run and Grant acro
     assert.deepEqual(events.slice(prefix.length).map(({ type }) => type), ["runtime.observed"]);
     assert.deepEqual(events.at(-1).workflowVersion, current.version);
     assert.deepEqual(events[0].workflowVersion, f.retained.version);
+    assert.equal(events[0].modelPolicy, undefined, "a new runtime and input never enroll a legacy Run");
     const manifestPath = join(current.root, ".workflow-version.json");
     const manifestBytes = readFileSync(manifestPath);
     const manifest = JSON.parse(manifestBytes);

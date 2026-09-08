@@ -23,7 +23,7 @@ export function configureHostInput(input = process.stdin) {
 
 const emit = (value) => process.stdout.write(`workflow-host ${JSON.stringify(value)}\n`);
 
-async function selectInstalledLane({ repository, specId, runId, host, prepareOnly = false }) {
+async function selectInstalledLane({ repository, specId, runId, host, prepareOnly = false, modelRouting }) {
   repository = realpathSync(repository);
   const common = realpathSync(resolve(repository, execFileSync("git", ["-C", repository, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
   const store = createRunStore({ gitCommonDir: common });
@@ -87,7 +87,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   }
   const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
     runIdentity: previousGrant?.runIdentity, workflowVersion: runtime.version,
-    compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host };
+    compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host, modelRouting };
   if (prepareOnly) {
     if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
     let lane = await composition.prepareCodexWorkflow(options);
@@ -122,15 +122,15 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   return result;
 }
 
-export async function runInstalledEntry({ repository, specId, runId, host, specIds, maxWorkers = 3 }) {
+export async function runInstalledEntry({ repository, specId, runId, host, specIds, maxWorkers = 3, modelRouting }) {
   if (!specIds && typeof specId === "string" && specId.includes(",")) specIds = specId.split(",");
-  if (!specIds) return selectInstalledLane({ repository, specId, runId, host });
+  if (!specIds) return selectInstalledLane({ repository, specId, runId, host, modelRouting });
   if (runId || specIds.length === 0 || new Set(specIds).size !== specIds.length) throw new Error("Batch entry requires explicit distinct Specs and no ambiguous Run ID");
   const lanes = [];
   try {
     for (const id of specIds) {
       try {
-        const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true });
+        const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true, modelRouting: modelRouting?.[id] });
         lanes.push(typeof lane.run === "function" ? lane : { specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
       } catch (error) { lanes.push({ specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
     }
@@ -140,14 +140,15 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
 }
 
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [repository, specId, runId] = process.argv.slice(2);
+  const [repository, specId, runId, modelRoutingPath] = process.argv.slice(2);
   let host;
   let restoreInput = () => {};
   try {
-    if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID]");
+    if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID] [model-routing JSON path]");
     restoreInput = configureHostInput();
     host = createCodexHostBridge();
-    const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host });
+    const modelRouting = modelRoutingPath ? JSON.parse(readFileSync(modelRoutingPath, "utf8")) : undefined;
+    const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host, modelRouting });
     emit({ type: "result", result, metrics: host.metrics() });
   } catch (error) {
     emit({ type: "error", message: error.message, metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });

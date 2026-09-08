@@ -1,6 +1,6 @@
 ---
 name: ask-matt
-description: Ask which skill or flow fits your situation. A router over this skill set.
+description: Route your situation to the appropriate skill or flow.
 disable-model-invocation: true
 ---
 
@@ -17,7 +17,7 @@ Route the situation; do not perform the work.
 5. `/close-issue <Issue-ID>` integrates the exact candidate into the recorded Issue target branch, removes its clean worktree, and closes it. Issue worktrees may run concurrently; target mutation stays serialized. Integration failure requires recovery. Use this command for a Multi-Issue parent after every child is closed and reachable.
 6. Before push, invoke `/verify-target-before-push <target>`. Local-ahead derives members from completion notes; already-pushed work uses an explicit range. Both run aggregate review and verification once. A passing local-ahead run writes `push_ready`; then `/push-target <target>` performs one ordinary non-force push and reads the remote ref back.
 
-The personal `/run-issue-workflow` uses its installed entry and current-host tools, preserves each Run’s original Grant and retained package with compatible runtime observations, and offers available text controls when the panel cannot open. Explicit Spec/batch re-entry reconciles completed members without replay; active members share existing worker limits. It carries approved pre-Run maintenance through [its owner](../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) without repeated leaf commands. A Spec-writing request ends at planning/publication; consumer configuration stays static.
+`/run-issue-workflow` uses its installed entry and current-host tools, preserves each Run’s original Grant and retained package with compatible runtime observations, and offers available text controls when the panel cannot open. Explicit Spec/batch re-entry reconciles completed members without replay; active members share existing worker limits. It carries approved pre-Run maintenance through [its owner](../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) without repeated leaf commands. Policy-bound Runs follow [model routing](../../personal/run-issue-workflow/references/model-routing.md). A Spec-writing request ends at planning/publication; consumer configuration stays static.
 
 Read [workflow route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
 

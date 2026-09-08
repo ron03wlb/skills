@@ -5,7 +5,7 @@ description: Implement and verify one dependency-ready tracker Issue in its reco
 
 # Execute Issue
 
-Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicated Git worktree. This skill owns implementation and Matt `code-review`; it stops at a trustworthy completion note and never invokes `close-issue`.
+Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicated Git worktree. This skill owns implementation and Matt `code-review`; it stops at verified completion and never invokes `close-issue`.
 
 ## 1. Enter the exact Issue
 
@@ -19,7 +19,7 @@ If the latest valid `implementation_complete` still binds this Issue, its curren
 
 A dirty target stop or partial close is not a conflict-resolution rerun. When completion remains valid, perform only cheap read-only identity and evidence checks. Do not run baseline, focused, final, or full suite verification; do not rerun review, create a commit, or write a tracker note. Return remaining close progress to the same authorized close owner. Human-owned target dirt still needs human resolution; direct entry then retries `/close-issue <Issue-ID>`, while the authorized coordinator reconciles before continuing that owner.
 
-An explicit conflict-resolution or technical-failure recovery request from a human or evidence-bound coordinator is the completion-preserving exception. For technical failure, read [technical recovery](references/technical-recovery.md) before diagnosis, ownership transfer or source edits. A coordinator handoff consumes the same Issue operation material repair budget (maximum ten across re-entry) and preserves the original worktree and task history while transferring exclusive write ownership to the recorded isolated repair task. Conflict recovery requires safe target-abort read-back; successful integration followed by failed verification preserves that merge. After `/close-issue` reports a merge conflict, the human or the same authorized coordinator may invoke `execute-issue` again in the same topic branch and Issue worktree, capture the latest target as the new attempt baseline, merge that exact baseline into the topic branch without rebasing or resetting, and resolve the conflict only while the original Acceptance Criteria, target, exclusions, and ownership remain unchanged. Require the new candidate to contain the new baseline. A Scope change returns to planning; a successful rerun writes a new `implementation_complete` note that becomes current.
+An explicit conflict-resolution or technical-failure recovery request from a human or evidence-bound coordinator is the completion-preserving exception. For technical failure, read [technical recovery](references/technical-recovery.md) before diagnosis, ownership transfer or source edits. A coordinator handoff consumes the same Issue operation material repair budget (maximum ten across re-entry) and preserves the original worktree and task history while transferring exclusive write ownership to the recorded isolated repair task. Conflict recovery requires safe target-abort read-back; successful integration followed by failed verification preserves that merge. After a `/close-issue` merge conflict, the human or same authorized coordinator may rerun `execute-issue` in the same topic branch and Issue worktree. Capture the latest target as the new attempt baseline and merge that exact baseline into the topic branch without rebasing or resetting; resolve only while Acceptance Criteria, target, exclusions and ownership remain unchanged. Require the new candidate to contain the new baseline. A Scope change returns to planning; a successful rerun writes a new `implementation_complete` note that becomes current.
 
 For a real blocked exit, append and read back one `implementation_blocked` with reason, cumulative repair-wave count, and available target, worktree, baseline, and candidate identities. Explain the gate using [workflow stop diagnosis](../../../docs/agents/references/workflow-stop-diagnosis.md). Tracker ambiguity never claims supersession or completion.
 
@@ -27,7 +27,7 @@ Capture the exact local Issue target branch and current `HEAD` as execution base
 
 Read [Manual prerequisites](references/manual-prerequisites.md) only when the published Issue declares one exact human-applied artifact or implementation discovers one unchanged-scope Late prerequisite. That reference solely governs attestation and `pre-execute-issue` handoff behavior.
 
-Matt/Ron workflow owners, runtime and their references use the selected immutable package, including shared `docs/` references. Generic host support skills explicitly required by repository or higher-priority instructions use installed sources from the current session catalog. They do not replace packaged workflow owners. Preserve accepted creation intents across clarification and re-entry; diagnose a truly missing dependency.
+Matt/Ron owners, runtime and references remain in the selected immutable package, including shared `docs/`. Repository-required or higher-priority generic host skills use current catalog sources; they never replace packaged owners. Preserve accepted creation intents across clarification and re-entry; diagnose missing dependencies.
 
 ## 2. Implement and verify
 
@@ -44,6 +44,8 @@ Run affected verification after each changed slice or repair. Before review, req
 Commit the candidate and invoke Matt `code-review` against the recorded baseline and Issue or Spec. Keep Standards and Spec separate. Require both axes to contain no Confirmed code review finding before treating them as clean. Every Code review advisory remains visible; collectively, advisories do not fail execution, trigger repair, consume a repair wave, or create durable waiver state.
 
 Confirm findings against source, tests, standards, and Spec. Repair every in-scope Confirmed finding, run affected verification, commit, and rerun both axes. Allow at most 10 repair waves for the same Issue operation across retries; a wave begins only when code repair starts. Before repair, append its cumulative count to the existing Issue progress evidence and read it back; resume that count after interruption or conflict repair. A retry never resets the budget. If earlier repair activity has no uniquely provable count, preserve the candidate and report the evidence gap instead of assuming zero. Tool failures, duplicates, and smells, preferences, or suggestions that lack exact governing evidence remain advisories and do not count; when exact evidence proves a violation, the observation is a Confirmed code review finding. If wave 10 is unclean, preserve the candidate, publish the blocked state, and leave the Issue open.
+
+For a task created under a versioned Run model policy, read [repair progress and the complete-wave yield](references/model-repair-yield.md) before its first repair or repair re-entry. That branch records cumulative progress before changes and may yield when the same Confirmed finding survives two consecutive complete waves. Preserve the task, candidate and original ten-wave budget. Other tasks keep the existing repair loop.
 
 ## 4. Complete
 

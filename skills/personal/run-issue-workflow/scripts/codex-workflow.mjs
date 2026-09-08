@@ -28,7 +28,7 @@ export function assessRecoveryCompatibility({ journal, taskIntents }) {
   } catch (error) { return { compatible: false, reason: error.message, nextOwner: "workflow-maintenance" }; }
 }
 
-export async function prepareCodexWorkflow({ repository, specId, runIdentity, workflowVersion, compatibleRecordedVersion, packageRoot, host }) {
+export async function prepareCodexWorkflow({ repository, specId, runIdentity, workflowVersion, compatibleRecordedVersion, packageRoot, host, modelRouting }) {
   const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
   if (configuration.schema !== "codex-workflow-host:v1") throw new Error("Unknown static workflow host configuration");
   const projectsResult = unwrapCodexResult(await host.call("mcp__codex_app__list_projects", {}));
@@ -78,7 +78,7 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
   return {
     specId: selectedIssue.node_id,
     async run(options = {}) {
-      latest = await runtime.run({ specId: selectedIssue.node_id, ...(runIdentity ? { runIdentity } : {}), ...options, controlQueue: pendingControls });
+      latest = await runtime.run({ specId: selectedIssue.node_id, ...(runIdentity ? { runIdentity } : {}), modelRouting, ...options, controlQueue: pendingControls });
       if (options.mode && !connection && latest.status.run.runId) connection = await host.controls.connect({
         readStatus: async () => store.readStatus(latest.status.run.runId),
         submitControl: command => new Promise((resolve, reject) => pendingControls.push({ command, resolve, reject })),

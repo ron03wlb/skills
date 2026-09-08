@@ -28,6 +28,7 @@ export const NODE_STATES = Object.freeze([
   "READY",
   "DISPATCHED",
   "EXECUTING",
+  "MODEL_YIELDED",
   "RETRYING",
   "IMPLEMENTATION_COMPLETE",
   "CLOSING",
@@ -486,6 +487,7 @@ const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
   }
   if (node.taskState === "EXECUTING") return "EXECUTING";
   if (node.taskState === "DISPATCHED") return "DISPATCHED";
+  if (node.taskState === "MODEL_YIELDED") return "MODEL_YIELDED";
   if (node.taskState === "TRANSIENT_FAILURE") return dispatchAttempts >= 3 ? "FAILED" : "RETRYING";
   if (node.taskState === "ENVIRONMENT_FAILURE") return remediationCycles >= 1 ? "FAILED" : "RETRYING";
   if (node.taskState === "FAILED") return "FAILED";
@@ -739,6 +741,9 @@ export function reduceRun(input) {
   const outOfScopeJournalEvent = input.journal.find((event) => (
     [
       "action.failed",
+      "model.acceptance",
+      "model.substitution",
+      "model.upgrade",
       "repair.recorded",
       "recovery.intent",
       "recovery.task",
@@ -910,7 +915,7 @@ export function reduceRun(input) {
   const derivedContradictions = normalizedNodes.flatMap((node) => {
     const stateFieldChecks = [
       [["OPEN", "CLOSED"], node.trackerState, "trackerState"],
-      [["NONE", "DISPATCHED", "EXECUTING", "TRANSIENT_FAILURE", "ENVIRONMENT_FAILURE", "FAILED"], node.taskState, "taskState"],
+      [["NONE", "DISPATCHED", "EXECUTING", "TRANSIENT_FAILURE", "ENVIRONMENT_FAILURE", "FAILED", "MODEL_YIELDED"], node.taskState, "taskState"],
       [["NONE", "COMPLETE", "BLOCKED"], node.completionState, "completionState"],
       [["PRESENT", "ABSENT"], node.worktreeState, "worktreeState"],
     ];
@@ -966,7 +971,7 @@ export function reduceRun(input) {
         affectedNodes: [node.issueId],
       }];
     }
-    if (["DISPATCHED", "EXECUTING", "TRANSIENT_FAILURE", "ENVIRONMENT_FAILURE", "FAILED"].includes(node.taskState)
+    if (["DISPATCHED", "EXECUTING", "TRANSIENT_FAILURE", "ENVIRONMENT_FAILURE", "FAILED", "MODEL_YIELDED"].includes(node.taskState)
       && dispatchAttemptsByIssue.get(node.issueId) === 0) {
       return [{
         code: "task_without_dispatch_reference",
@@ -1062,6 +1067,8 @@ export function reduceRun(input) {
   const occupiedWorkers = normalizedNodes.reduce((count, node) => count + Math.max(node.reservedWorkers ?? 0, ["DISPATCHED", "EXECUTING", "UNKNOWN"].includes(node.taskState) ? 1 : 0), 0);
   const slots = Math.max(0, maxParallel - occupiedWorkers);
   const normalActions = [];
+  const upgrades = nodes.filter(node => node.state === "MODEL_YIELDED").slice(0, slots).map(({ issueId }) => ({ type: "upgrade_issue", issueId }));
+  normalActions.push(...upgrades);
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
   const controlRevision = latestControl?.revision ?? 0;
   const repositoryCloseLeaseState = input.run.repositoryCloseLeaseState ?? "ABSENT";
@@ -1112,30 +1119,30 @@ export function reduceRun(input) {
         noAutomaticTransition: "Re-entry cannot reset or invent material repair progress.", resumePredicates: ["exact_cumulative_budget_proved_and_available"] })); return []; }
     }
     return [{ type: "recover_issue", issueId: node.issueId, failure: node.recovery }];
-  }).slice(0, slots);
+  }).slice(0, Math.max(0, slots - upgrades.length));
   const repairs = closeable.filter(issueId => byId.get(issueId).closeConflict).flatMap(issueId => {
     const conflict = byId.get(issueId).closeConflict;
     const previous = input.journal.filter(event => event.type === "repair.recorded" && event.issueId === issueId);
-    if (previous.length >= 10 && previous.at(-1)?.candidate !== conflict.candidate) {
+    if (Math.max(previous.at(-1)?.wave ?? 0, conflict.repairWaves ?? 0) >= 10 && previous.at(-1)?.candidate !== conflict.candidate) {
       nodes.find(node => node.issueId === issueId).state = "BLOCKED";
       nodeDiagnoses.push(diagnosis({ reasonCode: "repair_budget_exhausted", evidence: ["The persistent ten-wave conflict repair budget is exhausted."], affectedNodes: [issueId], allNodes: allNodeIds, resumePredicates: ["human_resolves_same_scope_repair_blocker"], noAutomaticTransition: "Re-entry does not reset the repair budget." }));
       return [];
     }
     return [{ type: "repair_issue", issueId, ...conflict }];
-  }).slice(0, Math.max(0, slots - recoveries.length));
+  }).slice(0, Math.max(0, slots - recoveries.length - upgrades.length));
   repairs.unshift(...recoveries);
-  normalActions.push(...repairs, ...remediations.slice(0, Math.max(0, slots - repairs.length)));
+  normalActions.push(...repairs, ...remediations.slice(0, Math.max(0, slots - repairs.length - upgrades.length)));
   const dispatchable = [
     ...retrying.filter((issueId) => byId.get(issueId).taskState === "TRANSIENT_FAILURE"),
     ...ready,
   ];
-  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length - repairs.length)).map((issueId) => ({
+  const dispatchActions = dispatchable.slice(0, Math.max(0, slots - remediations.length - repairs.length - upgrades.length)).map((issueId) => ({
     type: "dispatch_issue",
     issueId,
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
   }));
   normalActions.push(...dispatchActions);
-  const executionActionsScheduled = repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
+  const executionActionsScheduled = upgrades.length > 0 || repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
   if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict && !byId.get(id).recovery)) {
     normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict && !byId.get(id).recovery) });
   }
@@ -1198,7 +1205,7 @@ export function reduceRun(input) {
       seen.add(id);
       return (byId.get(id)?.blockers ?? []).some(blocker => dependsOnWait(blocker, seen));
     };
-    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue", "recover_issue"].includes(action.type) && !dependsOnWait(action.issueId));
+    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue", "recover_issue", "upgrade_issue"].includes(action.type) && !dependsOnWait(action.issueId));
     normalActions.splice(0, normalActions.length, ...(independent.length ? independent : [{
       type: activeCloseWait.type === "repository-close-wait.started"
         ? "wait_repository_close_lease"

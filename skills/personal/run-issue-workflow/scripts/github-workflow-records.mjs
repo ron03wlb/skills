@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 export const bodyDigest = (body) => `sha256:${createHash("sha256").update(body).digest("hex")}`;
 const canonical = value => Array.isArray(value) ? value.map(canonical) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
-const kinds = new Set(["spec_publication", "producer_handoff", "decomposition:v1", "implementation_complete", "implementation_blocked", "implementation_progress", "workflow_operation_identity_contract_adopted:v1", "workflow_artifacts_contract_adopted:v1"]);
+const kinds = new Set(["spec_publication", "producer_handoff", "decomposition:v1", "implementation_complete", "implementation_blocked", "implementation_progress", "implementation_repair_progress", "workflow_operation_identity_contract_adopted:v1", "workflow_artifacts_contract_adopted:v1"]);
 
 // Serialization of the existing owners' payloads, not an additional source of authority.
 export function renderWorkflowRecord(record) {

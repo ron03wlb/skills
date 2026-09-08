@@ -32,12 +32,20 @@ export function readRepairWaveCount(record) {
 
 export function readRepairProgress({ records, issueId, operationId, count }) {
   let previous;
+  const modelProgress = new Map();
   for (const { record } of records) {
-    if (record.kind !== "implementation_progress" || record.issueId !== issueId) continue;
+    if (!["implementation_progress", "implementation_repair_progress"].includes(record.kind) || record.issueId !== issueId) continue;
     if (!text(record.operationIdentity?.key)) throw new Error("Material repair progress has no proven operation");
     if (record.operationIdentity.key !== operationId) continue;
     assertWorkflowOperationIdentity(record.operationIdentity, { key: operationId, issueId });
     const progress = readRepairWaveCount(record);
+    if (record.kind === "implementation_repair_progress") {
+      const prior = modelProgress.get(progress);
+      const digest = recoveryDigest(record);
+      if (prior && prior !== digest) throw new Error("Conflicting execution progress reused a material repair wave");
+      if (prior) continue; // The model owner permits exact repeated progress receipts.
+      modelProgress.set(progress, digest);
+    }
     if (progress === null || previous !== undefined && progress < previous) throw new Error("Material repair progress is malformed or resets the operation budget");
     previous = progress;
   }

@@ -14,6 +14,13 @@
 - Pinned Matt/Ron package: `852bd245fbd94b8a7a815de4a52e036cfa691f97c1169fddff6e604ef53ea90f`. Generic required host helpers use the current catalog, as explicitly clarified by the original coordinator after human approval. Preserve the initial blocked note and creation intent.
 - Initial material repair count is zero, proved by the initial tracker history and no preceding implementation. Carry cumulative progress through subsequent review repairs.
 
+## Authorized conflict repair
+
+- New attempt baseline: `49c4167191f9a5370dc7031bdd6ac66b81aa9db7`; the Planning Seal remains `28857351f4243bb4d7ba1d9998195073df2135c0`.
+- Preserve original candidate `715c497a1b70a24936bac1d37e62dceb391c39e0`, its completion, and the verified target-abort result. Merge the exact new baseline into this same topic without resetting or rebasing.
+- Cumulative Material wave 5 is recorded before edits. The original journal's first conflict ordinal remains 1; it does not reset the four previously completed repair waves.
+- Preserve the target's Issue 78 model routing and Issue 79 recovery contracts. Verify combined counters, distinct progress-reader authority, frozen task/model ownership and scheduling limits before committed-candidate full-suite verification and independent Standards/Spec review.
+
 ### Outcome 1: Source boundaries survive dispatch and re-entry
 - Work: Correct `codex-workflow-tasks.mjs` and owning instructions. Pin Matt/Ron owners and shared package references; allow explicitly required generic host helpers from the current catalog. Retain historical task intents and diagnose truly missing dependencies. This is necessary discovery under AC-1/AC-10, explicitly authorized in the continuation.
 - Verify: `node --test tests/ron-workflow/codex-workflow-tasks.test.mjs tests/ron-workflow/skill-contracts.test.mjs`.
