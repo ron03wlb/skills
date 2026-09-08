@@ -68,8 +68,11 @@ export async function createGitLabProducerAdapters(options) {
     if (!Array.isArray(labels) || labels.some(label => typeof label !== "string" || !label)) throw conflict("Exact expected labels are required");
     return [...new Set(labels)].sort();
   };
+  // GitLab may strip the final LF. Keep approved bytes and operation identity unchanged.
+  const publishedBodyMatches = body => body === publication.body
+    || publication.body.endsWith("\n") && body === publication.body.slice(0, -1);
   const assertPublished = (current, labels) => {
-    if (current.body !== publication.body || current.issue.title !== publication.title || !current.labels.includes(readyLabel)
+    if (!publishedBodyMatches(current.body) || current.issue.title !== publication.title || !current.labels.includes(readyLabel)
       || !same(normalizeLabels(current.labels), normalizeLabels(labels))
       || current.issue.state !== "opened") throw conflict("Published Issue body, title, labels or state differs");
   };
@@ -240,7 +243,7 @@ export async function createGitLabProducerAdapters(options) {
     const result = await mutateOnce(connection, { ...publicationMutation({ identity: input, expectedVersion, expectedLabels }), retryRejected,
       observe: async attempted => {
         const current = await snapshot();
-        if (attempted && current.body === publication.body && current.issue.title === publication.title && current.labels.includes(readyLabel)) {
+        if (attempted && publishedBodyMatches(current.body) && current.issue.title === publication.title && current.labels.includes(readyLabel)) {
           assertPublished(current, labels); return current;
         }
         if (current.version !== expectedVersion || current.issue.state !== "opened") throw conflict("Issue version or state changed before publication");

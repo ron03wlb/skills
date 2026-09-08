@@ -34,3 +34,13 @@ The source and installed histories were merged without conflict at 5586b58581e3e
 The writer freezes document provenance independently from the later canonical publication body, avoiding a circular body/seal hash. After sealing, the publication transaction binds the exact body and seal operation together. Registration and pending writes require the live lane; completed seal read-back uses immutable registered bytes/blobs and current Git evidence, so permitted lane cleanup cannot invalidate published evidence.
 
 Package installation and Issue 142 continuation use the committed result of this worktree. They do not authorize a new Run host, Issue execution, SQL, push or unrelated cleanup.
+
+## Publication read-back continuation
+
+The authorized Issue 142 PUT was acknowledged and the native body matches all 9,334 content characters, but GitLab removed the requested final LF. The original operation remains at `publication.read_back`. Recover it without another PUT or replacement transaction.
+
+1. Accept only exact body equality or omission of one final LF during publication read-back. Preserve the original approved body, hashes, operation identity and mutation payload; keep the native version derived from the actual bytes. All other body, title, label and state drift must still stop.
+2. Verify ordinary normalized publication, recovery of an already acknowledged original intent, idempotent restart, and rejection of other whitespace/content changes with the focused adapter and transport/recovery suites.
+3. Commit and install the verified package through both existing harness links. Resume the unchanged request, read back the publication and handoff receipts, and retain INCOMPLETE Run preparation. Preserve the SPAY2 target, planning lane, original request and journal, dirty files and stash.
+
+Verification: `node --test tests/ron-workflow/gitlab-producer-adapters.test.mjs tests/ron-workflow/gitlab-producer-recovery.test.mjs` passed all 26 tests with zero failures or skips. This includes the original acknowledged-intent recovery and six non-equivalent body/title/state cases. Syntax checks, strict UTF-8 without BOM and `git diff --check` passed; scoped review confirmed that only the two publication body comparisons change behavior.

@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createGitLabProducerAdapters } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-adapters.mjs";
 import { configureGitLabProducer, inspectGitLabProducer, invokeGitLabProducer } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-entry.mjs";
 import { createGlabTransport, digest } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
+import { mutateOnce } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-mutations.mjs";
 
 const publication = { title: "Account display", body: "# Settled Spec\n\n完整帳號 `00123`\n", classification: "SINGLE" };
 function fixture(t, project = "group/sub/project") {
@@ -278,6 +279,64 @@ test("primary reservation and handoff retain their exact identity after a reject
   const handoff = await ctx.adapter.handoff.append({ ...ctx, retryRejected: true });
   assert.equal((await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "handoff.completed", receipt: handoff })).state, "COMPLETED");
   assert.equal(f.notes.get(Number(reserved.issue.iid)).length, 2);
+});
+
+test("GitLab final LF removal completes without changing approved identity or duplicating writes", async t => {
+  const f = fixture(t), ctx = await prepared(f);
+  f.failures.afterPut = current => { current.description = current.description.slice(0, -1); };
+  assert.equal((await complete(f, ctx)).state, "COMPLETED");
+  const native = await ctx.adapter.tracker.read();
+  assert.equal(native.body, publication.body.slice(0, -1));
+  const receipt = await ctx.adapter.tracker.readPublication(ctx.identity);
+  assert.equal(receipt.version, native.version);
+  const record = JSON.parse(f.notes.get(169)[0].body.match(/^```workflow-record\n([\s\S]+)\n```$/u)[1]);
+  assert.equal(record.authority.approvedScopeHash, digest(publication.body));
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal(adapter.checkpoint.identity({ baseline: ctx.identity.baseline, relevantFacts: ctx.identity.bindings.relevantFacts }).operationId, ctx.identity.operationId);
+  await complete(f, { ...ctx, adapter });
+  assert.equal(f.writes().length, 3);
+});
+
+test("acknowledged pre-fix LF mismatch resumes its original intent without another PUT", async t => {
+  const f = fixture(t), ctx = await prepared(f);
+  const labels = [...ctx.expectedLabels, "ready-for-agent"].sort();
+  // Reproduce the old reader failing after the native PUT was acknowledged.
+  await assert.rejects(() => mutateOnce({ gitCommonDir: join(f.repository, ".git"), repositoryId: ctx.identity.repositoryId }, {
+    key: `${ctx.identity.operationId}:issue-body`,
+    payload: { body: publication.body, title: publication.title, labels, expectedVersion: ctx.expectedVersion, trackerIdentity: ctx.identity.specId },
+    observe: async () => null,
+    write: async () => {
+      await f.transport({ method: "PUT", path: "projects/31/issues/169", body: { title: publication.title, description: publication.body, add_labels: "ready-for-agent" } });
+      f.issues.get(169).description = publication.body.slice(0, -1);
+    },
+  }), { code: "GITLAB_PRODUCER_UNKNOWN" });
+  const mutation = ctx.adapter.tracker.readMutation(ctx);
+  assert.equal(mutation.state, "ACKNOWLEDGED");
+  assert.equal(mutation.attempt, 1);
+  const adapter = await createGitLabProducerAdapters(f.options);
+  assert.equal((await complete(f, { ...ctx, adapter })).state, "COMPLETED");
+  assert.deepEqual(adapter.tracker.readMutation(ctx), mutation);
+  assert.equal(f.writes().filter(call => call.method === "PUT").length, 1);
+  assert.equal(f.writes().length, 3);
+});
+
+test("final LF tolerance does not accept other body or native state changes", async t => {
+  for (const alter of [
+    current => { current.description = ` ${current.description}`; },
+    current => { current.description = current.description.replace("\n\n", "\n"); },
+    current => { current.description = current.description.slice(0, -2); },
+    current => { current.description += "\n"; },
+    current => { current.description = current.description.slice(0, -1); current.title += " changed"; },
+    current => { current.description = current.description.slice(0, -1); current.state = "closed"; },
+  ]) {
+    const f = fixture(t), ctx = await prepared(f);
+    f.failures.afterPut = alter;
+    await assert.rejects(() => complete(f, ctx), { code: "GITLAB_PRODUCER_CONFLICT" });
+    const adapter = await createGitLabProducerAdapters(f.options);
+    await assert.rejects(() => complete(f, { ...ctx, adapter }), { code: "GITLAB_PRODUCER_CONFLICT" });
+    assert.equal(f.writes().length, 1);
+    assert.equal(adapter.checkpoint.read(ctx.identity).progress.length, 1);
+  }
 });
 
 test("entry registers accepted documents, writes a seal and completes the same Spec with native read-back", async t => {
