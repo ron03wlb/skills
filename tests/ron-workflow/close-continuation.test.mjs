@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
 
+test("durable integration failure suppresses redispatch across dialogue and target movement", () => {
+  const requestIdentity = `sha256:${"c".repeat(64)}`;
+  const requestEvidence = { runIdentity: { runId: "run" }, issueId: "issue", targetHead: "a".repeat(40),
+    authorityEvidence: { candidateCommit: "b".repeat(40) }, candidateReachable: true, worktreeState: "PRESENT",
+    integrationVerification: { state: "FAIL", identity: "sha256:failure", issueId: "issue", candidate: "b".repeat(40), targetHead: "a".repeat(40), results: [{ command: ["test"], state: "FAIL", evidence: "exit 1" }] } };
+  const task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed", items: [] }] }, closeRequest: { runId: "run", issueId: "issue", requestIdentity } };
+  const result = planCloseContinuation({ task, requestIdentity, requestEvidence });
+  assert.equal(result.needed, false); assert.equal(result.blocked.reasonCode, "integration_verification_failed");
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, targetHead: "c".repeat(40) } }).needed, false);
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, integrationVerification: { ...requestEvidence.integrationVerification, state: "UNKNOWN" } } }).blocked.reasonCode, "integration_verification_unknown");
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, integrationVerification: { ...requestEvidence.integrationVerification, state: "PASS" } } }).needed, true);
+});
+
 test("native close continuation retains its bounded no-progress budget and yields to active work", () => {
   const requestIdentity = `sha256:${"a".repeat(64)}`;
   const requestEvidence = { runIdentity: { runId: "run" }, issueId: "issue", targetHead: "a".repeat(40), trackerState: "OPEN", candidateReachable: true, worktreeState: "PRESENT" };

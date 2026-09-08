@@ -225,7 +225,7 @@ The terminal delivery state of one **DAG Run**: a Single-Issue Spec has **DAG no
 _Avoid_: Last child closed, push ready, deployed
 
 **DAG branch isolation**:
-The failure rule that keeps a failed child and its descendants blocked while independent dependency-ready children continue in the same **DAG Run**. A dirty target, merge conflict, changed or expired authority, contract drift, or ambiguous tracker or Git evidence pauses the whole run instead of guessing or repairing state.
+The failure rule that blocks an affected child and its descendants while independent authorized children continue in the same **DAG Run**. Scope or authority conflicts and uncertain shared writer state retain their owning gates; an Issue-local technical failure selects its isolated recovery owner.
 _Avoid_: Fail-fast whole run, ignoring failed dependencies, inferred recovery
 
 **DAG scheduling authority**:
@@ -763,3 +763,15 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - Safe conflict abort remains the close owner’s responsibility. The coordinator returns the original lane to execution under unchanged scope and a persistent ten-wave repair budget; replacement candidates require renewed necessary verification and independent Standards/Spec review. Semantic scope changes isolate that Issue and dependants for planning.
 - Execution-owned verification results are reusable only for the exact candidate, command, relevant configuration, environment and freshly read required external inputs. New candidates and integration combinations receive their required checks.
 - Known compatible record encodings and protocol-v1 runtime changes are handled by current code after exact source and authority checks. Original Grants, retained content and historical reviews remain unchanged; current runtime observations record only what is now true.
+
+**Integration verification obligation**:
+The complete set of approved checks whose PASS evidence binds an Issue operation, candidate, integrated target combination and necessary inputs before cleanup or closure. FAIL and UNKNOWN remain distinct from merge reachability and implementation completion.
+_Avoid_: Merge success, assumed test pass
+
+**Technical failure recovery**:
+Autonomous diagnosis and permitted repair of a concrete workflow failure under settled requirements and existing authority. Requirement conflicts and unavailable capabilities retain their exact decision or capability owner.
+_Avoid_: Approval reset, permission bypass
+
+**Repair task ownership transfer**:
+The evidenced transfer of exclusive write ownership from a settled original task to one isolated repair task while preserving the Issue operation, worktree, history and cumulative repair budget.
+_Avoid_: New Issue operation, concurrent replacement writer

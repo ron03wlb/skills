@@ -6,7 +6,7 @@ Load this interface for a fresh execution attempt or any retry whose operation e
 
 `execute-issue` is the implementation receipt owner. Derive its versioned operation identity with producer `execute-issue` and stage `implementation` from the canonical repository identity, parent or linked Spec identity, approved publication identity or hash, and stable Issue identity. A caller task, thread, Run correlation value, branch name, or worktree path is diagnostic only and never defines authority.
 
-Identical immutable inputs select the same Issue lane, topic branch, and worktree and resume the first unfinished execution stage. A different repository, Spec, approved revision, producer, stage, or Issue selects a different operation and may execute concurrently.
+Identical immutable inputs select the same Issue lane, topic branch, and worktree and resume the first unfinished execution stage. An evidence-bound technical recovery may transfer exclusive ownership to a separate task while retaining this operation, original task history and cumulative repair budget; task identity is not operation identity. A different repository, Spec, approved revision, producer, stage, or Issue selects a different operation and may execute concurrently.
 
 ## Immediate receipt
 

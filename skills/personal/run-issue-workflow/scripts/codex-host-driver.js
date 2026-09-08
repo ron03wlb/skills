@@ -3,6 +3,7 @@
   const allowed = Object.freeze([
     "mcp__codex_app__list_projects", "mcp__codex_app__list_threads",
     "mcp__codex_app__create_thread", "mcp__codex_app__read_thread",
+    "mcp__codex_app__fork_thread",
     "mcp__codex_app__wait_threads", "mcp__codex_app__send_message_to_thread",
     "mcp__codex_app__open_in_codex",
   ]);

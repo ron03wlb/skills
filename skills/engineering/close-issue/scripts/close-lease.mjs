@@ -93,3 +93,16 @@ const inputFields = new Set([
   "approvedPublicationIdentity",
   "issueId",
 ]);
+
+// The close owner retains the original operation error if releasing either lease also fails.
+export async function withCloseIssueLeases(input, action) {
+  const leases = acquireCloseIssueLeases(input);
+  let result, operationError;
+  try { result = await action(leases); } catch (error) { operationError = error; }
+  try { leases.release(); } catch (releaseError) {
+    if (operationError) throw new AggregateError([operationError, releaseError], "Close operation failed and lease release requires recovery");
+    throw releaseError;
+  }
+  if (operationError) throw operationError;
+  return result;
+}

@@ -1,12 +1,55 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
-import { mergeCandidate } from "../../skills/engineering/close-issue/scripts/merge-candidate.mjs";
+import { mergeCandidate, verifyIntegratedCandidate } from "../../skills/engineering/close-issue/scripts/merge-candidate.mjs";
+import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
+
+test("merged integration failure survives direct re-entry and blocks cleanup until the exact changed combination passes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "close-integration-failure-"));
+  const repo = join(root, "repo"), topic = join(root, "issue");
+  const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  execFileSync("git", ["init", "-b", "main", repo], { stdio: "ignore" });
+  try {
+    git(repo, "config", "user.name", "Fixture"); git(repo, "config", "user.email", "fixture@example.invalid");
+    writeFileSync(join(repo, "behavior.txt"), "base"); git(repo, "add", "."); git(repo, "commit", "-m", "baseline");
+    git(repo, "worktree", "add", "-b", "issue", topic, "main");
+    writeFileSync(join(topic, "behavior.txt"), "broken"); git(topic, "commit", "-am", "candidate");
+    const candidate = git(topic, "rev-parse", "HEAD");
+    const store = createRunStore({ gitCommonDir: join(repo, ".git") });
+    const leaseInput = { store, target: "main", repositoryId: "github:example/repo", specId: "spec", approvedPublicationIdentity: "scope", issueId: "issue" };
+    const checks = [{ command: [process.execPath, "-e", "require('node:assert/strict').equal(require('node:fs').readFileSync('behavior.txt','utf8'),'fixed')"], environment: { node: process.version }, readExternalInputs: async () => ({}) }];
+    let leases = acquireCloseIssueLeases(leaseInput);
+    const operationId = deriveExecuteIssueOperationIdentity(leases.operationIdentity).key;
+    mergeCandidate({ leases, targetWorktree: repo, candidate });
+    const failed = await verifyIntegratedCandidate({ leases, targetWorktree: repo, candidate, issueId: "issue", operationId, checks });
+    leases.release();
+    assert.equal(failed.state, "FAIL");
+    assert.equal(existsSync(topic), true);
+    assert.equal(git(repo, "rev-parse", "HEAD"), candidate, "failure must retain the successful merge");
+    leases = acquireCloseIssueLeases(leaseInput);
+    try {
+      const repeated = await verifyIntegratedCandidate({ leases, targetWorktree: repo, candidate, issueId: "issue", operationId, checks: checks.map(check => ({ ...check, run: () => { throw new Error("unchanged failure must not rerun"); } })) });
+      assert.equal(repeated.state, "FAIL");
+      await assert.rejects(verifyIntegratedCandidate({ leases, targetWorktree: repo, candidate, issueId: "issue", operationId, checks: [] }), /obligation/u);
+    } finally { leases.release(); }
+    writeFileSync(join(topic, "behavior.txt"), "fixed"); git(topic, "commit", "-am", "repair");
+    const repaired = git(topic, "rev-parse", "HEAD");
+    leases = acquireCloseIssueLeases(leaseInput);
+    try {
+      mergeCandidate({ leases, targetWorktree: repo, candidate: repaired });
+      const passed = await verifyIntegratedCandidate({ leases, targetWorktree: repo, candidate: repaired, issueId: "issue", operationId, checks });
+      assert.equal(passed.state, "PASS");
+      assert.notEqual(passed.identity, failed.identity);
+      git(repo, "worktree", "remove", topic);
+      assert.equal(existsSync(topic), false);
+    } finally { leases.release(); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("real close conflict restores the target, keeps the original lane and reintegrates its verified new candidate", () => {
   const root = mkdtempSync(join(tmpdir(), "close-conflict-"));

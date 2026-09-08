@@ -34,6 +34,9 @@ function fixture({ legacyRuntime = false } = {}) {
   const cacheDirectory = join(root, "packages");
   initialize(source); initialize(repository);
   cpSync(fileURLToPath(new URL(`../../${scriptsPath}`, import.meta.url)), join(source, scriptsPath), { recursive: true });
+  const verificationPath = "skills/engineering/execute-issue/scripts/verification-cache.mjs";
+  mkdirSync(join(source, "skills/engineering/execute-issue/scripts"), { recursive: true });
+  cpSync(fileURLToPath(new URL(`../../${verificationPath}`, import.meta.url)), join(source, verificationPath));
   const referencesPath = "skills/personal/run-issue-workflow/references";
   mkdirSync(join(source, referencesPath), { recursive: true });
   cpSync(fileURLToPath(new URL(`../../${referencesPath}/codex-host-driver.md`, import.meta.url)), join(source, referencesPath, "codex-host-driver.md"));

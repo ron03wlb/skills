@@ -54,6 +54,11 @@ test("a lost task creation response reuses its exact discovered lane without a s
   const options = { host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version", issueNumber: async () => 1, sleep: async () => {} };
   try {
     assert.deepEqual(await createCodexWorkflowTasks(options).create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
+    assert.match(prompt, /Matt\/Ron workflow owners and runtime/u);
+    assert.match(prompt, /shared docs\/ references/u);
+    assert.match(prompt, /Generic host support skills explicitly required/u);
+    assert.match(prompt, /current session's skill catalog/u);
+    const originalIntent = store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" });
     const resumed = createCodexWorkflowTasks(options);
     assert.deepEqual(await resumed.findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
     assert.deepEqual(await resumed.create({ issueId: "I_1", runIdentity }), ref);
@@ -64,6 +69,8 @@ test("a lost task creation response reuses its exact discovered lane without a s
     await resumed.message(ref, `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`);
     assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
     assert.match(prompt.replaceAll("\\", "/"), /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
+    assert.match(prompt, /Generic host support skills explicitly required/u, "continuations correct the boundary without editing accepted creation history");
+    assert.deepEqual(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), originalIntent);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -125,4 +132,36 @@ test("an unloaded native task with a completed latest turn is settled without re
   assert.equal((await tasks.read(ref)).state, "UNKNOWN", "unloaded does not prove unfinished work settled");
   status = "completed"; type = "active";
   assert.equal((await tasks.read(ref)).state, "RUNNING", "active native state takes precedence over older completion");
+});
+
+test("isolated repair fork adopts a lost response after exact settled-owner handoff and survives restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "repair-fork-"));
+  execFileSync("git", ["init", root], { stdio: "ignore" });
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const originalTaskRef = { threadId: "original", hostId: "local" }, repairRef = { threadId: "repair", hostId: "local" };
+  const runIdentity = { runId: "run", issueId: "I_1", specId: "I_1", target: "main" };
+  let forks = 0, messages = 0, marker, active = false;
+  const host = { async call(name, args) {
+    if (name.endsWith("send_message_to_thread")) { messages++; marker = args.prompt; return {}; }
+    if (name.endsWith("fork_thread")) { forks++; assert.ok(store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" })); throw new Error("response lost"); }
+    if (name.endsWith("list_threads")) return { threads: forks ? [{ id: "repair", hostId: "local", kind: "codex", cwd: root }] : [] };
+    if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: root, status: { type: active && args.threadId === "original" ? "active" : "idle" } },
+      turns: [{ id: "settled-turn", status: "completed", items: marker ? [{ type: "userMessage", content: [{ type: "text", text: marker }] }] : [] }] };
+    throw new Error(name);
+  } };
+  const options = { host, store, project: { path: root, hostId: "local" }, packageRoot: "/pinned", issueNumber: async () => 1, sleep: async () => {}, discoverTasks: async () => [] };
+  const input = { issueId: "I_1", runIdentity, operationId: "operation", originalTaskRef, worktree: root };
+  try {
+    const first = await createCodexWorkflowTasks(options).ensureRecoveryTask(input);
+    assert.deepEqual(first.taskRef, repairRef);
+    assert.deepEqual(first.previousOwner.taskRef, originalTaskRef);
+    assert.equal(first.previousOwner.state, "SETTLED");
+    const intent = store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" });
+    assert.deepEqual((await createCodexWorkflowTasks(options).ensureRecoveryTask(input)).taskRef, repairRef);
+    assert.equal(forks, 1); assert.equal(messages, 1);
+    assert.deepEqual(store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" }), intent);
+    active = true;
+    await assert.rejects(createCodexWorkflowTasks(options).ensureRecoveryTask(input), /previous writer/u);
+    assert.equal(forks, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

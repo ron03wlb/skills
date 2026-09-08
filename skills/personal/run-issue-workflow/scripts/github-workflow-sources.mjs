@@ -9,6 +9,9 @@ import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, de
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
 import { planCloseContinuation } from "./close-continuation.mjs";
+import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
+import { bindTechnicalFailure, validateRepairCompletion, validateMaintenanceResult, sameRecoveryTask } from "./recovery-evidence.mjs";
+import { selectWorkflowVersion } from "./workflow-installation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
 const one = (values, label) => {
@@ -17,7 +20,7 @@ const one = (values, label) => {
 };
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 
-export function createGitHubWorkflowSources({ repository, repositoryName, store, tasks }) {
+export function createGitHubWorkflowSources({ repository, repositoryName, store, tasks, workflowVersion, installationCacheDirectory }) {
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repositoryName)) throw new Error("Static GitHub repository identity is required");
   repository = realpathSync.native(repository);
   let commandCalls = 0;
@@ -228,19 +231,25 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const latest = lifecycle.at(-1);
       const completed = lifecycle.findLast(item => item.record.kind === "implementation_complete");
       const closeOnly = latest?.record.kind === "implementation_blocked" && ["target_dirty", "merge_conflict", "partial_close"].includes(latest.record.reasonCode);
-      const completion = latest?.record.kind === "implementation_complete" || closeOnly ? completed : null;
+      const completion = latest?.record.kind === "implementation_complete" || closeOnly || latest?.record.failure && completed ? completed : null;
       const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id]) : null;
+      const originalTaskRef = journal.find(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
+      const recoveryIntent = journal.findLast(event => event.type === "recovery.intent" && event.issueId === issue.node_id);
+      const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);
+      const recoveryTask = recoveryTransfer ? await tasks.read(recoveryTransfer.taskRef) : null;
+      const acceptedRecovery = recoveryTransfer && recoveryTask?.recoveryRequest?.requestIdentity === recoveryIntent.requestIdentity;
+      const recoveryWriting = acceptedRecovery && recoveryIntent.phase === "REPAIR" && recoveryTask.state === "RUNNING";
       const repair = journal.findLast(event => event.type === "repair.recorded" && event.issueId === issue.node_id);
       const acceptedRepair = repair && repair.candidate === completion?.record.candidate
         && task?.repairRequest?.requestIdentity === repair.requestIdentity && task.repairRequest.runId === selectedIdentity.runId;
-      const repairing = acceptedRepair && task.state === "RUNNING";
+      const repairing = acceptedRepair && task.state === "RUNNING" || recoveryWriting;
       const node = { issueId: issue.node_id, blockers: snapshot.blockers.get(issue.node_id),
         trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: completion ? "COMPLETE" : latest?.record.kind === "implementation_blocked" ? "BLOCKED" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
       if (completion && task?.closeRequest?.runId === selectedIdentity.runId
         && (task.closeRequest.issueId === issue.node_id || authority.classification === "MULTI" && task.closeRequest.issueId === authority.specId)) node.taskState = "NONE";
-      if (repairing) { node.taskState = "EXECUTING"; node.completionState = "NONE"; }
+      if (repairing) { node.taskState = "EXECUTING"; if (!recoveryWriting) node.completionState = "NONE"; }
       if (acceptedRepair && task.state === "RESUMABLE" && task.snapshot?.turns?.[0]?.status === "completed") throw new Error("Conflict repair settled without renewed completion; inspect the original lane's semantic or verification blocker");
       if (task?.state === "UNKNOWN") throw new Error(`Issue #${issue.number} task state is unknown`);
       if (task?.state === "RESUMABLE" && !latest) node.taskState = "TRANSIENT_FAILURE";
@@ -294,6 +303,24 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         node.closeAuthorityEvidence = { trackerIdentity: `${issue.node_id}:${bodyDigest(issue.body)}`, targetHead: target.head,
           candidateCommit: record.candidate, completionEvidenceId: completion.identity, completionBodySha256: completion.bodySha256,
           worktreeIdentity: bodyDigest(JSON.stringify({ gitCommonDir, path: record.worktree, topic: record.topic })) };
+        if (record.operationIdentity?.key) {
+          const integration = createIntegrationVerification({ gitCommonDir, operationId: record.operationIdentity.key, issueId: issue.node_id, candidate: record.candidate }).read();
+          if (integration) {
+            node.integrationVerification = integration.current ?? { state: "UNKNOWN", issueId: issue.node_id, candidate: record.candidate,
+              targetHead: target.head, identity: bodyDigest(JSON.stringify(integration)), results: integration.attempts };
+            if (node.integrationVerification.targetHead !== target.head && node.integrationVerification.state === "PASS") {
+              node.integrationVerification = { ...node.integrationVerification, state: "UNKNOWN" };
+            }
+            if (node.integrationVerification.state !== "PASS" && (issue.state === "closed" || node.worktreeState === "ABSENT")) throw new Error("Cleanup or closure contradicts the unresolved integration obligation; retain the closed-Issue owner boundary");
+          }
+        }
+        if (record.recovery) {
+          const transfer = journal.find(event => event.type === "recovery.task" && event.requestIdentity === record.recovery.requestIdentity);
+          const intent = transfer && journal.find(event => event.type === "recovery.intent" && event.requestIdentity === transfer.requestIdentity);
+          const previousCompletion = lifecycle.find(item => item.identity === record.recovery.previousCompletionIdentity);
+          node.repairLineage = validateRepairCompletion({ failure: intent?.failure, transfer, completion, previousCompletion, ancestor });
+        }
+        if (recoveryIntent?.phase === "REPAIR" && record.candidate !== recoveryIntent.failure.candidate && !record.recovery) throw new Error("Replacement completion omits its required repair lineage");
         if (task?.closeResult?.state === "HOST_CLEANUP_BLOCKED") {
           const cleanup = planCloseContinuation({ task, requestIdentity: task.closeRequest?.requestIdentity,
             requestEvidence: { runIdentity: selectedIdentity, issueId: issue.node_id, candidateReachable: node.candidateReachable,
@@ -302,12 +329,78 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             affectedNodes: [issue.node_id], evidence: cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`) });
         }
       }
+      const renewedCloseActive = node.repairLineage && task?.state === "RUNNING"
+        && task.closeRequest?.runId === selectedIdentity.runId && task.closeRequest?.issueId === issue.node_id
+        && task.closeRequest.evidence?.authorityEvidence?.candidateCommit === completion?.record.candidate
+        && task.closeRequest.evidence?.authorityEvidence?.completionEvidenceId === completion?.identity
+        && recoveryTask?.state === "RESUMABLE";
+      if (recoveryTransfer && task?.state !== "RESUMABLE" && !renewedCloseActive) throw new Error("Original writer is active or uncertain after exclusive recovery transfer");
       const conflict = task?.closeResult;
       if (completion && !repairing && conflict?.schema === "issue-close-result:v1" && conflict.state === "CONFLICT"
         && conflict.issueId === issue.node_id && conflict.runId === selectedIdentity.runId && conflict.candidate === completion.record.candidate
         && conflict.requestIdentity === task.closeRequest?.requestIdentity && conflict.targetRestored === true) {
         if (target.state !== "CLEAN" || !ancestor(conflict.targetHead, target.head)) throw new Error("Conflict target restoration or current ownership is unproven");
         node.closeConflict = { candidate: conflict.candidate, targetHead: target.head };
+      }
+      let failure = latest?.record.kind === "implementation_blocked" ? latest.record.failure : null;
+      if (!failure && latest?.record.kind === "implementation_blocked" && recoveryIntent?.failure.blockedEvidenceIdentity === latest.identity) failure = recoveryIntent.failure;
+      if (!failure && latest?.record.kind === "implementation_blocked" && originalTaskRef && task?.cwd) {
+        const registered = worktrees().filter(item => item.worktree === worktreePath(task.cwd));
+        if (registered.length !== 1 || realpathSync.native(resolve(task.cwd, command("git", ["-C", task.cwd, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Blocked execution has no exact owned worktree for diagnosis");
+        failure = bindTechnicalFailure({ runId: selectedIdentity.runId, issueId: issue.node_id,
+          operationId: latest.record.operationIdentity?.key ?? deriveExecuteIssueOperationIdentity({ repositoryId, specId: authority.specId, approvedPublicationIdentity: authority.approvedScopeHash, issueId: issue.node_id }).key,
+          candidate: registered[0].HEAD, targetHead: target.head, worktree: task.cwd, topic: registered[0].branch?.replace(/^refs\/heads\//u, "") ?? "DETACHED",
+          owningSource: latest.record.owningSource ?? "skills/engineering/execute-issue/SKILL.md", command: latest.record.command ?? ["execute-issue", String(issue.number)],
+          observedResult: latest.record.reason ?? latest.record.reasonCode ?? "Execution reported a blocked outcome requiring diagnosis",
+          blockedEvidenceIdentity: latest.identity,
+          completionIdentity: completion?.identity ?? null, completionBodySha256: completion?.bodySha256 ?? null,
+          ownerTaskRef: originalTaskRef, repairWaveCount: latest.record.repairWaveCount ?? null });
+        node.worktreeState = "PRESENT";
+      }
+      if (completion && (node.integrationVerification && node.integrationVerification.state !== "PASS" || node.closeConflict)) {
+        const record = completion.record;
+        const verification = node.integrationVerification;
+        const failedCheck = verification?.results?.find(item => item.state !== "PASS");
+        failure = bindTechnicalFailure({ runId: selectedIdentity.runId, issueId: issue.node_id,
+          operationId: record.operationIdentity?.key ?? deriveExecuteIssueOperationIdentity({ repositoryId, specId: authority.specId, approvedPublicationIdentity: authority.approvedScopeHash, issueId: issue.node_id }).key,
+          candidate: record.candidate, targetHead: verification?.targetHead ?? target.head, worktree: record.worktree, topic: record.topic,
+          owningSource: "skills/engineering/close-issue/references/executable-closeout.md",
+          command: failedCheck?.command ?? ["git", "merge", record.candidate], observedResult: failedCheck?.evidence ?? (verification ? "Integration outcome unknown" : "Merge conflict; target restoration verified"),
+          verificationIdentity: verification?.identity ?? null, completionIdentity: completion.identity, completionBodySha256: completion.bodySha256,
+          ownerTaskRef: originalTaskRef, repairWaveCount: record.repairWaveCount ?? null,
+          maintenanceEvaluation: task?.closeRequest?.evidence?.maintenanceRecoveryIdentity ?? null });
+      }
+      if (failure && issue.state !== "closed") {
+        failure = bindTechnicalFailure(failure);
+        if (recoveryIntent?.failure.identity === failure.identity && recoveryIntent.failure.diagnosis) {
+          failure = bindTechnicalFailure({ ...failure, diagnosis: recoveryIntent.failure.diagnosis });
+        }
+        if (failure.runId !== selectedIdentity.runId || failure.issueId !== issue.node_id || !sameRecoveryTask(failure.ownerTaskRef, originalTaskRef)) throw new Error("Technical failure is foreign to this Run or original task");
+        if (recoveryIntent?.failure.identity === failure.identity && acceptedRecovery && recoveryTask.state === "RESUMABLE") {
+          const result = recoveryTask.recoveryResult;
+          if (result && (result.requestIdentity !== recoveryIntent.requestIdentity || result.failureIdentity !== failure.identity)) throw new Error("Recovery response differs from the exact failure request");
+          if (recoveryIntent.phase === "DIAGNOSE" && result?.diagnosis) failure = bindTechnicalFailure({ ...failure, diagnosis: result.diagnosis });
+          else if (recoveryIntent.phase === "REPAIR") throw new Error("Repair settled without a verified replacement completion; inspect its owned evidence");
+          else if (recoveryIntent.phase === "MAINTENANCE" && result?.maintenance) {
+            const installed = installationCacheDirectory ? selectWorkflowVersion({ cacheDirectory: installationCacheDirectory }) : null;
+            const proof = validateMaintenanceResult({ result, intent: recoveryIntent, installed });
+            if (workflowVersion?.id !== proof.packageVersion.id) {
+              contradictions.push({ code: "workflow_runtime_reentry_required", reasonCode: "workflow_runtime_reentry_required", affectedNodes: [issue.node_id], evidence: ["Verified maintenance installation requires the installed entry to freshly reconcile this same Run with the proven package."] });
+            } else {
+              node.maintenanceRecoveryIdentity = recoveryIntent.requestIdentity;
+              delete node.integrationVerification;
+              failure = null;
+            }
+          }
+          else if (!result) throw new Error("Recovery task settled without its diagnosis result; preserve the task and evidence");
+        }
+        if (failure) node.recovery = failure;
+        delete node.closeConflict;
+        const pending = failure && recoveryIntent?.failure.identity === failure.identity && (recoveryTask?.state === "RUNNING" || !recoveryTransfer && task?.state === "RUNNING");
+        if (pending) {
+          node.recoveryActive = true; node.taskState = "EXECUTING";
+          taskRefs[issue.node_id] = recoveryTransfer?.taskRef ?? originalTaskRef;
+        }
       }
       nodes.push(node);
       } catch (error) {

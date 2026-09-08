@@ -32,7 +32,7 @@ export async function discoverLocalCodexTasks({ prompt, since, sessionsDirectory
           if (event.type === "session_meta") metadata = event.payload;
           if (event.type !== "response_item" || event.payload?.type !== "function_call_output") continue;
           if (delegatedInput(event.payload) !== prompt) continue;
-          if (metadata?.thread_source !== "agent_created_thread" || typeof metadata.id !== "string" || typeof metadata.cwd !== "string") continue;
+          if (typeof metadata?.id !== "string" || typeof metadata.cwd !== "string") continue;
           found.set(metadata.id, { threadId: metadata.id, hostId: "local", cwd: metadata.cwd });
           break;
         }

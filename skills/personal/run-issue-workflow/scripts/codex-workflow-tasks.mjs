@@ -16,6 +16,8 @@ const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (i
     : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 
+const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
+
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
   const refs = new Map();
   const cursors = new Map();
@@ -45,7 +47,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
   };
   const read = async (ref) => {
-    const snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 16000 });
+    const snapshot = await readHistory(ref, value => userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:)/u.test(text)));
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const prompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -63,12 +65,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const repairPrompt = userTexts(snapshot).find(text => text.includes("Repair request: "));
     const repairMatch = repairPrompt?.match(/Repair request: (\{.+\})$/u);
     const repairRequest = repairMatch ? { state: "ACCEPTED", ...JSON.parse(repairMatch[1]) } : undefined;
-    const final = (snapshot.turns?.[0]?.items ?? []).findLast(item => item.type === "agentMessage" && item.phase === "final_answer")?.text;
-    const closeResultMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
+    const recoveryPrompt = userTexts(snapshot).find(text => text.includes("Recovery request: "));
+    const recoveryMatch = recoveryPrompt?.match(/^Recovery request: (\{.+\})$/mu);
+    const recoveryRequest = recoveryMatch ? { state: "ACCEPTED", ...JSON.parse(recoveryMatch[1]) } : undefined;
+    const finals = (snapshot.turns ?? []).flatMap(turn => (turn.items ?? []).filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.text));
+    const closeResultMatch = finals.map(final => final?.match(/^Workflow close result: (\{.+\})$/mu)).find(Boolean);
     const closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    const recoveryResultMatch = finals.map(final => final?.match(/^Workflow recovery result: (\{.+\})$/mu)).find(Boolean);
+    const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, repairRequest, closeResult, snapshot, cwd: snapshot.thread.cwd };
+      closeRequest, retryRequest, repairRequest, recoveryRequest, recoveryResult, closeResult, snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
@@ -81,7 +88,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const marker = `Workflow prerequisite lane: ${JSON.stringify({ issueId, specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash })}`;
       const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)));
       const cwd = snapshot.thread.cwd;
-      const common = path => realpathSync(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+      const common = path => realpathSync.native(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       if (cwd !== prepared.worktree || common(cwd) !== common(project.path)
         || !userTexts(snapshot).some(text => text.includes(marker))) throw new Error("Native prepared task ownership is unproven");
       refs.set(key, ref);
@@ -92,7 +99,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const found = [];
     if (project.path && project.hostId === "local") {
       const since = intent.createdAt ?? store.readEvents(runIdentity.runId).find(({ type }) => type === "grant.recorded")?.at;
-      const common = (cwd) => realpathSync(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+      const common = (cwd) => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const hint of await discoverTasks({ prompt: intent.prompt, since })) {
         const ref = { threadId: hint.threadId, hostId: hint.hostId };
         const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt));
@@ -124,7 +131,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const number = await issueNumber(issueId);
     if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
-    const prompt = `${key}\nUse the installed workflow's exact skill at ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to execute Issue #${number}.\nRead the current Issue and only its required linked scope. Run Grant: ${JSON.stringify(runIdentity)}. Read its grant.recorded event from the repository Git common directory before any mutation.\nUse this task's existing Git worktree as the sole Issue lane after verifying its common directory, target ancestry and ownership. Record this worktree and branch; do not create a second worktree. Target: ${runIdentity.target}. Complete implementation, required verification, independent review and implementation_complete read-back, then stop. A later close request owns integration and closure. No push or deployment. All workflow skills and references must come from ${packageRoot}/skills for this Run's pinned version.`;
+    const prompt = `${key}\nUse the installed workflow's exact skill at ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to execute Issue #${number}.\nRead the current Issue and only its required linked scope. Run Grant: ${JSON.stringify(runIdentity)}. Read its grant.recorded event from the repository Git common directory before any mutation.\nUse this task's existing Git worktree as the sole Issue lane after verifying its common directory, target ancestry and ownership. Record this worktree and branch; do not create a second worktree. Target: ${runIdentity.target}. Complete implementation, required verification, independent review and implementation_complete read-back, then stop. A later close request owns integration and closure. No push or deployment. ${workflowSourceBoundary(packageRoot)}`;
     const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, prompt });
     if (!reservation.created) {
       const existing = await findIssueLane({ issueId, runIdentity });
@@ -158,6 +165,108 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   };
   return {
     findIssueLane, create, read,
+    async ensureMaintenanceTask({ issueId, runIdentity, failure, originalTaskRef }) {
+      const scope = failure.diagnosis?.maintenance;
+      if (!scope || !["repositoryId", "sourceRepository", "target", "approvedScopeHash", "authority", "operationId"].every(key => typeof scope[key] === "string" && scope[key])) {
+        throw new Error("Governing-workflow maintenance needs its exact canonical repository, target, scoped authority and operation");
+      }
+      if (!Number.isInteger(scope.repairWaveCount) || scope.repairWaveCount < 0 || scope.repairWaveCount >= 10) throw new Error("Maintenance cumulative repair budget is unproved or exhausted");
+      const previous = await read(originalTaskRef);
+      if (previous.state !== "RESUMABLE" || previous.cwd !== failure.worktree || previous.snapshot.turns?.[0]?.status !== "completed") throw new Error("Maintenance previous writer has not settled");
+      const projects = (await call("list_projects", {})).projects ?? [];
+      const matching = projects.filter(item => item.isGitRepository === true && item.hostId === project.hostId && item.path
+        && realpathSync.native(item.path) === realpathSync.native(scope.sourceRepository));
+      if (matching.length !== 1) throw new Error("Maintenance canonical source has no unique saved Git project");
+      const maintenanceProject = matching[0];
+      const purpose = `maintenance:${scope.operationId}`;
+      const { repairWaveCount, ...scopeAuthority } = scope;
+      const prompt = `Workflow maintenance ownership: ${JSON.stringify({ runId: runIdentity.runId, issueId, scope: scopeAuthority })}\nRead-only setup: preserve this isolated maintenance worktree and wait for the exact scoped maintenance request. Do not edit, commit, install or touch the product checkout during setup. ${workflowSourceBoundary(packageRoot)}`;
+      if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
+      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose, prompt });
+      if (reservation.intent.prompt !== prompt) throw new Error("Existing maintenance operation has different failure/scope evidence; reconcile its owner instead of recreating it");
+      let taskRef;
+      if (reservation.created) {
+        try {
+          const created = await call("create_thread", { title: "Workflow maintenance", prompt, target: { type: "project", projectId: maintenanceProject.id ?? maintenanceProject.projectId,
+            environment: { type: "worktree", startingState: { type: "branch", branchName: scope.target } } } });
+          if (created.threadId && created.hostId) taskRef = { threadId: created.threadId, hostId: created.hostId };
+        } catch { /* The persisted maintenance intent owns discovery after uncertainty. */ }
+      }
+      const nativeListing = taskRef ? {} : await call("list_threads", { limit: 50 });
+      const listing = [...(nativeListing.pinnedThreads ?? []), ...(nativeListing.threads ?? [])];
+      const hints = taskRef ? [taskRef] : listing.filter(item => item.kind === "codex" && item.hostId === project.hostId
+        && item.projectId === (maintenanceProject.id ?? maintenanceProject.projectId)).map(item => ({ threadId: item.id, hostId: item.hostId }));
+      if (!taskRef && project.hostId === "local") hints.push(...await discoverTasks({ prompt, since: reservation.intent.createdAt }));
+      const matches = [];
+      const common = cwd => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+      for (const ref of new Map(hints.map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+        if (userTexts(snapshot).includes(prompt) && snapshot.thread.cwd !== scope.sourceRepository && snapshot.thread.cwd !== failure.worktree
+          && common(snapshot.thread.cwd) === common(scope.sourceRepository)) matches.push(ref);
+      }
+      if (matches.length !== 1) throw new Error(`Maintenance task creation is unresolved (${matches.length} exact matches); preserve its intent`);
+      if ((await read(originalTaskRef)).state !== "RESUMABLE") throw new Error("Maintenance previous writer became active");
+      return { taskRef: matches[0], previousOwner: { taskRef: originalTaskRef, state: "SETTLED", worktree: failure.worktree, turnId: previous.snapshot.turns[0].id ?? null } };
+    },
+    async ensureRecoveryTask({ issueId, runIdentity, operationId, originalTaskRef, worktree }) {
+      if (originalTaskRef?.hostId !== project.hostId || !worktree || !operationId) throw new Error("Recovery lane ownership is incomplete");
+      const settledOwner = async () => {
+        const previous = await read(originalTaskRef);
+        if (previous.state !== "RESUMABLE" || previous.snapshot.turns?.[0]?.status !== "completed" || previous.cwd !== worktree) throw new Error("Recovery previous writer has not settled in the exact worktree");
+        const common = path => realpathSync.native(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
+        if (common(worktree) !== common(project.path)) throw new Error("Recovery repository common directory differs");
+        return { taskRef: originalTaskRef, state: "SETTLED", worktree, turnId: previous.snapshot.turns[0].id ?? null };
+      };
+      await settledOwner();
+      const purpose = `recovery:${operationId}`;
+      const marker = `Workflow recovery ownership: ${JSON.stringify({ runId: runIdentity.runId, issueId, operationId, originalTaskRef, worktree })}`;
+      const prompt = `${marker}\nThe coordinator is transferring this exact Issue worktree to an isolated repair task. Settle this turn without source edits, commits, closeout or installation. Preserve the original operation and worktree. Subsequent repair messages belong only to the recorded repair task. ${workflowSourceBoundary(packageRoot)}`;
+      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose, prompt });
+      if (reservation.intent.prompt !== prompt) throw new Error("Recovery ownership intent differs; preserve the original request");
+      const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
+      if (!userTexts(history).includes(prompt)) {
+        // The immutable handoff intent precedes even this read-only settlement message.
+        try { await call("send_message_to_thread", { ...originalTaskRef, prompt }); }
+        catch { /* Read native history before deciding whether the handoff was accepted. */ }
+        const accepted = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
+        if (!userTexts(accepted).includes(prompt)) throw new Error("Recovery ownership message outcome is unresolved");
+        if ((await read(originalTaskRef)).state === "RUNNING") return { pending: true, waitingRef: originalTaskRef };
+      }
+      const previousOwner = await settledOwner();
+      const discover = async () => {
+        const listing = await call("list_threads", { limit: 50 });
+        const hints = [...(listing.pinnedThreads ?? []), ...(listing.threads ?? [])].filter(item => item.kind === "codex" && item.hostId === project.hostId && item.cwd === worktree)
+          .map(item => ({ threadId: item.id, hostId: item.hostId }));
+        if (project.hostId === "local") hints.push(...await discoverTasks({ prompt, since: reservation.intent.createdAt }));
+        const matches = [];
+        for (const ref of new Map(hints.filter(ref => ref.threadId !== originalTaskRef.threadId).map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+          if (snapshot.thread.cwd === worktree && userTexts(snapshot).includes(prompt)) matches.push(ref);
+        }
+        if (matches.length > 1) throw new Error("Recovery task ownership is ambiguous; preserve all matches");
+        return matches[0];
+      };
+      let taskRef = await discover();
+      const forkPurpose = `${purpose}:fork`;
+      if (!taskRef) {
+        if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
+        const fork = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose: forkPurpose, prompt });
+        if (fork.created) {
+          await settledOwner();
+          try {
+            const created = await call("fork_thread", { threadId: originalTaskRef.threadId, environment: { type: "same-directory" } });
+            if (created.threadId) taskRef = { threadId: created.threadId, hostId: created.hostId ?? project.hostId };
+          } catch { /* A lost response is reconciled; the fork intent forbids another creation. */ }
+        }
+        taskRef ??= await discover();
+        if (!taskRef) return { pending: true, reason: "RECOVERY_TASK_SETUP_UNRESOLVED", waitingRef: originalTaskRef };
+      }
+      if (taskRef.threadId === originalTaskRef.threadId) throw new Error("Repair requires a separate task");
+      const snapshot = await readHistory(taskRef, value => userTexts(value).includes(prompt));
+      if (snapshot.thread.cwd !== worktree || !userTexts(snapshot).includes(prompt)) throw new Error("Recovery fork does not preserve the exact ownership handoff");
+      await settledOwner();
+      return { taskRef, previousOwner };
+    },
     async observePendingCreations({ runIdentity, issueIds }) {
       const observations = [];
       const dispatched = new Set(store.readEvents(runIdentity.runId).filter(event => event.type === "dispatch.recorded").map(event => event.issueId));
@@ -171,7 +280,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     async message(ref, prompt) {
       const issue = prompt.match(/(?:close|retry|repair) (?:parent )?Issue (I_[A-Za-z0-9_-]+)/u);
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
-      const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${prompt}`;
+      const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${workflowSourceBoundary(packageRoot)}\n${prompt}`;
+      const previous = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
+      if (userTexts(previous).includes(frozenPrompt)) return;
       for (const delay of [1000, 5000, 15000]) {
         try { await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }); return; }
         catch (error) {

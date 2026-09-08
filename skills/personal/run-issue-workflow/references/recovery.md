@@ -1,10 +1,10 @@
 # Run recovery
 
-Read the applicable branch when dispatch, tracker, environment, writer or coordinator evidence cannot progress. This reference owns Run retry budgets, outage probes, recognized remediation and diagnosis fields; it grants no ambiguity repair or target mutation.
+Read the applicable branch when dispatch, tracker, environment, writer or coordinator evidence cannot progress. This reference owns Run retry budgets, outage probes, recognized remediation and diagnosis fields; it grants no target mutation or expansion beyond applicable approved scope.
 
 ## Worker and tracker recovery
 
-A transient worker or task failure permits at most three dispatch attempts per Issue. Reuse a reachable task. Create a replacement only when the prior task is proven unable to continue and append one `retry.recorded` relationship with exact inactive evidence. Semantic failure, `implementation_blocked`, merge conflict, Scope change, authority mismatch, and contradictory evidence bypass the retry budget.
+A transient worker or task failure permits at most three dispatch attempts per Issue. Reuse a reachable task. Create a replacement only when the prior task is proven unable to continue and append one `retry.recorded` relationship with exact inactive evidence. Technical `implementation_blocked` and failed integration bypass blind dispatch retries and enter the isolated diagnosis lifecycle. Scope conflicts, authority mismatch and contradictory evidence require their exact owning decision or read-back.
 
 Before a same-task retry, reacquire task history. An exact accepted retry follow-up for the same Run, Issue, and next attempt is already in flight; journal the recovered relationship without sending the prompt again.
 
@@ -32,3 +32,9 @@ Healthy waits continue across bounded observations and preserve their journaled 
 Known JSON encodings of existing owner records are read without rewriting them. Missing operation/artifact fields follow their independent exact legacy frontiers or genuinely unadopted scope; no historical Grant, review or completion is invented. Conflicting Issue evidence isolates that Issue and its transitive dependants. A known compatible current runtime records its actual version while preserving the original Grant and retained content.
 
 An accepted close task that settled after partial progress may continue in the same task after fresh Git and tracker reconciliation. Native `Close continuation` metadata retains at most three attempts for unchanged observed progress across re-entry; accepted-message read-back suppresses duplicate sends. New progress resumes only remaining actions. Exhaustion isolates that Issue; it never resets the reviewed candidate or reruns execution checks. Coordinator action failures likewise isolate the owning Issue and descendants; fresh task discovery releases a resolved ambiguity while unrelated work continues within the actual remaining capacity.
+
+## Technical failure and repair ownership
+
+For a concrete execution or integration failure, consume [technical recovery](../../../engineering/execute-issue/references/technical-recovery.md). The source adapter binds exact command/result, operation, candidate/completion and worktree evidence; missing initial diagnosis selects a read-only isolated task. `recovery.intent` precedes native effects, `recovery.task` proves the settled original writer and exclusive transfer, and the original Issue operation owns every material repair wave. Native task history and immutable creation intents reconcile lost responses and prevent duplicate messages/writers. The main session coordinates and observes; it performs no repair source edits, candidate commits or installation.
+
+Unchanged explicit integration failure suppresses close redispatch across direct close, Run restart and later task dialogue. Issue repair produces a verified replacement completion with exact failure/task/old-completion lineage; it is not a synthetic conflict event. Governing-workflow defects select an independently scoped maintenance task/worktree, with reviewed package and exact authorized installation read-back before same-Run runtime reconciliation. Matching protocol numbers alone do not prove compatibility: the installed entry checks actual journal semantics, recovery ownership and original task intents through the current runtime's compatibility reader. Preserve original Grants, history and Pause/Stop. Only affected and dependent nodes are blocked; independent authorized nodes remain eligible.

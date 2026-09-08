@@ -6,6 +6,16 @@ export function planCloseContinuation({ task, requestIdentity, requestEvidence }
     || task.closeRequest?.requestIdentity !== requestIdentity
     || task.closeRequest.runId !== requestEvidence.runIdentity.runId
     || task.closeRequest.issueId !== requestEvidence.issueId) return { needed: false };
+  const verification = requestEvidence.integrationVerification;
+  if (verification) {
+    if (verification.issueId !== requestEvidence.issueId || verification.candidate !== requestEvidence.authorityEvidence?.candidateCommit
+      || !["PASS", "FAIL", "UNKNOWN"].includes(verification.state)) throw new Error("Integration verification identity differs from the close candidate");
+    if (verification.state !== "PASS") return { needed: false, blocked: {
+      reasonCode: verification.state === "FAIL" ? "integration_verification_failed" : "integration_verification_unknown",
+      evidence: (verification.results ?? []).map(item => ({ code: item.state, message: `${JSON.stringify(item.command)}: ${item.evidence ?? "outcome unknown"}` })),
+      verificationIdentity: verification.identity,
+    } };
+  }
   const cleanup = task.closeResult;
   if (cleanup?.state === "HOST_CLEANUP_BLOCKED") {
     const authority = requestEvidence.authorityEvidence;

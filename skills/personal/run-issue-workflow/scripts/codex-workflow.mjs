@@ -8,8 +8,25 @@ import { createRunStore } from "./run-store.mjs";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
+import { validateJournal } from "./run-journal.mjs";
+import { recoveryDigest } from "./recovery-evidence.mjs";
 
 export const supportsCompletedRunReentry = true;
+
+export function assessRecoveryCompatibility({ journal, taskIntents }) {
+  try {
+    validateJournal(journal);
+    const grant = journal.find(event => event.type === "grant.recorded");
+    if (!grant) throw new Error("Recorded Grant is missing");
+    for (const intent of taskIntents) {
+      if (intent.runId !== grant.runIdentity.runId || typeof intent.issueId !== "string" || typeof intent.prompt !== "string") throw new Error("Original native task intent is malformed or foreign");
+    }
+    // The current reducers retain legacy dispatch/conflict records and require explicit ownership
+    // transfers for new recovery. Parsing the exact journal exercises both semantic contracts.
+    return { compatible: true, contract: "isolated-technical-recovery:v1", journalIdentity: recoveryDigest(journal),
+      taskIntentIdentity: recoveryDigest(taskIntents), preserves: ["original-grant", "operation", "legacy-receipts", "task-intents", "cumulative-budget", "exclusive-writer"] };
+  } catch (error) { return { compatible: false, reason: error.message, nextOwner: "workflow-maintenance" }; }
+}
 
 export async function prepareCodexWorkflow({ repository, specId, runIdentity, workflowVersion, compatibleRecordedVersion, packageRoot, host }) {
   const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/workflow-host.json"), "utf8"));
@@ -27,7 +44,8 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
   const taskSource = { read: (...args) => tasks.read(...args) };
   let store;
   const storeSource = { readLeaseHealth: (...args) => store.readLeaseHealth(...args), listRunIds: () => store.listRunIds(), readStatus: (...args) => store.readStatus(...args), readEvents: (...args) => store.readEvents(...args), readWriterLock: (...args) => store.readWriterLock(...args), readHostTask: (...args) => store.readHostTask(...args) };
-  const owners = createGitHubWorkflowSources({ repository, repositoryName: configuration.repository, store: storeSource, tasks: taskSource });
+  const owners = createGitHubWorkflowSources({ repository, repositoryName: configuration.repository, store: storeSource, tasks: taskSource,
+    workflowVersion, installationCacheDirectory: resolve(packageRoot, "../..") });
   store = createRunStore({ gitCommonDir: owners.gitCommonDir });
   const selectedIssue = await owners.readIssue(specId);
   tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber: owners.issueNumber });

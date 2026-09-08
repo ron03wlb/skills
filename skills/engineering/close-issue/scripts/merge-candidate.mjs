@@ -1,6 +1,23 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
+import { createIntegrationVerification } from "../../execute-issue/scripts/verification-cache.mjs";
+import { deriveExecuteIssueOperationIdentity } from "../../../personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
+
+export async function verifyIntegratedCandidate({ leases, targetWorktree, candidate, issueId, operationId, checks }) {
+  if (issueId !== leases.operationIdentity?.issueId || operationId !== deriveExecuteIssueOperationIdentity(leases.operationIdentity).key) throw new Error("Integration verification must bind the original Issue execution operation");
+  const git = (...args) => execFileSync("git", ["-C", targetWorktree, ...args], { encoding: "utf8" }).trim();
+  const targetHead = git("rev-parse", "HEAD");
+  const assertCurrent = () => {
+    leases.assertCurrent();
+    if (git("symbolic-ref", "HEAD") !== `refs/heads/${leases.target}`
+      || realpathSync(resolve(targetWorktree, git("rev-parse", "--git-common-dir"))) !== realpathSync(leases.gitCommonDir)
+      || git("rev-parse", "HEAD") !== targetHead || git("status", "--porcelain=v1", "--untracked-files=all")) throw new Error("Integration target or lease changed; preserve the lane");
+    git("merge-base", "--is-ancestor", candidate, targetHead);
+  };
+  return createIntegrationVerification({ gitCommonDir: leases.gitCommonDir, operationId, issueId, candidate })
+    .verify({ targetHead, checks, assertCurrent, repository: targetWorktree });
+}
 
 // The close owner calls this while holding its own two leases. No tracker receipt is written.
 export function mergeCandidate({ leases, targetWorktree, candidate }) {

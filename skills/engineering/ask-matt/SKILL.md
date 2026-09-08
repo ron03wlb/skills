@@ -1,25 +1,25 @@
 ---
 name: ask-matt
-description: Ask which skill or flow fits your situation. A concise router over the skills in this repo.
+description: Ask which skill or flow fits your situation. A router over this skill set.
 disable-model-invocation: true
 ---
 
 # Ask Matt
 
-Route the user's situation; do not perform the routed work.
+Route the situation; do not perform the work.
 
 ## Build flow
 
 1. Use `/grill-with-docs` to settle a codebase-backed idea with an isolated planning lane for accepted glossary or ADR writes; without a codebase, use `/grill-me`.
 2. Use `/to-spec`; tracker-only publication needs no worktree, while accepted document writes reuse the same registered lane and installed writer. It revalidates or writes the Planning Seal, is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue, and publishes the exact next command.
 3. Follow that command: a Single-Issue Tracker Spec uses `/run-issue-workflow`; invoke it as `/run-issue-workflow <Spec-ID>`. A Multi-Issue Tracker Spec uses `/to-tickets`; invoke it as `/to-tickets <Spec-ID>` and then `/run-issue-workflow <Spec-ID>`. An approved Standalone Spec or explicit direct current-branch task uses `/implement`.
-4. `/execute-issue <Issue-ID>` is the exact implementation leaf for direct human invocation or an authorized coordinator. Known permissions and SQL prerequisites are prepared by planning before Run-ready; `pre-execute-issue` returns its exact attestation and same lane to that producer. Execution invokes it in the same lane only for direct entry or newly discovered prerequisites. Direct `/pre-execute-issue <Issue-ID>` stops after attestation read-back.
-5. `/close-issue <Issue-ID>` integrates the exact candidate into the recorded Issue target branch, removes its clean worktree, and closes it. Issue worktrees may run concurrently; target mutation stays serialized. Use the same command for a Multi-Issue parent only after every exact child is closed and reachable.
+4. `/execute-issue <Issue-ID>` is the exact implementation leaf for direct human invocation or an authorized coordinator. Known permissions and SQL prerequisites are prepared by planning before Run-ready; `pre-execute-issue` returns its exact attestation and same lane to that producer. Execution invokes it in the same lane only for direct entry or newly discovered prerequisites. Recovery preserves the operation under isolated ownership. Direct `/pre-execute-issue <Issue-ID>` stops after attestation read-back.
+5. `/close-issue <Issue-ID>` integrates the exact candidate into the recorded Issue target branch, removes its clean worktree, and closes it. Issue worktrees may run concurrently; target mutation stays serialized. Integration failure requires recovery. Use this command for a Multi-Issue parent after every child is closed and reachable.
 6. Before push, invoke `/verify-target-before-push <target>`. Local-ahead derives members from completion notes; already-pushed work uses an explicit range. Both run aggregate review and verification once. A passing local-ahead run writes `push_ready`; then `/push-target <target>` performs one ordinary non-force push and reads the remote ref back.
 
 The personal `/run-issue-workflow` uses its installed entry and current-host tools, preserves each Run’s original Grant and retained package with compatible runtime observations, and offers available text controls when the panel cannot open. Explicit Spec/batch re-entry reconciles completed members without replay; active members share existing worker limits. It carries approved pre-Run maintenance through [its owner](../../../docs/agents/references/approved-pre-run-workflow-maintenance.md) without repeated leaf commands. A Spec-writing request ends at planning/publication; consumer configuration stays static.
 
-Read [workflow route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
+Read [route details](references/workflow-routes.md) only when selecting among published coordinator, compatibility, prerequisite, closeout, aggregate-recovery, or push branches. That reference owns their authority and recovery distinctions.
 
 Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-point diff. Material security, data, concurrency, migration, contract, or cross-module risk requires `code-review` before integration.
 

@@ -481,25 +481,25 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     ? readdirSync(runsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory() && runIdPattern.test(entry.name))
       .map(({ name }) => name).sort(compareRunIds) : [];
 
-  const hostTaskPath = (runId, issueId) => {
+  const hostTaskPath = (runId, issueId, purpose) => {
     if (typeof issueId !== "string" || issueId.length === 0) throw new TypeError("Host task requires an Issue identity");
-    return join(pathsFor(runId).runDir, `host-task-${createHash("sha256").update(issueId).digest("hex")}.json`);
+    return join(pathsFor(runId).runDir, `host-task-${createHash("sha256").update(purpose ? JSON.stringify([issueId, purpose]) : issueId).digest("hex")}.json`);
   };
-  const readHostTask = ({ runId, issueId }) => {
-    const path = hostTaskPath(runId, issueId);
+  const readHostTask = ({ runId, issueId, purpose }) => {
+    const path = hostTaskPath(runId, issueId, purpose);
     if (!existsSync(path)) return null;
     const value = JSON.parse(readFileSync(path, "utf8"));
-    if (value.runId !== runId || value.issueId !== issueId || typeof value.prompt !== "string") {
+    if (value.runId !== runId || value.issueId !== issueId || value.purpose !== purpose || typeof value.prompt !== "string") {
       throw new Error("Host task intent identity differs");
     }
     assertNoToken(value);
     return value;
   };
-  const reserveHostTask = ({ runId, issueId, prompt }) => {
-    const path = hostTaskPath(runId, issueId);
-    const existing = readHostTask({ runId, issueId });
+  const reserveHostTask = ({ runId, issueId, prompt, purpose }) => {
+    const path = hostTaskPath(runId, issueId, purpose);
+    const existing = readHostTask({ runId, issueId, purpose });
     if (existing) return { created: false, intent: existing };
-    const intent = { runId, issueId, prompt, createdAt: new Date().toISOString() };
+    const intent = { runId, issueId, prompt, ...(purpose ? { purpose } : {}), createdAt: new Date().toISOString() };
     assertNoToken(intent);
     mkdirSync(dirname(path), { recursive: true });
     let descriptor;
@@ -508,7 +508,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       writeSync(descriptor, JSON.stringify(intent));
       fsyncSync(descriptor);
     } catch (error) {
-      if (error.code === "EEXIST") return { created: false, intent: readHostTask({ runId, issueId }) };
+      if (error.code === "EEXIST") return { created: false, intent: readHostTask({ runId, issueId, purpose }) };
       throw error;
     } finally { if (descriptor !== undefined) closeSync(descriptor); }
     syncDirectory(dirname(path));

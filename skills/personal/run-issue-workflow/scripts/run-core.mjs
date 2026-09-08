@@ -1,3 +1,4 @@
+import { nextRecoveryPhase, nextRepairWave } from "./recovery-evidence.mjs";
 import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
 import {
   createCloseWaitEvidence,
@@ -469,8 +470,10 @@ export function reduceRunReadyHandoff(input) {
 }
 
 const reduceNodeState = (node, dispatchAttempts, remediationCycles) => {
+  if (node.recoveryActive) return "EXECUTING";
+  if (node.recovery) return "BLOCKED";
   if (node.completionState === "BLOCKED") return "BLOCKED";
-  if (node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+  if (!node.recoveryActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
     return "BLOCKED";
   }
   if (node.completionState === "COMPLETE") {
@@ -736,6 +739,8 @@ export function reduceRun(input) {
     [
       "action.failed",
       "repair.recorded",
+      "recovery.intent",
+      "recovery.task",
       "dispatch.recorded",
       "retry.recorded",
       "remediation.recorded",
@@ -837,7 +842,13 @@ export function reduceRun(input) {
   failedDependencyDiagnoses.sort((left, right) => compareIds(left.affectedNodes[0], right.affectedNodes[0]));
   const nodeDiagnoses = normalizedNodes.flatMap((node) => {
     const state = stateById.get(node.issueId);
-    if (node.completionState === "BLOCKED") {
+    if (node.recovery && !node.recoveryActive) {
+      return [diagnosis({ reasonCode: "technical_failure_recovery", evidence: [node.recovery.observedResult],
+        noAutomaticTransition: "Only the exact failure owner may diagnose or repair within approved scope.", affectedNodes: [node.issueId], allNodes: allNodeIds,
+        nextOwner: nextRecoveryPhase(node.recovery) ? "isolated-recovery-task" : node.recovery.diagnosis?.classification === "REQUIREMENT_CONFLICT" ? "planning-human" : "named-technical-owner",
+        resumePredicates: ["failure_diagnosed_and_required_verification_proved"] })];
+    }
+    if (node.completionState === "BLOCKED" && !node.recoveryActive) {
       return [diagnosis({
         reasonCode: REASON_CODES.implementationBlocked,
         evidence: node.failure?.evidence ?? ["The Issue published implementation_blocked."],
@@ -920,7 +931,7 @@ export function reduceRun(input) {
         affectedNodes: [node.issueId],
       }];
     }
-    if (node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+    if (!node.recoveryActive && node.completionState === "COMPLETE" && ["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
       return [{
         code: "completion_while_task_active",
         reasonCode: REASON_CODES.evidenceContradiction,
@@ -1088,6 +1099,18 @@ export function reduceRun(input) {
       cycle: 1,
     }];
   }).slice(0, slots);
+  const recoveries = normalizedNodes.filter(node => node.recovery && !node.recoveryActive && node.trackerState === "OPEN"
+    && node.blockers.every(id => stateById.get(id) === "SUCCEEDED")).flatMap(node => {
+    const phase = nextRecoveryPhase(node.recovery);
+    if (!phase) return [];
+    if (phase === "REPAIR") {
+      const existing = input.journal.findLast(event => event.type === "recovery.intent" && event.phase === phase && event.failure.identity === node.recovery.identity);
+      if (!existing) try { nextRepairWave({ failure: node.recovery, journal: input.journal }); }
+      catch (error) { nodeDiagnoses.push(diagnosis({ reasonCode: "repair_budget_unproved_or_exhausted", evidence: [error.message], affectedNodes: [node.issueId], allNodes: allNodeIds,
+        noAutomaticTransition: "Re-entry cannot reset or invent material repair progress.", resumePredicates: ["exact_cumulative_budget_proved_and_available"] })); return []; }
+    }
+    return [{ type: "recover_issue", issueId: node.issueId, failure: node.recovery }];
+  }).slice(0, slots);
   const repairs = closeable.filter(issueId => byId.get(issueId).closeConflict).flatMap(issueId => {
     const conflict = byId.get(issueId).closeConflict;
     const previous = input.journal.filter(event => event.type === "repair.recorded" && event.issueId === issueId);
@@ -1097,7 +1120,8 @@ export function reduceRun(input) {
       return [];
     }
     return [{ type: "repair_issue", issueId, ...conflict }];
-  }).slice(0, slots);
+  }).slice(0, Math.max(0, slots - recoveries.length));
+  repairs.unshift(...recoveries);
   normalActions.push(...repairs, ...remediations.slice(0, Math.max(0, slots - repairs.length)));
   const dispatchable = [
     ...retrying.filter((issueId) => byId.get(issueId).taskState === "TRANSIENT_FAILURE"),
@@ -1110,8 +1134,8 @@ export function reduceRun(input) {
   }));
   normalActions.push(...dispatchActions);
   const executionActionsScheduled = repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
-  if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict)) {
-    normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict) });
+  if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict && !byId.get(id).recovery)) {
+    normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict && !byId.get(id).recovery) });
   }
   const needsParentClose = allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
@@ -1172,7 +1196,7 @@ export function reduceRun(input) {
       seen.add(id);
       return (byId.get(id)?.blockers ?? []).some(blocker => dependsOnWait(blocker, seen));
     };
-    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type) && !dependsOnWait(action.issueId));
+    const independent = normalActions.filter(action => ["dispatch_issue", "remediate_environment", "repair_issue", "recover_issue"].includes(action.type) && !dependsOnWait(action.issueId));
     normalActions.splice(0, normalActions.length, ...(independent.length ? independent : [{
       type: activeCloseWait.type === "repository-close-wait.started"
         ? "wait_repository_close_lease"

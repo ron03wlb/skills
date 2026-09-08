@@ -77,14 +77,49 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     return { state: "UNAVAILABLE", reason: "Selected runtime does not support completed Run re-entry",
       recovery: "Restore a reviewed compatible runtime with completed Run re-entry support; preserve the original Run, Grant and retained package before retrying this entry." };
   }
+  if (previousGrant) {
+    const journal = store.readEvents(previousGrant.runIdentity.runId);
+    const issueIds = [...new Set(journal.filter(event => event.issueId).map(event => event.issueId))];
+    const taskIntents = issueIds.map(issueId => store.readHostTask({ runId: previousGrant.runIdentity.runId, issueId })).filter(Boolean);
+    const compatibility = composition.assessRecoveryCompatibility?.({ journal, taskIntents });
+    if (compatibility?.compatible !== true) return { state: "UNAVAILABLE", reason: compatibility?.reason ?? "Runtime cannot prove recovery evidence and task ownership compatibility",
+      nextOwner: "workflow-maintenance", recovery: "Preserve the same Run, Grant, retained package and accepted task intents; use the scoped maintenance owner to supply a reviewed compatible runtime." };
+  }
   const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
     runIdentity: previousGrant?.runIdentity, workflowVersion: runtime.version,
     compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host };
   if (prepareOnly) {
     if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
-    return composition.prepareCodexWorkflow(options);
+    let lane = await composition.prepareCodexWorkflow(options);
+    let versionId = runtime.version.id;
+    return { specId: lane.specId,
+      async run(request) {
+        const status = await lane.run(request);
+        if (status.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")
+          && !host.disconnected && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(status.run.state)) {
+          const installed = selectWorkflowVersion({ cacheDirectory });
+          if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
+            await lane.close?.();
+            const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
+            if (typeof renewed.run !== "function") return { ...status, capacityUnknown: true, reason: renewed.reason };
+            lane = renewed; versionId = installed.version.id;
+            return lane.run({ ...request, mode: "snapshot" }); // Reconcile before the next shared-capacity allocation.
+          }
+        }
+        return status;
+      },
+      async close() { await lane.close?.(); },
+    };
   }
-  return composition.runCodexWorkflow(options);
+  const result = await composition.runCodexWorkflow(options);
+  if (result.status?.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")) {
+    const installed = selectWorkflowVersion({ cacheDirectory });
+    if (installed.state === "AVAILABLE" && installed.version.id !== runtime.version.id && !host.disconnected
+      && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(result.status.run.state)) {
+      return selectInstalledLane({ repository, specId, runId: result.status.run.runId, host });
+    }
+  }
+  return result;
 }
 
 export async function runInstalledEntry({ repository, specId, runId, host, specIds, maxWorkers = 3 }) {

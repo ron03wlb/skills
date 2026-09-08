@@ -15,6 +15,7 @@ import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/sc
 import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
+import { bindTechnicalFailure } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-coordinator-"));
@@ -35,6 +36,48 @@ const identity = {
   classification: "SINGLE",
   decompositionIdentity: null,
 };
+
+test("technical failure diagnosis and isolated repair retain one operation budget across coordinator restart", async () => {
+  const { root, store } = createStoreFixture();
+  const original = { threadId: "original", hostId: "local" }, repairTask = { threadId: "repair", hostId: "local" };
+  let running = false, recoveryRequest, diagnosed = false;
+  const messages = [];
+  const failureBase = { runId: identity.runId, issueId: "15", operationId: "issue-operation", candidate: "b".repeat(40), targetHead: "a".repeat(40),
+    worktree: root, topic: "issue", owningSource: "integration-check", command: ["node", "check.mjs"], observedResult: "exit 1", ownerTaskRef: original,
+    completionIdentity: "IC_original", completionBodySha256: `sha256:${"d".repeat(64)}`, repairWaveCount: 3 };
+  const tasks = {
+    async findIssueLane() { return [original]; }, async create() { throw new Error("No replacement execution lane"); },
+    async ensureRecoveryTask() { return { taskRef: repairTask, previousOwner: { taskRef: original, state: "SETTLED", worktree: root, turnId: "settled" } }; },
+    async read(ref) { return { state: ref.threadId === "repair" && running ? "RUNNING" : "RESUMABLE", cwd: root,
+      snapshot: { turns: [{ status: "completed" }] }, ...(ref.threadId === "repair" ? { recoveryRequest } : {}) }; },
+    async message(ref, prompt) {
+      assert.deepEqual(ref, repairTask); messages.push(prompt);
+      recoveryRequest = JSON.parse(prompt.match(/^Recovery request: (\{.+\})$/mu)[1]); running = true;
+    }, async wait() { throw new Error("A step yields"); },
+  };
+  const options = { store, tasks, tracker: { read: async () => ({}) }, now: () => "2026-09-08T00:00:00.000Z", sleep: async () => {},
+    reconcile: async () => reconciliation({ taskRefs: { 15: running ? repairTask : original }, nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN",
+      taskState: running ? "EXECUTING" : "NONE", completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT", recoveryActive: running,
+      recovery: bindTechnicalFailure({ ...failureBase, ...(diagnosed ? { diagnosis: { classification: "ISSUE_DEFECT", source: "check.mjs", reason: "Fixture mismatch", scopeCompatible: true } } : {}) }) }] }) };
+  try {
+    const writer = store.acquireWriter(identity.runId);
+    writer.append({ type: "grant.recorded", at: options.now(), runIdentity: identity });
+    writer.append({ type: "dispatch.recorded", at: options.now(), issueId: "15", attempt: 1, taskRef: original }); writer.release();
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(messages.length, 1); assert.match(messages[0], /Read-only diagnosis/u);
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(messages.length, 1, "an active recovery is observed, not messaged again");
+    running = false; diagnosed = true;
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    assert.equal(messages.length, 2); assert.match(messages[1], /Material repair wave 4\/10/u);
+    await createCoordinator(options).run({ specId: "15", mode: "step" });
+    const events = store.readEvents(identity.runId);
+    assert.equal(events.filter(event => event.type === "grant.recorded").length, 1);
+    assert.deepEqual(events.filter(event => event.type === "recovery.intent").map(event => [event.phase, event.wave]), [["DIAGNOSE", null], ["REPAIR", 4]]);
+    assert.equal(events.filter(event => event.type === "repair.recorded").length, 0, "no fabricated conflict repair event");
+    assert.equal(messages.length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 const multiIdentity = {
   ...identity,

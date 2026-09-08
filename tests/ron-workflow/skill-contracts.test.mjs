@@ -38,6 +38,7 @@ const readExecuteIssueContract = () => [
   read("skills/engineering/execute-issue/references/operation-identity.md"),
   read("skills/engineering/execute-issue/references/manual-prerequisites.md"),
   read("skills/engineering/execute-issue/references/completion-evidence.md"),
+  read("skills/engineering/execute-issue/references/technical-recovery.md"),
 ].join("\n");
 const readToSpecContract = () => [
   read("skills/engineering/to-spec/SKILL.md"),
@@ -1884,7 +1885,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
   assert.match(execute, /blocked state supersedes completion only when.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
   assert.match(execute, /dirty target.*partial close.*not.*conflict-resolution rerun.*cheap read-only.*identity.*evidence.*do not run.*baseline.*focused.*final.*full suite.*review.*commit.*tracker note.*`\/close-issue <Issue-ID>`/isu);
-  assert.match(execute, /explicit conflict-resolution rerun.*same topic branch.*Issue worktree.*latest target.*new attempt baseline.*merge.*baseline.*topic branch.*without rebasing or resetting.*Acceptance Criteria.*unchanged.*new candidate.*contain.*baseline.*new `implementation_complete`.*current/isu);
+  assert.match(execute, /explicit conflict-resolution or technical-failure recovery.*same topic branch.*Issue worktree.*latest target.*new attempt baseline.*merge.*baseline.*topic branch.*without rebasing or resetting.*Acceptance Criteria.*unchanged.*new candidate.*contain.*baseline.*new `implementation_complete`.*current/isu);
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
   assert.match(execute, /never invokes `close-issue`/iu);
@@ -3375,7 +3376,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /close_issue.*current target state and exact HEAD.*exact tracker identity.*candidate commit.*completion evidence ID\/body hash.*registered worktree identity/isu);
   assert.match(skill, /close_parent.*current target state and exact HEAD.*exact parent tracker state and identity.*every child's exact close authority evidence/isu);
   assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
-  assert.match(skill, /at most three dispatch attempts.*semantic.*contradictory.*bypass.*retry/isu);
+  assert.match(skill, /at most three dispatch attempts.*Technical.*failed integration bypass blind dispatch retries.*isolated diagnosis.*Scope conflicts.*authority mismatch.*contradictory evidence/isu);
   assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);
   assert.match(skill, /5, 15, and 30 second.*tracker.*probe.*retry budget/isu);
   assert.match(skill, /restart.*selector-known Run identity and node set.*preserve.*affected nodes.*anonymous outage/isu);

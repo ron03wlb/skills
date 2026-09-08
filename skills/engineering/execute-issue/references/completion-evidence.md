@@ -19,7 +19,7 @@ Write one compact tracker completion note containing:
 - Planning Seal SHA/state (`created`, `reused`, `successor`, or `not-applicable`);
 - `manualAttestations`: every consumed attestation, or an explicit empty list. A v2 entry records `kind: manual_prerequisite_complete:v2`, its tracker-native immutable identity, Issue, Prerequisite candidate, Git blob, artifact, declared environment identity where applicable, and outcome; a v1 entry records its immutable identity, Issue, and exact legacy non-generated artifact path. Never degrade v2 to a path string or infer a missing field;
 - `workflowArtifacts`: the reviewed prospective entries with exact `path`, `requirementSource`, and `purpose`, or an explicit empty list;
-- `standards: clean`, `spec: clean`, exact verification commands/results, repair-wave count, and any Material plan deviations;
+- `standards: clean`, `spec: clean`, exact verification commands/results, `repairWaveCount`, and any Material plan deviations; for a repair, the exact `recovery` lineage fields from [technical recovery](technical-recovery.md);
 - `worktree: clean` and `implementation_complete`.
 
 For the installed Codex GitHub host, serialize this same owner-verified payload using [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The encoding adds no new completion authority.

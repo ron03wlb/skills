@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
+import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask } from "./recovery-evidence.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
@@ -51,6 +52,7 @@ const ENGINE_WRITER_CONTENTION = new Set([
 const MUTATING_ACTION_TYPES = new Set([
   "dispatch_issue",
   "repair_issue",
+  "recover_issue",
   "remediate_environment",
   "close_issue",
   "close_parent",
@@ -71,7 +73,7 @@ const canonicalize = (value) => {
   return value;
 };
 const closeRequestAuthority = (evidence) => {
-  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, ...authority } = evidence;
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, ...authority } = evidence;
   if (authority.authorityEvidence) {
     const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
     authority.authorityEvidence = fixed;
@@ -610,6 +612,49 @@ export function createCoordinator({
     }
   };
 
+  const recoverIssue = async ({ action, current, writer }) => {
+    const failure = bindTechnicalFailure(action.failure);
+    const journal = store.readEvents(current.runIdentity.runId);
+    const phase = nextRecoveryPhase(failure);
+    if (!phase) throw new Error(`Recovery requires the ${failure.diagnosis.classification} owner: ${failure.diagnosis.reason}`);
+    const originalTaskRef = journal.find(event => event.type === "dispatch.recorded" && event.issueId === action.issueId)?.taskRef;
+    if (!isTaskRef(originalTaskRef) || !sameRecoveryTask(originalTaskRef, failure.ownerTaskRef)) throw new Error("Recovery original task identity is unproved");
+    let intent = journal.findLast(event => event.type === "recovery.intent" && event.failure.identity === failure.identity && event.phase === phase);
+    if (!intent) {
+      const wave = phase === "REPAIR" ? nextRepairWave({ failure, journal }) : phase === "MAINTENANCE" ? nextMaintenanceWave({ failure, journal }) : null;
+      const requestIdentity = recoveryDigest({ failure, phase, wave });
+      intent = writer.append({ type: "recovery.intent", at: now(), issueId: action.issueId, failure, phase, wave, originalTaskRef, requestIdentity });
+    }
+    let transfer = journal.find(event => event.type === "recovery.task" && event.requestIdentity === intent.requestIdentity);
+    if (!transfer) {
+      const ownership = phase === "MAINTENANCE"
+        ? await tasks.ensureMaintenanceTask({ issueId: action.issueId, runIdentity: current.runIdentity, failure, originalTaskRef })
+        : await tasks.ensureRecoveryTask({ issueId: action.issueId, runIdentity: current.runIdentity, operationId: failure.operationId, originalTaskRef, worktree: failure.worktree });
+      if (ownership.pending) {
+        if (ownership.reason) throw new Error(ownership.reason);
+        return;
+      }
+      transfer = writer.append({ type: "recovery.task", at: now(), issueId: action.issueId, phase, wave: intent.wave,
+        requestIdentity: intent.requestIdentity, failureIdentity: failure.identity, originalTaskRef,
+        taskRef: ownership.taskRef, previousOwner: ownership.previousOwner });
+    }
+    const previousOwner = await tasks.read(originalTaskRef);
+    if (previousOwner.state !== "RESUMABLE" || previousOwner.cwd !== failure.worktree
+      || previousOwner.snapshot?.turns?.[0]?.status !== "completed") throw new Error("Previous writer became active or changed ownership during recovery");
+    const task = await tasks.read(transfer.taskRef);
+    if (task.recoveryRequest?.requestIdentity === intent.requestIdentity) return;
+    if (task.state === "RUNNING") return;
+    if (task.state !== "RESUMABLE") throw new Error("Repair task has unresolved active work; preserve it");
+    const request = { runId: current.runIdentity.runId, issueId: action.issueId, operationId: failure.operationId,
+      requestIdentity: intent.requestIdentity, phase, wave: intent.wave, failureIdentity: failure.identity };
+    const work = phase === "DIAGNOSE"
+      ? `Read-only diagnosis: inspect the owning source, failed command and exact observed evidence below. Distinguish ISSUE_DEFECT, ENVIRONMENT, WORKFLOW_DEFECT, REQUIREMENT_CONFLICT, CAPABILITY_UNAVAILABLE and OUTCOME_UNKNOWN. Missing initial diagnosis is work to perform. Return one final line Workflow recovery result: <JSON> binding requestIdentity and failureIdentity with diagnosis {classification, source, reason, scopeCompatible}; a WORKFLOW_DEFECT also names its exact approved maintenance source repository, target and scope authority. Do not edit, commit, install, integrate or close in this diagnosis phase.`
+      : phase === "REPAIR"
+        ? `Use $execute-issue for the original Issue operation in this exclusively transferred original worktree. Material repair wave ${intent.wave}/10 is already recorded; do not count it again or reset the budget. Capture the latest target baseline and merge that exact commit into the topic without resetting, rebasing or rolling back a successful integration. Repair only unchanged approved requirements. Run focused checks including the original failed command, configured typechecking, full suite and independent Standards/Spec review. Record the original failed command as an exact argv array with its PASS result in verification. Publish/read a new implementation_complete containing repairWaveCount and recovery {failureIdentity, requestIdentity, taskRef, previousCompletionIdentity, previousCompletionBodySha256}, bound to the supplied original completion. Preserve prior notes. No closeout or installation.`
+        : `Execute only the exact approved governing-workflow maintenance in this separate canonical-source worktree. Its own material wave ${intent.wave}/10 is recorded; return repairWaveCount ${intent.wave}. Preserve the product worktree and its pinned package. Verify/review the maintenance candidate and, only with its exact installation authority, let the installation owner install it. Return Workflow recovery result: <JSON> binding requestIdentity, failureIdentity and maintenance {repositoryId,target,operationId,candidate,packageVersion,standards,spec,verification,installation}. Otherwise return the precise missing predicate and owning next action. A new task never resets the maintenance operation budget.`;
+    await tasks.message(transfer.taskRef, `${work}\nOriginal failure and authority: ${JSON.stringify(failure)}\nRecovery request: ${JSON.stringify(request)}`);
+  };
+
   const closeIssue = async ({ action, current, status, step = false }) => {
     let taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) {
@@ -639,6 +684,8 @@ export function createCoordinator({
       candidateReachable: node.close.candidateReachable,
       worktreeState: node.close.worktreeState,
       authorityEvidence: sourceNode.closeAuthorityEvidence,
+      ...(sourceNode.integrationVerification ? { integrationVerification: sourceNode.integrationVerification } : {}),
+      ...(sourceNode.maintenanceRecoveryIdentity ? { maintenanceRecoveryIdentity: sourceNode.maintenanceRecoveryIdentity } : {}),
     };
     let requestIdentity = closeRequestIdentityFor(requestEvidence);
     const task = await tasks.read(taskRef);
@@ -647,9 +694,13 @@ export function createCoordinator({
       && task.closeRequest.issueId === action.issueId;
     if (acceptedForLane && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity) requestIdentity = task.closeRequest.requestIdentity;
     const repair = store.readEvents(current.runIdentity.runId).findLast(event => event.type === "repair.recorded" && event.issueId === action.issueId);
-    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && repair
+    const renewedAfterRepair = acceptedForLane && task.state === "RESUMABLE" && (sourceNode.maintenanceRecoveryIdentity
+      || sourceNode.repairLineage
+      && sourceNode.repairLineage.previousCandidate === task.closeRequest.evidence?.authorityEvidence?.candidateCommit
+      && sourceNode.repairLineage.previousCompletionIdentity === task.closeRequest.evidence?.authorityEvidence?.completionEvidenceId
+      || repair
       && repair.candidate === task.closeRequest.evidence?.authorityEvidence?.candidateCommit
-      && sourceNode.closeAuthorityEvidence.candidateCommit !== repair.candidate;
+      && sourceNode.closeAuthorityEvidence.candidateCommit !== repair.candidate);
     if (task?.closeRequest?.state === "ACCEPTED"
       && (!acceptedForLane || task.closeRequest.requestIdentity !== requestIdentity) && !renewedAfterRepair) {
       return {
@@ -662,6 +713,11 @@ export function createCoordinator({
     }
     const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
     const continuation = accepted ? planCloseContinuation({ task, requestIdentity, requestEvidence }) : { needed: false };
+    if (continuation.blocked) return { stopped: diagnosedStop(status, {
+      reasonCode: continuation.blocked.reasonCode, evidence: continuation.blocked.evidence.map(item => item.message),
+      affectedNodes: [action.issueId], noAutomaticTransition: "Exact integration or cleanup evidence requires its recovery owner before close redispatch.",
+      resumePredicates: ["owning_failure_diagnosed_and_exact_verification_proved"],
+    }) };
     if (continuation.exhausted) return { stopped: diagnosedStop(status, {
       reasonCode: "close_retry_budget_exhausted", evidence: ["Three native close continuations settled without progress; preserve the original task and current Git/tracker state."],
       affectedNodes: [action.issueId], noAutomaticTransition: "The unchanged close progress exhausted its persistent continuation budget.", resumePredicates: ["close_progress_or_owning_source_failure_is_resolved"],
@@ -1300,7 +1356,7 @@ export function createCoordinator({
 
           let deferredEnvironmentStop = null;
           let controlRevisionChanged = false;
-          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type));
+          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue", "recover_issue"].includes(action.type));
           if (request.mode === "step" && actions.length === 0) return lastStatus;
           for (const action of request.mode === "step" ? actions.slice(0, 1) : actions) {
             if (MUTATING_ACTION_TYPES.has(action.type)) {
@@ -1317,6 +1373,8 @@ export function createCoordinator({
               if (stopped) { if (isolateActionStop(stopped, action, current)) break; return stopped; }
             } else if (action.type === "repair_issue") {
               await repairIssue({ action, current, writer });
+            } else if (action.type === "recover_issue") {
+              await recoverIssue({ action, current, writer });
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) {
@@ -1357,7 +1415,7 @@ export function createCoordinator({
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
             } catch (error) {
-              if (!["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
+              if (!["dispatch_issue", "repair_issue", "recover_issue", "close_issue"].includes(action.type)) throw error;
               lastStatus = rebuildStatus(current.facts); // A fenced writer must throw before any continuation.
               const progressIdentity = actionProgressIdentity(current.facts, action.issueId);
               const attempt = failedActions(current.facts).filter(event => event.issueId === action.issueId && event.actionType === action.type).length + 1;

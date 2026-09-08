@@ -1,4 +1,5 @@
 import { validateCloseWaitEvidence } from "./run-target-writer-wait.mjs";
+import { validateRecoveryIntent, sameRecoveryTask, nextRepairWave, nextMaintenanceWave } from "./recovery-evidence.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
@@ -7,6 +8,8 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
   "runtime.observed",
   "repair.recorded",
+  "recovery.intent",
+  "recovery.task",
   "action.failed",
   "control.revised",
   "dispatch.recorded",
@@ -30,6 +33,8 @@ const immutableRunIdentityKeys = Object.freeze([
   "decompositionIdentity",
 ]);
 const eventFields = new Map([
+  ["recovery.intent", new Set(["type", "at", "issueId", "failure", "phase", "wave", "originalTaskRef", "requestIdentity"])],
+  ["recovery.task", new Set(["type", "at", "issueId", "requestIdentity", "failureIdentity", "originalTaskRef", "taskRef", "previousOwner", "wave", "phase"])],
   ["action.failed", new Set(["type", "at", "issueId", "actionType", "progressIdentity", "attempt", "evidence"])],
   ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
@@ -134,9 +139,19 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
   assertExactFields(event, allowedFields, `${event.type} event`);
   requireIsoInstant(event.at, "Journal event timestamp");
   switch (event.type) {
+    case "recovery.intent":
+      validateRecoveryIntent(event);
+      break;
+    case "recovery.task":
+      validateTaskRef(event.taskRef, "recovery task");
+      validateTaskRef(event.originalTaskRef, "original recovery task");
+      if (sameRecoveryTask(event.taskRef, event.originalTaskRef) || event.previousOwner?.state !== "SETTLED"
+        || !sameRecoveryTask(event.previousOwner.taskRef, event.originalTaskRef)
+        || typeof event.previousOwner.worktree !== "string") throw new Error("Recovery requires a separate task and exact settled previous owner");
+      break;
     case "action.failed":
       requireText(event.issueId, "failed action Issue");
-      if (!["dispatch_issue", "repair_issue", "close_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
+      if (!["dispatch_issue", "repair_issue", "recover_issue", "close_issue"].includes(event.actionType)) throw new TypeError("Unsupported failed action");
       if (!/^sha256:[a-f0-9]{64}$/u.test(event.progressIdentity)) throw new TypeError("Failed action requires exact progress identity");
       requirePositiveInteger(event.attempt, "failed action attempt", 3);
       requireText(event.evidence, "failed action evidence");
@@ -274,6 +289,25 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     const dispatch = events.findLast(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
     if (!dispatch || !sameTaskRef(dispatch.taskRef, event.taskRef) || event.wave !== previous.length + 1
       || previous.some(item => item.candidate === event.candidate)) throw new TypeError("Repair must preserve its original dispatched lane and monotonic candidate budget");
+  }
+  if (event.type === "recovery.intent") {
+    const grant = events.find(item => item.type === "grant.recorded");
+    const dispatch = events.find(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    if (event.failure.runId !== grant?.runIdentity.runId || !dispatch
+      || !sameRecoveryTask(dispatch.taskRef, event.originalTaskRef)
+      || events.some(item => item.type === "recovery.intent" && item.requestIdentity === event.requestIdentity)) throw new Error("Recovery intent must bind the original Run and dispatched task exactly once");
+    if (event.phase === "REPAIR" && event.wave !== nextRepairWave({ failure: event.failure, journal: events })) throw new Error("Recovery must preserve the cumulative material repair count");
+    if (event.phase === "MAINTENANCE" && event.wave !== nextMaintenanceWave({ failure: event.failure, journal: events })) throw new Error("Maintenance must preserve its scoped operation budget");
+  }
+  if (event.type === "recovery.task") {
+    const intent = events.find(item => item.type === "recovery.intent" && item.requestIdentity === event.requestIdentity);
+    if (!intent || intent.issueId !== event.issueId || intent.failure.identity !== event.failureIdentity
+      || intent.phase !== event.phase || intent.wave !== event.wave || !sameRecoveryTask(intent.originalTaskRef, event.originalTaskRef)
+      || event.previousOwner.worktree !== intent.failure.worktree
+      || events.some(item => ["dispatch.recorded", "recovery.task"].includes(item.type) && item.issueId !== event.issueId && sameRecoveryTask(item.taskRef, event.taskRef))
+      || events.some(item => item.type === "recovery.task" && item.issueId === event.issueId && item.phase !== "MAINTENANCE"
+        && event.phase !== "MAINTENANCE" && !sameRecoveryTask(item.taskRef, event.taskRef))
+      || events.some(item => item.type === "recovery.task" && item.requestIdentity === event.requestIdentity)) throw new Error("Recovery transfer lacks its exact prior intent and exclusive ownership proof");
   }
   if (event.type === "runtime.observed") {
     const grant = events.findLast(({ type }) => type === "grant.recorded");
