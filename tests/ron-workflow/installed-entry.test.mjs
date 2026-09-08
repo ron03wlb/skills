@@ -23,7 +23,8 @@ const initialize = root => {
   git(root, "config", "user.email", "fixture@example.invalid");
   git(root, "config", "core.autocrlf", "false");
 };
-const note = (node_id, record) => ({ node_id, author_association: "OWNER", body: renderWorkflowRecord(record) });
+const note = (node_id, record) => ({ node_id, created_at: "2026-09-08T00:00:00Z", author_association: "OWNER", body: renderWorkflowRecord(record) });
+const closure = number => ({ node_id: `IE_closed_${number}`, event: "closed", created_at: "2026-09-08T00:02:00Z" });
 
 // Real installed packages, Git, checkpoints, journals and reconciliation; only external CLI/host I/O is substituted.
 function fixture() {
@@ -75,7 +76,7 @@ function fixture() {
     assert.ok(number, `Unexpected tracker route: ${args[1]}`);
     const issue = issues.get(Number(number));
     if (!suffix) readHooks.get(issue.number)?.();
-    const response = suffix.startsWith("/comments") ? issue.comments : suffix.includes("blocked_by") ? (issue.blockers ?? []).map(id => ({ node_id: id }))
+    const response = suffix.startsWith("/comments") ? issue.comments : suffix.startsWith("/events") ? issue.events : suffix.includes("blocked_by") ? (issue.blockers ?? []).map(id => ({ node_id: id }))
       : suffix === "/parent" ? { node_id: issue.parent } : issue;
     return JSON.stringify([response]);
   };
@@ -89,7 +90,7 @@ function fixture() {
       standards: "clean", spec: "clean", worktreeState: "clean", manualAttestations: [], workflowArtifacts: [],
       verification: [{ command: "fixture check", result: "passed" }] });
     const children = multi ? [number + 100, number + 200].map((n, index) => ({ node_id: `I_${n}`, number: n, parent: specId,
-      body: `Part of ${specId}, child ${index}`, state: "closed", blockers: index ? [`I_${number + 100}`] : [], comments: [completion(`I_${n}`, n)] })) : [];
+      body: `Part of ${specId}, child ${index}`, state: "closed", events: [closure(n)], blockers: index ? [`I_${number + 100}`] : [], comments: [completion(`I_${n}`, n)] })) : [];
     for (const child of children) issues.set(child.number, child);
     const decomposition = multi ? note(authority.decompositionIdentity, { kind: "decomposition:v1", parent: specId, target: "main", planningSeal: seal,
       approvedScopeHash: authority.approvedScopeHash, decompositionMapping: Object.fromEntries(children.map((child, i) => [`${number}/${i}`, child.node_id])),
@@ -110,7 +111,7 @@ function fixture() {
       ["handoff.completed", { handoffIdentity: `IC_hand_${number}` }],
     ];
     for (const [stage, receipt] of stages) checkpoints.advanceCheckpoint({ identity, stage, receipt });
-    const issue = { node_id: specId, number, body, state: "closed", comments: [
+    const issue = { node_id: specId, number, body, state: "closed", events: [closure(number)], comments: [
       note(`IC_pub_${number}`, { kind: "spec_publication", repositoryId: "github:example/repo", authority }),
       note(`IC_hand_${number}`, { kind: "producer_handoff", ...authority, producerCommand, checkpointIdentity: identity,
         transactionIdentity: tx.transactionId, publicationIdentity: `IC_pub_${number}`, trackerIdentity: specId,
@@ -135,6 +136,11 @@ function fixture() {
     async entry(options = {}) {
       const { runInstalledEntry } = await import(pathToFileURL(join(retained.root, scriptsPath, "installed-entry.mjs")).href);
       return runInstalledEntry({ repository, host, ...options });
+    },
+    async snapshot(runIdentity) {
+      const { prepareCodexWorkflow } = await import(pathToFileURL(join(retained.root, scriptsPath, "codex-workflow.mjs")).href);
+      const lane = await prepareCodexWorkflow({ repository, host, runIdentity, specId: runIdentity.specId, workflowVersion: retained.version, packageRoot: retained.root });
+      try { return await lane.run({ mode: "snapshot" }); } finally { await lane.close(); }
     },
     close() { childProcess.execFileSync = originalExec; syncBuiltinESMExports(); rmSync(root, { recursive: true, force: true }); },
   };
@@ -186,6 +192,7 @@ test("a mixed installed batch observes the existing active worker while retainin
     const active = f.addCompleted(2);
     const completion = active.issue.comments.pop();
     active.issue.state = "open";
+    active.issue.events = [];
     f.taskStates.set("task-2", "active");
     let observations = 0;
     f.readHooks.set(2, () => {
@@ -308,6 +315,70 @@ test("installed selection retains current scope, native identity, batch ownershi
   } finally { f.close(); }
 });
 
+test("completed replay gates rebuild from owner history across disposable snapshots and temporary blockers", async t => {
+  const f = fixture();
+  try {
+    const single = f.addCompleted();
+    const multi = f.addCompleted(2, true);
+    const journal = f.store.readEvents(single.runIdentity.runId);
+    const snapshotPath = join(f.repository, ".git/matt-workflow-control/runs", single.runIdentity.runId, "status.json");
+    await f.entry({ specId: "1" });
+    await t.test("a deleted success snapshot cannot replay a reopened member", async () => {
+      rmSync(snapshotPath);
+      single.issue.state = "open";
+      const result = await f.snapshot(single.runIdentity);
+      assert.equal(result.run.state, "BLOCKED");
+      assert.deepEqual(result.legalActions, []);
+      assert.ok(result.diagnoses.some(d => d.resumePredicates.includes("resolve_contradiction:completed_run_evidence_changed")));
+      assert.equal((await f.entry({ specId: "1" })).status.run.state, "BLOCKED");
+    });
+    await t.test("dirty-to-clean target observations retain the same replay gate", async () => {
+      single.issue.state = "closed";
+      await f.entry({ specId: "1" });
+      single.issue.state = "open";
+      const dirtyPath = join(f.repository, "unrelated.txt");
+      writeFileSync(dirtyPath, "preserved target work\n");
+      try { assert.equal((await f.entry({ specId: "1" })).status.run.state, "BLOCKED"); }
+      finally { rmSync(dirtyPath); }
+      const result = await f.snapshot(single.runIdentity);
+      assert.equal(result.run.state, "BLOCKED");
+      assert.deepEqual(result.legalActions, []);
+      assert.equal((await f.entry({ specId: "1" })).status.run.state, "BLOCKED");
+    });
+    await t.test("a completed parent cannot repeat closeout without a prior snapshot", async () => {
+      multi.issue.state = "open";
+      const result = await f.snapshot(multi.runIdentity);
+      assert.equal(result.run.state, "BLOCKED");
+      assert.deepEqual(result.legalActions, []);
+      assert.equal((await f.entry({ specId: "2" })).status.run.state, "BLOCKED");
+    });
+    await t.test("unreadable or unordered closure evidence cannot authorize progress", async () => {
+      const events = single.issue.events;
+      const publication = single.issue.comments[0];
+      const createdAt = publication.created_at;
+      try {
+        for (const history of [null, [{ ...closure(1), created_at: "unknown" }]]) {
+          single.issue.events = history;
+          const result = await f.snapshot(single.runIdentity);
+          assert.equal(result.run.state, "BLOCKED");
+          assert.deepEqual(result.legalActions, []);
+        }
+        single.issue.events = events;
+        delete publication.created_at;
+        assert.equal((await f.snapshot(single.runIdentity)).run.state, "BLOCKED");
+      } finally { single.issue.events = events; publication.created_at = createdAt; }
+    });
+    await t.test("closure before the current publication does not fence a current partial close", async () => {
+      single.issue.events = [{ ...closure(1), created_at: "2026-09-07T00:00:00Z" }];
+      const result = await f.snapshot(single.runIdentity);
+      assert.deepEqual(result.legalActions, [{ type: "close_issue", issueId: "I_1" }]);
+    });
+    assert.deepEqual(f.store.readEvents(single.runIdentity.runId), journal);
+    assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
+    assert.equal(git(f.repository, "status", "--porcelain=v1"), "");
+  } finally { f.close(); }
+});
+
 test("recorded package failures preserve evidence and STOPPED re-entry never renews authority", async t => {
   const f = fixture();
   try {
@@ -345,6 +416,7 @@ test("recorded package failures preserve evidence and STOPPED re-entry never ren
     }
     await t.test("STOPPED keeps the original Grant and remains excluded from no-argument entry", async () => {
       f.issues.get(1).state = "open";
+      f.issues.get(1).events = [];
       f.issues.get(1).comments.pop();
       const writer = f.store.acquireWriter(runIdentity.runId);
       writer.append({ type: "control.revised", at: "2026-09-08T00:01:00.000Z", revision: 1, command: "STOP" });

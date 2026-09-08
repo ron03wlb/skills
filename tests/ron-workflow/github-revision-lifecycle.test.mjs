@@ -67,7 +67,7 @@ test("formal GitHub reconciliation carries an unchanged closed child and scopes 
       const path = args[1];
       const issue = fixtures[Number(path.match(/issues\/(\d+)/u)[1])];
       return JSON.stringify([path.includes("comments") ? issue.comments : path.endsWith("/parent") ? fixtures[1]
-        : path.includes("blocked_by") ? issue.number === 3 ? [fixtures[2]] : [] : issue]);
+        : path.includes("events?") ? [] : path.includes("blocked_by") ? issue.number === 3 ? [fixtures[2]] : [] : issue]);
     };
     syncBuiltinESMExports();
     let oldEvents = [];

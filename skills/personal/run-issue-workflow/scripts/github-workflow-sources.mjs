@@ -141,6 +141,27 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     const declaration = snapshot.publication.record.preparation;
     const supplied = snapshot.handoff.record.preparation;
     const alreadyStarted = journal.some(event => event.type === "grant.recorded");
+    const reconcileClosureHistory = (issue, affectedNodes) => {
+      if (!alreadyStarted || issue.state !== "open") return;
+      try {
+        // Tracker history survives disposable projections and also covers Runs completed by older packages.
+        const events = api(`repos/${repositoryName}/issues/${issue.number}/events?per_page=100`);
+        if (events.some(event => !event || typeof event.event !== "string")) throw new Error("Native Issue event history is malformed");
+        const closures = events.filter(event => event.event === "closed");
+        if (closures.length === 0) return;
+        const publicationTime = Date.parse(snapshot.spec.comments.find(comment => comment.node_id === snapshot.publication.identity)?.created_at);
+        if (!Number.isFinite(publicationTime) || closures.some(event => !event.node_id || !Number.isFinite(Date.parse(event.created_at)))) {
+          throw new Error("Native closure history cannot be ordered against the current Spec publication");
+        }
+        const closed = closures.find(event => Date.parse(event.created_at) >= publicationTime);
+        if (closed) contradictions.push({ code: "completed_run_evidence_changed", affectedNodes,
+          evidence: [`Issue ${issue.node_id} is OPEN after native closure ${closed.node_id} at ${closed.created_at} under current Spec publication ${snapshot.publication.identity}. Preserve the original Run, Grant, tasks and candidates; reconcile the tracker history before re-entry.`] });
+      } catch (error) {
+        contradictions.push({ code: "issue_closure_history_unresolved", affectedNodes,
+          evidence: [`Issue ${issue.node_id} closure history is unproven: ${error.message}`] });
+      }
+    };
+    if (authority.classification === "MULTI") reconcileClosureHistory(snapshot.spec, snapshot.issues.map(issue => issue.node_id));
     let preparation = declaration ? assessRunPreparation({ ...declaration, approvals: supplied?.approvals,
       trackerPublication: { required: declaration.trackerPublication?.required, observed: "READ_WRITE_READBACK" }, preparedSql: supplied?.preparedSql ?? [] }) : undefined;
     if (alreadyStarted && preparation?.sql === "PENDING" && preparation.questions.length === 0) preparation = assessRunPreparation({ ...declaration, sql: [], preparedSql: [], approvals: supplied?.approvals, trackerPublication: { required: declaration.trackerPublication?.required, observed: "READ_WRITE_READBACK" } });
@@ -151,6 +172,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     for (const issue of snapshot.issues) {
       try {
       if (snapshot.issueErrors?.has(issue.node_id)) throw new Error(snapshot.issueErrors.get(issue.node_id));
+      reconcileClosureHistory(issue, [issue.node_id]);
       const sql = declaration?.sql?.find(item => item.issueId === issue.node_id);
       if (sql) {
         const sqlReadiness = assessRunPreparation({ requiredActions: [], approvals: [], trackerPublication: { observed: "READ_WRITE_READBACK" }, sql: [sql], preparedSql: supplied?.preparedSql ?? [] });

@@ -5,7 +5,6 @@ import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } fr
 import {
   createRecoverableOperatorPacket,
   REASON_CODES,
-  reduceRun,
   reduceRunReadyHandoff,
   planControl,
 } from "./run-core.mjs";
@@ -1003,17 +1002,8 @@ export function createCoordinator({
       const failedActions = facts => store.readEvents(facts.run.runId).filter(event => event.type === "action.failed"
         && event.progressIdentity === actionProgressIdentity(facts, event.issueId));
       const rebuildStatus = (facts) => {
-        const previous = store.readStatus(facts.run.runId);
-        const completedConflict = "completed_run_evidence_changed";
-        const wasCompleted = previous?.run.state === "SUCCEEDED" || previous?.diagnoses?.some(diagnosis =>
-          diagnosis.resumePredicates?.includes(`resolve_contradiction:${completedConflict}`));
         const control = store.readEvents(facts.run.runId).findLast(event => event.type === "control.revised");
         const local = [];
-        // A terminal projection can restrict replay, never prove current completion or grant authority.
-        if (wasCompleted && reduceRun({ ...facts, journal: store.readEvents(facts.run.runId) }).legalActions.length > 0) {
-          local.push({ code: completedConflict, affectedNodes: facts.nodes.map(node => node.issueId),
-            evidence: ["This Run was completed, but current owner evidence no longer proves completion. Preserve its Grant, tasks and candidates; resolve the changed evidence before re-entry."] });
-        }
         const reservations = new Map();
         for (const failure of failedActions(facts).filter(event => event.attempt === 3)) {
           local.push({ code: "issue_action_retry_exhausted", reasonCode: "issue_action_retry_exhausted",
