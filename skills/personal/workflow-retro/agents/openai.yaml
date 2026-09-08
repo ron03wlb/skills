@@ -1,0 +1,5 @@
+interface:
+  display_name: "Workflow Retro"
+  short_description: "Diagnose Codex interruptions and settle improvement decisions"
+policy:
+  allow_implicit_invocation: false
