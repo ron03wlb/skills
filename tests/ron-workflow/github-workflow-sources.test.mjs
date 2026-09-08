@@ -14,6 +14,7 @@ import { createWorkflowControlStore } from "../../skills/personal/run-issue-work
 import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 import { modelEvidenceDigest } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { reduceRunReadyHandoff } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
+import { createVerificationCache } from "../../skills/engineering/execute-issue/scripts/verification-cache.mjs";
 
 test("the GitHub source joins CLI tracker read-back to the real Git checkpoint and target", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "github-source-")));
@@ -155,10 +156,16 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       writeFileSync(join(lane, "repair.mjs"), `export const value = ${number};\n`);
       issueGit("add", "repair.mjs"); issueGit("commit", "-m", `repair ${number}`);
       const candidate = issueGit("rev-parse", "HEAD");
-      const receipt = { schema: "issue-verification:v1", key: String(number).repeat(64), candidate, command: ["node", "--test"], exitCode: 0 };
+      const cache = createVerificationCache({ repository: lane, operationId: execution.key });
+      const check = { candidate, command: [process.execPath, "--check", "repair.mjs"], environment: { node: process.version, fixture: true },
+        readExternalInputs: async () => ({ fixture: "local syntax check" }) };
+      const returned = await cache.verify(check);
+      const reused = await cache.verify(check);
+      assert.equal(returned.exitCode, 0); assert.equal(returned.reused, false); assert.equal(reused.reused, true);
       const verificationDirectory = join(root, ".git", "workflow-verification", execution.key);
-      mkdirSync(verificationDirectory, { recursive: true });
-      writeFileSync(join(verificationDirectory, `${receipt.key}.json`), JSON.stringify(receipt));
+      const receipt = JSON.parse(readFileSync(join(verificationDirectory, `${returned.key}.json`), "utf8"));
+      assert.notEqual(modelEvidenceDigest(returned), modelEvidenceDigest(receipt), "the fresh API return includes a non-persisted diagnostic");
+      assert.notEqual(modelEvidenceDigest(reused), modelEvidenceDigest(receipt), "the reused API return is not the stored receipt either");
       const reviews = ["Standards", "Spec"].map(axis => {
         const report = { schema: "issue-repair-review:v1", operationId: execution.key, reviewerId: `reviewer-${axis}`, axis, candidate, materialChange: true, findings: axis === "Spec" ? [finding] : [] };
         const digest = modelEvidenceDigest(report);
@@ -180,6 +187,13 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const modelCurrent = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal: modelJournal, request: {} });
     assert.equal(modelCurrent.facts.nodes[0].taskState, "MODEL_YIELDED", JSON.stringify(modelCurrent.facts.contradictions));
     assert.deepEqual(modelCurrent.modelYields.I_1.setting, { model: "gpt-6-astra", thinking: "high" });
+    for (const wave of [3, 10]) {
+      const journal = [...modelJournal, { type: "repair.recorded", issueId: "I_1", wave, priorRepairWaves: wave - 1,
+        candidate: waves[0].before, targetHead: seal, taskRef: yieldEvidence.taskRef, requestIdentity: "sha256:" + "e".repeat(64) }];
+      const spent = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal, request: {} });
+      assert.equal(spent.modelYields.I_1, undefined, "self-reported waves cannot regress persisted conflict-repair history");
+      assert.match(spent.facts.contradictions[0].evidence[0], /cumulative repair budget/u);
+    }
     yieldEvidence.waves[1].reviews[0].bodySha256 = "sha256:" + "0".repeat(64);
     const missingReview = await modelOwner.sources.reconciliation.read({ tracker: snapshot, journal: modelJournal, request: {} });
     assert.equal(missingReview.modelYields.I_1, undefined);

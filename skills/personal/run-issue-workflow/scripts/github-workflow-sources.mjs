@@ -251,7 +251,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         if (!policy || !intent?.modelDecision) throw new Error("A legacy or adopted task cannot request a policy upgrade");
         const reserved = journal.find(event => event.type === "model.upgrade" && event.issueId === issue.node_id);
         const substituted = journal.find(event => event.type === "model.substitution" && event.issueId === issue.node_id);
+        const recordedCounts = [
+          ...journal.filter(event => event.type === "repair.recorded" && event.issueId === issue.node_id).map(event => event.wave),
+          ...lifecycle.map(item => item.record.repairWaves),
+        ];
+        if (recordedCounts.some(count => !Number.isInteger(count) || count < 0 || count > 10)) throw new Error("Recorded cumulative repair count is missing or invalid");
         const evidence = await validateRepairYield({ evidence: task.modelYield, runIdentity: selectedIdentity, issueId: issue.node_id,
+          recordedRepairWaves: Math.max(0, ...recordedCounts),
           taskRef: taskRefs[issue.node_id], task, operationIdentity: deriveExecuteIssueOperationIdentity({ repositoryId,
             specId: authority.specId, issueId: issue.node_id, approvedPublicationIdentity: authority.approvedScopeHash }),
           inspectGit: async value => {

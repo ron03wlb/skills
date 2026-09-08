@@ -10,7 +10,7 @@ const confirmed = value => value?.classification === "confirmed" && value.inScop
 // Callbacks read reviewer-owned reports, execution-owned verification receipts and actual Git.
 // A handoff's self-reported success fields alone cannot pass this boundary.
 export async function validateRepairYield({ evidence, runIdentity, issueId, taskRef, operationIdentity,
-  task, inspectGit, readVerification, readReview }) {
+  task, recordedRepairWaves, inspectGit, readVerification, readReview }) {
   if (evidence?.schema !== "issue-model-yield:v1" || evidence.runId !== runIdentity.runId || evidence.issueId !== issueId
     || evidence.target !== runIdentity.target || !sameTask(evidence.taskRef, taskRef)
     || task?.state !== "RESUMABLE" || evidence.writesStopped !== true || task.cwd !== evidence.worktree
@@ -18,6 +18,8 @@ export async function validateRepairYield({ evidence, runIdentity, issueId, task
   assertWorkflowOperationIdentity(evidence.operationIdentity, operationIdentity);
   if (!Number.isInteger(evidence.repairWaves) || evidence.repairWaves < 2 || evidence.repairWaves >= 10
     || !confirmed(evidence.finding)) throw new Error("Model yield lacks an in-scope Confirmed finding or remaining repair capacity");
+  if (!Number.isInteger(recordedRepairWaves) || recordedRepairWaves < 0 || recordedRepairWaves >= 10
+    || evidence.repairWaves < recordedRepairWaves) throw new Error("Model yield contradicts the recorded cumulative repair budget");
   const waves = evidence.waves;
   if (!Array.isArray(waves) || waves.length !== 2 || waves[0].number !== evidence.repairWaves - 1
     || waves[1].number !== evidence.repairWaves || waves[1].before !== waves[0].candidate
