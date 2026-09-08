@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
+import { CODEX_HOST_RELEASE_CAPABILITY, createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
 
 test("the desktop bridge exchanges tool responses and text controls through its active input", async () => {
   const input = new PassThrough();
@@ -33,6 +33,11 @@ test("disconnected desktop transport fails pending work and cannot invoke unrela
   const output = new PassThrough();
   const bridge = createCodexHostBridge({ input, output });
   await assert.rejects(bridge.call("mcp__codex_app__consume_usage_reset", {}), /unsupported/i);
+  assert.equal(CODEX_HOST_RELEASE_CAPABILITY.state, "UNAVAILABLE");
+  assert.equal(CODEX_HOST_RELEASE_CAPABILITY.operation, null);
+  for (const name of ["mcp__codex_app__release_helpers", "mcp__codex_app__handoff_thread", "mcp__codex_app__set_thread_archived"]) {
+    await assert.rejects(bridge.call(name, { threadId: "exact-idle-task" }), /unsupported/i);
+  }
   const pending = bridge.call("mcp__codex_app__list_threads", { limit: 100 });
   input.end();
   await assert.rejects(pending, /disconnected/i);

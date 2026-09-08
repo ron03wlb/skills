@@ -18,7 +18,7 @@ After a new merge, require `C` target-reachable and run only the Issue-plan inte
 
 Require `C` target-reachable. If the exact registered worktree remains, recheck path, topic branch, clean state, and `HEAD == C`, then run `git worktree remove <exact-issue-worktree>` from outside that directory. Never delete a branch or another worktree. Cleanup is satisfied only when both registration and directory are absent.
 
-An unregistered, ordinary empty directory remains pending cleanup only when its recorded topic still names `C`, no registration claims its path or topic, and `C` is target-reachable. Preserve completion and resume the same close owner; remove only that exact empty directory nonrecursively after verifying ownership. Linked/nonempty paths or unknown owners stop. A tool policy rejection stops without alternate-tool retries; it is not a transient OS error. Host-held handles require supported owner release, never arbitrary process termination.
+An unregistered, ordinary empty directory remains pending cleanup only when its recorded topic still names `C`, no registration claims its path or topic, and `C` is target-reachable. Preserve completion and resume the same close owner; remove only that exact empty directory nonrecursively after verifying ownership. Linked/nonempty paths or unknown owners stop. A tool policy rejection stops without alternate-tool retries; it is not a transient OS error. For host-held handles or policy rejection, read [host cleanup recovery](host-cleanup.md) for capability evidence, bounded observation and the same-owner failure result.
 
 ## 3. Close and read back Issue
 

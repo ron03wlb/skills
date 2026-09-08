@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import childProcess, { execFileSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, rmdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -183,20 +183,28 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const runStore = createRunStore({ gitCommonDir: join(root, ".git") });
     const ref = { threadId: "existing-issue-task", hostId: "local" };
     let nativePrompt = "Implementation fixture completed";
+    let nativeFinal = "";
     let nativeMessages = 0;
     const host = { async call(name, args) {
       if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: lane, status: { type: "idle" } },
-        turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] }] }] };
+        turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] },
+          { type: "agentMessage", phase: "final_answer", text: nativeFinal }] }] };
       if (name.endsWith("send_message_to_thread")) {
         nativeMessages++; nativePrompt = args.prompt;
         if (nativeMessages === 1) {
           git("merge", "--ff-only", packet.candidate);
           git("worktree", "remove", lane);
           mkdirSync(lane); // Reproduce Windows partial removal: registration gone, empty directory remains.
+          const request = JSON.parse(nativePrompt.match(/Current close request evidence: (\{.+\})/u)[1]);
+          nativeFinal = `Workflow close result: ${JSON.stringify({ schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED",
+            runId: request.runIdentity.runId, issueId: request.issueId,
+            requestIdentity: nativePrompt.match(/Close request identity: (sha256:[a-f0-9]+)/u)[1], authorityEvidence: request.authorityEvidence,
+            reasonCode: "host_release_unavailable", observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }
         else if (nativeMessages === 2) {
           assert.match(nativePrompt, /Close continuation: .*"attempt":1/u);
-          rmdirSync(lane); fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
+          assert.equal(existsSync(lane), false, "physical cleanup must precede tracker closure");
+          fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
         } else throw new Error("Duplicate completed close mutation");
         throw new Error("response lost after accepted close action");
       }
@@ -227,6 +235,17 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     rmSync(lane); symlinkSync(`${root}-missing`, lane, "junction");
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u, "a dangling link is not physical absence");
     rmSync(lane); mkdirSync(lane);
+    const blocked = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
+    assert.equal(blocked.run.state, "BLOCKED", JSON.stringify(blocked));
+    assert.equal(blocked.diagnoses[0].reasonCode, "host_release_unavailable");
+    assert.equal(blocked.diagnoses[0].nextOwner, "close-issue");
+    assert.equal(blocked.nodes[0].close.completionState, "COMPLETE");
+    assert.equal(fixture.state, "open");
+    assert.equal(nativeMessages, 1, "a known host limitation does not spend three more cleanup attempts");
+    assert.equal(git("rev-parse", "HEAD"), packet.candidate);
+    assert.equal(runStore.readTargetMutationWriterLock("main"), null);
+    assert.equal(runStore.observeRepositoryCloseLease().state, "ABSENT");
+    rmdirSync(lane); // An owning-source physical change, not a cached success or implementation replay.
     const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
     assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");

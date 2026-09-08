@@ -1915,6 +1915,20 @@ test("explicit contradictions stop the affected Issue with a structured diagnosi
   });
 });
 
+test("an unavailable host cleanup isolates its dependents while an independent Issue can run", () => {
+  const status = reduceRun({
+    ...facts([{ ...node("13"), completionState: "COMPLETE", candidateReachable: true, worktreeState: "PRESENT" }, node("14"), node("15", ["13"])]),
+    contradictions: [{ code: "host_cleanup_blocked", reasonCode: "host_release_unavailable",
+      evidence: ["EBUSY: Exact task directory remains held"], affectedNodes: ["13"] }],
+  });
+  assert.equal(status.run.state, "RUNNING");
+  assert.deepEqual(status.legalActions, [{ type: "dispatch_issue", issueId: "14", attempt: 1 }]);
+  assert.equal(status.nodes.find(item => item.issueId === "13").close.completionState, "COMPLETE");
+  assert.deepEqual(status.diagnoses[0].affectedNodes, ["13", "15"]);
+  assert.equal(status.diagnoses[0].nextOwner, "close-issue");
+  assert.equal(status.diagnoses[0].limitationClass, "instance-blocker");
+});
+
 test("missing authority and malformed DAG facts fail closed", () => {
   const cases = [
     [{ ...facts([node("13")]), schema: "dag-run-facts:v2" }, "invalid_fact_schema"],

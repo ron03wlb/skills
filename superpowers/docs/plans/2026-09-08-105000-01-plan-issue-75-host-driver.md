@@ -25,3 +25,12 @@
 - Adopted sole worktree: `C:/Users/ron.chang/.codex/worktrees/d182/skills`; topic: `codex/issue-75-host-driver`.
 - Git common directory: `C:/Workspace/open_source/skills/.git`; task: `01a07ee2-00c5-7090-b2e3-cbc6c26d147c`.
 - Initial worktree and target were clean. Grant, dispatch, publication mapping, Issue body digest and seal ancestry matched before mutation. Repair waves: 0.
+
+## Conflict recovery attempt
+
+- The close owner restored the clean target after a conflict in `codex-host-bridge.mjs`; original candidate `fe72a1be7a3ebe2cf4a9ec4b6398a33c3038f27f` and its completion evidence remain preserved.
+- New execution baseline: `18af670f35ad5c5c3ee3e84e2a41ea0de0e0b10f`. Merge this exact baseline into the original topic without rebase or reset. The replacement candidate must contain both the baseline and the previous candidate.
+- Recovery request: `sha256:d092df334e9b78e013c0e9529b7365442e42eafd25f2fc6c27d456f8c0719a07`. Coordinator conflict-repair wave: 1/10. Issue cumulative repair waves: 2, including the earlier review repair.
+- Preserve the incoming host-release capability declaration and the single driver-owned tool allowlist. Their behavior is compatible; no AC, exclusion, target or owner changes are needed. Any semantic scope conflict stops this lane.
+- Verify the merged combination with driver, bridge and installation focused tests, the repository workflow suite, changed-script syntax and diff checks. Obtain new independent Standards and Spec review against this baseline. Prior live observations remain historical evidence; do not relabel them as a new live run.
+- Completion ends at one new read-back implementation receipt. Integration, cleanup and tracker closure remain with the close owner.

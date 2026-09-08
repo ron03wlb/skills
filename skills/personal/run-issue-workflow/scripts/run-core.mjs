@@ -1001,12 +1001,17 @@ export function reduceRun(input) {
     .sort((left, right) => compareIds(left.code, right.code))
     .map((contradiction) => diagnosis({
       reasonCode: contradiction.reasonCode ?? REASON_CODES.evidenceContradiction,
-      limitationClass: "unresolved-evidence",
+      limitationClass: contradiction.code === "host_cleanup_blocked" ? "instance-blocker" : "unresolved-evidence",
       evidence: [...contradiction.evidence],
-      noAutomaticTransition: "Contradictory authoritative evidence has no safe precedence.",
+      noAutomaticTransition: contradiction.code === "host_cleanup_blocked"
+        ? "Preserve the integrated candidate, completion and pending directory; the host cannot safely release its helpers."
+        : "Contradictory authoritative evidence has no safe precedence.",
       affectedNodes: [...contradiction.affectedNodes].sort(compareIds),
       allNodes: allNodeIds,
-      resumePredicates: [`resolve_contradiction:${contradiction.code}`],
+      nextOwner: contradiction.code === "host_cleanup_blocked" ? "close-issue" : "human",
+      resumePredicates: contradiction.code === "host_cleanup_blocked"
+        ? ["exact_worktree_physical_absence_proven_or_supported_host_release_resolved_by_same_close_owner"]
+        : [`resolve_contradiction:${contradiction.code}`],
       operatorPacket: contradiction.reasonCode === "merge_conflict"
         ? postWaitPacket(contradiction.evidence, {
           owningSource: "target integration result",

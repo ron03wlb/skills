@@ -5,6 +5,16 @@ import { createInterface } from "node:readline";
 const driverSource = readFileSync(new URL("./codex-host-driver.js", import.meta.url), "utf8");
 export const { allowed: CODEX_HOST_TOOLS } = new Function(`return (\n${driverSource}\n);`)();
 
+// This bridge exposes no helper-release operation or safe-cwd/respawn guarantee.
+// Archive/handoff are not release APIs. Change this only with a proven host contract.
+export const CODEX_HOST_RELEASE_CAPABILITY = Object.freeze({
+  state: "UNAVAILABLE",
+  operation: null,
+  helperOwnership: "UNAVAILABLE",
+  respawnProtection: "UNAVAILABLE",
+  reason: "The exposed Codex desktop bridge has no supported exact-task helper release or safe-current-directory lifecycle.",
+});
+
 // Only the active Codex task forwards these requests to its available desktop tools.
 export function createCodexHostBridge({ input = process.stdin, output = process.stdout, idleTimeoutMs = 90000 } = {}) {
   const reader = createInterface({ input, terminal: false });
