@@ -62,6 +62,7 @@ Choose the conversation by the gap in front of you:
 - Vague needs or a solution-first idea: [clarify-needs](https://aihero.dev/skills-clarify-needs) confirms the goal, examines proposals from first principles, and converges on a Needs Summary when the evidence is sufficient.
 - A plan to pressure-test through its decision tree: [grilling](https://aihero.dev/skills-grilling).
 - Understanding to calibrate against specified evidence: [confirm-understanding](https://aihero.dev/skills-confirm-understanding).
+- Repeated Codex task interruptions: manually invoke the personal `/workflow-retro` skill. It examines recent task evidence, distinguishes avoidable interruptions from necessary stops, and settles improvement decisions for a human `/to-spec` handoff. It performs diagnosis only and remains outside promoted packaging.
 
 A Needs Summary creates shared understanding. Explicit authorization already given for subsequent work carries forward to the applicable flow.
 
@@ -74,8 +75,6 @@ For a new software project without a governing Spec, the personal `/start-projec
 `start-project` remains a personal skill, outside the promoted plugin.
 
 For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
-
-For repeated Codex task interruptions, manually invoke the personal `/workflow-retro` skill. It examines recent task evidence, distinguishes avoidable interruptions from necessary stops, and settles improvement decisions for a human `/to-spec` handoff. It performs diagnosis only and remains outside promoted packaging.
 
 Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) governs substantive instruction, structure, and routing changes.
 
