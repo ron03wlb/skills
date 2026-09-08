@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
+import { validateModelPolicy } from "./issue-model-policy.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
 import {
@@ -50,6 +51,7 @@ const ENGINE_WRITER_CONTENTION = new Set([
 ]);
 const MUTATING_ACTION_TYPES = new Set([
   "dispatch_issue",
+  "upgrade_issue",
   "repair_issue",
   "remediate_environment",
   "close_issue",
@@ -481,7 +483,7 @@ export function createCoordinator({
     }
   };
 
-  const dispatchIssue = async ({ action, current, status, writer }) => {
+  const dispatchIssue = async ({ action, current, status, writer, modelRouting }) => {
     if (action.attempt > 1) {
       const journal = store.readEvents(current.runIdentity.runId);
       const priorDispatch = journal.findLast((event) => (
@@ -569,6 +571,7 @@ export function createCoordinator({
       issueId: action.issueId,
       runIdentity: current.runIdentity,
       environment: "local",
+      modelInput: current.modelInputs?.[action.issueId], modelDecision: modelRouting?.decisions?.[action.issueId], writer,
     });
     if (!isTaskRef(taskRef)) throw new Error("ISSUE_LANE_NOT_READY");
     if (prepared) {
@@ -597,10 +600,12 @@ export function createCoordinator({
     if (!isTaskRef(taskRef)) throw new Error("Conflict repair requires the original Issue task");
     let intent = prior.findLast(event => event.candidate === action.candidate);
     if (!intent) {
-      const wave = prior.length + 1;
+      const priorRepairWaves = Math.max(action.repairWaves ?? 0, prior.at(-1)?.wave ?? 0);
+      const wave = priorRepairWaves + 1;
       if (wave > 10) throw new Error("Persistent conflict repair budget exhausted");
       const requestIdentity = closeRequestIdentityFor({ runIdentity: current.runIdentity, issueId: action.issueId, candidate: action.candidate, baseline: action.targetHead, wave });
-      intent = writer.append({ type: "repair.recorded", at: now(), issueId: action.issueId, wave, candidate: action.candidate, targetHead: action.targetHead, taskRef, requestIdentity });
+      intent = writer.append({ type: "repair.recorded", at: now(), issueId: action.issueId, wave, candidate: action.candidate, targetHead: action.targetHead, taskRef, requestIdentity,
+        ...(action.repairWaves === undefined ? {} : { priorRepairWaves }) });
     }
     const task = await tasks.read(taskRef);
     const accepted = task.repairRequest?.requestIdentity === intent.requestIdentity && task.repairRequest.runId === current.runIdentity.runId;
@@ -608,6 +613,22 @@ export function createCoordinator({
       if (task.state !== "RESUMABLE") throw new Error("Original Issue task is not ready for conflict repair");
       await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
     }
+  };
+
+  const upgradeIssue = async ({ action, current, writer }) => {
+    const evidence = current.modelYields?.[action.issueId];
+    const taskRef = current.taskRefs?.[action.issueId];
+    if (!evidence || !isTaskRef(taskRef)) throw new Error("Upgrade requires validated owner repair evidence");
+    let intent = store.readEvents(current.runIdentity.runId).find(event => event.type === "model.upgrade" && event.issueId === action.issueId);
+    if (!intent) {
+      const request = { issueId: action.issueId, taskRef, candidate: evidence.candidate, worktree: evidence.worktree,
+        topic: evidence.topic, repairWaves: evidence.repairWaves, yieldIdentity: evidence.yieldIdentity, ...evidence.setting };
+      intent = writer.append({ type: "model.upgrade", at: now(), ...request,
+        requestIdentity: closeRequestIdentityFor({ runIdentity: current.runIdentity, ...request }),
+        reason: `Confirmed finding ${evidence.finding.identity} remained after two consecutive material, verified and reviewed repair waves.` });
+    }
+    if (intent.yieldIdentity !== evidence.yieldIdentity) throw new Error("The single upgrade allowance already belongs to another handoff");
+    await tasks.upgrade({ ref: taskRef, intent, runIdentity: current.runIdentity, writer });
   };
 
   const closeIssue = async ({ action, current, status, step = false }) => {
@@ -1238,6 +1259,9 @@ export function createCoordinator({
               runIdentity,
               maxParallel: grantMaxParallel,
               ...(workflowVersion === undefined ? {} : { workflowVersion }),
+              ...(request.modelRouting?.policy === undefined ? {} : {
+                modelPolicy: validateModelPolicy(request.modelRouting.policy, runIdentity),
+              }),
             });
             const priorRuntime = store.readEvents(runIdentity.runId).findLast(({ type }) => type === "runtime.observed");
             if (previousGrant && !sameWorkflowVersion(priorRuntime?.workflowVersion ?? previousGrant.workflowVersion, workflowVersion)) {
@@ -1300,7 +1324,7 @@ export function createCoordinator({
 
           let deferredEnvironmentStop = null;
           let controlRevisionChanged = false;
-          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue"].includes(action.type));
+          const actions = lastStatus.legalActions.filter(action => request.executionSlots !== 0 || !["dispatch_issue", "remediate_environment", "repair_issue", "upgrade_issue"].includes(action.type));
           if (request.mode === "step" && actions.length === 0) return lastStatus;
           for (const action of request.mode === "step" ? actions.slice(0, 1) : actions) {
             if (MUTATING_ACTION_TYPES.has(action.type)) {
@@ -1313,10 +1337,12 @@ export function createCoordinator({
             }
             try {
             if (action.type === "dispatch_issue") {
-              const stopped = await dispatchIssue({ action, current, status: lastStatus, writer });
+              const stopped = await dispatchIssue({ action, current, status: lastStatus, writer, modelRouting: request.modelRouting });
               if (stopped) { if (isolateActionStop(stopped, action, current)) break; return stopped; }
             } else if (action.type === "repair_issue") {
               await repairIssue({ action, current, writer });
+            } else if (action.type === "upgrade_issue") {
+              await upgradeIssue({ action, current, writer });
             } else if (action.type === "remediate_environment") {
               const remediated = await remediateEnvironment({ action, current, writer });
               if (!remediated) {
@@ -1357,7 +1383,7 @@ export function createCoordinator({
               throw new Error(`UNSUPPORTED_COORDINATOR_ACTION:${action.type}`);
             }
             } catch (error) {
-              if (!["dispatch_issue", "repair_issue", "close_issue"].includes(action.type)) throw error;
+              if (!["dispatch_issue", "repair_issue", "close_issue", "upgrade_issue"].includes(action.type)) throw error;
               lastStatus = rebuildStatus(current.facts); // A fenced writer must throw before any continuation.
               const progressIdentity = actionProgressIdentity(current.facts, action.issueId);
               const attempt = failedActions(current.facts).filter(event => event.issueId === action.issueId && event.actionType === action.type).length + 1;

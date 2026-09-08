@@ -6,6 +6,37 @@ import { join } from "node:path";
 import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
+
+test("policy-bound creation freezes validated native settings and refuses a below-floor decision", async () => {
+  const root = mkdtempSync(join(tmpdir(), "model-task-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "model-run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+  const policy = { version: ISSUE_MODEL_POLICY_VERSION, specId: "I_1", target: "main", approvedScopeHash: "approved", authorization: "Human approved this pool and one upgrade in task approval-1" };
+  const writer = store.acquireWriter(runIdentity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity, modelPolicy: policy });
+  const input = modelDecisionInput({ issueId: "I_1", specId: "I_1", approvedScopeHash: "approved", issueBody: "Authorization. AC-1: protect access. Module: API.", specBody: "Authorization. AC-1: protect access. Module: API." });
+  const decision = { inputIdentity: input.inputIdentity, model: "gpt-6-astra", thinking: "high", reason: "Authorization changes require Astra/high.",
+    assessment: { scope: ["Authorization"], acceptanceCriteria: ["AC-1: protect access"], affectedModules: ["Module: API"], characteristics: [{ name: "authorization-security", evidence: ["Authorization"] }] } };
+  const calls = [];
+  const options = { host: { async call(name, args) {
+    calls.push({ name, args });
+    assert.deepEqual(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }).nativeRequest, args, "intent is durable before native submission");
+    return { threadId: "worker", hostId: "local" };
+  } }, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed", issueNumber: async () => 1 };
+  try {
+    const tasks = createCodexWorkflowTasks(options);
+    await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: { ...decision, model: "gpt-5.6-terra" }, writer }), /floor/u);
+    assert.equal(calls.length, 0);
+    assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), null);
+    assert.deepEqual(await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer }), { threadId: "worker", hostId: "local" });
+    assert.equal(calls[0].args.model, "gpt-6-astra");
+    assert.equal(calls[0].args.thinking, "high");
+    assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }).modelDecision.inputIdentity, input.inputIdentity);
+    assert.equal(store.readEvents(runIdentity.runId).at(-1).acceptance, "accepted");
+    assert.equal(store.readEvents(runIdentity.runId).at(-1).effectiveReadBack, "unavailable");
+  } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("host loss before submission leaves no creation intent to strand on re-entry", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-unsent-task-"));
@@ -20,6 +51,51 @@ test("host loss before submission leaves no creation intent to strand on re-entr
     assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), null);
     assert.equal(calls, 0);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("only a confirmed pre-creation model rejection substitutes Astra; transport acknowledgement proves nothing", async () => {
+  for (const response of ["unavailable", "astra-unavailable", "acknowledgement", "ack-with-identity", "lost"]) {
+    const root = mkdtempSync(join(tmpdir(), "model-substitution-"));
+    const store = createRunStore({ gitCommonDir: join(root, ".git") });
+    const runIdentity = { runId: "run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+    const writer = store.acquireWriter("run");
+    writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity,
+      modelPolicy: { version: ISSUE_MODEL_POLICY_VERSION, specId: "I_1", target: "main", approvedScopeHash: "approved", authorization: "Explicit pool and bounded upgrade approval" } });
+    const input = modelDecisionInput({ issueId: "I_1", specId: "I_1", approvedScopeHash: "approved", issueBody: "Rename. Preserve behavior. Formatter.", specBody: "Rename. Preserve behavior. Formatter." });
+    const decision = { inputIdentity: input.inputIdentity, model: "gpt-5.6-terra", thinking: "xhigh", reason: "Mechanically bounded rename with extra reasoning for verification.",
+      assessment: { scope: ["Rename"], acceptanceCriteria: ["Preserve behavior"], affectedModules: ["Formatter"], characteristics: [{ name: "local-mechanical", evidence: ["Rename"] }] } };
+    const native = [];
+    const tasks = createCodexWorkflowTasks({ store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed", issueNumber: async () => 1, sleep: async () => {},
+      host: { async call(name, args) {
+        if (name.endsWith("list_threads")) return { threads: [] };
+        native.push(args);
+        if (args.model === "gpt-6-astra") {
+          assert.equal(store.readEvents("run").at(-1).type, "model.substitution", "reserve the final request before calling the host");
+          if (response === "astra-unavailable") return { isError: true, structuredContent: { code: "MODEL_UNAVAILABLE", model: args.model, requestSubmitted: false } };
+          return { threadId: "worker", hostId: "local" };
+        }
+        if (["unavailable", "astra-unavailable"].includes(response)) return { isError: true, structuredContent: { code: "MODEL_UNAVAILABLE", model: args.model, requestSubmitted: false } };
+        if (response === "lost") throw new Error("response lost");
+        return response === "ack-with-identity" ? { type: "response", status: "response-accepted", threadId: "transport-task", hostId: "local" }
+          : { type: "response-accepted", id: "transport-only" };
+      } } });
+    try {
+      if (response === "unavailable") {
+        await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer });
+        assert.deepEqual(native.map(({ model, thinking }) => ({ model, thinking })), [{ model: "gpt-5.6-terra", thinking: "xhigh" }, { model: "gpt-6-astra", thinking: "xhigh" }]);
+      } else if (response === "astra-unavailable") {
+        await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer }), /MODEL_UNAVAILABLE/u);
+        assert.deepEqual(await tasks.observePendingCreations({ runIdentity, issueIds: ["I_1"] }), [], "a proven unsubmitted task reserves no worker capacity");
+        assert.deepEqual(await tasks.findIssueLane({ runIdentity, issueId: "I_1" }), []);
+        await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, writer }), /MODEL_UNAVAILABLE/u);
+        assert.equal(native.length, 2, "ordinary re-entry cannot repeat a rejected request or reselect");
+      } else {
+        await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer }), /TASK_SETUP_PENDING/u);
+        assert.equal(native.length, 1);
+        assert.equal(store.readEvents("run").at(-1).acceptance, "unknown");
+      }
+    } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
+  }
 });
 
 test("a lost task creation response reuses its exact discovered lane without a second create", async () => {
@@ -125,4 +201,42 @@ test("an unloaded native task with a completed latest turn is settled without re
   assert.equal((await tasks.read(ref)).state, "UNKNOWN", "unloaded does not prove unfinished work settled");
   status = "completed"; type = "active";
   assert.equal((await tasks.read(ref)).state, "RUNNING", "active native state takes precedence over older completion");
+});
+
+test("a lost model continuation response reconciles the same task and never reserves a second upgrade", async () => {
+  const root = mkdtempSync(join(tmpdir(), "model-upgrade-"));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init", "-b", "topic"); git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "candidate");
+  const candidate = git("rev-parse", "HEAD");
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const writer = store.acquireWriter("run");
+  const runIdentity = { runId: "run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+  const ref = { threadId: "worker", hostId: "local" };
+  let prompt, sends = 0, active = true;
+  const tasks = createCodexWorkflowTasks({ store, project: { path: root }, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call(name, args) {
+      if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: root, status: { type: active ? "active" : "idle" } },
+        turns: [{ status: "completed", items: prompt ? [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] : [] }] };
+      assert.equal(name, "mcp__codex_app__send_message_to_thread");
+      assert.equal(args.threadId, ref.threadId); assert.equal(args.model, "gpt-6-astra"); assert.equal(args.thinking, "xhigh");
+      assert.match(args.prompt, /2\/10/u); assert.match(args.prompt, new RegExp(candidate));
+      sends++; prompt = args.prompt; throw new Error("response lost after native acceptance");
+    } } });
+  try {
+    writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity,
+      modelPolicy: { version: ISSUE_MODEL_POLICY_VERSION, specId: "I_1", target: "main", approvedScopeHash: "approved", authorization: "Explicit model pool and bounded escalation approval" } });
+    writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref, attempt: 1 });
+    const draft = { type: "model.upgrade", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref,
+      candidate, worktree: root, topic: "topic", repairWaves: 2, model: "gpt-6-astra", thinking: "xhigh", reason: "Same confirmed finding after two verified material repairs",
+      requestIdentity: "sha256:" + "a".repeat(64), yieldIdentity: "sha256:" + "b".repeat(64) };
+    const intent = writer.append(draft);
+    await assert.rejects(tasks.upgrade({ ref, intent, runIdentity, writer }), /active/u);
+    assert.equal(sends, 0);
+    active = false;
+    assert.equal((await tasks.upgrade({ ref, intent, runIdentity, writer })).observed, true);
+    assert.equal((await tasks.upgrade({ ref, intent, runIdentity, writer })).observed, true);
+    assert.equal(sends, 1);
+    assert.equal(store.readEvents("run").at(-1).acceptance, "unknown", "message read-back is not independent effective-model evidence");
+    assert.throws(() => writer.append(draft), /sole allowance/u);
+  } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
 });

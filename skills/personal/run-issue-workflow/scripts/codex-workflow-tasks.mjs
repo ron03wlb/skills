@@ -4,9 +4,10 @@ import { realpathSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
 import { join, resolve } from "node:path";
 import { delegatedInput, discoverLocalCodexTasks } from "./codex-task-discovery.mjs";
+import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
 
 export function unwrapCodexResult(result) {
-  if (result?.isError) throw new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed");
+  if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
   if (result?.structuredContent) return result.structuredContent;
   const body = result?.content?.find(({ type }) => type === "text")?.text;
   return body === undefined ? result : JSON.parse(body);
@@ -15,6 +16,7 @@ const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (i
   item.type === "userMessage" ? item.content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []
     : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
+const uncertainNativeResult = result => [result?.type, result?.status].some(value => ["error", "failed", "response-accepted"].includes(value));
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
   const refs = new Map();
@@ -63,12 +65,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const repairPrompt = userTexts(snapshot).find(text => text.includes("Repair request: "));
     const repairMatch = repairPrompt?.match(/Repair request: (\{.+\})$/u);
     const repairRequest = repairMatch ? { state: "ACCEPTED", ...JSON.parse(repairMatch[1]) } : undefined;
+    const modelMatch = userTexts(snapshot).find(text => text.includes("Model upgrade request: "))?.match(/Model upgrade request: (\{.+\})$/mu);
+    const modelRequest = modelMatch ? { state: "ACCEPTED", ...JSON.parse(modelMatch[1]) } : undefined;
     const final = (snapshot.turns?.[0]?.items ?? []).findLast(item => item.type === "agentMessage" && item.phase === "final_answer")?.text;
     const closeResultMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
     const closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    const modelYieldMatch = final?.match(/^Workflow model yield: (\{.+\})$/mu);
+    const modelYield = modelYieldMatch ? JSON.parse(modelYieldMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, repairRequest, closeResult, snapshot, cwd: snapshot.thread.cwd };
+      closeRequest, retryRequest, repairRequest, closeResult, modelRequest, modelYield, snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
@@ -89,6 +95,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
     const intent = store.readHostTask({ runId: runIdentity.runId, issueId });
     if (!intent) return [];
+    if (creationUnavailable(store.readEvents(runIdentity.runId), issueId)) return [];
     const found = [];
     if (project.path && project.hostId === "local") {
       const since = intent.createdAt ?? store.readEvents(runIdentity.runId).find(({ type }) => type === "grant.recorded")?.at;
@@ -120,23 +127,62 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (found.length === 1) refs.set(key, found[0]);
     return found;
   };
-  const create = async ({ issueId, runIdentity }) => {
+  const create = async ({ issueId, runIdentity, modelInput, modelDecision, writer }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const number = await issueNumber(issueId);
     if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
+    // Existing intents (including field-less historical intents) retain their original request.
+    const previous = store.readHostTask({ runId: runIdentity.runId, issueId });
+    if (previous) {
+      if (creationUnavailable(store.readEvents(runIdentity.runId), issueId)) throw new Error("MODEL_UNAVAILABLE: native Astra rejection proved no task was submitted");
+      const existing = await findIssueLane({ issueId, runIdentity });
+      if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+      return existing[0];
+    }
+    const policy = store.readEvents(runIdentity.runId).find(event => event.type === "grant.recorded")?.modelPolicy;
+    let selection;
+    if (policy) {
+      validateModelPolicy(policy, runIdentity);
+      if (!writer?.append) throw new Error("Model selection requires the owning Run writer");
+      if (modelInput?.issueId !== issueId || modelInput.specId !== runIdentity.specId || modelInput.approvedScopeHash !== runIdentity.approvedScopeHash) throw new Error("Model input authority differs");
+      selection = validateModelDecision(modelDecision, modelInput);
+    }
     const prompt = `${key}\nUse the installed workflow's exact skill at ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to execute Issue #${number}.\nRead the current Issue and only its required linked scope. Run Grant: ${JSON.stringify(runIdentity)}. Read its grant.recorded event from the repository Git common directory before any mutation.\nUse this task's existing Git worktree as the sole Issue lane after verifying its common directory, target ancestry and ownership. Record this worktree and branch; do not create a second worktree. Target: ${runIdentity.target}. Complete implementation, required verification, independent review and implementation_complete read-back, then stop. A later close request owns integration and closure. No push or deployment. All workflow skills and references must come from ${packageRoot}/skills for this Run's pinned version.`;
-    const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, prompt });
+    const nativeRequest = { title: `Workflow Issue ${number}`, prompt,
+      target: { type: "project", projectId: project.projectId,
+        environment: { type: "worktree", startingState: { type: "branch", branchName: runIdentity.target } } },
+      ...(selection ? { model: selection.model, thinking: selection.thinking } : {}) };
+    const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, prompt,
+      ...(selection ? { modelDecision: selection, nativeRequest } : {}) });
     if (!reservation.created) {
       const existing = await findIssueLane({ issueId, runIdentity });
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
       return existing[0];
     }
     let created;
-    try { created = await call("create_thread", { title: `Workflow Issue ${number}`, prompt,
-      target: { type: "project", projectId: project.projectId,
-        environment: { type: "worktree", startingState: { type: "branch", branchName: runIdentity.target } } } }); }
-    catch { created = { uncertain: true }; }
-    if (created.threadId && created.hostId) {
+    const submit = async (request, phase) => {
+      let result, unavailable = false;
+      try { result = await call("create_thread", request); }
+      catch (error) { unavailable = Boolean(selection) && confirmedModelUnavailable(error, request.model); result = { uncertain: !unavailable }; }
+      const accepted = !uncertainNativeResult(result) && Boolean(result?.threadId && result.hostId || result?.clientThreadId);
+      if (selection) writer.append({ type: "model.acceptance", at: new Date().toISOString(), issueId,
+        requestIdentity: modelEvidenceDigest(request), model: request.model, thinking: request.thinking,
+        phase, acceptance: unavailable ? "unavailable" : accepted ? "accepted" : "unknown",
+        effectiveReadBack: "unavailable", evidence: unavailable ? "Native MODEL_UNAVAILABLE rejection explicitly confirms requestSubmitted=false."
+          : accepted ? "Native task creation returned an accepted task/setup identity."
+            : "Native creation result is uncertain; transport acknowledgement is not model acceptance." });
+      return { ...result, accepted, unavailable, ...(!accepted && !unavailable ? { uncertain: true } : {}) };
+    };
+    created = await submit(nativeRequest, "creation");
+    if (created.unavailable && selection.model !== "gpt-6-astra") {
+      const replacement = { ...nativeRequest, ...astraSetting(selection) };
+      writer.append({ type: "model.substitution", at: new Date().toISOString(), issueId, fromModel: selection.model,
+        model: replacement.model, thinking: replacement.thinking, requestIdentity: modelEvidenceDigest(replacement),
+        reason: "The selected model was explicitly unavailable before creation; substitute Astra directly under the approved policy." });
+      created = await submit(replacement, "substitution");
+    }
+    if (created.unavailable) throw new Error("MODEL_UNAVAILABLE: Astra is unavailable; preserve this Issue and its original intent");
+    if (created.accepted && created.threadId && created.hostId) {
       const ref = { threadId: created.threadId, hostId: created.hostId };
       refs.set(key, ref);
       return ref;
@@ -158,11 +204,42 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   };
   return {
     findIssueLane, create, read,
+    async upgrade({ ref, intent, runIdentity, writer }) {
+      const stored = store.readEvents(runIdentity.runId).find(event => event.type === "model.upgrade" && event.issueId === intent.issueId);
+      if (!stored || JSON.stringify(stored) !== JSON.stringify(intent) || ref.threadId !== intent.taskRef.threadId || ref.hostId !== intent.taskRef.hostId) {
+        throw new Error("Upgrade requires the exact durable reservation and original task");
+      }
+      const marker = { runId: runIdentity.runId, issueId: intent.issueId, requestIdentity: intent.requestIdentity,
+        candidate: intent.candidate, repairWaves: intent.repairWaves, yieldIdentity: intent.yieldIdentity };
+      const prompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to resume Issue #${await issueNumber(intent.issueId)} after its controlled model yield. Continue in the same worktree and topic from candidate ${intent.candidate}, with ${intent.repairWaves}/10 repair waves already consumed. The sole automatic upgrade is consumed. Preserve the unchanged Grant, ACs, exclusions and completed work; verify and independently review the next material repair, then publish implementation_complete only when proved. Model upgrade request: ${JSON.stringify(marker)}`;
+      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+      if (userTexts(snapshot).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      const receipts = store.readEvents(runIdentity.runId).filter(event => event.type === "model.acceptance" && event.requestIdentity === intent.requestIdentity);
+      if (receipts.some(event => event.acceptance === "accepted") || receipts.length >= 3) throw new Error("Upgrade outcome unresolved; preserve the original continuation");
+      const task = await read(ref);
+      if (task.state !== "RESUMABLE" || task.cwd !== intent.worktree) throw new Error("Upgrade cannot race an active or unowned executor");
+      const git = (...args) => execFileSync("git", ["-C", intent.worktree, ...args], { encoding: "utf8" }).trim();
+      if (git("rev-parse", "HEAD") !== intent.candidate || git("branch", "--show-current") !== intent.topic || git("status", "--porcelain=v1")) throw new Error("Upgrade candidate or clean worktree changed");
+      let result;
+      try { result = await call("send_message_to_thread", { ...ref, prompt, model: intent.model, thinking: intent.thinking }); }
+      catch { result = null; }
+      const accepted = result?.threadId === ref.threadId && (result.hostId === undefined || result.hostId === ref.hostId)
+        && !uncertainNativeResult(result);
+      writer.append({ type: "model.acceptance", at: new Date().toISOString(), issueId: intent.issueId, requestIdentity: intent.requestIdentity,
+        model: intent.model, thinking: intent.thinking, phase: "upgrade", acceptance: accepted ? "accepted" : "unknown",
+        effectiveReadBack: "unavailable", evidence: accepted ? "Native continuation returned the original task identity."
+          : "Continuation submission is uncertain; independently reconcile its original message before any resend." });
+      if (accepted) return { accepted: true, effectiveReadBack: "unavailable" };
+      const after = await readHistory(ref, value => userTexts(value).includes(prompt));
+      if (userTexts(after).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
+    },
     async observePendingCreations({ runIdentity, issueIds }) {
       const observations = [];
       const dispatched = new Set(store.readEvents(runIdentity.runId).filter(event => event.type === "dispatch.recorded").map(event => event.issueId));
       for (const issueId of issueIds) {
         if (dispatched.has(issueId) || !store.readHostTask({ runId: runIdentity.runId, issueId })) continue;
+        if (creationUnavailable(store.readEvents(runIdentity.runId), issueId)) continue;
         try { observations.push({ issueId, refs: await findIssueLane({ issueId, runIdentity }) }); }
         catch (error) { observations.push({ issueId, error: error.message }); }
       }
