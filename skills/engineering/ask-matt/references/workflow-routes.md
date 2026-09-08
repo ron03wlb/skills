@@ -22,6 +22,8 @@ Each clean completion note records required non-contract `workflowArtifacts` wit
 
 `close-issue` alone acquires the repository close lease before the target mutation writer. It merges the exact candidate into the recorded Issue target branch, removes the clean worktree, closes the Issue, and resumes partial retries from observable state. Planning lanes and Issue worktrees may run concurrently; only a Planning Seal write and closeout hold the target mutation writer. The repository lease permits one closeout per Git common dir. A Multi-Issue parent closes only after every exact child is closed and reachable.
 
+Unavailable host release preserves pending cleanup and returns the exact failure to the same close owner; unchanged completion never routes back to implementation.
+
 ## Aggregate verification and push
 
 For already-pushed work, the human gives `verify-target-before-push` an explicit merge request, pull request, or exact range. Across execution and aggregate review, only an exact-evidence **Confirmed code review finding** blocks; a **Code review advisory** stays visible without repair or waiver authority. A Confirmed aggregate finding defaults to a new human-created **Aggregate repair Issue** on the same target. Verification never creates or executes it, repairs product code, reopens an Issue, or edits a completion note.

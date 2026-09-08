@@ -1,6 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 
+// This bridge exposes no helper-release operation or safe-cwd/respawn guarantee.
+// Archive/handoff are not release APIs. Change this only with a proven host contract.
+export const CODEX_HOST_RELEASE_CAPABILITY = Object.freeze({
+  state: "UNAVAILABLE",
+  operation: null,
+  helperOwnership: "UNAVAILABLE",
+  respawnProtection: "UNAVAILABLE",
+  reason: "The exposed Codex desktop bridge has no supported exact-task helper release or safe-current-directory lifecycle.",
+});
+
 export const CODEX_HOST_TOOLS = Object.freeze([
   "mcp__codex_app__list_projects",
   "mcp__codex_app__list_threads",

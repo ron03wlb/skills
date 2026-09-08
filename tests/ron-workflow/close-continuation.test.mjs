@@ -16,3 +16,26 @@ test("native close continuation retains its bounded no-progress budget and yield
   task.state = "RUNNING";
   assert.deepEqual(planCloseContinuation({ task, requestIdentity, requestEvidence }), { needed: false });
 });
+
+test("exact host cleanup failure stops unchanged continuation but physical absence permits closure", () => {
+  const requestIdentity = `sha256:${"b".repeat(64)}`;
+  const authorityEvidence = { candidateCommit: "a".repeat(40), completionEvidenceId: "IC_done", completionBodySha256: "sha256:done", worktreeIdentity: "sha256:owned" };
+  const requestEvidence = { runIdentity: { runId: "run" }, issueId: "issue", trackerState: "OPEN", candidateReachable: true, worktreeState: "PRESENT", authorityEvidence };
+  const task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed" }] },
+    closeRequest: { runId: "run", issueId: "issue", requestIdentity },
+    closeResult: { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "issue", requestIdentity,
+      authorityEvidence, reasonCode: "host_release_unavailable", observations: [{ code: "EBUSY", message: "Exact directory remains held" }] } };
+  const stopped = planCloseContinuation({ task, requestIdentity, requestEvidence });
+  assert.equal(stopped.needed, false);
+  assert.equal(stopped.blocked.reasonCode, "host_release_unavailable");
+  assert.deepEqual(stopped.blocked.evidence, task.closeResult.observations);
+  assert.deepEqual(task.closeRequest, { runId: "run", issueId: "issue", requestIdentity }, "no retry budget is spent");
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, targetHead: "b".repeat(40) } }).blocked.reasonCode, "host_release_unavailable", "target movement cannot replay cleanup");
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, worktreeState: "ABSENT" } }).attempt, 1);
+  for (const change of [{ runId: "foreign" }, { issueId: "foreign" }, { requestIdentity: "foreign" },
+    { authorityEvidence: { ...authorityEvidence, completionBodySha256: "changed" } }, { observations: [] }]) {
+    assert.throws(() => planCloseContinuation({ task: { ...task, closeResult: { ...task.closeResult, ...change } }, requestIdentity, requestEvidence }), /Host cleanup result/u);
+  }
+  task.state = "RUNNING";
+  assert.deepEqual(planCloseContinuation({ task, requestIdentity, requestEvidence }), { needed: false });
+});

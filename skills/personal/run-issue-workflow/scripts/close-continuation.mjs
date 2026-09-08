@@ -6,6 +6,22 @@ export function planCloseContinuation({ task, requestIdentity, requestEvidence }
     || task.closeRequest?.requestIdentity !== requestIdentity
     || task.closeRequest.runId !== requestEvidence.runIdentity.runId
     || task.closeRequest.issueId !== requestEvidence.issueId) return { needed: false };
+  const cleanup = task.closeResult;
+  if (cleanup?.state === "HOST_CLEANUP_BLOCKED") {
+    const authority = requestEvidence.authorityEvidence;
+    if (cleanup.schema !== "issue-close-result:v1" || cleanup.runId !== requestEvidence.runIdentity.runId
+      || cleanup.issueId !== requestEvidence.issueId || cleanup.requestIdentity !== requestIdentity
+      || !["host_release_unavailable", "host_task_ownership_unproven", "host_cleanup_ownership_unproven", "host_cleanup_policy_rejected"].includes(cleanup.reasonCode)
+      || !["candidateCommit", "completionEvidenceId", "completionBodySha256", "worktreeIdentity"].every(key =>
+        typeof authority?.[key] === "string" && authority[key].length > 0 && cleanup.authorityEvidence?.[key] === authority[key])
+      || !Array.isArray(cleanup.observations) || !cleanup.observations.length
+      || !cleanup.observations.every(item => typeof item.code === "string" && item.code && typeof item.message === "string" && item.message)) {
+      throw new Error("Host cleanup result is malformed or differs from the exact close owner evidence");
+    }
+    if (requestEvidence.worktreeState === "PRESENT" && requestEvidence.candidateReachable === true) {
+      return { needed: false, blocked: { reasonCode: cleanup.reasonCode, evidence: cleanup.observations } };
+    }
+  }
   const progress = {
     targetHead: requestEvidence.targetHead,
     trackerState: requestEvidence.trackerState ?? requestEvidence.parentTrackerState,

@@ -8,6 +8,7 @@ import { bodyDigest, readWorkflowRecords, legacyCompletionAllowed } from "./gith
 import { bindProducerCheckpointOperationIdentity, deriveRunOperationIdentity, deriveExecuteIssueOperationIdentity, assertWorkflowOperationIdentity } from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
+import { planCloseContinuation } from "./close-continuation.mjs";
 
 const authorityConflict = message => Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
 const one = (values, label) => {
@@ -271,6 +272,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         node.closeAuthorityEvidence = { trackerIdentity: `${issue.node_id}:${bodyDigest(issue.body)}`, targetHead: target.head,
           candidateCommit: record.candidate, completionEvidenceId: completion.identity, completionBodySha256: completion.bodySha256,
           worktreeIdentity: bodyDigest(JSON.stringify({ gitCommonDir, path: record.worktree, topic: record.topic })) };
+        if (task?.closeResult?.state === "HOST_CLEANUP_BLOCKED") {
+          const cleanup = planCloseContinuation({ task, requestIdentity: task.closeRequest?.requestIdentity,
+            requestEvidence: { runIdentity: selectedIdentity, issueId: issue.node_id, candidateReachable: node.candidateReachable,
+              worktreeState: node.worktreeState, authorityEvidence: node.closeAuthorityEvidence } });
+          if (cleanup.blocked) contradictions.push({ code: "host_cleanup_blocked", reasonCode: cleanup.blocked.reasonCode,
+            affectedNodes: [issue.node_id], evidence: cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`) });
+        }
       }
       const conflict = task?.closeResult;
       if (completion && !repairing && conflict?.schema === "issue-close-result:v1" && conflict.state === "CONFLICT"
