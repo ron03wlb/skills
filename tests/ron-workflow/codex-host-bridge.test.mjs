@@ -169,7 +169,7 @@ test("fragment replay preserves one response and rejects missing, reordered or c
   } finally { bridge.close(); }
 });
 
-test("buffered host heartbeat survives a synchronous bridge event-loop stall", async () => {
+test("buffered host heartbeat survives a synchronous bridge stall within the bounded confirmation grace", async () => {
   const bridgeUrl = new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs", import.meta.url).href;
   const source = `import { createCodexHostBridge } from ${JSON.stringify(bridgeUrl)};
     const bridge = createCodexHostBridge({ idleTimeoutMs: 100 });
@@ -187,7 +187,7 @@ test("buffered host heartbeat survives a synchronous bridge event-loop stall", a
   const code = await new Promise((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
   assert.equal(code, 0, output);
   assert.equal(sent, true);
-  assert.match(output, /DISCONNECTED false/u, "stdin already buffered during synchronous Git/tool work must get a poll turn before expiry");
+  assert.match(output, /DISCONNECTED false/u, "stdin already buffered during synchronous Git/tool work must get bounded time to reach readline");
 });
 
 test("settled requests retain duplicate/conflict evidence without retaining native payloads", async () => {

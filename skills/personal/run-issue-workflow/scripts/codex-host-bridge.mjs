@@ -30,15 +30,18 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
   let toolCalls = 0;
   let settledRequests = 0;
   const startedAt = Date.now();
+  const idleConfirmationMs = Math.min(1000, idleTimeoutMs);
   let idleTimer, idleCheck;
   let lastInputAt = startedAt, disconnect;
   const digest = value => createHash("sha256").update(value).digest("hex");
   const armIdleTimer = () => {
-    lastInputAt = Date.now(); clearTimeout(idleTimer); clearImmediate(idleCheck);
+    lastInputAt = Date.now(); clearTimeout(idleTimer); clearTimeout(idleCheck);
     idleTimer = setTimeout(() => {
       // Synchronous Git/CLI work can delay both timers and stdin polling. Give
-      // an already-buffered heartbeat one I/O turn before declaring host loss.
-      idleCheck = setImmediate(() => { if (Date.now() - lastInputAt >= idleTimeoutMs) close("idle-timeout"); });
+      // an already-buffered heartbeat bounded time to reach readline before loss.
+      idleCheck = setTimeout(() => {
+        if (Date.now() - lastInputAt >= idleTimeoutMs) close("idle-timeout");
+      }, idleConfirmationMs);
       idleCheck.unref?.();
     }, idleTimeoutMs);
     idleTimer.unref?.();
@@ -49,7 +52,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     closed = true;
     disconnect = { reason, idleMs: Date.now() - lastInputAt, pendingRequests: pending.size };
     clearTimeout(idleTimer);
-    clearImmediate(idleCheck);
+    clearTimeout(idleCheck);
     // Keep the coordinator's established sentinel; structured reason is diagnostic.
     const failure = () => Object.assign(new Error("CODEX_HOST_DISCONNECTED"), { reason });
     for (const control of controls.values()) control.onDisconnect?.(failure());
