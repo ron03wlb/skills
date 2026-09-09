@@ -1,4 +1,4 @@
 interface:
   display_name: "Code Review"
   short_description: "Review risky diffs against standards and spec"
-  default_prompt: "Use $code-review to assess this fixed candidate and report applicable Standards and Spec findings separately."
+  default_prompt: "Use $code-review to assess this fixed candidate against explicit requirements, including accepted conversation requirements with provenance. Report Standards and Spec separately; use Spec not assessed with its limitation when no applicable basis is available, preserving formal Issue delivery gates."

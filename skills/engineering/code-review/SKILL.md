@@ -6,11 +6,11 @@ description: Review a concrete committed or WIP diff against a fixed point and a
 Two-axis review of the committed or WIP candidate changes since a fixed point:
 
 - **Standards** — does the code conform to this repo's documented coding standards?
-- **Spec** — does the code faithfully implement the originating issue / spec?
+- **Spec** — does the code faithfully implement the applicable requirements, including explicit human requirements and accepted decisions retained in conversation?
 
 Keep the axes separate. Material security, data, concurrency, migration, contract, or cross-module risk requires independent reviewers, using parallel sub-agents when available. For a low-risk requested review, one agent may perform both applicable axes and record that mode. If required independent evidence is unavailable, report review incomplete. Use the task's configured model and appropriate reasoning; no blanket highest-reasoning requirement.
 
-The issue tracker should have been provided to you. If `docs/agents/issue-tracker.md` is missing, tell the user to run `/setup-matt-pocock-skills`.
+Use tracker setup only when the chosen source or owning workflow requires it. If that route requires missing `docs/agents/issue-tracker.md`, report the limitation and tell the user to run `/setup-matt-pocock-skills`; standalone conversation or file review needs no tracker setup.
 
 ## Process
 
@@ -25,14 +25,19 @@ Choose the candidate form once:
 
 For committed work, note `git log <fixed-point>..<candidate-sha> --oneline`; for WIP, record current `HEAD` and the observed working-tree inputs. Confirm the fixed point resolves with `git rev-parse <fixed-point>`. The candidate is non-empty when its tracked diff or at least one in-scope untracked path contains reviewable changes. A bad ref or empty candidate should fail here — not inside two parallel sub-agents.
 
-### 2. Identify the spec source
+### 2. Resolve and freeze the requirements
 
-Look for the originating spec, in this order:
+Requirements explicitly designated by the human or owning workflow take precedence over automatically discovered commit references or repository documents. A conversation, a file, or an Issue can supply the Spec. Use the designated source and its applicable scope first; consult commit references and matching repository specs only when no source was designated or as supporting context. Verify discovered material applies to this change before treating it as requirements.
 
-1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
-2. A path the user passed as an argument.
-3. A spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
-4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
+Freeze the exact applicable requirement statements and their provenance before review. A concise packet in the reviewer brief is sufficient:
+
+- Identify each source and its observed version: conversation/task and message or turn reference with speaker and exact excerpt; file path and revision or captured content; Issue identity and fetched body/comment version or captured content. Include any accepted decision and the human acceptance that makes it applicable. Use available locators truthfully; never invent message IDs or approval.
+- Separate **accepted requirements**, **assumptions**, and **unaccepted assistant proposals**. Only applicable human requirements and accepted decisions establish conversational Spec authority; assumptions and proposals remain context and cannot prove a mismatch.
+- Supply the same frozen statements and provenance to every reviewer, including reviewers without inherited conversation. A source pointer alone is insufficient when that reviewer cannot read its exact contents. No physical Spec, new Issue, or renewed approval is needed merely to review already specified requirements.
+
+For an explicitly required unavailable or conflicting source, report the exact limitation and do not substitute guessed requirements or silently select among conflicting designated sources. Assess any separable supported requirements with their limits visible; affected requirements remain unassessed. A standalone general review with no applicable requirement basis may complete Standards and report `Spec not assessed` with the reason, without a mandatory clarification round. This is neither a Spec pass nor complete acceptance.
+
+Formal `execute-issue` delivery still requires its governing published Spec and clean applicable Standards and Spec axes. Conversation cannot silently replace published Issue scope; a material scope change follows the existing planning/revision route. Missing or conflicting governing requirements leave formal review incomplete, even if a separate conversation-based assessment is possible.
 
 ### 3. Identify the standards sources
 
@@ -53,23 +58,24 @@ Classification is behavioral, never extension-based. The Standards axis checks t
 
 ### 5. Run the applicable review axes
 
-For independent review, give each reviewer only its inputs. For a low-risk inline review, use the same evidence checks separately.
+For independent review, give each reviewer its axis inputs and the frozen requirement packet. For a low-risk inline review, use the same frozen statements, provenance, limitations, and evidence checks separately.
 
 **Standards reviewer brief** — include:
 
 - The candidate diff command, commit list, in-scope untracked path contents, and explicit unrelated-path exclusions.
 - The list of standards-source files you found in step 3, the applicable smell-baseline reference from step 3.
+- The frozen requirement packet from step 2 for source attribution and scope context; Standards findings still require repository-standard evidence.
 - The prospective `workflowArtifacts` declaration when supplied, including an explicit empty list.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); (b) any baseline smell you spot: name it and quote the hunk; and (c) any workflow-artifact path, requirement source, purpose, or Issue-contribution ownership that is missing, false, duplicate, ambiguous, or inconsistent with repository instructions. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
 **Spec reviewer brief** — include:
 
 - The candidate diff command, commit list, in-scope untracked path contents, and explicit unrelated-path exclusions.
-- The path or fetched contents of the spec.
+- The frozen requirement statements, provenance, acceptance evidence, source limitations, and separately labeled assumptions and unaccepted proposals from step 2; include the governing published Spec for a formal Issue caller.
 - The prospective `workflowArtifacts` declaration when supplied, including an explicit empty list.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; and (d) any declared workflow artifact that changes runtime, public contract, routing, Acceptance Criteria, governance, or otherwise remains arbitrary, ambiguous, or unowned ordinary material scope. Quote the spec line for each finding. Under 400 words."
+- The brief: "Report: (a) applicable requirements that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong; and (d) any declared workflow artifact that changes runtime, public contract, routing, Acceptance Criteria, governance, or otherwise remains arbitrary, ambiguous, or unowned ordinary material scope. Quote the exact frozen requirement and its provenance for each finding. Keep assumptions, unaccepted proposals, and unassessed requirements distinct from violations. Under 400 words."
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report.
+If no applicable requirements can be assessed, skip the Spec sub-agent and carry `Spec not assessed` and its limitation into aggregation. Partial assessment must identify the unassessed requirements; it cannot yield a clean overall Spec axis.
 
 ### 6. Classify observations from exact evidence
 
@@ -82,7 +88,7 @@ After both reports return, the Coordinator classifies every observation as a Con
 
 Present the classified observations under `## Standards` and `## Spec` headings. Report confirmed findings and advisories with candidate, governing source, axis, and review mode. Keep full reviewer reports available through evidence pointers; load or quote them when a disputed finding or audit needs the detail. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 
-An axis is clean when it has no Confirmed code review finding; Code review advisories may remain visible in a clean result. End with a one-line summary giving confirmed and advisory counts per axis and the worst confirmed issue within each axis, if any. Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
+An assessed axis is clean when its applicable requirements were assessed and it has no Confirmed code review finding; Code review advisories may remain visible in a clean result. Report `Spec not assessed` or a partial assessment with its exact source limitation; an unassessed axis is not a zero-finding pass. Missing required independent evidence also remains review incomplete. End with a one-line summary giving assessment status, confirmed and advisory counts per assessed axis, and the worst confirmed issue within each axis, if any. Do not report full acceptance when a required axis is unassessed or incomplete. Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 
 ## Why two axes
 
