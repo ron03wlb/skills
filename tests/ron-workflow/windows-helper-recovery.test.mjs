@@ -102,7 +102,7 @@ test("real Windows current-directory recovery releases only the exact helper and
     const completion = { issueId: "issue", specId: "spec", target: "main", targetWorktree: repository, topic: "issue", worktree, candidate };
     const taskRef = { threadId: "task", hostId: "local" };
     let reads = 0, started = false;
-    const readTask = async () => ({ thread: { id: "task", hostId: "local", cwd: worktree, status: { type: started ? "active" : "idle" } }, turns: [{ status: started ? "inProgress" : "completed" }] });
+    const readTask = async () => ({ thread: { id: "task", hostId: "local", cwd: worktree, status: { type: started ? "active" : "notLoaded" } }, turns: [{ status: started ? "inProgress" : "completed" }] });
     const input = { leaseInput, completion, taskRef, failure, readTask: async () => { reads++; return readTask(); },
       verifyIntegration: leases => verifyIntegratedCandidate({ leases, targetWorktree: repository, candidate, issueId: "issue",
         operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: [] }),

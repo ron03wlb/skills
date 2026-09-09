@@ -24,6 +24,8 @@ On Windows, Git can remove a worktree registration while leaving its empty direc
 
 A launcher that exits when its child is released is recorded as already exited through its retained process handle. It does not invalidate recovery of the remaining verified helpers. An unreadable live helper still blocks cleanup, and a repaired adapter does not automatically repeat an earlier reserved batch.
 
+An unloaded native task is settled only when its latest turn is completed and its exact task, host and directory still match. Cleanup does not need to wake it, and unfinished or unknown task state still blocks recovery.
+
 The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate satisfies the merge; required integration verification remains outstanding until its exact combination passes. Otherwise Git fast-forwards when possible and uses an ordinary merge for diverged histories. Target dirt requires human preservation and resolution. After resolution:
 
 - Direct entry retries `/close-issue <Issue-ID>`.

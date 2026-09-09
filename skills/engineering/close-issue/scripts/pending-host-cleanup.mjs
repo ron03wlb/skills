@@ -8,7 +8,7 @@ import { openWindowsCleanupSession } from "./windows-cleanup-session.mjs";
 
 const ownsSettledTask = (snapshot, taskRef, worktree) => taskRef?.threadId && taskRef.hostId
   && snapshot?.thread?.id === taskRef.threadId && snapshot.thread.hostId === taskRef.hostId
-  && snapshot.thread.status?.type === "idle" && snapshot.turns?.[0]?.status === "completed"
+  && ["idle", "notLoaded"].includes(snapshot.thread.status?.type) && snapshot.turns?.[0]?.status === "completed"
   && isAbsolute(snapshot.thread.cwd ?? "") && resolve(snapshot.thread.cwd) === resolve(worktree);
 
 // Read-only failure boundary, called by the existing close owner inside its two leases.

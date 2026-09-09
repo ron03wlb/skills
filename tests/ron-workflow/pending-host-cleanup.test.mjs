@@ -55,6 +55,10 @@ test("unavailable release preserves real integrated Git state, failures and both
     assert.equal(git("rev-parse", "HEAD"), candidate);
     assert.equal(git("rev-parse", "issue"), candidate);
     assert.ok(existsSync(worktree));
+    const unloaded = { ...snapshot, thread: { ...snapshot.thread, status: { type: "notLoaded" } } };
+    const unloadedResult = await assessPendingHostCleanup({ ...input, readTask: async () => unloaded });
+    assert.equal(unloadedResult.reasonCode, "host_release_unavailable", "native unloaded/completed metadata is settled without waking the task");
+    assert.equal(unloaded.thread.status.type, "notLoaded", "the native status is preserved");
     leases.release();
     assert.equal(store.readTargetMutationWriterLock("main"), null);
     assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
@@ -68,6 +72,10 @@ test("unavailable release preserves real integrated Git state, failures and both
       ["foreign cwd", { ...snapshot, thread: { ...snapshot.thread, cwd: repository } }],
       ["unknown", null],
       ["new turn", { ...snapshot, turns: [{ status: "inProgress" }] }],
+      ["unloaded unfinished", { ...unloaded, turns: [{ status: "inProgress" }] }],
+      ["unloaded failed", { ...unloaded, turns: [{ status: "failed" }] }],
+      ["unloaded no latest turn", { ...unloaded, turns: [] }],
+      ["unknown native status", { ...snapshot, thread: { ...snapshot.thread, status: { type: "unknown" } } }],
     ]) {
       const blocked = await assessPendingHostCleanup({ ...input, readTask: async () => altered });
       assert.equal(blocked.state, "HOST_CLEANUP_BLOCKED", label);
