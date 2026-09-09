@@ -16,7 +16,7 @@ test("native close acceptance survives omitted history and blocks unchanged redi
   const requestIdentity = `sha256:${"a".repeat(64)}`;
   const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "PRESENT" };
   const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
-  let sends = 0, sentPrompt, turnId = "implementation", result;
+  let sends = 0, sentPrompt, turnId = "implementation", result, omitInput = false;
   const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
     host: { async call(name, args) {
       if (name.endsWith("send_message_to_thread")) { sends++; sentPrompt = args.prompt; turnId = "close"; return { threadId: ref.threadId }; }
@@ -24,7 +24,7 @@ test("native close acceptance survives omitted history and blocks unchanged redi
       if (sends) assert.equal(args.turnLimit, 1, "accepted close observation does not reread the large implementation turn");
       return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
         turns: [{ id: turnId, status: "completed", items: result ? [
-          { type: "userMessage", content: [{ type: "text", text: sentPrompt }] },
+          ...(!omitInput ? [{ type: "userMessage", content: [{ type: "text", text: sentPrompt }] }] : []),
           { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
         ] : turnId === "implementation" ? [{ type: "agentMessage", phase: "final_answer", text: "Implementation completed" }] : [] }] };
     } } };
@@ -33,6 +33,12 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     const resumed = createCodexWorkflowTasks(options);
     const unknown = await resumed.read(ref);
     assert.equal(unknown.closeRequest?.requestIdentity, requestIdentity, "native accepted input survives missing returned items");
+    omitInput = true;
+    result = { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity };
+    const unbound = await resumed.read(ref);
+    assert.equal(unbound.closeResult, undefined, "a matching final without its owning prompt cannot establish same-turn outcome");
+    assert.equal(unbound.closeOutcomeUnavailable, true);
+    result = undefined; omitInput = false;
     assert.equal(planCloseContinuation({ task: unknown, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "close_outcome_unavailable");
     await resumed.message(ref, prompt);
     assert.equal(sends, 1, "same exact accepted native request is never sent twice");
@@ -46,6 +52,13 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     assert.equal(settled.closeResult?.state, "HOST_CLEANUP_BLOCKED", "retain the actual observed result when later native history omits it");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "host_helper_recovery_failed");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: { ...evidence, worktreeState: "ABSENT" } }).needed, true);
+    omitInput = true;
+    for (const change of [{ runId: "foreign-run" }, { issueId: "I_foreign" }, { requestIdentity: `sha256:${"f".repeat(64)}` }]) {
+      result = { ...settled.closeResult, ...change };
+      await assert.rejects(resumed.read(ref), /outcome identity differs/u,
+        "a latest foreign native final cannot be hidden by a receipt when its input is omitted");
+    }
+    omitInput = false;
     result = { ...settled.closeResult, issueId: "I_foreign" };
     await assert.rejects(resumed.read(ref), /outcome identity differs/u, "a conflicting native result cannot replace retained owning evidence");
     result = settled.closeResult;
@@ -135,8 +148,10 @@ test("a newer close continuation cannot inherit another turn's outcome and a par
     turns[0].items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify({ schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity })}` });
     await tasks.read(ref);
     await tasks.message(ref, `${prompt}\nClose continuation: ${JSON.stringify({ attempt: 1, progressIdentity: `sha256:${"e".repeat(64)}` })}`);
+    turns[1].items.at(-1).text = `Workflow close result: ${JSON.stringify({ schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED",
+      runId: "older-run", issueId: "I_older", requestIdentity })}`;
     const current = await createCodexWorkflowTasks(options).read(ref);
-    assert.equal(current.closeResult, undefined, "older same-request final is not the new continuation's result");
+    assert.equal(current.closeResult, undefined, "an older turn's final is neither the new continuation's outcome nor current contradictory authority");
     assert.equal(current.closeOutcomeUnavailable, true);
     const directory = join(root, ".git", "matt-workflow-control", "runs", "run");
     const receipt = readdirSync(directory).find(name => name.startsWith("close-messages-"));
