@@ -159,6 +159,62 @@ test("lost settlement acknowledgement converges from the bridge's payload-free a
   assert.deepEqual(h.durable().faults, []);
 });
 
+test("restored pending physical owner permits read-only inspection after exact stopped-cell resume", async () => {
+  let responseWrites = 0, inspections = 0;
+  const neverReturns = new Promise(() => {});
+  const h = harness({ write: message => {
+    if (message?.id) { responseWrites += 1; return neverReturns; }
+    if (message?.inspectRequests) {
+      inspections += 1;
+      return { output: frame({ type: "request-state", id: request.id, state: "pending", request }) };
+    }
+    return { output: "" };
+  } });
+
+  await h.driver.tick();
+  assert.equal(h.durable().pendingIo.kind, "response");
+  h.values.set("workflow.host", plain(api.restoreCheckpoint(h.durable())));
+  const resumed = api.createDriver({ ...h.dependencies, driverId: "recovered-cell" });
+  resumed.resume({ previousDriverId: "first-cell", stoppedEvidence: "original functions cell confirmed terminated" });
+  await resumed.tick();
+
+  assert.equal(inspections, 1, "a restored physical owner must not block its own read-only inspection");
+  assert.equal(responseWrites, 1, "resume never starts a replacement physical response writer");
+  assert.equal(h.lane().pendingIo, null);
+  assert.ok(h.output.some(item => item.type === "reconciliation-required" && item.id === request.id));
+});
+
+test("an undelivered exhausted settlement isolates only its affected request", async () => {
+  const independent = { ...request, id: "independent-id", arguments: { limit: 25 } };
+  const settlementWrites = [], inspections = [];
+  const h = harness({ write: message => {
+    if (message?.id) return { output: frame({ type: "response-accepted", id: message.id }) };
+    if (message?.settleRequests) {
+      settlementWrites.push(message.settleRequests[0]);
+      if (message.settleRequests[0] === request.id) throw new Error("settlement never reached bridge");
+      return { output: "" };
+    }
+    if (message?.inspectRequests) {
+      inspections.push(message.requestIds);
+      return { output: frame({ type: "request-state", id: request.id, state: "accepted", request }) };
+    }
+    return { output: "" };
+  } });
+
+  await h.driver.tick();
+  assert.equal(h.durable().fault.state, "exhausted");
+  const lane = h.lane(); lane.buffer += frame(independent); h.values.set("workflow.host", lane);
+  await h.driver.tick();
+
+  assert.deepEqual(inspections, [[independent.id, request.id]]);
+  assert.deepEqual(settlementWrites, [request.id, independent.id], "the exhausted settlement is never resent");
+  assert.equal(h.calls(), 2, "independent authorized native work continues");
+  assert.equal(h.lane().requests.find(item => item.id === request.id).settled, undefined);
+  assert.equal(h.lane().requests.find(item => item.id === independent.id).settled, true);
+  assert.equal(h.durable().fault.identity, `transport:42:settlement:${request.id}`);
+  assert.equal(h.durable().fault.state, "exhausted");
+});
+
 test("exit drains final frames, retains partial bytes, session identity and a pending native outcome", async () => {
   const terminal = { type: "result", result: { state: "UNAVAILABLE" } };
   const h = harness({ native: async () => { await sleep(20); return { actual: true }; }, write: () => ({ output: frame(terminal) + 'workflow-host {"partial":', exit_code: 0 }) });

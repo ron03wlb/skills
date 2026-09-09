@@ -236,7 +236,8 @@ test("settled bridge receipts have a fixed retention bound and evicted responses
       input.write(`${JSON.stringify({ settleRequests: [request.id] })}\n`);
       await new Promise(resolve => setImmediate(resolve));
     }
-    assert.deepEqual(bridge.metrics(), { toolCalls: 3, elapsedMs: bridge.metrics().elapsedMs, tokens: "unavailable",
+    const metrics = bridge.metrics();
+    assert.deepEqual(metrics, { toolCalls: 3, elapsedMs: metrics.elapsedMs, tokens: "unavailable",
       settledRequests: 3, retainedSettledReceipts: 2, retainedSettledPayloadBytes: 0 });
     input.write(`${JSON.stringify(responses[0])}\n`);
     assert.equal(messages.at(-1).type, "input-error", "an evicted duplicate is rejected rather than accepted or replayed");

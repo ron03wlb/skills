@@ -533,9 +533,12 @@
           }
         }
         if (request.state === "forwarded" && !request.settled && lane.active) {
-          if (!await write({ settleRequests: [request.id] }, "settlement")) return;
-          settleRequest(request);
-          save(); await flush();
+          const settlementFault = findFault(`transport:${lane.sessionId}:settlement:${request.id}`);
+          if (settlementFault?.state !== "exhausted") {
+            if (!await write({ settleRequests: [request.id] }, "settlement")) return;
+            settleRequest(request);
+            save(); await flush();
+          }
         }
         if (Date.now() >= deadline) break;
       }
@@ -585,6 +588,10 @@
       resume({ previousDriverId, stoppedEvidence }) {
         read();
         if (!stoppedEvidence || lane.driver?.id !== previousDriverId) throw new Error("Exact original driver and stopped evidence required");
+        if (lane.pendingIo) {
+          lane.pendingIo = { ...lane.pendingIo, state: "uncertain", ownerSettled: true };
+          lane.needsInspection = true;
+        }
         lane.driver = { id: driverId, previousDriverId, stoppedEvidence }; save();
       },
       async reconcileNative({ id, result, error, ownerEvidence }) {
