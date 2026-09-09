@@ -1,6 +1,6 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, creates an isolated planning worktree when accepted documents need writing, and interviews you until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share one understanding, and records accepted vocabulary and hard decisions there. It is the same one-question-at-a-time interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then interviews you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) toward a shared understanding, one material decision at a time. It is the same interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase. Only accepted glossary or ADR writes require an isolated planning worktree.
 
 Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. That worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
@@ -24,7 +24,13 @@ The wayfinder split comes down to session count: `/grill-with-docs` for single-s
 
 The skill reads a Git repository; before accepted document writes, the task must own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's `CONTEXT.md` if a `CONTEXT-MAP.md` marks the repo as multi-context. Decisions go to its `docs/adr/`. Both are created lazily; the target checkout is not the writing surface.
 
-It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. The lane contract passes both the same task, proposed Spec, target, baseline, and worktree identity.
+It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. Both receive the same settled scope and, for accepted document writes, the same task, proposed Spec, target, baseline, and worktree identity.
+
+Each permitted dependency loads separately through the host:
+
+- With a generic Skill tool, the agent uses it for the named dependency.
+- Without that tool, host-supported named-skill loading reads and follows the required `SKILL.md`; this alone needs no repeated invocation from you.
+- Missing or inaccessible content, conflicting source identities, or a host restriction still require the actual limitation to be reported. Loading preserves explicit-only invocation rules and any selected immutable package; a newer local owner is not a substitute. Generic helpers follow the current host catalog.
 
 ## The planning lane
 
@@ -53,7 +59,7 @@ The glossary is the point. Domain language is the thing this skill is actually b
 Scope decides it. Use this for anything you can settle in one session; use [wayfinder](https://aihero.dev/skills-wayfinder) when the effort is too big to hold in one, and it charts the work as a map of decision [tickets](https://www.aihero.dev/ai-coding-dictionary/ticket) first. Wayfinder is slower and denser, and reaching for it on a well-scoped feature is the common mistake. It does not replace this skill: it can drop into a grilling session for the parts of the map that suit one.
 
 **It ran, but no `CONTEXT.md` and no ADRs appeared.**
-Two known causes. The mundane one: nothing qualified. ADRs need all three gates, and a session about a change with no new vocabulary genuinely has nothing to write. The real bug: when the skill runs inside another orchestration layer (a spec-driven-development wrapper, a multi-agent framework, a rule that invokes it as a step in someone else's pipeline), the file-writing half is reported to silently not happen, while the interview still runs. This is filed and unfixed. If you are in that setup, check the working directory before you trust the session's output.
+Read-only or tracker-only planning can finish with an explicit empty accepted-change list. ADRs need all three gates, and a session with no new vocabulary may have no glossary changes either. If you accepted a qualifying document change, the handoff should identify its path or hunk and content identity in the registered isolated worktree. A missing dependency or lane mismatch must be reported rather than silently dropping that write.
 
 **It asked everything at once, with no recommendations, and never mentioned `CONTEXT.md`.**
 That is the skill failing to load one of its two dependencies. Without [grilling](https://aihero.dev/skills-grilling), you get an undifferentiated question dump; without [domain-modeling](https://aihero.dev/skills-domain-modeling), you get a good interview with no paper trail. Partial loading correlates with model and [effort](https://www.aihero.dev/ai-coding-dictionary/effort) level, and it is the most reported problem with this skill. If you suspect it, ask the agent which skills and lane identity it loaded.
@@ -65,19 +71,25 @@ Into the conversation only. This is the most substantive open complaint about th
 Yes. This is the right skill for a codebase with no ADRs, no domain language and no design principles: invoke it and say "help me document my repo". The community pattern pairs it with [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) for building or repairing a `CONTEXT.md`. Expect to steer it: it will read code and ask you about what it finds, and you are the one who says which of the words already in the codebase are the right ones.
 
 **What should I do when the session ends?**
-The skill's closing message tends to be open-ended, which is a known rough edge. In the main flow the answer is [to-spec](https://aihero.dev/skills-to-spec), in the same conversation. A published Single-Issue Spec continues to `run-issue-workflow`; a Multi-Issue Spec goes through `to-tickets` first, then continues to `run-issue-workflow`.
+Keep the exact handoff packet in the same conversation: task identity, proposed Spec, target, current baseline, and the accepted-change evidence. Then explicitly run `/to-spec` with that packet; finishing the interview does not invoke it automatically or reopen settled design.
+
+- For read-only or tracker-only work, the packet carries an explicit empty accepted-change list.
+- For document writes, it carries the owned worktree and every accepted glossary or ADR path or hunk with its content identity. Keep that lane registered through publication. Only its owning task may dispose of the exact clean planning worktree after successful `to-spec` handoff read-back; partial publication, uncommitted accepted decisions, identity mismatch, or failed read-back preserves it for the same-command retry.
+
+[to-spec](https://aihero.dev/skills-to-spec) publishes the next command: a Single-Issue Spec continues to `run-issue-workflow`; a Multi-Issue Spec goes through `to-tickets` first.
 
 **Why is it called that?**
 Nobody is happy with the name. There is an open suggestion to rename it `grill-domain-model`, which describes the behaviour more honestly. Nothing has moved on it. If a rename ever lands, the docs page moves with it and the URL changes.
 
 ## It's working if
 
-- `CONTEXT.md` changes *during* the session, term by term, rather than appearing in one lump at the end.
+- Accepted glossary changes appear *during* the session, term by term; a session with no accepted document changes finishes with an explicit empty list.
 - Accepted files change only in the task's isolated planning worktree; the target checkout and other lanes stay untouched.
 - The glossary reads as pure vocabulary (your project's words with tight definitions) and contains no implementation detail or spec-like prose.
 - Questions the codebase can answer get answered by reading the codebase, not asked of you.
 - You get few or no ADRs, and the ones you get are decisions you would be annoyed to have to re-litigate.
 - It challenges a word you used because your existing glossary defines it differently.
+- The closing message gives you the exact handoff and the later `/to-spec` command.
 
 ## Where it fits
 
