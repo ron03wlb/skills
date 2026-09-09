@@ -134,7 +134,7 @@
     if (typeof persist !== "function") throw new Error("A durable checkpoint writer is required");
     const native = new Map();
     let lane;
-    let ticking = false;
+    let ticking = false, owned = false;
     let persisted = Promise.resolve();
     let transport = Promise.resolve();
     let pulseTimer, pulsePending, pulsing = false;
@@ -338,25 +338,32 @@
     const boundedTick = async () => {
       if (ticking) throw new Error("Original active driver tick is still pending");
       ticking = true;
+      try { await tick(); } finally { ticking = false; }
+    };
+    const withPulse = async action => {
+      if (owned) throw new Error("Original active driver is still pending");
+      owned = true;
       let completed = false;
       try {
         claim(); pulsing = true; schedulePulse();
-        await tick();
+        await action();
         completed = true;
       } finally {
         pulsing = false; clearTimeout(pulseTimer);
-        await pulsePending;
         try {
-          // The final pulse may return EOF after tick's last drain. Retain and
-          // consume its terminal frames before run checks whether to continue.
+          await pulsePending;
+          // The final pulse may return EOF after the last drain. Retain and
+          // consume its terminal frames before the active driver returns.
           if (completed && !lane.active) { await drain(); await flush(); }
-        } finally { ticking = false; }
+        } finally { owned = false; }
       }
     };
     return {
-      tick: boundedTick,
+      tick: () => withPulse(boundedTick),
       async run(yieldControl) {
-        do { await boundedTick(); await yieldControl(); } while (lane.active || native.size);
+        await withPulse(async () => {
+          do { await boundedTick(); await yieldControl(); } while (lane.active || native.size);
+        });
       },
       resume({ previousDriverId, stoppedEvidence }) {
         read();

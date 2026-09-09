@@ -337,6 +337,43 @@ for (const slowBoundary of ["large response", "checkpoint", "control read", "pos
   });
 }
 
+test("run keeps its heartbeat across a delayed yield and stops it when the run returns", async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  let wire = "", calls = 0, writes = 0;
+  output.on("data", chunk => { wire += chunk; });
+  const take = () => { const result = wire; wire = ""; return result; };
+  const bridge = createCodexHostBridge({ input, output, idleTimeoutMs: 100 });
+  const values = new Map([["workflow.host", api.createLane({ sessionId: 42 })]]);
+  const outcome = bridge.call(request.name, {}).then(result => ({ result }), error => ({ error }));
+  const driver = api.createDriver({ driverId: "yield-probe", load: key => values.get(key), store: (key, value) => values.set(key, value),
+    report: () => {}, setTimeout, clearTimeout, heartbeatMs: 10, tickMs: 500, persist: async () => {},
+    tools: {
+      async [request.name]() { calls++; return { observed: true }; },
+      async write_stdin(args) {
+        writes++;
+        if (!bridge.disconnected) input.write(args.chars);
+        await sleep(1);
+        return { output: take(), ...(bridge.disconnected ? { exit_code: 0 } : {}) };
+      },
+    } });
+  try {
+    let yields = 0;
+    await driver.run(async () => {
+      if (++yields === 1) {
+        await assert.rejects(driver.tick(), /Original active driver is still pending/u);
+        await sleep(180);
+        assert.equal(bridge.disconnected, false, "a pending yield remains part of the active driver lifetime");
+      } else bridge.close();
+    });
+    assert.deepEqual(plain((await outcome).result), { observed: true });
+    assert.equal(calls, 1);
+    assert.equal(values.get("workflow.host").requests[0].state, "forwarded");
+    const completedWrites = writes;
+    await sleep(30);
+    assert.equal(writes, completedWrites, "no detached heartbeat survives a completed run");
+  } finally { bridge.close(); input.destroy(); output.destroy(); }
+});
+
 test("a terminal frame returned by the final in-flight heartbeat is drained before run exits", async () => {
   const terminal = { type: "result", result: { state: "PRESERVED" } };
   let heartbeats = 0, delayed = false;
