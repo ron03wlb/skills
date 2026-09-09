@@ -1,18 +1,23 @@
 ## What it does
 
-`grilling` is the relentless interview that stress-tests a plan or design before you build it. It walks a decision tree in rounds until you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) share the same understanding.
+`grilling` stress-tests a plan, decision, or idea by resolving unresolved material decisions within the agreed scope. Its decision tree contains questions that could change product behavior, scope, authority, or material risk; routine implementation details follow source and existing conventions.
 
-Each round contains only questions whose prerequisites are already settled: the current **frontier**. Independent decisions can appear together; a question that depends on an unanswered one waits for a later round. Each question comes with a recommended answer. Facts available from the codebase are explored instead of asked, and implementation waits for your confirmation that the shared understanding has been reached.
+Each round contains only material questions whose prerequisites are already settled: the current **frontier**. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) looks up available facts and recommends an answer for each decision. Once all material decisions are settled, it asks you to confirm the shared understanding before acting. Silence is not agreement or approval.
 
 ## When to reach for it
 
 Type `/grilling`, or the agent reaches for it automatically when a task fits — this is the underlying primitive, not a user-only entry point.
 
-Reach for it when a plan or design still has soft spots and you want them surfaced before code is written. In practice you usually invoke it through one of its two wrappers rather than by name: for a plain grilling [session](https://www.aihero.dev/ai-coding-dictionary/session) use [grill-me](https://aihero.dev/skills-grill-me); to have the session also write ADRs and a glossary as it goes, use [grill-with-docs](https://aihero.dev/skills-grill-with-docs).
+Reach for it when a plan or design still has material uncertainties you want surfaced before acting. Its two wrappers shape the [session](https://www.aihero.dev/ai-coding-dictionary/session):
+
+- For a plain interview, use [grill-me](https://aihero.dev/skills-grill-me).
+- To record accepted glossary or ADR changes in a codebase, use [grill-with-docs](https://aihero.dev/skills-grill-with-docs).
 
 ## The decision tree
 
-The mental model is a **decision tree**: every plan branches into decisions, and decisions depend on each other. After you answer a round, `grilling` recomputes the frontier. A pending background fact-finding task holds only the decisions that depend on it; other ready questions can proceed.
+The **decision tree** tracks material decisions and their dependencies inside the agreed scope. After you answer a round, `grilling` recomputes the frontier. A pending background fact-finding task holds only the decisions that depend on it; other ready questions can proceed. An empty ready frontier while material decisions await evidence is not completion.
+
+Accepted decisions remain settled on continuation and re-entry. A decision returns to the frontier only when new evidence invalidates its basis; the agent identifies that evidence and the affected decision. Unrelated hypothetical branches do not extend the interview.
 
 The calling skill can narrow the round:
 
@@ -25,13 +30,15 @@ The calling skill can narrow the round:
 
 Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket)-shaping that its wrappers add on top.
 
-For an Issue workflow, the decision tree includes actual installation, task/message, local integration/cleanup and tracker permissions. The agent prepares concrete operations and looks up host capabilities before asking once for missing approval. Declared SQL brings environment, effect, rights, operator, recovery and outcome validation into planning; no SQL is recorded as N/A. Later leaves reuse unchanged decisions.
+For an Issue workflow, the decision tree includes actual installation, task/message, local integration/cleanup and tracker permissions. The agent prepares concrete operations and looks up host capabilities before asking once for missing approval. Declared SQL brings environment, effect, rights, operator, recovery and outcome validation into planning; no SQL is recorded as N/A. Later leaves reuse unchanged decisions and scoped approvals. Final confirmation grants no new scope and leaves actual permission and Manual prerequisite requirements intact.
 
 ## It's working if
 
 - Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) numbers the currently answerable questions and recommends an answer for each, within the calling skill's decision limit.
 - Later questions follow the dependencies created by answers already settled.
-- Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) are looked up, while decisions still come back to you.
+- Accepted decisions stay settled unless the agent identifies new evidence that invalidates them.
+- Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) and routine repository choices are resolved from evidence; material decisions still come back to you.
+- Once the material decisions are settled, you see a final confirmation instead of questions about unrelated possibilities.
 - No implementation starts until you confirm the shared understanding.
 
 ## Where it fits
