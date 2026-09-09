@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -8,6 +8,58 @@ import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workfl
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
+const readOpenIssueState = async issueId => ({ issueId, state: "OPEN" });
+
+test("close submission refreshes tracker after delayed native history and skips an Issue closed during that read", async () => {
+  for (const stateAfterRead of ["CLOSED", "OPEN"]) {
+    const root = mkdtempSync(join(tmpdir(), "close-send-freshness-"));
+    const store = createRunStore({ gitCommonDir: join(root, ".git") });
+    const ref = { threadId: "worker", hostId: "local" };
+    let enterRead, finishRead, trackerState = "OPEN", sends = 0;
+    const entered = new Promise(resolve => { enterRead = resolve; });
+    const released = new Promise(resolve => { finishRead = resolve; });
+    const observations = [];
+    const tasks = createCodexWorkflowTasks({ store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+      readIssueState: async issueId => { observations.push("tracker"); return { issueId, state: trackerState }; },
+      host: { async call(name) {
+        if (name.endsWith("send_message_to_thread")) { observations.push("send"); sends++; return { threadId: ref.threadId }; }
+        observations.push("history"); enterRead(); await released;
+        return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+          turns: [{ id: "settled-close-with-omitted-history", status: "completed", items: [] }] };
+      } } });
+    const prompt = `Use $close-issue to close Issue I_1. Close request identity: sha256:${"a".repeat(64)}. Current close request evidence: ${JSON.stringify({ runIdentity: { runId: "run" }, issueId: "I_1", trackerState: "OPEN", candidateReachable: true, worktreeState: "ABSENT" })}\nClose continuation: ${JSON.stringify({ attempt: 1, progressIdentity: `sha256:${"b".repeat(64)}` })}`;
+    try {
+      const pending = tasks.message(ref, prompt);
+      await entered; trackerState = stateAfterRead; finishRead();
+      const result = await pending;
+      assert.deepEqual(observations, stateAfterRead === "CLOSED" ? ["history", "tracker"] : ["history", "tracker", "send"]);
+      assert.equal(sends, stateAfterRead === "CLOSED" ? 0 : 1);
+      if (stateAfterRead === "CLOSED") {
+        assert.deepEqual(result, { reconcileRequired: true, reasonCode: "issue_already_closed", issueId: "I_1" });
+        assert.equal(existsSync(join(root, ".git", "matt-workflow-control", "runs", "run")), false, "a skipped close creates no receipt or Run authority");
+      } else assert.equal(result, undefined, "missing native final still permits the remaining close for an open Issue with physical cleanup proved");
+    } finally { finishRead(); rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("missing, foreign, unknown, or unavailable final tracker read cannot submit close", async () => {
+  for (const readIssueState of [undefined, async () => ({ issueId: "I_foreign", state: "CLOSED" }),
+    async issueId => ({ issueId, state: "UNKNOWN" }), async () => { throw new Error("tracker unavailable"); }]) {
+    const root = mkdtempSync(join(tmpdir(), "close-send-unknown-"));
+    let sends = 0;
+    const tasks = createCodexWorkflowTasks({ store: createRunStore({ gitCommonDir: join(root, ".git") }), project: {}, packageRoot: "/installed",
+      issueNumber: async () => 1, readIssueState, host: { async call(name) {
+        if (name.endsWith("send_message_to_thread")) { sends++; return { threadId: "worker" }; }
+        return { thread: { id: "worker", hostId: "local", status: { type: "idle" } }, turns: [{ status: "completed", items: [] }] };
+      } } });
+    const prompt = `Use $close-issue to close Issue I_1. Close request identity: sha256:${"a".repeat(64)}. Current close request evidence: ${JSON.stringify({ runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "ABSENT" })}`;
+    try {
+      await assert.rejects(tasks.message({ threadId: "worker", hostId: "local" }, prompt), /tracker/iu);
+      assert.equal(sends, 0);
+      assert.equal(existsSync(join(root, ".git", "matt-workflow-control", "runs", "run")), false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
 
 test("native close acceptance survives omitted history and blocks unchanged redispatch across restart", async () => {
   const root = mkdtempSync(join(tmpdir(), "close-acceptance-"));
@@ -17,7 +69,7 @@ test("native close acceptance survives omitted history and blocks unchanged redi
   const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "PRESENT" };
   const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
   let sends = 0, sentPrompt, turnId = "implementation", result, omitInput = false;
-  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState,
     host: { async call(name, args) {
       if (name.endsWith("send_message_to_thread")) { sends++; sentPrompt = args.prompt; turnId = "close"; return { threadId: ref.threadId }; }
       assert.equal(name, "mcp__codex_app__read_thread");
@@ -73,7 +125,7 @@ test("lost or transport-only close response with omitted history never resends t
     const store = createRunStore({ gitCommonDir: join(root, ".git") });
     let sends = 0;
     const ref = { threadId: "worker", hostId: "local" };
-    const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, sleep: async () => {},
+    const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState, sleep: async () => {},
       host: { async call(name) {
         if (name.endsWith("send_message_to_thread")) { sends++; if (!nativeResult) throw new Error("response lost"); return nativeResult; }
         return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
@@ -106,7 +158,7 @@ test("legacy omitted close history permits only freshly proved remaining closeou
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const ref = { threadId: "worker", hostId: "local" };
   let sends = 0;
-  const tasks = createCodexWorkflowTasks({ store, project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+  const tasks = createCodexWorkflowTasks({ store, project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState,
     host: { async call(name) {
       if (name.endsWith("send_message_to_thread")) { sends++; return { threadId: ref.threadId }; }
       return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
@@ -133,7 +185,7 @@ test("a newer close continuation cannot inherit another turn's outcome and a par
   const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", worktreeState: "ABSENT", candidateReachable: true };
   const requestIdentity = `sha256:${"d".repeat(64)}`;
   let turns = [{ id: "implementation", status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: "Done" }] }];
-  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState,
     host: { async call(name, args) {
       if (name.endsWith("send_message_to_thread")) {
         turns.unshift({ id: `close-${turns.length}`, status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: args.prompt }] }] });

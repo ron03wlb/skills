@@ -56,6 +56,14 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     syncBuiltinESMExports();
     const owner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: { listRunIds: () => ["unreadable"], readEvents() { throw new Error("Unreadable journal"); } }, tasks: { read: async () => ({ state: "RESUMABLE" }) } });
     const snapshot = await owner.sources.tracker.read({ specId: "1" });
+    let stateCalls = owner.metrics().commandCalls;
+    assert.deepEqual(await owner.readIssueState("I_1"), { issueId: "I_1", state: "OPEN" });
+    assert.equal(owner.metrics().commandCalls - stateCalls, 1, "the final state guard reads only the exact Issue, not its comment history");
+    fixture.state = "closed"; writeFileSync(fixturePath, JSON.stringify(fixture));
+    assert.deepEqual(await owner.readIssueState("I_1"), { issueId: "I_1", state: "CLOSED" });
+    fixture.node_id = "I_foreign"; writeFileSync(fixturePath, JSON.stringify(fixture));
+    await assert.rejects(owner.readIssueState("I_1"), /Issue identity/u);
+    fixture.node_id = "I_1"; fixture.state = "open"; writeFileSync(fixturePath, JSON.stringify(fixture));
     fixture.body = "Different unapproved scope";
     writeFileSync(fixturePath, JSON.stringify(fixture));
     await assert.rejects(owner.sources.tracker.read({ specId: "1" }), error =>
@@ -303,7 +311,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       }
       throw new Error(`Unexpected native action ${name}`);
     } };
-    const nativeTasks = createCodexWorkflowTasks({ host, store: runStore, project: { path: root, projectId: "project", hostId: "local" }, packageRoot: "/fixture-installed", issueNumber: async () => 1, sleep: async () => {} });
+    const nativeTasks = createCodexWorkflowTasks({ host, store: runStore, project: { path: root, projectId: "project", hostId: "local" }, packageRoot: "/fixture-installed", issueNumber: async () => 1,
+      readIssueState: issueId => liveOwners.readIssueState(issueId), sleep: async () => {} });
     const liveOwners = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: runStore, tasks: nativeTasks });
     const beforeClose = await refresh();
     const writer = runStore.acquireWriter(beforeClose.runIdentity.runId);

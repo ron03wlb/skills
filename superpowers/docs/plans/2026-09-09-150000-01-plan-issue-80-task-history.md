@@ -15,3 +15,7 @@
 ### Outcome 3: Compatible recovery contract
 - Work: Update the owning recovery reference and inspect task-source integration without changing Grant, journal, model selection, target-writing, or helper-release authority. Commit only the reviewed scoped change.
 - Verify: Run focused task/source/close integration checks, review the final diff and working tree, and report unproved native-host limitations separately.
+
+### Outcome 4: Fresh tracker state at the close submission boundary
+- Work: Before a native close message is submitted after any history read or continuation delay, reread the exact Issue's tracker state through its owning adapter. If that Issue has closed during the wait, suppress the native send and return to normal complete reconciliation. The guard must not declare success, erase receipts, change a Grant, or prevent an open Issue with proved physical cleanup from finishing closeout.
+- Verify: A focused regression delays native history while the tracker changes from open to closed, proves zero sends and no new receipt, and retains the open-Issue continuation path. Rerun the affected task, close, and source integration checks.

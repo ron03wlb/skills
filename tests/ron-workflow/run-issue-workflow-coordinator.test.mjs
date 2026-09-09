@@ -3547,6 +3547,35 @@ test("environment refresh revalidates Run and Grant authority before diagnosis",
   }
 });
 
+test("a tracker-closed send guard returns to full reconciliation before claiming success", async () => {
+  for (const candidateStillReachable of [true, false]) {
+    const { root, store } = createStoreFixture();
+    const ref = { threadId: "original", hostId: "local" };
+    let closed = false, guarded = 0, freshReconciliations = 0;
+    const now = () => "2026-09-09T07:30:00.000Z";
+    const tasks = { findIssueLane: async () => [ref], create: async () => { throw new Error("No new task"); },
+      read: async () => ({ state: "RESUMABLE", snapshot: { turns: [{ status: "completed" }] } }),
+      message: async () => { guarded++; closed = true; return { reconcileRequired: true, reasonCode: "issue_already_closed", issueId: "15" }; },
+      wait: async () => { throw new Error("A suppressed send has no new native turn to wait for"); } };
+    try {
+      const writer = store.acquireWriter(identity.runId);
+      writer.append({ type: "grant.recorded", at: now(), runIdentity: identity });
+      writer.append({ type: "dispatch.recorded", at: now(), issueId: "15", attempt: 1, taskRef: ref }); writer.release();
+      const status = await createCoordinator({ store, tasks, now, sleep: async () => {},
+        tracker: { read: async () => ({ state: closed ? "CLOSED" : "OPEN" }) },
+        reconcile: async ({ tracker }) => {
+          if (closed) freshReconciliations++;
+          return reconciliation({ taskRefs: { 15: ref }, nodes: [{ issueId: "15", blockers: [], trackerState: tracker.state,
+            taskState: "NONE", completionState: "COMPLETE", candidateReachable: !closed || candidateStillReachable, worktreeState: "ABSENT" }] });
+        } }).run({ specId: "15" });
+      assert.equal(guarded, 1);
+      assert.ok(freshReconciliations > 0);
+      assert.equal(status.run.state, candidateStillReachable ? "SUCCEEDED" : "BLOCKED", "tracker closure alone never proves completed delivery");
+      assert.equal(store.readEvents(identity.runId).filter(event => event.type === "grant.recorded").length, 1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
 test("manual implementation completion adopts one existing lane for serialized close", async () => {
   const { root, store } = createStoreFixture();
   const adoptedTaskRef = { threadId: "thread-15-manual", hostId: "local" };

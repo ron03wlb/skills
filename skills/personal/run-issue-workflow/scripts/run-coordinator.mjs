@@ -764,10 +764,11 @@ export function createCoordinator({
     }) };
     if (continuation.needed) await sleep([5000, 15000, 30000][continuation.attempt - 1]);
     if (!accepted || continuation.needed) {
-      await tasks.message(
+      const delivery = await tasks.message(
         taskRef,
         `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`,
       );
+      if (delivery?.reconcileRequired && delivery.reasonCode === "issue_already_closed" && delivery.issueId === action.issueId) return { active: true };
     }
     if (step) return { active: true };
     const waited = await tasks.wait([taskRef]);
