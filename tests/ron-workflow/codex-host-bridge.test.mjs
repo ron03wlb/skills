@@ -171,23 +171,31 @@ test("fragment replay preserves one response and rejects missing, reordered or c
 
 test("buffered host heartbeat survives a synchronous bridge stall within the bounded confirmation grace", async () => {
   const bridgeUrl = new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs", import.meta.url).href;
-  const source = `import { createCodexHostBridge } from ${JSON.stringify(bridgeUrl)};
-    const bridge = createCodexHostBridge({ idleTimeoutMs: 100 });
-    bridge.call('mcp__codex_app__list_projects', {}).catch(error => console.log('OUTCOME ' + error.message));
-    console.log('BLOCKING');
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
-    setTimeout(() => { console.log('DISCONNECTED ' + bridge.disconnected); bridge.close(); }, 30);`;
-  const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["pipe", "pipe", "pipe"] });
-  let output = "", sent = false;
-  child.stdout.on("data", data => {
-    output += data;
-    if (!sent && output.includes("BLOCKING")) { sent = true; child.stdin.write('{"heartbeat":true}\n'); }
-  });
-  child.stderr.on("data", data => { output += data; });
-  const code = await new Promise((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
-  assert.equal(code, 0, output);
-  assert.equal(sent, true);
-  assert.match(output, /DISCONNECTED false/u, "stdin already buffered during synchronous Git/tool work must get bounded time to reach readline");
+  const run = async (sendHeartbeat) => {
+    const source = `import { createCodexHostBridge } from ${JSON.stringify(bridgeUrl)};
+      const bridge = createCodexHostBridge({ idleTimeoutMs: 100 });
+      bridge.call('mcp__codex_app__list_projects', {}).catch(error => console.log('OUTCOME ' + error.message));
+      console.log('BLOCKING');
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+      setTimeout(() => { console.log('DISCONNECTED ' + bridge.disconnected); bridge.close(); }, 150);`;
+    const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["pipe", "pipe", "pipe"] });
+    let output = "", blocked = false;
+    child.stdout.on("data", data => {
+      output += data;
+      if (!blocked && output.includes("BLOCKING")) {
+        blocked = true;
+        if (sendHeartbeat) child.stdin.write('{"heartbeat":true}\n');
+      }
+    });
+    child.stderr.on("data", data => { output += data; });
+    const code = await new Promise((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
+    assert.equal(code, 0, output);
+    assert.equal(blocked, true);
+    return output;
+  };
+
+  assert.match(await run(false), /DISCONNECTED true/u, "the bounded confirmation deadline must still disconnect an idle host");
+  assert.match(await run(true), /DISCONNECTED false/u, "a buffered heartbeat must rearm the deadline before confirmation");
 });
 
 test("settled requests retain duplicate/conflict evidence without retaining native payloads", async () => {
