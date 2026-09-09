@@ -349,7 +349,7 @@
         try {
           // The final pulse may return EOF after tick's last drain. Retain and
           // consume its terminal frames before run checks whether to continue.
-          if (completed) { await drain(); await flush(); }
+          if (completed && !lane.active) { await drain(); await flush(); }
         } finally { ticking = false; }
       }
     };

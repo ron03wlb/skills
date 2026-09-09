@@ -295,7 +295,7 @@ test("unresolved omitted partial bytes survive repeated restore, checkpoint and 
   assert.equal(h.output.at(-1).partialBytes, partial.length);
 });
 
-for (const slowBoundary of ["large response", "checkpoint", "control read"]) {
+for (const slowBoundary of ["large response", "checkpoint", "control read", "post-report checkpoint"]) {
   test(`bridge stays connected during ${slowBoundary} without repeating native work`, async () => {
     const input = new PassThrough(), output = new PassThrough();
     let wire = "", calls = 0;
@@ -306,10 +306,12 @@ for (const slowBoundary of ["large response", "checkpoint", "control read"]) {
     const outcome = bridge.call(request.name, { limit: 1 }).then(result => ({ result }), error => ({ error }));
     const values = new Map([["workflow.host", api.createLane({ sessionId: 42, output: take() })]]);
     const writes = [];
-    let slowCheckpoint = slowBoundary === "checkpoint", slowControl = slowBoundary === "control read";
+    let slowCheckpoint = slowBoundary === "checkpoint", slowControl = slowBoundary === "control read", reported = false;
     const driver = api.createDriver({ driverId: "bounded-probe", load: key => values.get(key), store: (key, value) => values.set(key, value),
-      report: () => {}, setTimeout, clearTimeout, heartbeatMs: 10, tickMs: 500,
-      persist: async () => { if (slowCheckpoint) { slowCheckpoint = false; await sleep(180); } },
+      report: value => { if (value.type === "driver") reported = true; }, setTimeout, clearTimeout, heartbeatMs: 10, tickMs: 500,
+      persist: async () => {
+        if (slowCheckpoint || slowBoundary === "post-report checkpoint" && reported) { slowCheckpoint = false; await sleep(180); }
+      },
       readControl: async () => { if (slowControl) { slowControl = false; await sleep(180); } return null; },
       tools: {
         async [request.name]() { calls++; return payload; },
@@ -325,11 +327,12 @@ for (const slowBoundary of ["large response", "checkpoint", "control read"]) {
       await driver.tick();
       const observed = await outcome;
       assert.equal(observed.error, undefined, "no heartbeat starvation at the reproduced boundary");
+      assert.equal(bridge.disconnected, false, "the completed tick must not strand its still-active bridge");
       assert.deepEqual(plain(observed.result), payload);
       assert.equal(calls, 1);
       assert.ok(writes.every(value => value.length <= 12000), "native responses use bounded physical writes");
       assert.equal(values.get("workflow.host").requests[0].state, "forwarded");
-      if (slowBoundary !== "large response") assert.ok(writes.filter(value => JSON.parse(value).heartbeat).length >= 2);
+      if (["checkpoint", "control read"].includes(slowBoundary)) assert.ok(writes.filter(value => JSON.parse(value).heartbeat).length >= 2);
     } finally { bridge.close(); input.destroy(); output.destroy(); }
   });
 }
