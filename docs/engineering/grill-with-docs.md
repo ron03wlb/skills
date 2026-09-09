@@ -74,7 +74,7 @@ Yes. This is the right skill for a codebase with no ADRs, no domain language and
 Keep the exact handoff packet in the same conversation: task identity, proposed Spec, target, current baseline, and the accepted-change evidence. Then explicitly run `/to-spec` with that packet; finishing the interview does not invoke it automatically or reopen settled design.
 
 - For read-only or tracker-only work, the packet carries an explicit empty accepted-change list.
-- For document writes, it carries the owned worktree and every accepted glossary or ADR path or hunk with its content identity. Keep that lane registered through publication. Only its owning task may dispose of the exact clean planning worktree after successful `to-spec` handoff read-back; partial publication, uncommitted accepted decisions, identity mismatch, or failed read-back preserves it for the same-command retry.
+- For document writes, it carries the owned worktree and every accepted glossary or ADR path or hunk with its content identity. Your accepted documents remain available through publication or an interrupted handoff.
 
 [to-spec](https://aihero.dev/skills-to-spec) publishes the next command: a Single-Issue Spec continues to `run-issue-workflow`; a Multi-Issue Spec goes through `to-tickets` first.
 
