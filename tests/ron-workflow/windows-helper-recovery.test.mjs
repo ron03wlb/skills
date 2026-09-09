@@ -12,16 +12,20 @@ import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts
 import { verifyIntegratedCandidate } from "../../skills/engineering/close-issue/scripts/merge-candidate.mjs";
 import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
-async function hostFixture(root, target, foreignChild = false, ownedCount = 1) {
+function fixturePaths(root) {
   const local = join(root, "local"), hostExe = join(local, "OpenAI", "Codex", "bin", "fixture", "codex.exe");
   const helperExe = join(local, "OpenAI", "Codex", "runtimes", "cua_node", "fixture", "bin", "node_repl.exe");
   for (const path of [hostExe, helperExe]) { mkdirSync(join(path, ".."), { recursive: true }); copyFileSync(process.execPath, path); }
   const unrelated = join(root, "unrelated"); mkdirSync(unrelated, { recursive: true });
+  return { hostExe, helperExe, unrelated, env: { ...process.env, LOCALAPPDATA: local } };
+}
+
+async function hostFixture(root, target, foreignChild = false, ownedCount = 1) {
+  const { hostExe, helperExe, unrelated, env } = fixturePaths(root);
   const helperCode = foreignChild
     ? `const {spawn}=require('node:child_process'); const child=spawn(${JSON.stringify(process.execPath)},['-e','process.stdin.resume()'],{cwd:${JSON.stringify(unrelated)},stdio:['pipe','ignore','ignore'],windowsHide:true}); process.stdin.resume();const stop=()=>{child.kill();process.exit()};process.stdin.on('end',stop);process.stdin.on('data',stop);process.stdout.write('ready\\n');`
     : "process.stdin.resume();process.stdout.write('ready\\n');process.stdin.on('end',()=>process.exit());process.stdin.on('data',()=>process.exit());";
   const code = `const {spawn}=require('node:child_process');let children=[];let ready=0;for(const cwd of ${JSON.stringify([...Array(ownedCount).fill(target), unrelated])}){const child=spawn(${JSON.stringify(helperExe)},['-e',${JSON.stringify(helperCode)}],{cwd,detached:true,windowsHide:true,stdio:['pipe','pipe','ignore']});child.stdin.on('error',()=>{});children.push(child);child.stdout.once('data',()=>{if(++ready===${ownedCount + 1})console.log(JSON.stringify(children.map(c=>c.pid)))});}process.stdin.resume();const stop=()=>{for(const c of children)if(c.exitCode===null)c.stdin.end('stop\\n');setTimeout(()=>{for(const c of children)if(c.exitCode===null)c.kill();process.exit()},1000)};process.stdin.on('end',stop);process.stdin.on('data',stop);`;
-  const env = { ...process.env, LOCALAPPDATA: local };
   const host = spawn(hostExe, ["-e", code], { cwd: root, env, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
   const lines = createInterface({ input: host.stdout });
   const [line] = await once(lines, "line"); const pids = JSON.parse(line), unrelatedPid = pids.pop(), ownedPid = pids[0];
@@ -40,6 +44,43 @@ async function holdDirectory(executable, cwd) {
     const exited = once(child, "exit"); child.stdin.end(); await exited;
   } };
 }
+
+async function nestedHostFixture(root, target) {
+  const { hostExe, helperExe, unrelated, env } = fixturePaths(root);
+  // The nested launcher exits naturally with its child, matching the
+  // computer-use launcher / Node REPL topology.
+  const leafCode = "process.stdin.resume();console.log(process.pid);process.stdin.on('end',()=>process.exit());";
+  const launcherCode = `const {spawn}=require('node:child_process');const child=spawn(${JSON.stringify(helperExe)},['-e',${JSON.stringify(leafCode)}],{cwd:${JSON.stringify(target)},detached:true,windowsHide:true,stdio:['pipe','pipe','ignore']});child.stdout.pipe(process.stdout);child.once('exit',()=>process.exit());process.stdin.resume();process.stdin.on('end',()=>child.stdin.end());`;
+  const code = `const {spawn}=require('node:child_process');const other=spawn(${JSON.stringify(helperExe)},['-e',${JSON.stringify(leafCode)}],{cwd:${JSON.stringify(unrelated)},detached:true,windowsHide:true,stdio:['pipe','ignore','ignore']});const launcher=spawn(${JSON.stringify(helperExe)},['-e',${JSON.stringify(launcherCode)}],{cwd:${JSON.stringify(target)},detached:true,windowsHide:true,stdio:['pipe','pipe','ignore']});launcher.stdout.once('data',data=>console.log(JSON.stringify({launcher:launcher.pid,leaf:Number(data.toString().trim()),unrelatedPid:other.pid})));launcher.once('exit',()=>console.log('launcher-exited'));process.stdin.resume();process.stdin.on('end',()=>{launcher.stdin.end();other.stdin.end();setTimeout(()=>process.exit(),1000)});`;
+  const host = spawn(hostExe, ["-e", code], { cwd: root, env, windowsHide: true, stdio: ["pipe", "pipe", "ignore"] });
+  const lines = createInterface({ input: host.stdout });
+  const [line] = await once(lines, "line");
+  const pids = JSON.parse(line);
+  const launcherExited = once(lines, "line");
+  return { env, host, ...pids, launcherExited, async dispose() {
+    lines.close(); if (host.exitCode !== null || host.signalCode !== null) return;
+    const exited = once(host, "exit"); host.stdin.end(); await exited;
+  } };
+}
+
+test("a frozen launcher exiting with its released child is observed through its retained handle", { skip: process.platform !== "win32", timeout: 60000 }, async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "nested-helper-exit-"))), target = join(root, "issue"); mkdirSync(target);
+  let fixture, session;
+  try {
+    fixture = await nestedHostFixture(root, target);
+    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env });
+    assert.deepEqual(session.proof.processes.map(item => item.Pid).sort(), [fixture.launcher, fixture.leaf].sort());
+    const release = await session.release(async outcome => {
+      if (outcome.Pid === fixture.leaf && outcome.State === "EXITED") await fixture.launcherExited;
+    });
+    assert.equal(release.state, "RELEASED", JSON.stringify(release));
+    assert.deepEqual(release.outcomes.map(item => [item.Pid, item.State, item.TerminationRequested]),
+      [[fixture.leaf, "EXITED", true], [fixture.launcher, "EXITED", false]]);
+    assert.doesNotThrow(() => process.kill(fixture.host.pid, 0));
+    assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
+    rmdirSync(target);
+  } finally { await session?.close(); await fixture?.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
 
 // Real Git ownership is checked on both sides of every yielding task read; Windows
 // process startup makes these end-to-end checks much slower than the native probe.
