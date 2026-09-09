@@ -89,7 +89,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     recoveryRounds, recoveryDelaysMs, receiptRefs, updatedAt: new Date().toISOString(),
   });
   const exhaustedFault = fault => Object.assign(new Error(`Read-only host recovery budget exhausted for ${fault.operation} (${fault.faultId})`), { fault });
-  const call = async (name, args) => {
+  const call = async (name, args, { interruptible = false } = {}) => {
     const readOnly = ["read_thread", "list_threads", "wait_threads"].includes(name);
     let fault;
     if (readOnly) {
@@ -105,7 +105,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           fault = recordFault({ ...fault, state: "exhausted", receiptRefs: fault.receiptRefs });
           throw exhaustedFault(fault);
         }
-        if (name === "wait_threads") {
+        if (interruptible) {
           const signal = await waitSignal({ timeoutMs: recoveryDelaysMs[fault.recoveryRounds], readSignal: readObservationSignal });
           if (signal?.control || signal?.deadline) {
             throw Object.assign(new Error("Task observation recovery was interrupted by control or deadline"), { observationSignal: signal });
@@ -134,8 +134,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate, { latestOnly = false } = {}) => {
-    let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2, includeOutputs: true, maxOutputCharsPerItem: 8192 }));
+  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false } = {}) => {
+    let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
+      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
@@ -143,15 +144,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const cursor = snapshot.page.nextCursor;
       if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
-      const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 8192 }));
+      const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
+        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
     }
   };
-  const read = async (ref, ownership = {}) => {
+  const read = async (ref, ownership = {}, { interruptible = false } = {}) => {
     const receipts = receiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let receipt = receipts?.read();
-    const snapshot = await readHistory(ref, value => Boolean(receipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)), { latestOnly: Boolean(receipt) });
+    const snapshot = await readHistory(ref, value => Boolean(receipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)),
+      { latestOnly: Boolean(receipt), interruptible });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const nativePrompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -545,11 +548,18 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
           modelRoundTrips: "unavailable", tokens: "unavailable" } });
       let result, mode = "event";
+      const observeCall = async action => {
+        try { return { value: await action() }; }
+        catch (error) {
+          if (error.observationSignal) return { interruption: interrupted(mode, error.observationSignal) };
+          throw error;
+        }
+      };
       if (eventWaitSupported) {
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: 15000 });
+          result = await call("wait_threads", { targets, timeoutMs: 15000 }, { interruptible: true });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
@@ -568,7 +578,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const signaled = await waitSignal({ timeoutMs: [15000, 30000, 60000][Math.min(round, 2)], readSignal: readObservationSignal });
         if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
-          const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false, maxOutputCharsPerItem: 1000 });
+          const snapshotAttempt = await observeCall(() => call("read_thread", { ...ref, turnLimit: 1,
+            includeOutputs: false, maxOutputCharsPerItem: 1000 }, { interruptible: true }));
+          if (snapshotAttempt.interruption) return snapshotAttempt.interruption;
+          const snapshot = snapshotAttempt.value;
           if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
           const status = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
           const terminal = ["idle", "notloaded", "completed", "failed", "error"].includes(status);
@@ -578,7 +591,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const previous = taskObservations.get(ref.threadId);
           if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: status });
           if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
-            const state = await read(ref); fullHistoryReads += 1;
+            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true }));
+            if (stateAttempt.interruption) return stateAttempt.interruption;
+            const state = stateAttempt.value; fullHistoryReads += 1;
             taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
               closeRequestIdentity: state.closeRequest?.requestIdentity });
           } else taskObservations.set(ref.threadId, { semantic, settled: previous?.settled === true,
@@ -604,7 +619,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
           }
           if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
-            const state = await read(ref); fullHistoryReads += 1;
+            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true }));
+            if (stateAttempt.interruption) return stateAttempt.interruption;
+            const state = stateAttempt.value; fullHistoryReads += 1;
             taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",
               closeRequestIdentity: state.closeRequest?.requestIdentity });
           } else {

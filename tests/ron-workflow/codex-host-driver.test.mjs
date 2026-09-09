@@ -125,6 +125,8 @@ test("lost forwarding acknowledgement reconciles from the original bridge before
   assert.equal(h.lane().requests[0].state, "forwarded");
   assert.equal(h.calls(), 1);
   assert.equal(h.writes.filter(item => item?.id).length, 1);
+  assert.equal(h.durable().fault, null);
+  assert.deepEqual(h.durable().faults, []);
 });
 
 test("exit drains final frames, retains partial bytes, session identity and a pending native outcome", async () => {
@@ -170,6 +172,8 @@ test("a still-pending response is redelivered only after original-owner read-bac
   const redelivery = h.writes.findLastIndex(item => item?.id);
   assert.equal(h.writes[redelivery - 1].inspectRequests, true);
   assert.equal(h.lane().requests[0].state, "forwarded");
+  assert.equal(h.durable().fault, null);
+  assert.deepEqual(h.durable().faults, []);
 });
 
 test("a second concurrent tick cannot duplicate a pending native request", async () => {
@@ -412,6 +416,23 @@ test("a response beyond transport capacity stops with its native outcome retaine
   assert.equal(h.writes.some(message => message?.id || message?.responseChunk), false);
   assert.equal(h.lane().requests[0].response.result.text.length, text.length);
   assert.equal(h.lane().requests[0].state, "forwarding");
+});
+
+test("a rejected physical heartbeat remains exhausted and never starts a replacement writer", async () => {
+  let heartbeatWrites = 0;
+  const h = harness({ write: message => {
+    assert.equal(message?.heartbeat, true);
+    heartbeatWrites += 1;
+    return Promise.reject(new Error("physical write rejected"));
+  } });
+  h.values.set("workflow.host", api.createLane({ sessionId: 42 }));
+  const driver = api.createDriver({ ...h.dependencies, heartbeatMs: 1_000_000, setTimeout, clearTimeout });
+  await driver.tick();
+  assert.equal(heartbeatWrites, 1);
+  assert.equal(h.durable().fault.state, "exhausted");
+  await driver.tick();
+  assert.equal(heartbeatWrites, 1, "an exhausted physical operation cannot acquire a replacement writer");
+  assert.equal(h.durable().fault.state, "exhausted");
 });
 
 test("a stalled physical write has bounded observation, preserves its owner and settles late without a second writer", async () => {

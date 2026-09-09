@@ -336,7 +336,10 @@
           const request = message.request?.type === "tool" ? await receive(message.request, item.raw) : lane.requests.find(value => value.id === message.id);
           if (request && !request.conflict && message.id === request.id) {
             request.ownerState = message.state; save();
-            if (["forwarding", "returned"].includes(request.state) && message.state === "accepted") await transition(request, "forwarded");
+            if (["forwarding", "returned"].includes(request.state) && message.state === "accepted") {
+              clearFault(`transport:${lane.sessionId}:response:${request.id}`);
+              await transition(request, "forwarded");
+            }
             // Redelivery is only the already-returned response, after original-owner pending evidence.
             if (request.state === "forwarding" && message.state === "pending") {
               clearFault(`transport:${lane.sessionId}:response:${request.id}`);
@@ -358,11 +361,30 @@
     const write = async (message, kind) => {
       if (!lane.active) return false;
       const body = JSON.stringify(message);
+      const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${requestIdFor(message) ?? "session"}`;
       if (kind === "response" && body.length > 16 * 1024 * 1024) {
         throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
       }
+      const exhaustedFault = !activeWrite ? findFault(transportFaultIdentity) : null;
+      if (exhaustedFault?.state === "exhausted") {
+        publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId,
+          kind, state: "exhausted", faultIdentity: exhaustedFault.identity });
+        return false;
+      }
       if (!activeWrite && lane.pendingIo?.ownerSettled) {
-        lane.pendingIo = null; save();
+        if (kind === "reconcile") {
+          lane.pendingIo = null; save();
+        } else {
+          const failedIdentity = `transport:${lane.sessionId}:${lane.pendingIo.kind}:${lane.pendingIo.requestId ?? "session"}`;
+          let fault = findFault(failedIdentity);
+          if (!fault || fault.state !== "exhausted") {
+            fault = retainFault(faultFor("transport", lane.pendingIo.kind, lane.pendingIo.requestId, { state: "exhausted" }));
+            save(); await flush();
+          }
+          publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId,
+            kind: lane.pendingIo.kind, state: "exhausted", faultIdentity: fault.identity });
+          return false;
+        }
       } else if (!activeWrite && lane.pendingIo) {
         lane.pendingIo.state = "uncertain";
         const fault = retainFault(faultFor("transport", lane.pendingIo.kind, lane.pendingIo.requestId)); save(); await flush();
@@ -375,7 +397,6 @@
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
         return false;
       }
-      const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${current.requestId ?? "session"}`;
       const recovery = current.outcome ? { observe: true, recoveryRounds: findFault(transportFaultIdentity)?.recoveryRounds ?? 0 }
         : await beginRecoveryObservation("transport", kind, current.requestId);
       if (!recovery.observe) {

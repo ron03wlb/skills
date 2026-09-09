@@ -632,6 +632,65 @@ test("control interrupts wait_threads fault recovery before another native call"
   assert.equal(calls, 1, "the interrupted recovery never issues a second native call");
 });
 
+test("control interrupts fallback snapshot recovery before another read_thread call", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const recoveryWindows = [];
+  const calls = [];
+  let reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", runId: "run",
+    sleep: async () => {},
+    readObservationSignal: async () => null,
+    waitForObservationSignal: async ({ timeoutMs }) => {
+      recoveryWindows.push(timeoutMs);
+      return timeoutMs === 5000 ? { control: "STOP" } : null;
+    },
+    host: { async call(name) {
+      calls.push(name);
+      if (name === "mcp__codex_app__wait_threads") throw new Error("Unsupported wait_threads");
+      assert.equal(name, "mcp__codex_app__read_thread");
+      reads += 1;
+      if (reads === 1) throw new Error("temporary connection failure");
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] };
+    } },
+  });
+  const observed = await tasks.wait([ref]);
+  assert.equal(observed.observation.kind, "interrupted");
+  assert.equal(observed.observation.mode, "fallback");
+  assert.equal(observed.observation.signal, "control");
+  assert.deepEqual(recoveryWindows, [15000, 5000]);
+  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread"]);
+});
+
+test("deadline interrupts material full-history recovery before another read_thread call", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const recoveryWindows = [];
+  const calls = [];
+  let reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", runId: "run",
+    readObservationSignal: async () => null,
+    waitForObservationSignal: async ({ timeoutMs }) => {
+      recoveryWindows.push(timeoutMs);
+      return { deadline: "2026-09-09T20:00:00.000Z" };
+    },
+    host: { async call(name, args) {
+      calls.push(name);
+      if (name === "mcp__codex_app__wait_threads") {
+        return { polls: [{ threadId: ref.threadId, status: "completed", event: "completion" }] };
+      }
+      assert.equal(name, "mcp__codex_app__read_thread");
+      reads += 1;
+      if (reads === 1) throw new Error("temporary connection failure");
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [] };
+    } },
+  });
+  const observed = await tasks.wait([ref]);
+  assert.equal(observed.observation.kind, "interrupted");
+  assert.equal(observed.observation.mode, "event");
+  assert.equal(observed.observation.signal, "deadline");
+  assert.deepEqual(recoveryWindows, [5000]);
+  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread"]);
+});
+
 test("production composition binds the Run fault store and task observation signals", () => {
   const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-workflow.mjs", import.meta.url), "utf8");
   const coordinator = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs", import.meta.url), "utf8");
