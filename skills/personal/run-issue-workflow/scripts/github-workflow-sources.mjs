@@ -61,6 +61,14 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     catch (error) { throw authorityConflict(error.message); }
     return { ...issue, comments, records };
   };
+  const readIssueState = async (issueId) => {
+    const number = await issueNumber(issueId);
+    const issue = api(`repos/${repositoryName}/issues/${number}`)[0];
+    if (issue?.node_id !== issueId || issue.pull_request || !["open", "closed"].includes(issue.state)) {
+      throw authorityConflict("Close tracker state or Issue identity is unproven");
+    }
+    return { issueId: issue.node_id, state: issue.state.toUpperCase() };
+  };
   const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {
@@ -564,7 +572,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         blockers: node?.blockers.map(id => current.facts.nodes.find(item => item.issueId === id)),
         contradictions: current.facts.contradictions });
     },
-    gitCommonDir, issueNumber, readIssue, targetRead, readCleanupRuns, metrics: () => ({ commandCalls }),
+    gitCommonDir, issueNumber, readIssue, readIssueState, targetRead, readCleanupRuns, metrics: () => ({ commandCalls }),
     sources: {
       repository: { readIdentity: async () => repositoryId }, tracker: { read: trackerRead },
       reconciliation: { read: reconciliationRead }, target: { read: async ({ current }) => targetRead(current.runIdentity.target) },

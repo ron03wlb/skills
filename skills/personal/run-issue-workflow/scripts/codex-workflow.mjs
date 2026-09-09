@@ -48,7 +48,7 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     workflowVersion, installationCacheDirectory: resolve(packageRoot, "../..") });
   store = createRunStore({ gitCommonDir: owners.gitCommonDir });
   const selectedIssue = await owners.readIssue(specId);
-  tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber: owners.issueNumber });
+  tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber: owners.issueNumber, readIssueState: owners.readIssueState });
   const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, compatibleRecordedVersion, authoritySources: owners.sources,
     controls: host.controls,
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
@@ -66,7 +66,10 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
       if (continuation.blocked) throw new Error(`${continuation.blocked.reasonCode}: ${continuation.blocked.evidence.map(item => item.message).join("; ")}`);
       if (continuation.exhausted) throw new Error("Parent close continuation budget exhausted without progress; preserve its existing task");
       if (continuation.needed) await setTimeout([5000, 15000, 30000][continuation.attempt - 1]);
-      if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent || continuation.needed) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${effectiveIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`);
+      if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent || continuation.needed) {
+        const delivery = await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${effectiveIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`);
+        if (delivery?.reconcileRequired && delivery.reasonCode === "issue_already_closed" && delivery.issueId === issueId) return { settled: false, coordinatorActive: true };
+      }
       if (step) return { settled: false };
       const waited = await tasks.wait([dispatch.taskRef]);
       return { settled: waited.taskSettled, coordinatorActive: waited.coordinatorActive,

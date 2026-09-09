@@ -39,7 +39,7 @@ const assertCloseOutcomeIdentity = (result, request) => {
 
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
-export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, runId, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
+export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
@@ -414,6 +414,15 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
         return;
+      }
+      // Native history and continuation waits may outlive the tracker snapshot
+      // that selected this action. Only suppress delivery here; the coordinator
+      // still needs its complete fresh facts before it can report success.
+      if (close) {
+        if (typeof readIssueState !== "function") throw new Error("Close submission requires its current tracker state reader");
+        const current = await readIssueState(close.issueId);
+        if (current?.issueId !== close.issueId || !["OPEN", "CLOSED"].includes(current.state)) throw new Error("Close tracker state or identity is unproven");
+        if (current.state === "CLOSED") return { reconcileRequired: true, reasonCode: "issue_already_closed", issueId: close.issueId };
       }
       if (close && previous.turns?.some(turn => turn.status === "completed" && !turn.items?.length)
         && !completedCloseCleanup(close.evidence)) {
