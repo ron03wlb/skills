@@ -10,6 +10,8 @@ import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
 import { validateJournal } from "./run-journal.mjs";
 import { recoveryDigest } from "./recovery-evidence.mjs";
+import { bodyDigest } from "./github-workflow-records.mjs";
+import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
 
 export const supportsCompletedRunReentry = true;
 
@@ -48,7 +50,20 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     workflowVersion, installationCacheDirectory: resolve(packageRoot, "../..") });
   store = createRunStore({ gitCommonDir: owners.gitCommonDir });
   const selectedIssue = await owners.readIssue(specId);
-  tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber: owners.issueNumber, readIssueState: owners.readIssueState });
+  const effectiveRunIdentity = runIdentity ?? { runId: deriveRunOperationIdentity({ repositoryId: `github:${configuration.repository}`,
+    specId: selectedIssue.node_id, approvedPublicationIdentity: bodyDigest(selectedIssue.body) }).key };
+  const pendingControls = [];
+  let executionDeadlineAt = null;
+  const observationSignal = async () => {
+    const runStatus = store.readStatus(effectiveRunIdentity.runId);
+    const control = pendingControls[0]?.command ?? (["PAUSING", "PAUSED", "STOPPING", "STOPPED"].includes(runStatus?.run?.state)
+      ? runStatus.run.controlCommand ?? runStatus.run.state : null);
+    return { ...(control ? { control } : {}),
+      ...(executionDeadlineAt !== null && Date.now() >= executionDeadlineAt
+        ? { deadline: new Date(executionDeadlineAt).toISOString() } : {}) };
+  };
+  tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, runId: effectiveRunIdentity.runId,
+    issueNumber: owners.issueNumber, readIssueState: owners.readIssueState, readObservationSignal: observationSignal });
   const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, compatibleRecordedVersion, authoritySources: owners.sources,
     controls: host.controls,
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
@@ -77,11 +92,14 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     } },
   });
   let latest;
-  const pendingControls = [];
   let connection;
   return {
     specId: selectedIssue.node_id,
     async run(options = {}) {
+      if (options.executionDeadlineAt !== undefined) {
+        executionDeadlineAt = Date.parse(options.executionDeadlineAt);
+        if (!Number.isFinite(executionDeadlineAt)) throw new TypeError("executionDeadlineAt must be one ISO instant");
+      } else executionDeadlineAt = null;
       latest = await runtime.run({ specId: selectedIssue.node_id, ...(runIdentity ? { runIdentity } : {}), modelRouting, ...options, controlQueue: pendingControls });
       if (options.mode && !connection && latest.status.run.runId) connection = await host.controls.connect({
         readStatus: async () => store.readStatus(latest.status.run.runId),

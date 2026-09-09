@@ -40,7 +40,7 @@ const assertCloseOutcomeIdentity = (result, request) => {
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout,
-  discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null }) {
+  discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null, waitForObservationSignal }) {
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
@@ -51,6 +51,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   let eventWaitSupported = true;
   let hostCallCount = 0;
   let hostReturnedBytes = 0;
+  const waitSignal = waitForObservationSignal ?? (async ({ timeoutMs }) => {
+    const expiresAt = Date.now() + timeoutMs;
+    for (;;) {
+      const signal = await readObservationSignal();
+      if (signal?.control || signal?.deadline) return signal;
+      const remaining = expiresAt - Date.now();
+      if (remaining <= 0) return null;
+      await sleep(Math.min(1000, remaining));
+    }
+  });
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
@@ -525,44 +535,48 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const targets = batch.map(ref => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) }));
       const batchKey = batch.map(({ threadId, hostId }) => `${hostId}:${threadId}`).join("|");
       const callsBefore = hostCallCount, bytesBefore = hostReturnedBytes;
+      const interrupted = (mode, signal) => ({ coordinatorActive: !host.disconnected, taskSettled: false,
+        observation: { kind: "interrupted", mode, signal: signal.control ? "control" : "deadline", batchSize: batch.length,
+          fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+          modelRoundTrips: "unavailable", tokens: "unavailable" } });
       let result, mode = "event";
       if (eventWaitSupported) {
+        const before = await readObservationSignal();
+        if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: 60000 });
+          result = await call("wait_threads", { targets, timeoutMs: 15000 });
         } catch (error) {
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
           eventWaitSupported = false;
         }
+        const after = await readObservationSignal();
+        if (after?.control || after?.deadline) return interrupted(mode, after);
       }
       const changed = [];
-      const states = [];
       let fullHistoryReads = 0;
       if (!eventWaitSupported) {
         mode = "fallback";
         const round = fallbackRounds.get(batchKey) ?? 0;
         const before = await readObservationSignal();
-        if (before?.control || before?.deadline) {
-          return { coordinatorActive: !host.disconnected, taskSettled: false,
-            observation: { kind: "interrupted", mode, signal: before.control ? "control" : "deadline", batchSize: batch.length,
-              fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
-              modelRoundTrips: "unavailable", tokens: "unavailable" } };
-        }
-        await sleep([15000, 30000, 60000][Math.min(round, 2)]);
-        const after = await readObservationSignal();
-        if (after?.control || after?.deadline) {
-          return { coordinatorActive: !host.disconnected, taskSettled: false,
-            observation: { kind: "interrupted", mode, signal: after.control ? "control" : "deadline", batchSize: batch.length,
-              fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
-              modelRoundTrips: "unavailable", tokens: "unavailable" } };
-        }
+        if (before?.control || before?.deadline) return interrupted(mode, before);
+        const signaled = await waitSignal({ timeoutMs: [15000, 30000, 60000][Math.min(round, 2)], readSignal: readObservationSignal });
+        if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
-          const state = await read(ref); fullHistoryReads += 1; states.push(state);
-          const semantic = JSON.stringify({ state: state.state, closeRequestIdentity: state.closeRequest?.requestIdentity ?? null,
-            modelYield: state.modelYield?.yieldIdentity ?? null, recoveryResult: state.recoveryResult?.state ?? null });
+          const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false, maxOutputCharsPerItem: 1000 });
+          if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
+          const status = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
+          const terminal = ["idle", "notloaded", "completed", "failed", "error"].includes(status);
+          const attention = status === "needs_attention";
+          const anomaly = status === "unknown";
+          const semantic = JSON.stringify({ status, terminal, attention });
           const previous = taskObservations.get(ref.threadId);
-          if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: state.state });
-          taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
-            closeRequestIdentity: state.closeRequest?.requestIdentity });
+          if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: status });
+          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+            const state = await read(ref); fullHistoryReads += 1;
+            taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
+              closeRequestIdentity: state.closeRequest?.requestIdentity });
+          } else taskObservations.set(ref.threadId, { semantic, settled: previous?.settled === true,
+            closeRequestIdentity: previous?.closeRequestIdentity });
         }
         fallbackRounds.set(batchKey, changed.length ? 0 : Math.min(round + 1, 2));
       } else {
@@ -583,12 +597,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           if (terminal || attention || previous !== undefined && previous.semantic !== semantic) {
             changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
           }
-          if (terminal || attention || anomaly) {
-            const state = await read(ref); fullHistoryReads += 1; states.push(state);
+          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+            const state = await read(ref); fullHistoryReads += 1;
             taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",
               closeRequestIdentity: state.closeRequest?.requestIdentity });
           } else {
-            taskObservations.set(threadId, { semantic, settled: false });
+            taskObservations.set(threadId, { semantic, settled: previous?.settled === true,
+              closeRequestIdentity: previous?.closeRequestIdentity });
           }
         }
       }

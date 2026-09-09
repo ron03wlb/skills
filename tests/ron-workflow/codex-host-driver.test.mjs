@@ -405,6 +405,7 @@ test("a response beyond transport capacity stops with its native outcome retaine
 test("a stalled physical write has bounded observation, preserves its owner and settles late without a second writer", async () => {
   let settleWrite;
   let responseWrites = 0;
+  let clock = 0;
   const pendingWrite = new Promise(resolve => { settleWrite = resolve; });
   const h = harness({ write: message => {
     if (message?.id) {
@@ -419,6 +420,7 @@ test("a stalled physical write has bounded observation, preserves its owner and 
     tickMs: 5,
     transportWaitMs: 5,
     hostOverheadMs: 5,
+    now: () => clock,
   });
 
   const started = Date.now();
@@ -433,11 +435,23 @@ test("a stalled physical write has bounded observation, preserves its owner and 
     requestId: "original-id",
     state: "unresolved",
     recoveryRounds: 0,
+    recoveryDelaysMs: [5000, 15000, 30000],
+    nextObservationAt: 5000,
     receiptRefs: ["original-id"],
   });
 
   await driver.tick();
   assert.equal(responseWrites, 1, "a bounded observation never starts a replacement physical writer");
+  assert.equal(h.durable().fault.recoveryRounds, 0, "an unchanged early tick consumes no recovery round");
+  for (const [at, round, state] of [[5000, 1, "unresolved"], [20000, 2, "unresolved"], [50000, 3, "exhausted"]]) {
+    clock = at;
+    await driver.tick();
+    assert.equal(h.durable().fault.recoveryRounds, round);
+    assert.equal(h.durable().fault.state, state);
+  }
+  clock = 100000;
+  await driver.tick();
+  assert.equal(h.durable().fault.recoveryRounds, 3, "an exhausted transport fault never multiplies its observation budget");
   settleWrite({ output: frame({ type: "response-accepted", id: request.id }) });
   await sleep(0);
   await driver.tick();
@@ -448,10 +462,11 @@ test("a stalled physical write has bounded observation, preserves its owner and 
 
 test("a never-returning native call is observed within the tick budget and its late original result is retained", async () => {
   let settleNative;
+  let clock = 0;
   const pendingNative = new Promise(resolve => { settleNative = resolve; });
   const h = harness({ native: () => pendingNative });
   const driver = api.createDriver({ ...h.dependencies, heartbeatMs: 1000, tickMs: 5,
-    transportWaitMs: 5, hostOverheadMs: 5 });
+    transportWaitMs: 5, hostOverheadMs: 5, now: () => clock });
 
   const started = Date.now();
   await driver.tick();
@@ -463,10 +478,21 @@ test("a never-returning native call is observed within the tick budget and its l
     requestId: "original-id",
     state: "unresolved",
     recoveryRounds: 0,
+    recoveryDelaysMs: [5000, 15000, 30000],
+    nextObservationAt: 5000,
     receiptRefs: ["original-id"],
   });
   await driver.tick();
   assert.equal(h.calls(), 1, "bounded native observation never replays the original tool call");
+  for (const [at, round, state] of [[5000, 1, "unresolved"], [20000, 2, "unresolved"], [50000, 3, "exhausted"]]) {
+    clock = at;
+    await driver.tick();
+    assert.equal(h.durable().fault.recoveryRounds, round);
+    assert.equal(h.durable().fault.state, state);
+  }
+  clock = 100000;
+  await driver.tick();
+  assert.equal(h.durable().fault.recoveryRounds, 3);
 
   settleNative({ late: true });
   await sleep(0);
@@ -474,6 +500,20 @@ test("a never-returning native call is observed within the tick budget and its l
   assert.equal(h.calls(), 1);
   assert.equal(h.lane().requests[0].state, "forwarded");
   assert.equal(h.durable().fault, null);
+});
+
+test("settled driver checkpoint work retains only a bounded recent request window", () => {
+  const lane = api.createLane({ sessionId: 42 });
+  lane.settledRequestCount = 105;
+  lane.requests = Array.from({ length: 105 }, (_, index) => ({ id: `settled-${index}`,
+    request: { type: "tool", name: "mcp__codex_app__list_threads" }, state: "forwarded", history: ["forwarded"], settled: true }));
+  lane.requests.push({ id: "unresolved", request, state: "dispatched", history: ["received", "dispatched"] });
+  const checkpoint = api.checkpointState(lane);
+  assert.equal(checkpoint.settledRequestCount, 105);
+  assert.equal(checkpoint.requests.length, 101);
+  assert.equal(checkpoint.requests.filter(item => item.state === "forwarded").length, 100);
+  assert.equal(checkpoint.requests.some(item => item.id === "unresolved"), true);
+  assert.equal(api.restoreCheckpoint(checkpoint).settledRequestCount, 105);
 });
 
 test("unchanged settled ticks do not emit another driver delta", async () => {

@@ -67,17 +67,22 @@
     if (sessionId == null) throw new Error("An original host session ID is required");
     return { schema: "codex-host-driver:v1", sessionId, active: exit_code === undefined,
       ...(exit_code === undefined ? {} : { exitCode: exit_code }), buffer: output,
-      requests: [], frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null, fault: null };
+      requests: [], settledRequestCount: 0, frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null, fault: null };
   }
 
   // Durable receipts carry identity/progress only. Native payloads, panel URLs,
   // terminal bytes and returned tool content may contain the bridge credential.
   const partialBytes = lane => lane.buffer.length + (lane.omittedPartialBytes ?? 0);
   function checkpointState(lane) {
+    const settled = lane.requests.filter(request => request.settled === true);
+    const retainedSettled = new Set(settled.slice(-100));
+    const retainedRequests = lane.requests.filter(request => request.settled !== true || retainedSettled.has(request));
     return { schema: "codex-host-checkpoint:v1", sessionId: lane.sessionId, active: lane.active,
       exitCode: lane.exitCode, driverId: lane.driver?.id, partialBytes: partialBytes(lane),
-      requests: lane.requests.map(({ id, request, state, history, conflict }) => ({ id,
-        name: allowed.includes(request.name) ? request.name : "unsupported", state, history: [...history], conflict: Boolean(conflict) })),
+      settledRequestCount: lane.settledRequestCount ?? settled.length,
+      requests: retainedRequests.map(({ id, request, state, history, conflict, settled }) => ({ id,
+        name: allowed.includes(request.name) ? request.name : "unsupported", state, history: [...history], conflict: Boolean(conflict),
+        ...(settled ? { settled: true } : {}) })),
       controls: lane.controls.map(({ message, state, sourceId }) => ({ message: { control: message.control, runId: message.runId }, state, sourceId })),
       diagnostics: lane.diagnostics.map(() => ({ reason: "Retained transport diagnostic; raw bytes stay in the original cell" })),
       pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state,
@@ -90,6 +95,7 @@
     const lane = createLane({ sessionId: saved.sessionId, ...(saved.active ? {} : { exit_code: saved.exitCode }) });
     lane.driver = saved.driverId ? { id: saved.driverId } : null;
     lane.requests = saved.requests.map(item => ({ ...item, request: { type: "tool", id: item.id, name: item.name }, payloadMissing: true }));
+    lane.settledRequestCount = saved.settledRequestCount ?? lane.requests.filter(item => item.settled).length;
     lane.controls = saved.controls;
     lane.diagnostics = saved.diagnostics;
     lane.pendingIo = saved.pendingIo;
@@ -132,10 +138,14 @@
   }
 
   function createDriver({ driverId, tools, load, store, report, setTimeout, clearTimeout,
-    persist, readControl = async () => load("workflow.control"), heartbeatMs = 15000, tickMs = 35000,
-    transportWaitMs = 1000, hostOverheadMs = 5000, checkpoint = () => {} }) {
+    persist, readControl = async () => load("workflow.control"), heartbeatMs = 15000, tickMs = 15000,
+    transportWaitMs = 1000, hostOverheadMs = 5000, checkpoint = () => {}, now = Date.now,
+    settledRetentionLimit = 100 }) {
     if (!driverId) throw new Error("The original functions cell identity is required");
     if (typeof persist !== "function") throw new Error("A durable checkpoint writer is required");
+    if (!Number.isInteger(settledRetentionLimit) || settledRetentionLimit < 1 || settledRetentionLimit > 100) {
+      throw new TypeError("Settled driver retention must be between one and 100 requests");
+    }
     const native = new Map();
     let lane;
     let ticking = false, owned = false;
@@ -144,6 +154,7 @@
     let pulseTimer, pulsePending, pulsing = false;
     let reportVersion = 0, lastDriverSignature = null, lastStatusSignature = null;
     const reportSignatures = new Map();
+    const recoveryDelaysMs = [5000, 15000, 30000];
     const save = () => store("workflow.host", copy(lane));
     const publish = value => { reportVersion += 1; report(value); };
     const publishDelta = (key, value) => {
@@ -152,21 +163,50 @@
       reportSignatures.set(key, signature); publish(value); return true;
     };
     const requestIdFor = message => message?.id ?? message?.responseChunk?.id ?? null;
-    const faultFor = (scope, kind, requestId = null) => ({
-      identity: `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`,
+    const faultFor = (scope, kind, requestId = null, changes = {}) => {
+      const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
+      const previous = lane.fault?.identity === identity ? lane.fault : null;
+      const recoveryRounds = changes.recoveryRounds ?? previous?.recoveryRounds ?? 0;
+      const state = changes.state ?? previous?.state ?? "unresolved";
+      const nextObservationAt = changes.nextObservationAt ?? previous?.nextObservationAt
+        ?? Number(now()) + recoveryDelaysMs[recoveryRounds];
+      return {
+      identity,
       kind: scope,
       ...(requestId ? { requestId } : {}),
-      state: "unresolved",
-      recoveryRounds: lane.fault?.identity === `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`
-        ? lane.fault.recoveryRounds : 0,
+      state,
+      recoveryRounds,
+      recoveryDelaysMs,
+      ...(state === "unresolved" ? { nextObservationAt } : {}),
       receiptRefs: requestId ? [requestId] : [],
-    });
+    }; };
+    const beginRecoveryObservation = async (scope, kind, requestId, flushFault = true) => {
+      const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
+      const fault = lane.fault?.identity === identity ? lane.fault : null;
+      if (!fault) return { observe: true, recoveryRounds: 0 };
+      if (fault.state === "exhausted" || Number(now()) < fault.nextObservationAt) {
+        return { observe: false, recoveryRounds: fault.recoveryRounds, state: fault.state };
+      }
+      const recoveryRounds = fault.recoveryRounds + 1;
+      lane.fault = faultFor(scope, kind, requestId, { recoveryRounds, state: "unresolved",
+        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) });
+      save(); if (flushFault) await flush();
+      return { observe: true, recoveryRounds };
+    };
+    const retainPendingFault = async (scope, kind, requestId, recoveryRounds, flushFault = true) => {
+      const exhausted = recoveryRounds >= recoveryDelaysMs.length;
+      lane.fault = faultFor(scope, kind, requestId, { recoveryRounds, state: exhausted ? "exhausted" : "unresolved",
+        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) });
+      save(); if (flushFault) await flush();
+      return lane.fault;
+    };
     const observe = async pending => {
       let timer;
       const timeout = new Promise(resolve => { timer = setTimeout(() => resolve({ state: "pending" }), transportWaitMs + hostOverheadMs); });
       try { return await Promise.race([pending, timeout]); }
       finally { clearTimeout(timer); }
     };
+    const pauseObservationCycle = () => new Promise(resolve => setTimeout(resolve, Math.min(heartbeatMs, 1000)));
     const physicalWrite = async message => {
       if (!lane.active) return { output: "" };
       const result = await tools.write_stdin({ session_id: lane.sessionId,
@@ -182,7 +222,8 @@
       if (kind !== "heartbeat") {
         lane.pendingIo = { kind, state: "sending", ...(requestId ? { requestId } : {}) }; save();
       }
-      const promise = (async () => {
+      const owner = { kind, requestId, message, promise: null, outcome: null };
+      owner.promise = (async () => {
         let result;
         if (kind === "response" && body.length > 6000) {
           const chunks = [];
@@ -196,8 +237,8 @@
           }
         } else result = await physicalWrite(message);
         return { state: "returned", result };
-      })().catch(() => ({ state: "failed" }));
-      activeWrite = { kind, requestId, message, promise };
+      })().catch(() => ({ state: "failed" })).then(outcome => { owner.outcome = outcome; return outcome; });
+      activeWrite = owner;
       return activeWrite;
     };
     const schedulePulse = () => {
@@ -316,19 +357,27 @@
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
         return false;
       }
-      const observed = await observe(current.promise);
+      const recovery = current.outcome ? { observe: true, recoveryRounds: lane.fault?.recoveryRounds ?? 0 }
+        : await beginRecoveryObservation("transport", kind, current.requestId, kind !== "heartbeat");
+      if (!recovery.observe) {
+        await pauseObservationCycle();
+        publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind,
+          state: recovery.state ?? "pending", recoveryRounds: recovery.recoveryRounds });
+        return false;
+      }
+      const observed = current.outcome ?? await observe(current.promise);
       if (observed.state === "pending") {
         if (lane.pendingIo) lane.pendingIo.state = "observing";
-        lane.fault = faultFor("transport", kind, current.requestId); save();
-        if (kind !== "heartbeat") await flush();
+        const fault = await retainPendingFault("transport", kind, current.requestId, recovery.recoveryRounds, kind !== "heartbeat");
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind, state: "pending",
-          waitMs: transportWaitMs, hostOverheadMs, faultIdentity: lane.fault.identity });
+          waitMs: transportWaitMs, hostOverheadMs, faultIdentity: fault.identity, recoveryRounds: fault.recoveryRounds,
+          faultState: fault.state });
         return false;
       }
       activeWrite = null;
       if (observed.state === "failed") {
         if (lane.pendingIo) { lane.pendingIo.state = "uncertain"; lane.pendingIo.ownerSettled = true; }
-        lane.fault = faultFor("transport", kind, current.requestId); save();
+        lane.fault = faultFor("transport", kind, current.requestId, { state: "exhausted" }); save();
         if (kind !== "heartbeat") await flush();
         publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: lane.fault.identity });
         return false;
@@ -390,16 +439,20 @@
         }
         const pending = native.get(request.id);
         if (pending) {
-          while (request.state === "dispatched" && Date.now() < deadline) {
+          const recovery = await beginRecoveryObservation("native", "call", request.id);
+          if (!recovery.observe) await pauseObservationCycle();
+          while (recovery.observe && request.state === "dispatched" && Date.now() < deadline) {
             let timer;
             await Promise.race([pending, new Promise(resolve => { timer = setTimeout(resolve, heartbeatMs); })]);
             clearTimeout(timer);
             if (request.state === "dispatched") await heartbeat();
           }
           if (request.state === "dispatched") {
-            lane.fault = faultFor("native", "call", request.id); save(); await flush();
+            const fault = recovery.observe
+              ? await retainPendingFault("native", "call", request.id, recovery.recoveryRounds)
+              : lane.fault;
             publishDelta(`native:${request.id}`, { type: "native-observation", id: request.id, state: "pending",
-              waitMs: tickMs, faultIdentity: lane.fault.identity });
+              waitMs: tickMs, faultIdentity: fault.identity, recoveryRounds: fault.recoveryRounds, faultState: fault.state });
           }
           if (request.state === "returned") { await pending; native.delete(request.id); }
         }
@@ -415,6 +468,12 @@
           request.settled = true;
           request.request = { type: "tool", id: request.id, name: request.request.name };
           delete request.raw; delete request.response; delete request.ownerEvidence;
+          lane.settledRequestCount = (lane.settledRequestCount ?? 0) + 1;
+          const retainedSettled = lane.requests.filter(item => item.settled);
+          if (retainedSettled.length > settledRetentionLimit) {
+            const remove = new Set(retainedSettled.slice(0, retainedSettled.length - settledRetentionLimit));
+            lane.requests = lane.requests.filter(item => !remove.has(item));
+          }
           save(); await flush();
         }
         if (Date.now() >= deadline) break;

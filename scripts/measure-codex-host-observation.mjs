@@ -1,4 +1,7 @@
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { performance } from "node:perf_hooks";
 import { runInNewContext } from "node:vm";
@@ -27,6 +30,28 @@ for (let index = 0; index < 1000; index += 1) {
   stringifySamples.push(performance.now() - sampleStartedAt);
 }
 stringifySamples.sort((left, right) => left - right);
+let persistence = { state: "unavailable", reason: "production checkpoint writer requires Windows PowerShell" };
+if (process.platform === "win32") {
+  const root = mkdtempSync(join(tmpdir(), "codex-host-observation-"));
+  try {
+    const writer = driver.createCheckpointWriter({ path: join(root, "checkpoint.json"), tools: {
+      async exec_command({ cmd }) {
+        const observed = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], { encoding: "utf8" });
+        return { exit_code: observed.status, output: `${observed.stdout ?? ""}${observed.stderr ?? ""}` };
+      },
+    } });
+    const samples = [];
+    for (let index = 0; index < 3; index += 1) {
+      const sampleStartedAt = performance.now();
+      await writer(checkpoint);
+      samples.push(performance.now() - sampleStartedAt);
+    }
+    samples.sort((left, right) => left - right);
+    persistence = { state: "measured", samples: samples.length,
+      meanMs: Number((samples.reduce((sum, value) => sum + value, 0) / samples.length).toFixed(2)),
+      maximumMs: Number(samples.at(-1).toFixed(2)) };
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}
 
 const input = new PassThrough();
 const output = new PassThrough();
@@ -81,6 +106,7 @@ const result = {
     stringifySamples: stringifySamples.length,
     meanStringifyMs: Number((stringifySamples.reduce((sum, value) => sum + value, 0) / stringifySamples.length).toFixed(4)),
     p95StringifyMs: Number(stringifySamples[Math.floor(stringifySamples.length * 0.95)].toFixed(4)),
+    persistence,
   },
   bridge: bridgeMetrics,
   taskObservation: {

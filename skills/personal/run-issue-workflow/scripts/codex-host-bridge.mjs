@@ -16,7 +16,11 @@ export const CODEX_HOST_RELEASE_CAPABILITY = Object.freeze({
 });
 
 // Only the active Codex task forwards these requests to its available desktop tools.
-export function createCodexHostBridge({ input = process.stdin, output = process.stdout, idleTimeoutMs = 90000 } = {}) {
+export function createCodexHostBridge({ input = process.stdin, output = process.stdout, idleTimeoutMs = 90000,
+  settledReceiptLimit = 1024 } = {}) {
+  if (!Number.isInteger(settledReceiptLimit) || settledReceiptLimit < 1 || settledReceiptLimit > 4096) {
+    throw new TypeError("Settled receipt limit must be between one and 4096");
+  }
   const reader = createInterface({ input, terminal: false });
   const pending = new Map();
   const accepted = new Map();
@@ -24,6 +28,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
   let closed = false;
   const controls = new Map();
   let toolCalls = 0;
+  let settledRequests = 0;
   const startedAt = Date.now();
   let idleTimer, idleCheck;
   let lastInputAt = startedAt, disconnect;
@@ -69,7 +74,14 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
           || message.settleRequests.some(id => typeof id !== "string")) throw new Error("Malformed settled request selection");
         for (const id of new Set(message.settleRequests)) {
           const entry = accepted.get(id);
-          if (entry) { entry.message = null; entry.settled = true; }
+          if (entry && !entry.settled) {
+            entry.message = null; entry.settled = true; settledRequests += 1;
+            while ([...accepted.values()].filter(value => value.settled).length > settledReceiptLimit) {
+              const oldest = [...accepted].find(([, value]) => value.settled)?.[0];
+              if (oldest === undefined) break;
+              accepted.delete(oldest);
+            }
+          }
         }
         return;
       }
@@ -158,7 +170,8 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     },
     get disconnected() { return closed; },
     metrics: () => ({ toolCalls, elapsedMs: Date.now() - startedAt, tokens: "unavailable",
-      settledRequests: [...accepted.values()].filter(entry => entry.settled).length,
+      settledRequests,
+      retainedSettledReceipts: [...accepted.values()].filter(entry => entry.settled).length,
       retainedSettledPayloadBytes: [...accepted.values()].filter(entry => entry.settled)
         .reduce((total, entry) => total + (entry.message ? JSON.stringify(entry.message).length : 0), 0),
       ...(disconnect ? { disconnect } : {}) }),

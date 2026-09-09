@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -558,13 +558,15 @@ test("event waits rotate batches of eight, reuse cursors and read full history o
 test("unsupported event notification falls back at 15/30/60 seconds and resets only after semantic change", async () => {
   const ref = { threadId: "worker", hostId: "local" };
   const delays = [];
-  let state = "active", reads = 0;
-  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", sleep: async delay => { delays.push(delay); },
+  let state = "active", snapshots = 0, fullReads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+    waitForObservationSignal: async ({ timeoutMs }) => { delays.push(timeoutMs); return null; },
     host: { async call(name, args) {
       if (name.endsWith("wait_threads")) throw new Error("Unsupported desktop tool: wait_threads");
       if (name.endsWith("read_thread")) {
-        reads += 1;
-        return { thread: { id: args.threadId, hostId: args.hostId, status: { type: state } }, turns: [] };
+        if (args.includeOutputs) fullReads += 1; else snapshots += 1;
+        return { thread: { id: args.threadId, hostId: args.hostId, status: { type: state } },
+          turns: args.includeOutputs ? [{ id: "done", status: "completed", items: [] }] : [] };
       }
       throw new Error(name);
     } } });
@@ -579,7 +581,8 @@ test("unsupported event notification falls back at 15/30/60 seconds and resets o
   await tasks.wait([ref]);
   assert.equal(changed.observation.kind, "changed");
   assert.equal(delays.at(-1), 15000, "a material state transition resets the next fallback interval");
-  assert.equal(reads, 6);
+  assert.equal(snapshots, 6);
+  assert.equal(fullReads, 1, "only the material terminal transition fetches bounded full task history");
 });
 
 test("fallback task observation yields independently for a control or execution deadline", async () => {
@@ -588,8 +591,8 @@ test("fallback task observation yields independently for a control or execution 
     const delays = [];
     let checks = 0;
     const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
-      sleep: async delay => { delays.push(delay); },
-      readObservationSignal: async () => (++checks === (signal.control ? 1 : 2) ? signal : null),
+      readObservationSignal: async () => (++checks === 1 && signal.control ? signal : null),
+      waitForObservationSignal: async ({ timeoutMs }) => { delays.push(timeoutMs); return signal.deadline ? signal : null; },
       host: { async call(name) {
         if (name.endsWith("wait_threads")) throw new Error("wait_threads is not available");
         throw new Error(`Task history must not be read after ${signal.control ? "control" : "deadline"}`);
@@ -600,6 +603,16 @@ test("fallback task observation yields independently for a control or execution 
     assert.equal(observed.observation.signal, signal.control ? "control" : "deadline");
     assert.deepEqual(delays, signal.control ? [] : [15000]);
     assert.equal(observed.observation.fullHistoryReads, 0);
-    assert.equal(observed.observation.nativeCalls, 1, "the unsupported event probe remains visible in metrics");
+    assert.equal(observed.observation.nativeCalls, signal.control ? 0 : 1,
+      "a queued control prevents the event call while a later deadline retains the unsupported probe metric");
   }
+});
+
+test("production composition binds the Run fault store and task observation signals", () => {
+  const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-workflow.mjs", import.meta.url), "utf8");
+  const coordinator = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs", import.meta.url), "utf8");
+  assert.match(source, /runId:\s*effectiveRunIdentity\.runId/u);
+  assert.match(source, /readObservationSignal:\s*observationSignal/u);
+  assert.match(source, /executionDeadlineAt/u);
+  assert.match(coordinator, /observation\?\.signal === "deadline"/u);
 });

@@ -212,3 +212,29 @@ test("settled requests retain duplicate/conflict evidence without retaining nati
     assert.equal(messages.at(-1).type, "input-error");
   } finally { bridge.close(); }
 });
+
+test("settled bridge receipts have a fixed retention bound and evicted responses fail closed", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output, settledReceiptLimit: 2 });
+  const responses = [];
+  try {
+    for (let index = 0; index < 3; index += 1) {
+      const pending = bridge.call("mcp__codex_app__list_threads", { limit: index + 1 });
+      const request = messages.at(-1), response = { id: request.id, result: { index } };
+      responses.push(response);
+      input.write(`${JSON.stringify(response)}\n`);
+      await pending;
+      input.write(`${JSON.stringify({ settleRequests: [request.id] })}\n`);
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.deepEqual(bridge.metrics(), { toolCalls: 3, elapsedMs: bridge.metrics().elapsedMs, tokens: "unavailable",
+      settledRequests: 3, retainedSettledReceipts: 2, retainedSettledPayloadBytes: 0 });
+    input.write(`${JSON.stringify(responses[0])}\n`);
+    assert.equal(messages.at(-1).type, "input-error", "an evicted duplicate is rejected rather than accepted or replayed");
+    input.write(`${JSON.stringify(responses[2])}\n`);
+    assert.equal(messages.at(-1).type, "response-accepted", "the bounded recent window keeps exact duplicate evidence");
+    input.write(`${JSON.stringify({ ...responses[2], result: { index: 99 } })}\n`);
+    assert.equal(messages.at(-1).type, "input-error", "the bounded recent window keeps conflicting-response evidence");
+  } finally { bridge.close(); }
+});

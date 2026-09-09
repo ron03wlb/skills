@@ -1395,6 +1395,7 @@ export function createCoordinator({
             }
             const waited = await tasks.wait(activeTaskRefs);
             if (waited?.coordinatorActive === false) return lastStatus;
+            if (waited?.observation?.signal === "deadline") return lastStatus;
             continue;
           }
 
