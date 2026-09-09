@@ -239,12 +239,14 @@
     };
     const write = async (message, kind) => {
       if (!lane.active) return false;
+      const body = JSON.stringify(message);
+      if (kind === "response" && body.length > 16 * 1024 * 1024) {
+        throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
+      }
       lane.pendingIo = { kind, message, state: "sending" }; save(); await flush();
       let result;
       try {
-        const body = JSON.stringify(message);
         if (kind === "response" && body.length > 6000) {
-          if (body.length > 16 * 1024 * 1024) throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
           const chunks = [];
           for (let offset = 0; offset < body.length;) {
             let size = Math.min(6000, body.length - offset);

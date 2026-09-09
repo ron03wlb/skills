@@ -351,3 +351,13 @@ test("a terminal frame returned by the final in-flight heartbeat is drained befo
   assert.ok(h.output.some(value => value.type === "result" && value.result.state === "PRESERVED"));
   assert.equal(h.lane().buffer, "");
 });
+
+test("a response beyond transport capacity stops with its native outcome retained", async () => {
+  const text = "x".repeat(16 * 1024 * 1024);
+  const h = harness({ native: () => ({ text }) });
+  await assert.rejects(h.driver.tick(), /exceeds bounded transport capacity/u);
+  assert.equal(h.calls(), 1);
+  assert.equal(h.writes.some(message => message?.id || message?.responseChunk), false);
+  assert.equal(h.lane().requests[0].response.result.text.length, text.length);
+  assert.equal(h.lane().requests[0].state, "forwarding");
+});
