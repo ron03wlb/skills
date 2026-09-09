@@ -4,6 +4,8 @@ import { realpathSync } from "node:fs";
 import { setTimeout } from "node:timers/promises";
 import { join, resolve } from "node:path";
 import { delegatedInput, discoverLocalCodexTasks } from "./codex-task-discovery.mjs";
+import { createCodexCloseReceipts } from "./codex-close-receipts.mjs";
+import { completedCloseCleanup } from "./close-continuation.mjs";
 import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
 
 export function unwrapCodexResult(result) {
@@ -15,14 +17,33 @@ export function unwrapCodexResult(result) {
 const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (items ?? []).flatMap((item) =>
   item.type === "userMessage" ? item.content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []
     : item.type === "functionCallOutput" && delegatedInput(item) !== null ? [delegatedInput(item)] : []));
+const ownerHistory = snapshot => ({ ...snapshot, turns: (snapshot.turns ?? []).map(turn => ({ ...turn,
+  items: (turn.items ?? []).filter(item => item.type === "userMessage" || item.type === "agentMessage" && item.phase === "final_answer"
+    || item.type === "functionCallOutput" && delegatedInput(item) !== null),
+})) });
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 const uncertainNativeResult = result => [result?.type, result?.status].some(value => ["error", "failed", "response-accepted"].includes(value));
+const closeRequestFrom = prompt => {
+  if (!prompt) return undefined;
+  const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (\{[^\n]+\})/u);
+  if (!match) throw new Error("Task close request evidence is malformed");
+  const evidence = JSON.parse(match[2]);
+  const continuation = prompt.match(/^Close continuation: (\{.+\})$/mu);
+  return { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence,
+    ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
+};
 
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
-export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
+export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, runId, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
   const refs = new Map();
   const cursors = new Map();
+  const taskRuns = new Map();
+  const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
+    if (!selectedRunId || !store?.gitCommonDir) return null;
+    taskRuns.set(ref.threadId, selectedRunId);
+    return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
+  };
   const call = async (name, args) => {
     const delays = [1000, 5000, 15000];
     for (let attempt = 0; ; attempt += 1) {
@@ -34,32 +55,35 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate) => {
-    let snapshot = await call("read_thread", { ...ref, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 16000 });
+  const readHistory = async (ref, predicate, { latestOnly = false } = {}) => {
+    let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2, includeOutputs: true, maxOutputCharsPerItem: 8192 }));
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
       if (predicate(snapshot) || !snapshot.page?.hasMore) return snapshot;
       const cursor = snapshot.page.nextCursor;
-      if (!cursor || cursorsSeen.has(cursor) || page >= 99) throw new Error("Task history is unresolved; preserve the existing lane");
+      if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
-      const older = await call("read_thread", { ...ref, cursor, turnLimit: 10, includeOutputs: true, maxOutputCharsPerItem: 16000 });
+      const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2, includeOutputs: true, maxOutputCharsPerItem: 8192 }));
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
     }
   };
-  const read = async (ref) => {
-    const snapshot = await readHistory(ref, value => userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)));
+  const read = async (ref, ownership = {}) => {
+    const receipts = receiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
+    let receipt = receipts?.read();
+    const snapshot = await readHistory(ref, value => Boolean(receipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)), { latestOnly: Boolean(receipt) });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
-    const prompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
-    let closeRequest;
-    if (prompt) {
-      const match = prompt.match(/Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (\{[^\n]+\})/u);
-      if (!match) throw new Error("Task close request evidence is malformed");
-      const evidence = JSON.parse(match[2]);
-      const continuation = prompt.match(/^Close continuation: (\{.+\})$/mu);
-      closeRequest = { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence, ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
+    const nativePrompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
+    if (receipt && userTexts(snapshot).includes(receipt.prompt) && !receipt.accepted) {
+      receipts.accept(receipt.promptIdentity, "native-history"); receipt = receipts.read();
+    }
+    const closeRequest = closeRequestFrom(receipt?.accepted ? receipt.prompt : nativePrompt);
+    const currentNativePrompt = userTexts({ turns: snapshot.turns.slice(0, 1) }).find(text => text.includes("Close request identity:"));
+    if (receipt?.accepted && currentNativePrompt
+      && modelEvidenceDigest(closeRequestFrom(currentNativePrompt)) !== modelEvidenceDigest(closeRequest)) {
+      throw new Error("Current native close request contradicts its retained accepted owner; preserve both identities");
     }
     const retryPrompt = userTexts(snapshot).find((text) => text.includes("Retry request: "));
     const retryMatch = retryPrompt?.match(/Retry request: (\{.+\})$/u);
@@ -77,17 +101,32 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const recoveryRequest = recoveryMatch ? { state: "ACCEPTED", ...JSON.parse(recoveryMatch[1]) } : undefined;
     const finals = (snapshot.turns ?? []).flatMap(turn => (turn.items ?? []).filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.text));
     const closeResultMatch = finals.map(final => final?.match(/^Workflow close result: (\{.+\})$/mu)).find(Boolean);
-    const closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    let closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    if (receipt?.accepted) {
+      // A same-identity continuation may have an older outcome in another turn.
+      // Only the turn containing this exact accepted prompt can add its result.
+      const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] }).includes(receipt.prompt));
+      const owningMatch = owningTurn?.items.findLast(item => item.type === "agentMessage" && item.phase === "final_answer")
+        ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
+      closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
+      if (closeResult) {
+        if (closeResult.runId !== closeRequest.runId || closeResult.issueId !== closeRequest.issueId
+          || closeResult.requestIdentity !== closeRequest.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
+        receipts.observe(receipt.promptIdentity, closeResult);
+      }
+      else closeResult = receipt.outcome?.result;
+    }
     const recoveryResultMatch = finals.map(final => final?.match(/^Workflow recovery result: (\{.+\})$/mu)).find(Boolean);
     const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult, snapshot, cwd: snapshot.thread.cwd };
+      closeRequest, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult,
+      closeOutcomeUnavailable: Boolean(receipt && !closeResult), snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
     const journaled = store.readEvents(runIdentity.runId).filter((event) => event.type === "dispatch.recorded" && event.issueId === issueId);
-    if (journaled.length) return [journaled.at(-1).taskRef];
+    if (journaled.length) { taskRuns.set(journaled.at(-1).taskRef.threadId, runIdentity.runId); return [journaled.at(-1).taskRef]; }
     if (refs.has(key)) return [refs.get(key)];
     if (prepared) {
       const ref = prepared.taskRef;
@@ -357,18 +396,43 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       return observations;
     },
     async message(ref, prompt) {
+      const close = prompt.includes("Close request identity:") ? closeRequestFrom(prompt) : null;
+      const receipts = close ? receiptsFor(ref, close.runId) : null;
       const issue = prompt.match(/(?:close|retry|repair) (?:parent )?Issue (I_[A-Za-z0-9_-]+)/u);
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
       const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${workflowSourceBoundary(packageRoot)}\n${prompt}`;
-      const previous = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
-      if (userTexts(previous).includes(frozenPrompt)) return;
+      const stored = receipts?.read();
+      if (stored?.prompt === frozenPrompt && stored.accepted) return;
+      const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
+      if (userTexts(previous).includes(frozenPrompt)) {
+        if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
+        return;
+      }
+      if (close && previous.turns?.some(turn => turn.status === "completed" && !turn.items?.length)
+        && !completedCloseCleanup(close.evidence)) {
+        throw new Error("Close message outcome is unresolved because native history omitted the settled turn; preserve its owner");
+      }
+      if (close && previous.thread.status?.type === "active") throw new Error("Close task is active; preserve its accepted work");
+      const reservation = receipts?.reserve(frozenPrompt);
+      if (reservation && !reservation.created) throw new Error("Close message outcome is unresolved; preserve the reserved request");
       for (const delay of [1000, 5000, 15000]) {
-        try { await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }); return; }
+        try {
+          const accepted = await call("send_message_to_thread", { ...ref, prompt: frozenPrompt });
+          if (close) {
+            if (uncertainNativeResult(accepted) || accepted?.threadId !== ref.threadId
+              || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) throw new Error("Native close acceptance is unproven");
+            receipts?.accept(reservation.promptIdentity, "native-response");
+          }
+          return;
+        }
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
           await sleep(delay);
           const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
-          if (userTexts(snapshot).includes(frozenPrompt)) return;
+          if (userTexts(snapshot).includes(frozenPrompt)) {
+            receipts?.accept(reservation.promptIdentity, "native-history"); return;
+          }
+          if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
         }
       }
@@ -381,7 +445,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const threadId = target.thread?.id ?? target.threadId;
         if (threadId && target.cursor) cursors.set(threadId, target.cursor);
       }
-      const states = await Promise.all(taskRefs.map(read));
+      const states = await Promise.all(taskRefs.map(ref => read(ref)));
       return { coordinatorActive: !host.disconnected, taskSettled: states.every(({ state }) => state === "RESUMABLE"),
         ...(states.length === 1 && states[0].closeRequest ? { closeRequestIdentity: states[0].closeRequest.requestIdentity } : {}) };
     },

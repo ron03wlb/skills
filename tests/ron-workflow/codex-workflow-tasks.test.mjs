@@ -1,12 +1,149 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
+import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
+
+test("native close acceptance survives omitted history and blocks unchanged redispatch across restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "close-acceptance-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "PRESENT" };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  let sends = 0, sentPrompt, turnId = "implementation", result;
+  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call(name, args) {
+      if (name.endsWith("send_message_to_thread")) { sends++; sentPrompt = args.prompt; turnId = "close"; return { threadId: ref.threadId }; }
+      assert.equal(name, "mcp__codex_app__read_thread");
+      if (sends) assert.equal(args.turnLimit, 1, "accepted close observation does not reread the large implementation turn");
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+        turns: [{ id: turnId, status: "completed", items: result ? [
+          { type: "userMessage", content: [{ type: "text", text: sentPrompt }] },
+          { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
+        ] : turnId === "implementation" ? [{ type: "agentMessage", phase: "final_answer", text: "Implementation completed" }] : [] }] };
+    } } };
+  try {
+    await createCodexWorkflowTasks(options).message(ref, prompt);
+    const resumed = createCodexWorkflowTasks(options);
+    const unknown = await resumed.read(ref);
+    assert.equal(unknown.closeRequest?.requestIdentity, requestIdentity, "native accepted input survives missing returned items");
+    assert.equal(planCloseContinuation({ task: unknown, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "close_outcome_unavailable");
+    await resumed.message(ref, prompt);
+    assert.equal(sends, 1, "same exact accepted native request is never sent twice");
+    const authorityEvidence = { candidateCommit: "a".repeat(40), completionEvidenceId: "IC_done", completionBodySha256: "sha256:done", worktreeIdentity: "sha256:owned" };
+    evidence.authorityEvidence = authorityEvidence;
+    result = { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
+      authorityEvidence, reasonCode: "host_helper_recovery_failed", observations: [{ code: "EBUSY", message: "Exact directory remains held" }] };
+    await resumed.read(ref);
+    result = undefined;
+    const settled = await createCodexWorkflowTasks(options).read(ref);
+    assert.equal(settled.closeResult?.state, "HOST_CLEANUP_BLOCKED", "retain the actual observed result when later native history omits it");
+    assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "host_helper_recovery_failed");
+    assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: { ...evidence, worktreeState: "ABSENT" } }).needed, true);
+    result = { ...settled.closeResult, issueId: "I_foreign" };
+    await assert.rejects(resumed.read(ref), /outcome identity differs/u, "a conflicting native result cannot replace retained owning evidence");
+    result = settled.closeResult;
+    sentPrompt = sentPrompt.replace('"issueId":"I_1"', '"issueId":"I_foreign"');
+    await assert.rejects(resumed.read(ref), /native close request contradicts/u, "present contradictory native ownership cannot be replaced by a receipt");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("lost or transport-only close response with omitted history never resends to an idle task", async () => {
+  for (const nativeResult of [undefined, { type: "response-accepted", threadId: "worker" }]) {
+    const root = mkdtempSync(join(tmpdir(), "close-uncertain-"));
+    const store = createRunStore({ gitCommonDir: join(root, ".git") });
+    let sends = 0;
+    const ref = { threadId: "worker", hostId: "local" };
+    const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, sleep: async () => {},
+      host: { async call(name) {
+        if (name.endsWith("send_message_to_thread")) { sends++; if (!nativeResult) throw new Error("response lost"); return nativeResult; }
+        return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+          turns: [{ id: sends ? "close" : "implementation", status: "completed", items: sends ? [] : [{ type: "agentMessage", phase: "final_answer", text: "Done" }] }] };
+      } } };
+    const prompt = `Use $close-issue to close Issue I_1. Close request identity: sha256:${"b".repeat(64)}. Current close request evidence: ${JSON.stringify({ runIdentity: { runId: "run" }, issueId: "I_1", worktreeState: "PRESENT" })}`;
+    try {
+      await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome.*unresolved/iu);
+      await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome.*unresolved/iu);
+      assert.equal(sends, 1);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
+test("owner history lookup has a fixed small page and output budget", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, host: { async call(name, args) {
+    assert.equal(name, "mcp__codex_app__read_thread"); reads++;
+    assert.ok(args.turnLimit <= 2); assert.ok(args.maxOutputCharsPerItem <= 8192);
+    return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      page: { hasMore: true, nextCursor: String(reads) }, turns: [{ id: String(reads), items: [] }] };
+  } } });
+  await assert.rejects(tasks.read(ref), /history.*unresolved/iu);
+  assert.ok(reads <= 4);
+});
+
+test("legacy omitted close history permits only freshly proved remaining closeout", async () => {
+  const root = mkdtempSync(join(tmpdir(), "legacy-close-history-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  let sends = 0;
+  const tasks = createCodexWorkflowTasks({ store, project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call(name) {
+      if (name.endsWith("send_message_to_thread")) { sends++; return { threadId: ref.threadId }; }
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+        turns: [{ id: "legacy-close", status: "completed", items: [] }] };
+    } } });
+  const prompt = evidence => `Use $close-issue to close Issue I_1. Close request identity: sha256:${"c".repeat(64)}. Current close request evidence: ${JSON.stringify({ runIdentity: { runId: "run" }, issueId: "I_1", ...evidence })}`;
+  try {
+    await assert.rejects(tasks.message(ref, prompt({ worktreeState: "PRESENT", candidateReachable: true })), /outcome.*unresolved/iu);
+    await assert.rejects(tasks.message(ref, prompt({ worktreeState: "ABSENT", candidateReachable: false })), /outcome.*unresolved/iu);
+    assert.equal(sends, 0);
+    await tasks.message(ref, prompt({ worktreeState: "ABSENT", candidateReachable: true }));
+    assert.equal(sends, 1);
+    const parent = { runIdentity: { runId: "run", specId: "I_parent", classification: "MULTI" }, issueId: "I_parent",
+      childCloseStates: [{ issueId: "I_1", completionState: "COMPLETE", trackerState: "CLOSED", candidateReachable: true, worktreeState: "ABSENT" }] };
+    await tasks.message(ref, `Use $close-issue to close parent Issue I_parent. Close request identity: sha256:${"f".repeat(64)}. Current close request evidence: ${JSON.stringify(parent)}`);
+    assert.equal(sends, 2, "the existing task can close its parent after every child has fully closed");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a newer close continuation cannot inherit another turn's outcome and a partial receipt fails closed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "close-turn-binding-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", worktreeState: "ABSENT", candidateReachable: true };
+  const requestIdentity = `sha256:${"d".repeat(64)}`;
+  let turns = [{ id: "implementation", status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: "Done" }] }];
+  const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call(name, args) {
+      if (name.endsWith("send_message_to_thread")) {
+        turns.unshift({ id: `close-${turns.length}`, status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: args.prompt }] }] });
+        return { threadId: ref.threadId };
+      }
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: structuredClone(turns) };
+    } } };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  try {
+    const tasks = createCodexWorkflowTasks(options);
+    await tasks.message(ref, prompt);
+    turns[0].items.push({ type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify({ schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity })}` });
+    await tasks.read(ref);
+    await tasks.message(ref, `${prompt}\nClose continuation: ${JSON.stringify({ attempt: 1, progressIdentity: `sha256:${"e".repeat(64)}` })}`);
+    const current = await createCodexWorkflowTasks(options).read(ref);
+    assert.equal(current.closeResult, undefined, "older same-request final is not the new continuation's result");
+    assert.equal(current.closeOutcomeUnavailable, true);
+    const directory = join(root, ".git", "matt-workflow-control", "runs", "run");
+    const receipt = readdirSync(directory).find(name => name.startsWith("close-messages-"));
+    appendFileSync(join(directory, receipt), "{partial");
+    await assert.rejects(createCodexWorkflowTasks(options).read(ref), /receipt write is incomplete/u);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test("policy-bound creation freezes validated native settings and refuses a below-floor decision", async () => {
   const root = mkdtempSync(join(tmpdir(), "model-task-"));

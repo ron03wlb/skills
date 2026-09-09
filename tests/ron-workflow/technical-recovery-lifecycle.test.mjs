@@ -192,7 +192,9 @@ for (const recoveryKind of ["issue", "maintenance", "environment", "readback", "
       }
       throw new Error(`Unexpected native call ${name}`);
     } };
-    histories.get("original").push({ id: "execution", status: "completed", items: [] });
+    histories.get("original").push({ id: "execution", status: "completed", items: [
+      { type: "agentMessage", phase: "final_answer", text: "Implementation fixture settled with its recorded completion." },
+    ] });
     const tasks = createCodexWorkflowTasks({ host, store, project: { path: repository, hostId: "local" }, packageRoot, issueNumber: async () => 1, sleep: async () => {}, discoverTasks: async () => [] });
     let owners = createGitHubWorkflowSources({ repository, repositoryName: "example/repo", store, tasks, workflowVersion: installed?.version, installationCacheDirectory: cacheDirectory });
     const refresh = () => owners.sources.tracker.read({ specId: "I_1" }).then(tracker => owners.sources.reconciliation.read({ tracker, journal: runIdentity ? store.readEvents(runIdentity.runId) : [], request: {} }));
