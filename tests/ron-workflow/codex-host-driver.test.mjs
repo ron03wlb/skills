@@ -246,6 +246,18 @@ test("failed checkpoint publication prevents native dispatch", async () => {
   assert.equal(h.calls(), 0);
 });
 
+test("an unavailable allowed host tool returns its original unsupported outcome to the adapter", async () => {
+  const h = harness();
+  const lane = h.lane();
+  lane.buffer = frame({ ...request, name: "mcp__codex_app__wait_threads", arguments: { targets: [], timeoutMs: 15000 } });
+  h.values.set("workflow.host", lane);
+  await h.driver.tick();
+  assert.equal(h.calls(), 0);
+  assert.deepEqual(h.writes.filter(message => message?.id), [{ id: request.id,
+    error: "Unsupported desktop tool: mcp__codex_app__wait_threads" }]);
+  assert.equal(h.lane().requests[0].state, "forwarded");
+});
+
 test("fresh file controls retain exact Run identity and do not replay the same ID after restore", async () => {
   const h = harness();
   let queued = null;
@@ -500,6 +512,46 @@ test("a never-returning native call is observed within the tick budget and its l
   assert.equal(h.calls(), 1);
   assert.equal(h.lane().requests[0].state, "forwarded");
   assert.equal(h.durable().fault, null);
+});
+
+test("concurrent native and transport faults retain independent recovery budgets", async () => {
+  let clock = 0;
+  const pending = new Promise(() => {});
+  const h = harness({ native: () => pending, write: message => message?.heartbeat ? pending : { output: "" } });
+  const driver = api.createDriver({ ...h.dependencies, heartbeatMs: 2, tickMs: 8,
+    transportWaitMs: 2, hostOverheadMs: 2, now: () => clock });
+  await driver.tick();
+  assert.deepEqual(h.durable().faults.map(fault => fault.identity).sort(), [
+    "native:42:call:original-id", "transport:42:heartbeat:session",
+  ]);
+  clock = 5000;
+  await driver.tick();
+  const rounds = Object.fromEntries(h.durable().faults.map(fault => [fault.identity, fault.recoveryRounds]));
+  assert.equal(rounds["native:42:call:original-id"], 0, "a transport-only observation cannot consume or reset the native budget");
+  assert.equal(rounds["transport:42:heartbeat:session"], 1);
+});
+
+test("a late heartbeat write clears its durable fault without starting another owner", async () => {
+  let settleHeartbeat;
+  const pendingHeartbeat = new Promise(resolve => { settleHeartbeat = resolve; });
+  let heartbeatWrites = 0;
+  const h = harness({ write: message => {
+    if (!message?.heartbeat) return { output: "" };
+    heartbeatWrites += 1;
+    return pendingHeartbeat;
+  } });
+  h.values.set("workflow.host", api.createLane({ sessionId: 42 }));
+  const driver = api.createDriver({ ...h.dependencies, heartbeatMs: 1_000_000, tickMs: 5,
+    transportWaitMs: 2, hostOverheadMs: 2, setTimeout, clearTimeout });
+  await driver.tick();
+  assert.equal(heartbeatWrites, 1);
+  assert.equal(h.durable().fault.identity, "transport:42:heartbeat:session");
+  settleHeartbeat({ output: "" });
+  await sleep(0);
+  await driver.tick();
+  assert.equal(heartbeatWrites, 2, "the late owner settles before the ordinary next heartbeat");
+  assert.equal(h.durable().fault, null);
+  assert.deepEqual(h.durable().faults, []);
 });
 
 test("settled driver checkpoint work retains only a bounded recent request window", () => {

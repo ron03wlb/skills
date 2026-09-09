@@ -496,7 +496,8 @@ test("one read-only transport fault consumes exactly 5/15/30 recovery seconds ac
     project: {},
     packageRoot: "/installed",
     issueNumber: async () => 1,
-    sleep: async delay => { delays.push(delay); },
+    sleep: async () => {},
+    waitForObservationSignal: async ({ timeoutMs }) => { delays.push(timeoutMs); return null; },
     host: { async call(name) {
       assert.equal(name, "mcp__codex_app__wait_threads");
       calls += 1;
@@ -606,6 +607,29 @@ test("fallback task observation yields independently for a control or execution 
     assert.equal(observed.observation.nativeCalls, signal.control ? 0 : 1,
       "a queued control prevents the event call while a later deadline retains the unsupported probe metric");
   }
+});
+
+test("control interrupts wait_threads fault recovery before another native call", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const recoveryWindows = [];
+  let calls = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", runId: "run",
+    readObservationSignal: async () => null,
+    waitForObservationSignal: async ({ timeoutMs }) => {
+      recoveryWindows.push(timeoutMs);
+      return { control: "STOP" };
+    },
+    host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      calls += 1;
+      throw new Error("temporary connection failure");
+    } },
+  });
+  const observed = await tasks.wait([ref]);
+  assert.equal(observed.observation.kind, "interrupted");
+  assert.equal(observed.observation.signal, "control");
+  assert.deepEqual(recoveryWindows, [5000]);
+  assert.equal(calls, 1, "the interrupted recovery never issues a second native call");
 });
 
 test("production composition binds the Run fault store and task observation signals", () => {

@@ -67,7 +67,8 @@
     if (sessionId == null) throw new Error("An original host session ID is required");
     return { schema: "codex-host-driver:v1", sessionId, active: exit_code === undefined,
       ...(exit_code === undefined ? {} : { exitCode: exit_code }), buffer: output,
-      requests: [], settledRequestCount: 0, frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null, fault: null };
+      requests: [], settledRequestCount: 0, frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null,
+      fault: null, faults: [] };
   }
 
   // Durable receipts carry identity/progress only. Native payloads, panel URLs,
@@ -87,7 +88,8 @@
       diagnostics: lane.diagnostics.map(() => ({ reason: "Retained transport diagnostic; raw bytes stay in the original cell" })),
       pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state,
         ...(lane.pendingIo.requestId ? { requestId: lane.pendingIo.requestId } : {}) } : null,
-      fault: lane.fault ? copy(lane.fault) : null };
+      fault: lane.fault ? copy(lane.fault) : null,
+      faults: copy(lane.faults ?? (lane.fault ? [lane.fault] : [])) };
   }
 
   function restoreCheckpoint(saved) {
@@ -100,6 +102,7 @@
     lane.diagnostics = saved.diagnostics;
     lane.pendingIo = saved.pendingIo;
     lane.fault = saved.fault ?? null;
+    lane.faults = saved.faults ?? (saved.fault ? [saved.fault] : []);
     lane.needsInspection = true;
     lane.omittedPartialBytes = saved.partialBytes;
     return lane;
@@ -163,9 +166,21 @@
       reportSignatures.set(key, signature); publish(value); return true;
     };
     const requestIdFor = message => message?.id ?? message?.responseChunk?.id ?? null;
+    const findFault = identity => lane.faults?.find(fault => fault.identity === identity) ?? null;
+    const retainFault = fault => {
+      lane.faults ??= [];
+      const index = lane.faults.findIndex(item => item.identity === fault.identity);
+      if (index < 0) lane.faults.push(fault); else lane.faults[index] = fault;
+      lane.fault = fault;
+      return fault;
+    };
+    const clearFault = identity => {
+      lane.faults = (lane.faults ?? []).filter(fault => fault.identity !== identity);
+      lane.fault = lane.faults.at(-1) ?? null;
+    };
     const faultFor = (scope, kind, requestId = null, changes = {}) => {
       const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
-      const previous = lane.fault?.identity === identity ? lane.fault : null;
+      const previous = findFault(identity);
       const recoveryRounds = changes.recoveryRounds ?? previous?.recoveryRounds ?? 0;
       const state = changes.state ?? previous?.state ?? "unresolved";
       const nextObservationAt = changes.nextObservationAt ?? previous?.nextObservationAt
@@ -182,23 +197,23 @@
     }; };
     const beginRecoveryObservation = async (scope, kind, requestId, flushFault = true) => {
       const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
-      const fault = lane.fault?.identity === identity ? lane.fault : null;
+      const fault = findFault(identity);
       if (!fault) return { observe: true, recoveryRounds: 0 };
       if (fault.state === "exhausted" || Number(now()) < fault.nextObservationAt) {
         return { observe: false, recoveryRounds: fault.recoveryRounds, state: fault.state };
       }
       const recoveryRounds = fault.recoveryRounds + 1;
-      lane.fault = faultFor(scope, kind, requestId, { recoveryRounds, state: "unresolved",
-        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) });
+      retainFault(faultFor(scope, kind, requestId, { recoveryRounds, state: "unresolved",
+        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) }));
       save(); if (flushFault) await flush();
       return { observe: true, recoveryRounds };
     };
     const retainPendingFault = async (scope, kind, requestId, recoveryRounds, flushFault = true) => {
       const exhausted = recoveryRounds >= recoveryDelaysMs.length;
-      lane.fault = faultFor(scope, kind, requestId, { recoveryRounds, state: exhausted ? "exhausted" : "unresolved",
-        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) });
+      const fault = retainFault(faultFor(scope, kind, requestId, { recoveryRounds, state: exhausted ? "exhausted" : "unresolved",
+        nextObservationAt: Number(now()) + (recoveryDelaysMs[recoveryRounds] ?? 0) }));
       save(); if (flushFault) await flush();
-      return lane.fault;
+      return fault;
     };
     const observe = async pending => {
       let timer;
@@ -323,7 +338,10 @@
             request.ownerState = message.state; save();
             if (["forwarding", "returned"].includes(request.state) && message.state === "accepted") await transition(request, "forwarded");
             // Redelivery is only the already-returned response, after original-owner pending evidence.
-            if (request.state === "forwarding" && message.state === "pending") await transition(request, "returned");
+            if (request.state === "forwarding" && message.state === "pending") {
+              clearFault(`transport:${lane.sessionId}:response:${request.id}`);
+              await transition(request, "returned");
+            }
           } else diagnostic("Unknown original-owner request state", { raw: item.raw });
         } else {
           if (message.type === "control-result") {
@@ -347,7 +365,7 @@
         lane.pendingIo = null; save();
       } else if (!activeWrite && lane.pendingIo) {
         lane.pendingIo.state = "uncertain";
-        lane.fault = faultFor("transport", lane.pendingIo.kind, lane.pendingIo.requestId); save(); await flush();
+        const fault = retainFault(faultFor("transport", lane.pendingIo.kind, lane.pendingIo.requestId)); save(); await flush();
         publish({ type: "reconciliation-required", id: lane.pendingIo.requestId,
           reason: "Original physical write owner is absent; reconcile its late outcome before another write" });
         return false;
@@ -357,8 +375,9 @@
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
         return false;
       }
-      const recovery = current.outcome ? { observe: true, recoveryRounds: lane.fault?.recoveryRounds ?? 0 }
-        : await beginRecoveryObservation("transport", kind, current.requestId, kind !== "heartbeat");
+      const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${current.requestId ?? "session"}`;
+      const recovery = current.outcome ? { observe: true, recoveryRounds: findFault(transportFaultIdentity)?.recoveryRounds ?? 0 }
+        : await beginRecoveryObservation("transport", kind, current.requestId);
       if (!recovery.observe) {
         await pauseObservationCycle();
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind,
@@ -368,7 +387,7 @@
       const observed = current.outcome ?? await observe(current.promise);
       if (observed.state === "pending") {
         if (lane.pendingIo) lane.pendingIo.state = "observing";
-        const fault = await retainPendingFault("transport", kind, current.requestId, recovery.recoveryRounds, kind !== "heartbeat");
+        const fault = await retainPendingFault("transport", kind, current.requestId, recovery.recoveryRounds);
         publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind, state: "pending",
           waitMs: transportWaitMs, hostOverheadMs, faultIdentity: fault.identity, recoveryRounds: fault.recoveryRounds,
           faultState: fault.state });
@@ -377,16 +396,17 @@
       activeWrite = null;
       if (observed.state === "failed") {
         if (lane.pendingIo) { lane.pendingIo.state = "uncertain"; lane.pendingIo.ownerSettled = true; }
-        lane.fault = faultFor("transport", kind, current.requestId, { state: "exhausted" }); save();
-        if (kind !== "heartbeat") await flush();
-        publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: lane.fault.identity });
+        const fault = retainFault(faultFor("transport", kind, current.requestId, { state: "exhausted" })); save();
+        await flush();
+        publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: fault.identity });
         return false;
       }
       lane.pendingIo = null;
-      if (lane.fault?.kind === "transport") lane.fault = null;
+      const recoveredFault = findFault(transportFaultIdentity) !== null;
+      clearFault(transportFaultIdentity);
       reportSignatures.delete("transport");
       save(); await drain();
-      if (kind !== "heartbeat") await flush();
+      if (kind !== "heartbeat" || recoveredFault) await flush();
       return true;
     };
     const heartbeat = async () => {
@@ -401,8 +421,16 @@
     };
     const callNative = async request => {
       const message = request.request;
-      if (request.payloadMissing || !allowed.includes(message.name) || typeof tools[message.name] !== "function") {
-        publish({ type: "reconciliation-required", id: request.id, reason: "Unsupported or unavailable tool" }); return;
+      if (request.payloadMissing) {
+        publish({ type: "reconciliation-required", id: request.id, reason: "Original native request payload is unavailable" }); return;
+      }
+      if (!allowed.includes(message.name)) {
+        publish({ type: "reconciliation-required", id: request.id, reason: "Unsupported native request is outside the allowlist" }); return;
+      }
+      if (typeof tools[message.name] !== "function") {
+        request.response = { id: request.id, error: `Unsupported desktop tool: ${message.name}` };
+        await transition(request, "returned");
+        return;
       }
       const args = message.name === "mcp__codex_app__list_threads" && message.arguments.limit > 50
         ? { ...message.arguments, limit: 50 } : message.arguments;
@@ -412,7 +440,7 @@
         result => ({ id: request.id, result }), error => ({ id: request.id, error: String(error.message ?? error) }),
       ).then(async response => {
         const current = lane.requests.find(item => item.id === request.id);
-        if (lane.fault?.identity === `native:${lane.sessionId}:call:${request.id}`) lane.fault = null;
+        clearFault(`native:${lane.sessionId}:call:${request.id}`);
         reportSignatures.delete(`native:${request.id}`);
         current.response = response; await transition(current, "returned");
       });
@@ -450,7 +478,7 @@
           if (request.state === "dispatched") {
             const fault = recovery.observe
               ? await retainPendingFault("native", "call", request.id, recovery.recoveryRounds)
-              : lane.fault;
+              : findFault(`native:${lane.sessionId}:call:${request.id}`);
             publishDelta(`native:${request.id}`, { type: "native-observation", id: request.id, state: "pending",
               waitMs: tickMs, faultIdentity: fault.identity, recoveryRounds: fault.recoveryRounds, faultState: fault.state });
           }

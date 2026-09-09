@@ -105,7 +105,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           fault = recordFault({ ...fault, state: "exhausted", receiptRefs: fault.receiptRefs });
           throw exhaustedFault(fault);
         }
-        await sleep(recoveryDelaysMs[fault.recoveryRounds]);
+        if (name === "wait_threads") {
+          const signal = await waitSignal({ timeoutMs: recoveryDelaysMs[fault.recoveryRounds], readSignal: readObservationSignal });
+          if (signal?.control || signal?.deadline) {
+            throw Object.assign(new Error("Task observation recovery was interrupted by control or deadline"), { observationSignal: signal });
+          }
+        } else await sleep(recoveryDelaysMs[fault.recoveryRounds]);
         fault = recordFault({ ...fault, state: "unresolved", recoveryRounds: fault.recoveryRounds + 1,
           receiptRefs: fault.receiptRefs });
       }
@@ -546,6 +551,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         try {
           result = await call("wait_threads", { targets, timeoutMs: 15000 });
         } catch (error) {
+          if (error.observationSignal) return interrupted(mode, error.observationSignal);
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
           eventWaitSupported = false;
         }
