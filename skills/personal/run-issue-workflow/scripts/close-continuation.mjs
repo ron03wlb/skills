@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 
+export const completedCloseCleanup = evidence => evidence.worktreeState === "ABSENT" && evidence.candidateReachable === true
+  || evidence.runIdentity?.classification === "MULTI" && evidence.issueId === evidence.runIdentity.specId
+    && Array.isArray(evidence.childCloseStates) && evidence.childCloseStates.length > 0
+    && evidence.childCloseStates.every(child => child.completionState === "COMPLETE" && child.trackerState === "CLOSED"
+      && child.candidateReachable === true && child.worktreeState === "ABSENT");
+
 // Native accepted prompts retain the bounded continuation budget across process re-entry.
 export function planCloseContinuation({ task, requestIdentity, requestEvidence }) {
   if (task?.state !== "RESUMABLE" || task.snapshot?.turns?.[0]?.status !== "completed"
@@ -17,6 +23,11 @@ export function planCloseContinuation({ task, requestIdentity, requestEvidence }
     } };
   }
   const cleanup = task.closeResult;
+  if (task.closeOutcomeUnavailable && !completedCloseCleanup(requestEvidence)) {
+    return { needed: false, blocked: { reasonCode: "close_outcome_unavailable", evidence: [
+      { code: "native_history_unavailable", message: "The native host accepted this close request but its outcome is unavailable; preserve the original task until owning evidence or physical cleanup progress is read back." },
+    ] } };
+  }
   if (cleanup?.state === "HOST_CLEANUP_BLOCKED") {
     const authority = requestEvidence.authorityEvidence;
     if (cleanup.schema !== "issue-close-result:v1" || cleanup.runId !== requestEvidence.runIdentity.runId

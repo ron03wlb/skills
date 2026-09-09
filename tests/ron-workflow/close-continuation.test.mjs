@@ -2,6 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
 
+test("missing parent close outcome permits only fully proved child closeout", () => {
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const requestEvidence = { runIdentity: { runId: "run", classification: "MULTI", specId: "parent" }, issueId: "parent",
+    childCloseStates: [{ issueId: "child", completionState: "COMPLETE", trackerState: "CLOSED", candidateReachable: true, worktreeState: "ABSENT" }] };
+  const task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed" }] }, closeOutcomeUnavailable: true,
+    closeRequest: { runId: "run", issueId: "parent", requestIdentity } };
+  assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence }).needed, true);
+  for (const change of [{ trackerState: "OPEN" }, { candidateReachable: false }, { worktreeState: "PRESENT" }, { completionState: "NONE" }]) {
+    assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence,
+      childCloseStates: [{ ...requestEvidence.childCloseStates[0], ...change }] } }).blocked.reasonCode, "close_outcome_unavailable");
+  }
+});
+
 test("durable integration failure suppresses redispatch across dialogue and target movement", () => {
   const requestIdentity = `sha256:${"c".repeat(64)}`;
   const requestEvidence = { runIdentity: { runId: "run" }, issueId: "issue", targetHead: "a".repeat(40),

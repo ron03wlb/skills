@@ -57,12 +57,13 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
       const dispatch = store.readEvents(identity.runId).findLast(({ type }) => type === "dispatch.recorded");
       if (!dispatch) throw new Error("Parent close requires the existing Run task");
-      const task = await tasks.read(dispatch.taskRef);
+      const task = await tasks.read(dispatch.taskRef, { runId: identity.runId });
       const acceptedEquivalent = task.closeRequest?.runId === identity.runId && task.closeRequest.issueId === issueId
         && task.closeRequest.evidence && closeRequestIdentityFor(task.closeRequest.evidence) === requestIdentity;
       if (task.closeRequest?.state === "ACCEPTED" && task.closeRequest.issueId === issueId && task.closeRequest.requestIdentity !== requestIdentity && !acceptedEquivalent) throw new Error("Parent close authority changed");
       const effectiveIdentity = acceptedEquivalent ? task.closeRequest.requestIdentity : requestIdentity;
       const continuation = planCloseContinuation({ task, requestIdentity: effectiveIdentity, requestEvidence });
+      if (continuation.blocked) throw new Error(`${continuation.blocked.reasonCode}: ${continuation.blocked.evidence.map(item => item.message).join("; ")}`);
       if (continuation.exhausted) throw new Error("Parent close continuation budget exhausted without progress; preserve its existing task");
       if (continuation.needed) await setTimeout([5000, 15000, 30000][continuation.attempt - 1]);
       if (task.closeRequest?.requestIdentity !== requestIdentity && !acceptedEquivalent || continuation.needed) await tasks.message(dispatch.taskRef, `Use $close-issue to close parent Issue ${issueId} under the same read-back DAG Run Grant. Close request identity: ${effectiveIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`);
