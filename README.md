@@ -222,6 +222,6 @@ General workflow tools, not code-specific.
 **Model-invoked**
 
 - **[clarify-needs](./skills/productivity/clarify-needs/SKILL.md)** — Clarify vague needs through first-principles conversation, compare proposals, and converge on a reviewable needs summary.
-- **[grilling](./skills/productivity/grilling/SKILL.md)** — Interview the user relentlessly about a plan, decision, or idea until every branch of the decision tree is resolved. The reusable loop behind `grill-me` and `grill-with-docs`.
+- **[grilling](./skills/productivity/grilling/SKILL.md)** — Resolve unresolved material decisions within the agreed scope, then confirm shared understanding. The reusable interview loop behind `grill-me` and `grill-with-docs`.
 - **[explain-decision](./skills/productivity/explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
 - **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.
