@@ -53,6 +53,8 @@ Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur onl
 
 Read [Run recovery](references/recovery.md) only after a worker, tracker, environment, writer, or coordinator failure. Apply its isolated technical diagnosis/repair, bounded retries, tracker probes, and single recognized environment adapter exactly. Unknown ownership or contradictory identity always fails closed; never steal a lease, guess a lane, synthesize a handoff, repair product code, or silently expand scope.
 
+For a settled Issue task with a helper-held empty directory, that reference routes one exact Windows recovery through the close owner's API from outside the Issue directory before declaring no legal action. Keep native task identity and existing close authority; the Issue task stays idle until physical cleanup is proved.
+
 Stop at reconciled `SUCCEEDED`, `STOPPED`, or a state with no legal action and no pending owning result. Keep healthy waits and pending native calls with their original owner. For a real gate, use [the recovery diagnosis](references/recovery.md#stop-with-a-diagnosis); check existing human authority and the rule's precondition before interpreting a Skill as requiring another approval. Re-entry resumes only the next legal action from fresh evidence.
 
 This personal coordinator uses only current-host Codex task capabilities and the shared installed package. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.

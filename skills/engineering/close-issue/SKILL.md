@@ -19,9 +19,11 @@ Read [close coordination](references/close-coordination.md) before any lease acq
 
 For an Executable Issue, read its latest valid `implementation_complete` note, require the current `operationIdentity` to bind repository, Spec, approved publication, `execute-issue`, `implementation`, and Issue, then read [completion evidence](references/completion-evidence.md). Require closed blockers, local candidate `C`, recorded target/worktree/topic/baseline, clean Standards and Spec, passing final verification, and a clean exact Issue worktree at `C`; an absent worktree is satisfied only when `C` is target-reachable. A dirty target stops without stash, reset, clean, or attribution. An already-closed Issue with unreachable `C` or a registered exact worktree is contradictory and stops.
 
-For executable actions, read [executable closeout](references/executable-closeout.md). It owns merge/conflict, verification, cleanup, tracker and recovery conditions. Follow its order: merge unchanged `C` into the latest target; remove the exact clean Issue worktree; close and read back the Issue. Recheck Git ancestry, worktree registration and tracker state; skip only satisfied actions. Candidate reachability satisfies the merge, while durable exact-combination integration verification remains a separate cleanup/closure obligation.
+For executable actions, read [executable closeout](references/executable-closeout.md). Follow its order: merge unchanged `C` into the latest target; remove the exact clean Issue worktree; close and read back the Issue. Recheck Git ancestry, worktree registration and tracker state; skip only satisfied actions. Candidate reachability satisfies the merge, while durable exact-combination integration verification remains a separate cleanup/closure obligation.
 
 For a Multi-Issue parent, read [parent closeout](references/parent-closeout.md). It owns its decomposition/child reachability proof. A parent never has an implementation candidate or Issue worktree; after its exact prerequisites read back, close and read back only the parent.
+
+Windows helper locks: [host cleanup recovery](references/host-cleanup.md).
 
 ## 3. Disposition
 

@@ -20,6 +20,8 @@ The only automatic environment adapter is the Windows Gradle case: a `Selector.o
 
 ## Stop with a diagnosis
 
+Before stopping on `host_release_unavailable`, read the close owner's [exact Windows helper recovery](../../../engineering/close-issue/references/host-cleanup.md#exact-windows-helper-recovery). Once the original task is idle and its prior leases are released, the authorized coordinator invokes that owner's `recoverPendingHostCleanup` from outside the Issue directory with fresh native task and integration readers. The owner API acquires its own two leases; the coordinator does not acquire them or send another cleanup message to reactivate the Issue task. Physical absence returns to fresh same-Run reconciliation and the original close task's remaining tracker action. A retained package without this owner follows its existing maintenance/explicit human-repair boundary. An existing recovery reservation or `host_helper_recovery_failed` requires owning-source diagnosis, never a second automatic process batch.
+
 Stop at reconciled `SUCCEEDED`, `STOPPED`, or no legal action after pending owning results settle. Every blocked, failed, or paused result reports the stable reason code, exact evidence, attempted recovery, retry count, affected and unaffected nodes, next owner, no-automatic-transition statement, and Resume predicates. A live native Promise or healthy wait stays with [the driver](codex-host-driver.md); elapsed time or missing output cannot turn it into failed delivery.
 
 For a Skill-caused stop, read [workflow stop diagnosis](../../../../docs/agents/references/workflow-stop-diagnosis.md) for the shared attribution rule. Keep the Run-specific fields and recovery actions above.

@@ -21,7 +21,7 @@ export function planCloseContinuation({ task, requestIdentity, requestEvidence }
     const authority = requestEvidence.authorityEvidence;
     if (cleanup.schema !== "issue-close-result:v1" || cleanup.runId !== requestEvidence.runIdentity.runId
       || cleanup.issueId !== requestEvidence.issueId || cleanup.requestIdentity !== requestIdentity
-      || !["host_release_unavailable", "host_task_ownership_unproven", "host_cleanup_ownership_unproven", "host_cleanup_policy_rejected"].includes(cleanup.reasonCode)
+      || !["host_release_unavailable", "host_task_ownership_unproven", "host_cleanup_ownership_unproven", "host_cleanup_policy_rejected", "host_helper_recovery_failed"].includes(cleanup.reasonCode)
       || !["candidateCommit", "completionEvidenceId", "completionBodySha256", "worktreeIdentity"].every(key =>
         typeof authority?.[key] === "string" && authority[key].length > 0 && cleanup.authorityEvidence?.[key] === authority[key])
       || !Array.isArray(cleanup.observations) || !cleanup.observations.length

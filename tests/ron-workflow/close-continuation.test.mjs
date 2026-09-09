@@ -45,6 +45,12 @@ test("exact host cleanup failure stops unchanged continuation but physical absen
   assert.deepEqual(task.closeRequest, { runId: "run", issueId: "issue", requestIdentity }, "no retry budget is spent");
   assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, targetHead: "b".repeat(40) } }).blocked.reasonCode, "host_release_unavailable", "target movement cannot replay cleanup");
   assert.equal(planCloseContinuation({ task, requestIdentity, requestEvidence: { ...requestEvidence, worktreeState: "ABSENT" } }).attempt, 1);
+  const failedRecovery = { ...task, closeResult: { ...task.closeResult, reasonCode: "host_helper_recovery_failed" } };
+  const preserved = planCloseContinuation({ task: failedRecovery, requestIdentity, requestEvidence });
+  assert.equal(preserved.needed, false, "a failed helper batch must not redispatch another cleanup message");
+  assert.equal(preserved.blocked.reasonCode, "host_helper_recovery_failed");
+  assert.equal(planCloseContinuation({ task: failedRecovery, requestIdentity,
+    requestEvidence: { ...requestEvidence, worktreeState: "ABSENT" } }).attempt, 1, "later physical cleanup permits only remaining closeout");
   for (const change of [{ runId: "foreign" }, { issueId: "foreign" }, { requestIdentity: "foreign" },
     { authorityEvidence: { ...authorityEvidence, completionBodySha256: "changed" } }, { observations: [] }]) {
     assert.throws(() => planCloseContinuation({ task: { ...task, closeResult: { ...task.closeResult, ...change } }, requestIdentity, requestEvidence }), /Host cleanup result/u);

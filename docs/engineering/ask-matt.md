@@ -37,6 +37,8 @@ Planning lanes and Issue worktrees may run concurrently. Only accepted Planning 
 
 Published Tracker Specs route through the separately installed authorized coordinator, while the individual `execute-issue` and `close-issue` leaves remain available to direct human invocation. The coordinator may use one valid **DAG Run Grant** to invoke those leaves without per-Issue approval. Each leaf revalidates that authority and keeps every existing worktree, review, merge, tracker, prerequisite, push, deploy, and scope boundary; the Codex-only coordinator is not promoted or packaged here.
 
+A Windows empty directory held by completed-task helpers returns to the close owner's exact-process recovery from outside that Issue task. Verified physical cleanup permits the original close operation to continue; unknown ownership or failed recovery keeps the Issue open with its valid completion preserved.
+
 Material security, data, concurrency, migration, contract, or cross-module risk requires [code-review](https://aihero.dev/skills-code-review) before integration.
 
 The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [confirm-understanding](https://aihero.dev/skills-confirm-understanding) to calibrate a mental model against named evidence, [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison, and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs. Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing knowledge, [wait-what](https://aihero.dev/skills-wait-what) when the last message did not land.
