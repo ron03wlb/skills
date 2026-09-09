@@ -401,3 +401,47 @@ test("a response beyond transport capacity stops with its native outcome retaine
   assert.equal(h.lane().requests[0].response.result.text.length, text.length);
   assert.equal(h.lane().requests[0].state, "forwarding");
 });
+
+test("a stalled physical write has bounded observation, preserves its owner and settles late without a second writer", async () => {
+  let settleWrite;
+  let responseWrites = 0;
+  const pendingWrite = new Promise(resolve => { settleWrite = resolve; });
+  const h = harness({ write: message => {
+    if (message?.id) {
+      responseWrites += 1;
+      return pendingWrite;
+    }
+    return { output: "" };
+  } });
+  const driver = api.createDriver({
+    ...h.dependencies,
+    heartbeatMs: 1000,
+    tickMs: 5,
+    transportWaitMs: 5,
+    hostOverheadMs: 5,
+  });
+
+  const started = Date.now();
+  await driver.tick();
+  assert.ok(Date.now() - started < 200, "the requested wait plus host overhead bounds one observation");
+  assert.equal(responseWrites, 1);
+  assert.equal(h.lane().pendingIo.state, "observing");
+  assert.equal(h.lane().requests[0].state, "forwarding");
+  assert.deepEqual(h.durable().fault, {
+    identity: "transport:42:response:original-id",
+    kind: "transport",
+    requestId: "original-id",
+    state: "unresolved",
+    recoveryRounds: 0,
+    receiptRefs: ["original-id"],
+  });
+
+  await driver.tick();
+  assert.equal(responseWrites, 1, "a bounded observation never starts a replacement physical writer");
+  settleWrite({ output: frame({ type: "response-accepted", id: request.id }) });
+  await sleep(0);
+  await driver.tick();
+  assert.equal(responseWrites, 1);
+  assert.equal(h.lane().requests[0].state, "forwarded");
+  assert.equal(h.durable().fault, null);
+});

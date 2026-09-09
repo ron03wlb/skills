@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -27,6 +27,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
   const startedAt = Date.now();
   let idleTimer, idleCheck;
   let lastInputAt = startedAt, disconnect;
+  const digest = value => createHash("sha256").update(value).digest("hex");
   const armIdleTimer = () => {
     lastInputAt = Date.now(); clearTimeout(idleTimer); clearImmediate(idleCheck);
     idleTimer = setTimeout(() => {
@@ -63,6 +64,15 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
       try { message = JSON.parse(line); } catch { throw new Error("Malformed desktop input"); }
       armIdleTimer();
       if (message.heartbeat === true) return;
+      if (message.settleRequests !== undefined) {
+        if (!Array.isArray(message.settleRequests) || message.settleRequests.length > 100
+          || message.settleRequests.some(id => typeof id !== "string")) throw new Error("Malformed settled request selection");
+        for (const id of new Set(message.settleRequests)) {
+          const entry = accepted.get(id);
+          if (entry) { entry.message = null; entry.settled = true; }
+        }
+        return;
+      }
       if (message.inspectRequests === true) {
         if (message.requestIds !== undefined && (!Array.isArray(message.requestIds)
           || message.requestIds.length > 100 || message.requestIds.some(id => typeof id !== "string"))) throw new Error("Malformed original request selection");
@@ -70,7 +80,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
         // Accepted history can contain large prompts. Echo only explicitly unresolved IDs.
         for (const id of new Set(message.requestIds ?? [])) {
           const entry = accepted.get(id);
-          if (entry) emit({ type: "request-state", id, state: "accepted", request: entry.message });
+          if (entry) emit({ type: "request-state", id, state: "accepted", ...(entry.message ? { request: entry.message } : {}) });
         }
         return;
       }
@@ -108,12 +118,13 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
         throw new Error("Desktop response must have exactly one result or error");
       }
       const response = JSON.stringify(hasResult ? { result: message.result } : { error: message.error });
+      const responseDigest = digest(response);
       if (previous) {
-        if (previous.response !== response) throw new Error("Conflicting desktop response for original request");
+        if (previous.responseDigest !== responseDigest) throw new Error("Conflicting desktop response for original request");
         emit({ type: "response-accepted", id: message.id }); return;
       }
       if (!request) throw new Error("Unknown desktop response");
-      accepted.set(message.id, { message: request.message, response });
+      accepted.set(message.id, { message: request.message, responseDigest, settled: false });
       pending.delete(message.id);
       emit({ type: "response-accepted", id: message.id });
       if (hasError) request.reject(new Error(message.error));
@@ -146,7 +157,11 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
       },
     },
     get disconnected() { return closed; },
-    metrics: () => ({ toolCalls, elapsedMs: Date.now() - startedAt, tokens: "unavailable", ...(disconnect ? { disconnect } : {}) }),
+    metrics: () => ({ toolCalls, elapsedMs: Date.now() - startedAt, tokens: "unavailable",
+      settledRequests: [...accepted.values()].filter(entry => entry.settled).length,
+      retainedSettledPayloadBytes: [...accepted.values()].filter(entry => entry.settled)
+        .reduce((total, entry) => total + (entry.message ? JSON.stringify(entry.message).length : 0), 0),
+      ...(disconnect ? { disconnect } : {}) }),
     close,
   };
 }

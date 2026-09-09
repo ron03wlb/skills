@@ -67,7 +67,7 @@
     if (sessionId == null) throw new Error("An original host session ID is required");
     return { schema: "codex-host-driver:v1", sessionId, active: exit_code === undefined,
       ...(exit_code === undefined ? {} : { exitCode: exit_code }), buffer: output,
-      requests: [], frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null };
+      requests: [], frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null, fault: null };
   }
 
   // Durable receipts carry identity/progress only. Native payloads, panel URLs,
@@ -80,7 +80,9 @@
         name: allowed.includes(request.name) ? request.name : "unsupported", state, history: [...history], conflict: Boolean(conflict) })),
       controls: lane.controls.map(({ message, state, sourceId }) => ({ message: { control: message.control, runId: message.runId }, state, sourceId })),
       diagnostics: lane.diagnostics.map(() => ({ reason: "Retained transport diagnostic; raw bytes stay in the original cell" })),
-      pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state } : null };
+      pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state,
+        ...(lane.pendingIo.requestId ? { requestId: lane.pendingIo.requestId } : {}) } : null,
+      fault: lane.fault ? copy(lane.fault) : null };
   }
 
   function restoreCheckpoint(saved) {
@@ -91,6 +93,7 @@
     lane.controls = saved.controls;
     lane.diagnostics = saved.diagnostics;
     lane.pendingIo = saved.pendingIo;
+    lane.fault = saved.fault ?? null;
     lane.needsInspection = true;
     lane.omittedPartialBytes = saved.partialBytes;
     return lane;
@@ -129,37 +132,76 @@
   }
 
   function createDriver({ driverId, tools, load, store, report, setTimeout, clearTimeout,
-    persist, readControl = async () => load("workflow.control"), heartbeatMs = 15000, tickMs = 35000, checkpoint = () => {} }) {
+    persist, readControl = async () => load("workflow.control"), heartbeatMs = 15000, tickMs = 35000,
+    transportWaitMs = 1000, hostOverheadMs = 5000, checkpoint = () => {} }) {
     if (!driverId) throw new Error("The original functions cell identity is required");
     if (typeof persist !== "function") throw new Error("A durable checkpoint writer is required");
     const native = new Map();
     let lane;
     let ticking = false, owned = false;
     let persisted = Promise.resolve();
-    let transport = Promise.resolve();
+    let activeWrite = null;
     let pulseTimer, pulsePending, pulsing = false;
     const save = () => store("workflow.host", copy(lane));
-    // Heartbeats carry no authority and need no disk receipt. Serialize physical
-    // writes, but keep them independent from checkpoint/control shell latency.
-    const exchange = message => {
-      const pending = transport.then(async () => {
-        if (!lane.active) return { output: "" };
-        const result = await tools.write_stdin({ session_id: lane.sessionId,
-          chars: message ? JSON.stringify(message) + "\n" : "", yield_time_ms: 1000, max_output_tokens: 16000 });
-        lane.buffer += result.output ?? "";
-        if (result.exit_code !== undefined) { lane.active = false; lane.exitCode = result.exit_code; }
-        save();
-        return result;
-      });
-      transport = pending.catch(() => {});
-      return pending;
+    const requestIdFor = message => message?.id ?? message?.responseChunk?.id ?? null;
+    const faultFor = (kind, requestId = null) => ({
+      identity: `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`,
+      kind: "transport",
+      ...(requestId ? { requestId } : {}),
+      state: "unresolved",
+      recoveryRounds: lane.fault?.identity === `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`
+        ? lane.fault.recoveryRounds : 0,
+      receiptRefs: requestId ? [requestId] : [],
+    });
+    const observe = async pending => {
+      let timer;
+      const timeout = new Promise(resolve => { timer = setTimeout(() => resolve({ state: "pending" }), transportWaitMs + hostOverheadMs); });
+      try { return await Promise.race([pending, timeout]); }
+      finally { clearTimeout(timer); }
+    };
+    const physicalWrite = async message => {
+      if (!lane.active) return { output: "" };
+      const result = await tools.write_stdin({ session_id: lane.sessionId,
+        chars: message ? JSON.stringify(message) + "\n" : "", yield_time_ms: transportWaitMs, max_output_tokens: 16000 });
+      lane.buffer += result.output ?? "";
+      if (result.exit_code !== undefined) { lane.active = false; lane.exitCode = result.exit_code; }
+      save();
+      return result;
+    };
+    const beginWrite = (message, kind) => {
+      const body = JSON.stringify(message);
+      const requestId = requestIdFor(message);
+      if (kind !== "heartbeat") {
+        lane.pendingIo = { kind, state: "sending", ...(requestId ? { requestId } : {}) }; save();
+      }
+      const promise = (async () => {
+        let result;
+        if (kind === "response" && body.length > 6000) {
+          const chunks = [];
+          for (let offset = 0; offset < body.length;) {
+            let size = Math.min(6000, body.length - offset);
+            while (JSON.stringify(body.slice(offset, offset + size)).length > 11000) size = Math.floor(size / 2);
+            chunks.push(body.slice(offset, offset + size)); offset += size;
+          }
+          for (let index = 0; index < chunks.length && lane.active; index++) {
+            result = await physicalWrite({ responseChunk: { id: message.id, index, count: chunks.length, length: body.length, data: chunks[index] } });
+          }
+        } else result = await physicalWrite(message);
+        return { state: "returned", result };
+      })().catch(() => ({ state: "failed" }));
+      activeWrite = { kind, requestId, message, promise };
+      return activeWrite;
     };
     const schedulePulse = () => {
       pulseTimer = setTimeout(() => {
         if (!pulsing || !lane.active) return;
-        pulsePending = exchange({ heartbeat: true }).catch(() => {
-          report({ type: "transport-uncertain", sessionId: lane.sessionId, kind: "heartbeat" });
-        }).finally(() => { if (pulsing && lane.active) schedulePulse(); });
+        pulsePending = (async () => {
+          if (activeWrite) {
+            report({ type: "transport-observation", sessionId: lane.sessionId, kind: activeWrite.kind, state: "pending" });
+            return;
+          }
+          await write({ heartbeat: true }, "heartbeat");
+        })().finally(() => { if (pulsing && lane.active) schedulePulse(); });
       }, heartbeatMs);
     };
     const flush = () => {
@@ -243,27 +285,40 @@
       if (kind === "response" && body.length > 16 * 1024 * 1024) {
         throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
       }
-      lane.pendingIo = { kind, message, state: "sending" }; save(); await flush();
-      let result;
-      try {
-        if (kind === "response" && body.length > 6000) {
-          const chunks = [];
-          for (let offset = 0; offset < body.length;) {
-            let size = Math.min(6000, body.length - offset);
-            while (JSON.stringify(body.slice(offset, offset + size)).length > 11000) size = Math.floor(size / 2);
-            chunks.push(body.slice(offset, offset + size)); offset += size;
-          }
-          for (let index = 0; index < chunks.length && lane.active; index++) {
-            result = await exchange({ responseChunk: { id: message.id, index, count: chunks.length, length: body.length, data: chunks[index] } });
-          }
-        } else result = await exchange(message);
-      } catch (error) {
-        lane.pendingIo.state = "uncertain"; lane.pendingIo.error = String(error.message ?? error); save();
-        report({ type: "transport-uncertain", sessionId: lane.sessionId, kind }); return false;
+      if (!activeWrite && lane.pendingIo?.ownerSettled) {
+        lane.pendingIo = null; save();
+      } else if (!activeWrite && lane.pendingIo) {
+        lane.pendingIo.state = "uncertain";
+        lane.fault = faultFor(lane.pendingIo.kind, lane.pendingIo.requestId); save(); await flush();
+        report({ type: "reconciliation-required", id: lane.pendingIo.requestId,
+          reason: "Original physical write owner is absent; reconcile its late outcome before another write" });
+        return false;
       }
-      // Save returned output before clearing the pending write or consuming any frames.
-      lane.pendingIo.result = result;
-      save(); lane.pendingIo = null; save(); await drain(); await flush(); return true;
+      const current = activeWrite ?? beginWrite(message, kind);
+      if (current.kind !== kind || current.requestId !== requestIdFor(message)) {
+        report({ type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
+        return false;
+      }
+      const observed = await observe(current.promise);
+      if (observed.state === "pending") {
+        if (lane.pendingIo) lane.pendingIo.state = "observing";
+        lane.fault = faultFor(kind, current.requestId); save();
+        if (kind !== "heartbeat") await flush();
+        report({ type: "transport-observation", sessionId: lane.sessionId, kind, state: "pending",
+          waitMs: transportWaitMs, hostOverheadMs, faultIdentity: lane.fault.identity });
+        return false;
+      }
+      activeWrite = null;
+      if (observed.state === "failed") {
+        if (lane.pendingIo) { lane.pendingIo.state = "uncertain"; lane.pendingIo.ownerSettled = true; }
+        lane.fault = faultFor(kind, current.requestId); save();
+        if (kind !== "heartbeat") await flush();
+        report({ type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: lane.fault.identity });
+        return false;
+      }
+      lane.pendingIo = null; lane.fault = null; save(); await drain();
+      if (kind !== "heartbeat") await flush();
+      return true;
     };
     const heartbeat = async () => {
       const queued = await readControl();
@@ -294,6 +349,7 @@
     };
     const tick = async () => {
       claim(); await drain(); await flush();
+      if (activeWrite && !await write(activeWrite.message, activeWrite.kind)) return;
       const deadline = Date.now() + tickMs;
       // An interrupted write may have returned output just before consumption was interrupted.
       if (lane.pendingIo?.result) { lane.pendingIo = null; save(); }
@@ -326,6 +382,13 @@
             await transition(request, "forwarding");
             if (!await write(request.response, "response")) return;
           }
+        }
+        if (request.state === "forwarded" && !request.settled && lane.active) {
+          if (!await write({ settleRequests: [request.id] }, "settlement")) return;
+          request.settled = true;
+          request.request = { type: "tool", id: request.id, name: request.request.name };
+          delete request.raw; delete request.response; delete request.ownerEvidence;
+          save(); await flush();
         }
         if (Date.now() >= deadline) break;
       }

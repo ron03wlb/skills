@@ -43,19 +43,70 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
+  const transientFaults = new Map();
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
     return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
   };
+  const recoveryDelaysMs = [5000, 15000, 30000];
+  const faultCategory = error => [
+    ["timeout", /timeout/iu], ["temporary", /temporar/iu], ["unavailable", /unavailable/iu],
+    ["connection", /connection/iu], ["response-lost", /response lost/iu],
+    ["rate-limit", /rate.?limit/iu], ["network", /network/iu],
+  ].find(([, pattern]) => pattern.test(error.message))?.[0];
+  const faultScope = (name, args) => ({ name,
+    refs: name === "wait_threads" ? (args.targets ?? []).map(({ threadId, hostId }) => [threadId, hostId])
+      : name === "read_thread" ? [[args.threadId, args.hostId]] : [["host", project?.hostId ?? null]],
+  });
+  const faultIdentity = (name, args, category) => `sha256:${createHash("sha256")
+    .update(JSON.stringify({ runId: runId ?? "unbound", category, ...faultScope(name, args) })).digest("hex")}`;
+  const readFault = faultId => store?.readHostFault && runId
+    ? store.readHostFault({ runId, faultId }) : transientFaults.get(faultId) ?? null;
+  const writeFault = value => {
+    if (store?.writeHostFault && runId) return store.writeHostFault(value);
+    transientFaults.set(value.faultId, value); return value;
+  };
+  const recordFault = ({ faultId, operation, category, state, recoveryRounds, receiptRefs }) => writeFault({
+    schema: "codex-host-fault:v1", runId: runId ?? "unbound", faultId, operation, category, state,
+    recoveryRounds, recoveryDelaysMs, receiptRefs, updatedAt: new Date().toISOString(),
+  });
+  const exhaustedFault = fault => Object.assign(new Error(`Read-only host recovery budget exhausted for ${fault.operation} (${fault.faultId})`), { fault });
   const call = async (name, args) => {
-    const delays = [1000, 5000, 15000];
-    for (let attempt = 0; ; attempt += 1) {
-      try { return unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args)); }
-      catch (error) {
-        if (!["read_thread", "list_threads", "wait_threads"].includes(name) || attempt === delays.length
-          || !/timeout|temporar|unavailable|connection|response lost|rate.?limit|network/iu.test(error.message)) throw error;
-        await sleep(delays[attempt]);
+    const readOnly = ["read_thread", "list_threads", "wait_threads"].includes(name);
+    let fault;
+    if (readOnly) {
+      for (const category of ["timeout", "temporary", "unavailable", "connection", "response-lost", "rate-limit", "network"]) {
+        const candidate = readFault(faultIdentity(name, args, category));
+        if (candidate?.state === "exhausted") throw exhaustedFault(candidate);
+        if (candidate?.state === "unresolved") { fault = candidate; break; }
+      }
+    }
+    for (;;) {
+      if (fault) {
+        if (fault.recoveryRounds >= recoveryDelaysMs.length) {
+          fault = recordFault({ ...fault, state: "exhausted", receiptRefs: fault.receiptRefs });
+          throw exhaustedFault(fault);
+        }
+        await sleep(recoveryDelaysMs[fault.recoveryRounds]);
+        fault = recordFault({ ...fault, state: "unresolved", recoveryRounds: fault.recoveryRounds + 1,
+          receiptRefs: fault.receiptRefs });
+      }
+      try {
+        const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args));
+        if (fault) recordFault({ ...fault, state: "settled", receiptRefs: fault.receiptRefs });
+        return result;
+      } catch (error) {
+        const category = readOnly ? faultCategory(error) : null;
+        if (!category) throw error;
+        const faultId = faultIdentity(name, args, category);
+        if (fault && fault.faultId !== faultId) throw new Error("Host recovery evidence became contradictory; preserve both fault identities", { cause: error });
+        fault ??= recordFault({ faultId, operation: name, category, state: "unresolved", recoveryRounds: 0,
+          receiptRefs: faultScope(name, args).refs.flat().filter(Boolean) });
+        if (fault.recoveryRounds >= recoveryDelaysMs.length) {
+          fault = recordFault({ ...fault, state: "exhausted", receiptRefs: fault.receiptRefs });
+          throw exhaustedFault(fault);
+        }
       }
     }
   };

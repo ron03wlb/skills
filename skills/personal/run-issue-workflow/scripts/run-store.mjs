@@ -32,6 +32,7 @@ export { EVENT_SCHEMA, RUN_EVENT_TYPES };
 export const CLEANUP_SCHEMA = "dag-run-cleanup:v1";
 export const CLEANUP_PREVIEW_SCHEMA = "dag-run-cleanup-preview:v1";
 export const LOCK_OWNER_SCHEMA = "dag-run-lock-owner:v1";
+export const HOST_FAULT_SCHEMA = "codex-host-fault:v1";
 
 const runIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
 const cleanupEvidenceFields = new Set([
@@ -485,6 +486,58 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
   const hostTaskPath = (runId, issueId, purpose) => {
     if (typeof issueId !== "string" || issueId.length === 0) throw new TypeError("Host task requires an Issue identity");
     return join(pathsFor(runId).runDir, `host-task-${createHash("sha256").update(purpose ? JSON.stringify([issueId, purpose]) : issueId).digest("hex")}.json`);
+  };
+
+  const hostFaultPath = (runId, faultId) => {
+    if (typeof faultId !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(faultId)) {
+      throw new TypeError("Host fault requires one SHA-256 identity");
+    }
+    return join(pathsFor(runId).runDir, `host-fault-${faultId.slice("sha256:".length)}.json`);
+  };
+  const validateHostFault = (value, runId, faultId) => {
+    assertExactFields(value, new Set(["schema", "runId", "faultId", "operation", "category", "state",
+      "recoveryRounds", "recoveryDelaysMs", "receiptRefs", "updatedAt"]), "host fault");
+    if (value.schema !== HOST_FAULT_SCHEMA || value.runId !== runId || value.faultId !== faultId
+      || !isText(value.operation) || !isText(value.category)
+      || !["unresolved", "settled", "exhausted"].includes(value.state)
+      || !Number.isInteger(value.recoveryRounds) || value.recoveryRounds < 0 || value.recoveryRounds > 3
+      || JSON.stringify(value.recoveryDelaysMs) !== JSON.stringify([5000, 15000, 30000])
+      || !Array.isArray(value.receiptRefs) || value.receiptRefs.some(ref => !isText(ref))
+      || !isText(value.updatedAt)) throw new TypeError("Host fault evidence is malformed or mismatched");
+    assertNoToken(value);
+    return value;
+  };
+  const readHostFault = ({ runId, faultId }) => {
+    const path = hostFaultPath(runId, faultId);
+    if (!existsSync(path)) return null;
+    return validateHostFault(JSON.parse(readFileSync(path, "utf8")), runId, faultId);
+  };
+  const listHostFaults = (runId) => {
+    const directory = pathsFor(runId).runDir;
+    if (!existsSync(directory)) return [];
+    return readdirSync(directory).filter(name => /^host-fault-[a-f0-9]{64}\.json$/u.test(name)).sort().map(name => {
+      const faultId = `sha256:${name.slice("host-fault-".length, -".json".length)}`;
+      return readHostFault({ runId, faultId });
+    });
+  };
+  const writeHostFault = (value) => {
+    const record = validateHostFault(value, value?.runId, value?.faultId);
+    const path = hostFaultPath(record.runId, record.faultId);
+    mkdirSync(dirname(path), { recursive: true });
+    const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+    let descriptor;
+    try {
+      descriptor = openSync(temporary, "wx", 0o600);
+      writeAll(descriptor, JSON.stringify(record));
+      fsyncSync(descriptor);
+      closeSync(descriptor); descriptor = undefined;
+      renameSync(temporary, path);
+      syncParent(path);
+    } finally {
+      if (descriptor !== undefined) closeSync(descriptor);
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
+    return readHostFault({ runId: record.runId, faultId: record.faultId });
   };
   const readHostTask = ({ runId, issueId, purpose }) => {
     const path = hostTaskPath(runId, issueId, purpose);
@@ -1230,6 +1283,9 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
     listRunIds,
     readHostTask,
     reserveHostTask,
+    readHostFault,
+    listHostFaults,
+    writeHostFault,
     readCleanupRecords,
     previewCleanup,
     applyCleanup,

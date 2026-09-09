@@ -189,3 +189,26 @@ test("buffered host heartbeat survives a synchronous bridge event-loop stall", a
   assert.equal(sent, true);
   assert.match(output, /DISCONNECTED false/u, "stdin already buffered during synchronous Git/tool work must get a poll turn before expiry");
 });
+
+test("settled requests retain duplicate/conflict evidence without retaining native payloads", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    const pending = bridge.call("mcp__codex_app__send_message_to_thread", { threadId: "task", prompt: "secret-payload" });
+    const request = messages.at(-1), response = { id: request.id, result: { accepted: true, secret: "native-secret" } };
+    input.write(JSON.stringify(response) + "\n");
+    await pending;
+    input.write(JSON.stringify({ settleRequests: [request.id] }) + "\n");
+    await new Promise(resolve => setImmediate(resolve));
+
+    const metrics = bridge.metrics();
+    assert.equal(metrics.settledRequests, 1);
+    assert.equal(metrics.retainedSettledPayloadBytes, 0);
+    assert.equal(JSON.stringify(metrics).includes("secret"), false);
+    input.write(JSON.stringify(response) + "\n");
+    assert.equal(messages.at(-1).type, "response-accepted");
+    input.write(JSON.stringify({ ...response, result: { accepted: false } }) + "\n");
+    assert.equal(messages.at(-1).type, "input-error");
+  } finally { bridge.close(); }
+});

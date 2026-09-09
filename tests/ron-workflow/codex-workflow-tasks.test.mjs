@@ -483,3 +483,36 @@ test("a lost model continuation response reconciles the same task and never rese
     assert.throws(() => writer.append(draft), /sole allowance/u);
   } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
 });
+
+test("one read-only transport fault consumes exactly 5/15/30 recovery seconds across re-entry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-fault-budget-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const delays = [];
+  let calls = 0;
+  const options = {
+    store,
+    runId: "run-1",
+    project: {},
+    packageRoot: "/installed",
+    issueNumber: async () => 1,
+    sleep: async delay => { delays.push(delay); },
+    host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      calls += 1;
+      throw new Error("temporary connection unavailable");
+    } },
+  };
+  try {
+    await assert.rejects(createCodexWorkflowTasks(options).wait([ref]), /recovery budget exhausted/iu);
+    assert.deepEqual(delays, [5000, 15000, 30000]);
+    assert.equal(calls, 4, "the initial observation plus three recovery rounds share one budget");
+    const fault = store.readHostFault({ runId: "run-1", faultId: store.listHostFaults("run-1")[0].faultId });
+    assert.equal(fault.state, "exhausted");
+    assert.equal(fault.recoveryRounds, 3);
+
+    await assert.rejects(createCodexWorkflowTasks(options).wait([ref]), /recovery budget exhausted/iu);
+    assert.equal(calls, 4, "a recreated adapter cannot reset or multiply the exhausted budget");
+    assert.deepEqual(delays, [5000, 15000, 30000]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
