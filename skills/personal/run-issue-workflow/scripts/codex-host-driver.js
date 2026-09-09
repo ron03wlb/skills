@@ -165,7 +165,8 @@
       if (reportSignatures.get(key) === signature) return false;
       reportSignatures.set(key, signature); publish(value); return true;
     };
-    const requestIdFor = message => message?.id ?? message?.responseChunk?.id ?? null;
+    const requestIdFor = message => message?.id ?? message?.responseChunk?.id
+      ?? (Array.isArray(message?.settleRequests) && message.settleRequests.length === 1 ? message.settleRequests[0] : null);
     const findFault = identity => lane.faults?.find(fault => fault.identity === identity) ?? null;
     const retainFault = fault => {
       lane.faults ??= [];
@@ -177,6 +178,18 @@
     const clearFault = identity => {
       lane.faults = (lane.faults ?? []).filter(fault => fault.identity !== identity);
       lane.fault = lane.faults.at(-1) ?? null;
+    };
+    const settleRequest = request => {
+      if (request.settled) return;
+      request.settled = true;
+      request.request = { type: "tool", id: request.id, name: request.request?.name };
+      delete request.raw; delete request.response; delete request.ownerEvidence;
+      lane.settledRequestCount = (lane.settledRequestCount ?? 0) + 1;
+      const retainedSettled = lane.requests.filter(item => item.settled);
+      if (retainedSettled.length > settledRetentionLimit) {
+        const remove = new Set(retainedSettled.slice(0, retainedSettled.length - settledRetentionLimit));
+        lane.requests = lane.requests.filter(item => !remove.has(item));
+      }
     };
     const faultFor = (scope, kind, requestId = null, changes = {}) => {
       const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
@@ -336,6 +349,10 @@
           const request = message.request?.type === "tool" ? await receive(message.request, item.raw) : lane.requests.find(value => value.id === message.id);
           if (request && !request.conflict && message.id === request.id) {
             request.ownerState = message.state; save();
+            if (request.state === "forwarded" && message.state === "accepted" && message.request === undefined) {
+              clearFault(`transport:${lane.sessionId}:settlement:${request.id}`);
+              settleRequest(request); save(); await flush();
+            }
             if (["forwarding", "returned"].includes(request.state) && message.state === "accepted") {
               clearFault(`transport:${lane.sessionId}:response:${request.id}`);
               await transition(request, "forwarded");
@@ -475,6 +492,9 @@
       if (lane.pendingIo?.result) { lane.pendingIo = null; save(); }
       if (lane.active && (lane.needsInspection || lane.requests.some(item => item.state === "forwarding") || lane.pendingIo?.state === "uncertain")) {
         const unresolved = lane.requests.filter(item => item.state !== "forwarded").map(item => item.id);
+        if (lane.pendingIo?.kind === "settlement" && lane.pendingIo.requestId && !unresolved.includes(lane.pendingIo.requestId)) {
+          unresolved.push(lane.pendingIo.requestId);
+        }
         for (let offset = 0; offset === 0 || offset < unresolved.length; offset += 100) {
           if (!await write({ inspectRequests: true, requestIds: unresolved.slice(offset, offset + 100) }, "reconcile")) return;
         }
@@ -514,15 +534,7 @@
         }
         if (request.state === "forwarded" && !request.settled && lane.active) {
           if (!await write({ settleRequests: [request.id] }, "settlement")) return;
-          request.settled = true;
-          request.request = { type: "tool", id: request.id, name: request.request.name };
-          delete request.raw; delete request.response; delete request.ownerEvidence;
-          lane.settledRequestCount = (lane.settledRequestCount ?? 0) + 1;
-          const retainedSettled = lane.requests.filter(item => item.settled);
-          if (retainedSettled.length > settledRetentionLimit) {
-            const remove = new Set(retainedSettled.slice(0, retainedSettled.length - settledRetentionLimit));
-            lane.requests = lane.requests.filter(item => !remove.has(item));
-          }
+          settleRequest(request);
           save(); await flush();
         }
         if (Date.now() >= deadline) break;

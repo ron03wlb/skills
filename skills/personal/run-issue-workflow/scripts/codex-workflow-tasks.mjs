@@ -125,8 +125,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (!category) throw error;
         const faultId = faultIdentity(name, args, category);
         if (fault && fault.faultId !== faultId) throw new Error("Host recovery evidence became contradictory; preserve both fault identities", { cause: error });
-        fault ??= recordFault({ faultId, operation: name, category, state: "unresolved", recoveryRounds: 0,
-          receiptRefs: faultScope(name, args).refs.flat().filter(Boolean) });
+        if (!fault) {
+          const previous = readFault(faultId);
+          if (previous?.state === "exhausted") throw exhaustedFault(previous);
+          if (previous && (previous.operation !== name || previous.category !== category)) {
+            throw new Error("Host recovery identity contradicts its retained operation or category", { cause: error });
+          }
+          fault = previous
+            ? recordFault({ ...previous, state: "unresolved", receiptRefs: previous.receiptRefs })
+            : recordFault({ faultId, operation: name, category, state: "unresolved", recoveryRounds: 0,
+              receiptRefs: faultScope(name, args).refs.flat().filter(Boolean) });
+        }
         if (fault.recoveryRounds >= recoveryDelaysMs.length) {
           fault = recordFault({ ...fault, state: "exhausted", receiptRefs: fault.receiptRefs });
           throw exhaustedFault(fault);
@@ -543,9 +552,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const targets = batch.map(ref => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) }));
       const batchKey = batch.map(({ threadId, hostId }) => `${hostId}:${threadId}`).join("|");
       const callsBefore = hostCallCount, bytesBefore = hostReturnedBytes;
+      let fullHistoryReads = 0;
       const interrupted = (mode, signal) => ({ coordinatorActive: !host.disconnected, taskSettled: false,
         observation: { kind: "interrupted", mode, signal: signal.control ? "control" : "deadline", batchSize: batch.length,
-          fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+          fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
           modelRoundTrips: "unavailable", tokens: "unavailable" } });
       let result, mode = "event";
       const observeCall = async action => {
@@ -569,7 +579,6 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (after?.control || after?.deadline) return interrupted(mode, after);
       }
       const changed = [];
-      let fullHistoryReads = 0;
       if (!eventWaitSupported) {
         mode = "fallback";
         const round = fallbackRounds.get(batchKey) ?? 0;

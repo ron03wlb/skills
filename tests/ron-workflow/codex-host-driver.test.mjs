@@ -129,6 +129,36 @@ test("lost forwarding acknowledgement reconciles from the original bridge before
   assert.deepEqual(h.durable().faults, []);
 });
 
+test("lost settlement acknowledgement converges from the bridge's payload-free accepted receipt", async () => {
+  let bridgeSettled = false, settlementWrites = 0;
+  const inspections = [];
+  const h = harness({ write: message => {
+    if (message?.id) return { output: frame({ type: "response-accepted", id: request.id }) };
+    if (message?.settleRequests) {
+      settlementWrites += 1;
+      bridgeSettled = true;
+      throw new Error("settlement acknowledgement lost");
+    }
+    if (message?.inspectRequests) {
+      inspections.push(message.requestIds);
+      return { output: bridgeSettled && message.requestIds.includes(request.id)
+        ? frame({ type: "request-state", id: request.id, state: "accepted" }) : "" };
+    }
+    return { output: "" };
+  } });
+  await h.driver.tick();
+  assert.equal(settlementWrites, 1);
+  assert.equal(h.lane().requests[0].state, "forwarded");
+  assert.equal(h.lane().requests[0].settled, undefined);
+  assert.equal(h.durable().fault.state, "exhausted");
+  await h.driver.tick();
+  assert.deepEqual(inspections, [[request.id]]);
+  assert.equal(settlementWrites, 1, "owner read-back never repeats the settlement write");
+  assert.equal(h.lane().requests[0].settled, true);
+  assert.equal(h.durable().fault, null);
+  assert.deepEqual(h.durable().faults, []);
+});
+
 test("exit drains final frames, retains partial bytes, session identity and a pending native outcome", async () => {
   const terminal = { type: "result", result: { state: "UNAVAILABLE" } };
   const h = harness({ native: async () => { await sleep(20); return { actual: true }; }, write: () => ({ output: frame(terminal) + 'workflow-host {"partial":', exit_code: 0 }) });

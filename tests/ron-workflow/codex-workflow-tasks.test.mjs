@@ -518,6 +518,39 @@ test("one read-only transport fault consumes exactly 5/15/30 recovery seconds ac
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("a settled deterministic fault identity resumes its consumed budget after adapter re-entry", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-settled-fault-budget-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const delays = [];
+  let calls = 0;
+  const options = {
+    store,
+    runId: "run-1",
+    project: {},
+    packageRoot: "/installed",
+    waitForObservationSignal: async ({ timeoutMs }) => { delays.push(timeoutMs); return null; },
+    host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      calls += 1;
+      if (calls % 2 === 1) throw new Error("temporary connection unavailable");
+      return { timedOut: true, polls: [{ threadId: ref.threadId, status: "running", event: "unchanged" }] };
+    } },
+  };
+  try {
+    await createCodexWorkflowTasks(options).wait([ref]);
+    let fault = store.listHostFaults("run-1")[0];
+    assert.equal(fault.state, "settled");
+    assert.equal(fault.recoveryRounds, 1);
+    await createCodexWorkflowTasks(options).wait([ref]);
+    fault = store.readHostFault({ runId: "run-1", faultId: fault.faultId });
+    assert.deepEqual(delays, [5000, 15000], "the stable identity continues with its next unconsumed delay");
+    assert.equal(calls, 4);
+    assert.equal(fault.state, "settled");
+    assert.equal(fault.recoveryRounds, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test("event waits rotate batches of eight, reuse cursors and read full history only for a material terminal event", async () => {
   const refs = Array.from({ length: 9 }, (_, index) => ({ threadId: `worker-${index + 1}`, hostId: "local" }));
   const batches = [];
@@ -662,7 +695,7 @@ test("control interrupts fallback snapshot recovery before another read_thread c
 });
 
 test("deadline interrupts material full-history recovery before another read_thread call", async () => {
-  const ref = { threadId: "worker", hostId: "local" };
+  const refs = [{ threadId: "worker-1", hostId: "local" }, { threadId: "worker-2", hostId: "local" }];
   const recoveryWindows = [];
   const calls = [];
   let reads = 0;
@@ -675,20 +708,24 @@ test("deadline interrupts material full-history recovery before another read_thr
     host: { async call(name, args) {
       calls.push(name);
       if (name === "mcp__codex_app__wait_threads") {
-        return { polls: [{ threadId: ref.threadId, status: "completed", event: "completion" }] };
+        return { polls: refs.map(ref => ({ threadId: ref.threadId, status: "completed", event: "completion" })) };
       }
       assert.equal(name, "mcp__codex_app__read_thread");
+      if (args.threadId === refs[0].threadId) {
+        return { thread: { id: refs[0].threadId, hostId: refs[0].hostId, status: { type: "idle" } }, turns: [] };
+      }
       reads += 1;
       if (reads === 1) throw new Error("temporary connection failure");
-      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [] };
+      return { thread: { id: refs[1].threadId, hostId: refs[1].hostId, status: { type: "idle" } }, turns: [] };
     } },
   });
-  const observed = await tasks.wait([ref]);
+  const observed = await tasks.wait(refs);
   assert.equal(observed.observation.kind, "interrupted");
   assert.equal(observed.observation.mode, "event");
   assert.equal(observed.observation.signal, "deadline");
+  assert.equal(observed.observation.fullHistoryReads, 1, "completed reads remain counted before a later batch member is interrupted");
   assert.deepEqual(recoveryWindows, [5000]);
-  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread"]);
+  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread", "mcp__codex_app__read_thread"]);
 });
 
 test("production composition binds the Run fault store and task observation signals", () => {
