@@ -35,16 +35,19 @@ public static class CleanupProcesses {
     [DllImport("shell32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CommandLineToArgvW(string command, out int argc);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr pointer);
 
-    static byte[] Read(IntPtr process, long address, int count) {
-        var bytes = new byte[count]; IntPtr actual;
-        if (address <= 0 || !ReadProcessMemory(process, new IntPtr(address), bytes, count, out actual) || actual.ToInt64() != count)
-            throw new InvalidOperationException("Process parameters unreadable");
+    static byte[] Read(IntPtr process, int pid, string phase, string field, long address, int count) {
+        var bytes = new byte[count]; IntPtr actual = IntPtr.Zero;
+        bool success = address > 0 && ReadProcessMemory(process, new IntPtr(address), bytes, count, out actual);
+        int error = success ? 0 : address > 0 ? Marshal.GetLastWin32Error() : 0;
+        if (!success || actual.ToInt64() != count)
+            throw new InvalidOperationException("Process parameters unreadable (pid=" + pid + ", phase=" + phase + ", field=" + field
+                + ", win32=" + error + ", requested=" + count + ", read=" + actual.ToInt64() + ")");
         return bytes;
     }
-    static string Unicode(IntPtr process, long address) {
-        var value = Read(process, address, 16); int count = BitConverter.ToUInt16(value, 0);
+    static string Unicode(IntPtr process, int pid, string field, long address) {
+        var value = Read(process, pid, "identity", field + "-descriptor", address, 16); int count = BitConverter.ToUInt16(value, 0);
         if (count == 0 || count > 32766 || count % 2 != 0) throw new InvalidOperationException("Process string layout unsupported");
-        return Encoding.Unicode.GetString(Read(process, BitConverter.ToInt64(value, 8), count));
+        return Encoding.Unicode.GetString(Read(process, pid, "identity", field + "-buffer", BitConverter.ToInt64(value, 8), count));
     }
     static string Normalize(string path) => Path.GetFullPath(path.StartsWith(@"\\?\") ? path.Substring(4) : path).TrimEnd('\\', '/');
     static bool Same(string left, string right) => String.Equals(left, right, StringComparison.OrdinalIgnoreCase);
@@ -91,9 +94,9 @@ public static class CleanupProcesses {
             bool wow64; if (!IsWow64Process(handle, out wow64) || wow64) throw new InvalidOperationException("Only native x64 helpers are supported");
             var basic = new byte[48]; int written;
             if (NtQueryInformationProcess(handle, 0, basic, basic.Length, out written) != 0) throw new InvalidOperationException("Process identity unreadable");
-            var parameters = BitConverter.ToInt64(Read(handle, BitConverter.ToInt64(basic, 8) + 0x20, 8), 0);
-            var cwd = Normalize(Unicode(handle, parameters + 0x38));
-            var command = Unicode(handle, parameters + 0x70);
+            var parameters = BitConverter.ToInt64(Read(handle, pid, "identity", "peb-parameters", BitConverter.ToInt64(basic, 8) + 0x20, 8), 0);
+            var cwd = Normalize(Unicode(handle, pid, "current-directory", parameters + 0x38));
+            var command = Unicode(handle, pid, "command-line", parameters + 0x70);
             var image = new StringBuilder(32768); int size = image.Capacity;
             long created, exited, kernel, user;
             if (!QueryFullProcessImageName(handle, 0, image, ref size) || !GetProcessTimes(handle, out created, out exited, out kernel, out user) || exited != 0)
@@ -119,7 +122,7 @@ public static class CleanupProcesses {
                     if (!CandidateImage(process.Id)) continue;
                     CleanupProcess item = null;
                     try { item = ReadProcess(process.Id, false); }
-                    catch { if (process.HasExited) continue; throw new InvalidOperationException("Supported helper parameters unreadable"); }
+                    catch (Exception error) { if (process.HasExited) continue; throw new InvalidOperationException("Supported helper parameters unreadable (pid=" + process.Id + "): " + error.Message); }
                     if (Same(item.Cwd, target)) {
                         item.Dispose(); item = ReadProcess(process.Id, true);
                         if (!Same(item.Cwd, target)) { item.Dispose(); throw new InvalidOperationException("Directory owner changed during discovery"); }
@@ -135,33 +138,45 @@ public static class CleanupProcesses {
     static void VerifyDirectoryHandle(CleanupProcess item, string target) {
         var basic = new byte[48]; int written;
         if (NtQueryInformationProcess(item.Handle, 0, basic, basic.Length, out written) != 0) throw new InvalidOperationException("Directory owner unreadable");
-        var parameters = BitConverter.ToInt64(Read(item.Handle, BitConverter.ToInt64(basic, 8) + 0x20, 8), 0);
-        var directory = new IntPtr(BitConverter.ToInt64(Read(item.Handle, parameters + 0x48, 8), 0)); IntPtr copy;
+        var parameters = BitConverter.ToInt64(Read(item.Handle, item.Pid, "directory-handle", "peb-parameters", BitConverter.ToInt64(basic, 8) + 0x20, 8), 0);
+        var directory = new IntPtr(BitConverter.ToInt64(Read(item.Handle, item.Pid, "directory-handle", "current-directory-handle", parameters + 0x48, 8), 0)); IntPtr copy;
         if (!DuplicateHandle(item.Handle, directory, GetCurrentProcess(), out copy, 0, false, 2)) throw new InvalidOperationException("Directory handle unreadable");
         try {
             var path = new StringBuilder(32768); uint length = GetFinalPathNameByHandle(copy, path, (uint)path.Capacity, 8);
             if (length == 0 || length >= path.Capacity || !Same(Normalize(path.ToString()), target)) throw new InvalidOperationException("Directory handle differs");
         } finally { CloseHandle(copy); }
     }
+    static bool HasExited(CleanupProcess item) {
+        uint state = WaitForSingleObject(item.Handle, 0);
+        if (state == 0) return true;
+        if (state == 258) return false;
+        throw new InvalidOperationException("Retained process state unreadable (pid=" + item.Pid + ")");
+    }
     public static void Validate(CleanupProcess[] frozen, string target, CleanupChild[] children) {
         target = Normalize(target); var byId = frozen.ToDictionary(p => p.Pid);
         if (frozen.Length == 0) throw new InvalidOperationException("No supported helper holds the directory");
         foreach (var item in frozen) {
             if (item.Kind == "host" || item.Kind == "unknown") throw new InvalidOperationException("Unknown or host process owns the directory");
-            using (var now = ReadProcess(item.Pid, false)) {
-                if (now.Started != item.Started || now.ParentPid != item.ParentPid || now.CommandHash != item.CommandHash || !Same(now.Executable, item.Executable) || !Same(now.Cwd, target))
-                    throw new InvalidOperationException("Frozen process identity changed");
-            }
-            VerifyDirectoryHandle(item, target);
-            var parent = item.ParentPid; var childStarted = Int64.Parse(item.Started); var seen = new HashSet<int> { item.Pid };
-            while (byId.ContainsKey(parent)) {
-                if (!seen.Add(parent)) throw new InvalidOperationException("Process ancestry cycle");
-                if (Int64.Parse(byId[parent].Started) > childStarted) throw new InvalidOperationException("Intermediate parent PID was reused");
-                childStarted = Int64.Parse(byId[parent].Started); parent = byId[parent].ParentPid;
-            }
-            using (var host = ReadProcess(parent, false)) {
-                if (host.Kind != "host" || Int64.Parse(host.Started) > childStarted) throw new InvalidOperationException("Helper host ownership unproved");
-            }
+            // A launcher may exit naturally when its released child exits. Only
+            // the retained kernel object proves this; an unreadable PID does not.
+            if (HasExited(item)) continue;
+            try {
+                using (var now = ReadProcess(item.Pid, false)) {
+                    if (now.Started != item.Started || now.ParentPid != item.ParentPid || now.CommandHash != item.CommandHash || !Same(now.Executable, item.Executable) || !Same(now.Cwd, target))
+                        throw new InvalidOperationException("Frozen process identity changed");
+                }
+                VerifyDirectoryHandle(item, target);
+                var parent = item.ParentPid; var childStarted = Int64.Parse(item.Started); var seen = new HashSet<int> { item.Pid };
+                while (byId.ContainsKey(parent)) {
+                    if (!seen.Add(parent)) throw new InvalidOperationException("Process ancestry cycle");
+                    if (HasExited(byId[parent])) throw new InvalidOperationException("Frozen helper ancestor exited (pid=" + parent + ")");
+                    if (Int64.Parse(byId[parent].Started) > childStarted) throw new InvalidOperationException("Intermediate parent PID was reused");
+                    childStarted = Int64.Parse(byId[parent].Started); parent = byId[parent].ParentPid;
+                }
+                using (var host = ReadProcess(parent, false)) {
+                    if (host.Kind != "host" || Int64.Parse(host.Started) > childStarted) throw new InvalidOperationException("Helper host ownership unproved");
+                }
+            } catch { if (!HasExited(item)) throw; }
         }
         // CIM supplies parent IDs even when a child's process DACL denies OpenProcess.
         // A failed/incomplete relevant identity is a blocker, never silently skipped.
@@ -176,7 +191,8 @@ public static class CleanupProcesses {
         }
         var current = Scan(target);
         try {
-            if (current.Length != frozen.Length || current.Any(now => !byId.ContainsKey(now.Pid) || byId[now.Pid].Started != now.Started)) throw new InvalidOperationException("New or missing directory holder");
+            var live = frozen.Where(item => !HasExited(item)).ToDictionary(item => item.Pid);
+            if (current.Length != live.Count || current.Any(now => !live.ContainsKey(now.Pid) || live[now.Pid].Started != now.Started)) throw new InvalidOperationException("New or missing directory holder");
         } finally { foreach (var item in current) item.Dispose(); }
     }
     public static CleanupProcess[] ReleaseOrder(CleanupProcess[] frozen) {
@@ -191,7 +207,7 @@ public static class CleanupProcesses {
         try {
             Validate(remaining, target, children);
             // Retained process handles bind kernel objects; PID reuse cannot select another process.
-            if (WaitForSingleObject(item.Handle, 0) == 0) { outcome.State = "EXITED"; return outcome; }
+            if (HasExited(item)) { outcome.State = "EXITED"; return outcome; }
             using (var now = ReadProcess(item.Pid, false)) {
                 if (now.Started != item.Started || now.ParentPid != item.ParentPid || now.CommandHash != item.CommandHash || !Same(now.Executable, item.Executable) || !Same(now.Cwd, Normalize(target)))
                     throw new InvalidOperationException("Frozen process changed before termination");

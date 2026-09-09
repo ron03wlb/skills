@@ -22,6 +22,8 @@ Any number of Issue worktrees may execute concurrently. Reach for this once per 
 
 On Windows, Git can remove a worktree registration while leaving its empty directory locked by task helpers. The original completion remains valid and the Issue stays open until the directory is removed. Closeout can recover one precisely identified helper set from outside the completed Issue task, verify physical cleanup, then continue the original close operation. It checks executable identity, process creation, parent ownership and the actual current-directory handle before termination, and preserves the Codex host and unrelated work. A task becoming active, unknown ownership or respawn retains a concrete blocker; it does not trigger repeated termination or implementation replay. Native desktop release remains unavailable. Tool policy rejection must be resolved at that boundary.
 
+A launcher that exits when its child is released is recorded as already exited through its retained process handle. It does not invalidate recovery of the remaining verified helpers. An unreadable live helper still blocks cleanup, and a repaired adapter does not automatically repeat an earlier reserved batch.
+
 The merge uses the latest recorded target and exact reviewed candidate while the leaf owns both leases. An already reachable candidate satisfies the merge; required integration verification remains outstanding until its exact combination passes. Otherwise Git fast-forwards when possible and uses an ordinary merge for diverged histories. Target dirt requires human preservation and resolution. After resolution:
 
 - Direct entry retries `/close-issue <Issue-ID>`.
