@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
+import { PassThrough } from "node:stream";
+import { createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
 
 const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-driver.js", import.meta.url), "utf8");
 const api = runInNewContext(source);
@@ -291,4 +293,61 @@ test("unresolved omitted partial bytes survive repeated restore, checkpoint and 
   await h.driver.tick();
   assert.equal(h.durable().partialBytes, partial.length);
   assert.equal(h.output.at(-1).partialBytes, partial.length);
+});
+
+for (const slowBoundary of ["large response", "checkpoint", "control read"]) {
+  test(`bridge stays connected during ${slowBoundary} without repeating native work`, async () => {
+    const input = new PassThrough(), output = new PassThrough();
+    let wire = "", calls = 0;
+    output.on("data", chunk => { wire += chunk; });
+    const take = () => { const result = wire; wire = ""; return result; };
+    const bridge = createCodexHostBridge({ input, output, idleTimeoutMs: 100 });
+    const payload = { text: "漢字😀 ".repeat(15000) };
+    const outcome = bridge.call(request.name, { limit: 1 }).then(result => ({ result }), error => ({ error }));
+    const values = new Map([["workflow.host", api.createLane({ sessionId: 42, output: take() })]]);
+    const writes = [];
+    let slowCheckpoint = slowBoundary === "checkpoint", slowControl = slowBoundary === "control read";
+    const driver = api.createDriver({ driverId: "bounded-probe", load: key => values.get(key), store: (key, value) => values.set(key, value),
+      report: () => {}, setTimeout, clearTimeout, heartbeatMs: 10, tickMs: 500,
+      persist: async () => { if (slowCheckpoint) { slowCheckpoint = false; await sleep(180); } },
+      readControl: async () => { if (slowControl) { slowControl = false; await sleep(180); } return null; },
+      tools: {
+        async [request.name]() { calls++; return payload; },
+        async write_stdin(args) {
+          writes.push(args.chars);
+          if (args.chars.length > 12000) await sleep(180);
+          if (!bridge.disconnected) input.write(args.chars);
+          await sleep(1);
+          return { output: take(), ...(bridge.disconnected ? { exit_code: 0 } : {}) };
+        },
+      } });
+    try {
+      await driver.tick();
+      const observed = await outcome;
+      assert.equal(observed.error, undefined, "no heartbeat starvation at the reproduced boundary");
+      assert.deepEqual(plain(observed.result), payload);
+      assert.equal(calls, 1);
+      assert.ok(writes.every(value => value.length <= 12000), "native responses use bounded physical writes");
+      assert.equal(values.get("workflow.host").requests[0].state, "forwarded");
+      if (slowBoundary !== "large response") assert.ok(writes.filter(value => JSON.parse(value).heartbeat).length >= 2);
+    } finally { bridge.close(); input.destroy(); output.destroy(); }
+  });
+}
+
+test("a terminal frame returned by the final in-flight heartbeat is drained before run exits", async () => {
+  const terminal = { type: "result", result: { state: "PRESERVED" } };
+  let heartbeats = 0, delayed = false;
+  const h = harness({ write: async message => {
+    if (message?.heartbeat) {
+      if (++heartbeats === 1) return { output: "" };
+      await sleep(20); return { output: frame(terminal), exit_code: 0 };
+    }
+    return { output: message?.id ? frame({ type: "response-accepted", id: message.id }) : "" };
+  } });
+  const driver = api.createDriver({ ...h.dependencies, readControl: async () => null,
+    persist: async () => { if (heartbeats && !delayed) { delayed = true; await sleep(5); } } });
+  await driver.run(async () => {});
+  assert.equal(h.lane().active, false);
+  assert.ok(h.output.some(value => value.type === "result" && value.result.state === "PRESERVED"));
+  assert.equal(h.lane().buffer, "");
 });

@@ -136,7 +136,32 @@
     let lane;
     let ticking = false;
     let persisted = Promise.resolve();
+    let transport = Promise.resolve();
+    let pulseTimer, pulsePending, pulsing = false;
     const save = () => store("workflow.host", copy(lane));
+    // Heartbeats carry no authority and need no disk receipt. Serialize physical
+    // writes, but keep them independent from checkpoint/control shell latency.
+    const exchange = message => {
+      const pending = transport.then(async () => {
+        if (!lane.active) return { output: "" };
+        const result = await tools.write_stdin({ session_id: lane.sessionId,
+          chars: message ? JSON.stringify(message) + "\n" : "", yield_time_ms: 1000, max_output_tokens: 16000 });
+        lane.buffer += result.output ?? "";
+        if (result.exit_code !== undefined) { lane.active = false; lane.exitCode = result.exit_code; }
+        save();
+        return result;
+      });
+      transport = pending.catch(() => {});
+      return pending;
+    };
+    const schedulePulse = () => {
+      pulseTimer = setTimeout(() => {
+        if (!pulsing || !lane.active) return;
+        pulsePending = exchange({ heartbeat: true }).catch(() => {
+          report({ type: "transport-uncertain", sessionId: lane.sessionId, kind: "heartbeat" });
+        }).finally(() => { if (pulsing && lane.active) schedulePulse(); });
+      }, heartbeatMs);
+    };
     const flush = () => {
       const snapshot = checkpointState(lane);
       persisted = persisted.then(() => persist(snapshot));
@@ -217,15 +242,25 @@
       lane.pendingIo = { kind, message, state: "sending" }; save(); await flush();
       let result;
       try {
-        result = await tools.write_stdin({ session_id: lane.sessionId, chars: message ? JSON.stringify(message) + "\n" : "",
-          yield_time_ms: 1000, max_output_tokens: 16000 });
+        const body = JSON.stringify(message);
+        if (kind === "response" && body.length > 6000) {
+          if (body.length > 16 * 1024 * 1024) throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
+          const chunks = [];
+          for (let offset = 0; offset < body.length;) {
+            let size = Math.min(6000, body.length - offset);
+            while (JSON.stringify(body.slice(offset, offset + size)).length > 11000) size = Math.floor(size / 2);
+            chunks.push(body.slice(offset, offset + size)); offset += size;
+          }
+          for (let index = 0; index < chunks.length && lane.active; index++) {
+            result = await exchange({ responseChunk: { id: message.id, index, count: chunks.length, length: body.length, data: chunks[index] } });
+          }
+        } else result = await exchange(message);
       } catch (error) {
         lane.pendingIo.state = "uncertain"; lane.pendingIo.error = String(error.message ?? error); save();
         report({ type: "transport-uncertain", sessionId: lane.sessionId, kind }); return false;
       }
       // Save returned output before clearing the pending write or consuming any frames.
-      lane.pendingIo.result = result; lane.buffer += result.output ?? "";
-      if (result.exit_code !== undefined) { lane.active = false; lane.exitCode = result.exit_code; }
+      lane.pendingIo.result = result;
       save(); lane.pendingIo = null; save(); await drain(); await flush(); return true;
     };
     const heartbeat = async () => {
@@ -261,7 +296,10 @@
       // An interrupted write may have returned output just before consumption was interrupted.
       if (lane.pendingIo?.result) { lane.pendingIo = null; save(); }
       if (lane.active && (lane.needsInspection || lane.requests.some(item => item.state === "forwarding") || lane.pendingIo?.state === "uncertain")) {
-        if (!await write({ inspectRequests: true }, "reconcile")) return;
+        const unresolved = lane.requests.filter(item => item.state !== "forwarded").map(item => item.id);
+        for (let offset = 0; offset === 0 || offset < unresolved.length; offset += 100) {
+          if (!await write({ inspectRequests: true, requestIds: unresolved.slice(offset, offset + 100) }, "reconcile")) return;
+        }
         lane.needsInspection = false; save();
       }
       for (const request of lane.requests) {
@@ -298,7 +336,20 @@
     const boundedTick = async () => {
       if (ticking) throw new Error("Original active driver tick is still pending");
       ticking = true;
-      try { await tick(); } finally { ticking = false; }
+      let completed = false;
+      try {
+        claim(); pulsing = true; schedulePulse();
+        await tick();
+        completed = true;
+      } finally {
+        pulsing = false; clearTimeout(pulseTimer);
+        await pulsePending;
+        try {
+          // The final pulse may return EOF after tick's last drain. Retain and
+          // consume its terminal frames before run checks whether to continue.
+          if (completed) { await drain(); await flush(); }
+        } finally { ticking = false; }
+      }
     };
     return {
       tick: boundedTick,

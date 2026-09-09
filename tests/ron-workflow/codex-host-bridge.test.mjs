@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { PassThrough } from "node:stream";
+import { spawn } from "node:child_process";
 import test from "node:test";
+import { setTimeout as sleep } from "node:timers/promises";
 
 import { CODEX_HOST_RELEASE_CAPABILITY, createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
 
@@ -67,13 +69,13 @@ test("original owner preserves malformed responses, acknowledges delivery and re
     const pending = bridge.call("mcp__codex_app__list_projects", {});
     const request = messages.at(-1);
     input.write(JSON.stringify({ id: request.id }) + "\n");
-    input.write('{"inspectRequests":true}\n');
+    input.write(JSON.stringify({ inspectRequests: true, requestIds: [request.id] }) + "\n");
     assert.equal(messages.at(-1).state, "pending");
     const response = { id: request.id, result: { original: true } };
     input.write(JSON.stringify(response) + "\n");
     assert.deepEqual(await pending, response.result);
     assert.equal(messages.at(-1).type, "response-accepted");
-    input.write('{"inspectRequests":true}\n');
+    input.write(JSON.stringify({ inspectRequests: true, requestIds: [request.id] }) + "\n");
     assert.equal(messages.at(-1).state, "accepted");
     assert.deepEqual(messages.at(-1).request, request);
     input.write(JSON.stringify(response) + "\n");
@@ -99,4 +101,91 @@ test("batch text controls require an exact Run and echo its identity", async () 
     assert.deepEqual(commands, [{ runId: "run-b", command: "PAUSE" }]);
     assert.equal(messages.at(-1).runId, "run-b");
   } finally { bridge.close(); }
+});
+
+test("request reconciliation excludes unrelated accepted history", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    let selected;
+    for (let i = 0; i < 70; i++) {
+      const pending = bridge.call("mcp__codex_app__send_message_to_thread", { threadId: `task-${i}`, prompt: "x".repeat(16000) });
+      selected = messages.at(-1).id;
+      input.write(JSON.stringify({ id: selected, result: { accepted: true } }) + "\n");
+      await pending;
+    }
+    messages.length = 0;
+    input.write(JSON.stringify({ inspectRequests: true, requestIds: [selected] }) + "\n");
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].id, selected);
+    assert.equal(messages[0].state, "accepted");
+  } finally { bridge.close(); }
+});
+
+for (const reason of ["idle-timeout", "input-eof", "input-error", "output-error"]) {
+  test(`disconnect preserves the safe ${reason} category`, async () => {
+    const input = new PassThrough(), output = new PassThrough();
+    const bridge = createCodexHostBridge({ input, output, idleTimeoutMs: 30 });
+    const pending = bridge.call("mcp__codex_app__list_projects", {}).catch(error => error);
+    if (reason === "input-eof") input.end();
+    else if (reason === "input-error") input.emit("error", new Error("secret input contents"));
+    else if (reason === "output-error") output.emit("error", new Error("secret output contents"));
+    else await sleep(50);
+    const error = await pending;
+    assert.match(error.message, /CODEX_HOST_DISCONNECTED/u);
+    assert.equal(error.reason, reason);
+    assert.equal(bridge.metrics().disconnect.reason, reason);
+    assert.equal(JSON.stringify(bridge.metrics()).includes("secret"), false);
+    bridge.close();
+  });
+}
+
+test("fragment replay preserves one response and rejects missing, reordered or conflicting data", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    const pending = bridge.call("mcp__codex_app__list_projects", {});
+    const id = messages.at(-1).id, response = { id, result: { text: "漢字😀 ".repeat(500) } };
+    const body = JSON.stringify(response), split = Math.floor(body.length / 2);
+    const chunks = [body.slice(0, split), body.slice(split)];
+    const send = (index, changes = {}) => input.write(JSON.stringify({ responseChunk: { id, index, count: 2, length: body.length, data: chunks[index], ...changes } }) + "\n");
+    send(1);
+    assert.equal(messages.at(-1).type, "input-error");
+    send(0);
+    send(0);
+    send(0, { data: chunks[0].replace("result", "differ") });
+    assert.equal(messages.at(-1).type, "input-error");
+    input.write(JSON.stringify({ inspectRequests: true, requestIds: [id] }) + "\n");
+    assert.equal(messages.at(-1).state, "pending", "a partial response is never accepted");
+    send(1);
+    assert.deepEqual(await pending, response.result);
+    assert.equal(messages.at(-1).type, "response-accepted");
+    send(0); send(1);
+    assert.equal(messages.at(-1).type, "response-accepted", "the original completed response may be acknowledged again");
+    input.write('{bad-secret-payload}\n');
+    assert.equal(JSON.stringify(messages).includes("bad-secret-payload"), false);
+  } finally { bridge.close(); }
+});
+
+test("buffered host heartbeat survives a synchronous bridge event-loop stall", async () => {
+  const bridgeUrl = new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs", import.meta.url).href;
+  const source = `import { createCodexHostBridge } from ${JSON.stringify(bridgeUrl)};
+    const bridge = createCodexHostBridge({ idleTimeoutMs: 100 });
+    bridge.call('mcp__codex_app__list_projects', {}).catch(error => console.log('OUTCOME ' + error.message));
+    console.log('BLOCKING');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+    setTimeout(() => { console.log('DISCONNECTED ' + bridge.disconnected); bridge.close(); }, 30);`;
+  const child = spawn(process.execPath, ["--input-type=module", "-e", source], { stdio: ["pipe", "pipe", "pipe"] });
+  let output = "", sent = false;
+  child.stdout.on("data", data => {
+    output += data;
+    if (!sent && output.includes("BLOCKING")) { sent = true; child.stdin.write('{"heartbeat":true}\n'); }
+  });
+  child.stderr.on("data", data => { output += data; });
+  const code = await new Promise((resolve, reject) => { child.on("exit", resolve); child.on("error", reject); });
+  assert.equal(code, 0, output);
+  assert.equal(sent, true);
+  assert.match(output, /DISCONNECTED false/u, "stdin already buffered during synchronous Git/tool work must get a poll turn before expiry");
 });
