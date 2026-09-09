@@ -463,6 +463,40 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("dependency loading separates host mechanism from invocation and selected-source authority", () => {
+  const convention = read(".agents/invocation.md");
+  assert.match(convention, /generic Skill tool.*available.*use it/isu);
+  assert.match(convention, /otherwise.*host-supported named-skill.*read and follow.*SKILL\.md/isu);
+  assert.match(convention, /absence of.*tool name.*another human invocation.*already authorized work/isu);
+  assert.match(convention, /one named skill per invocation/iu);
+  assert.match(convention, /missing or inaccessible content.*conflicting identities.*higher-priority host restrictions/isu);
+  assert.match(convention, /Matt\/Ron owners and their references.*selected immutable package/isu);
+  assert.match(convention, /generic helpers.*current host catalog/isu);
+  assert.match(convention, /never silently substitute.*newer local/isu);
+  assert.match(convention, /user-invoked skill.*never.*another skill.*fallback/isu);
+  assert.match(convention, /disable-model-invocation: true/iu);
+  assert.match(convention, /allow_implicit_invocation: false/iu);
+});
+
+test("grill-with-docs metadata and docs preserve both planning branches and the explicit handoff", () => {
+  const skill = read("skills/engineering/grill-with-docs/SKILL.md");
+  const metadata = read("skills/engineering/grill-with-docs/agents/openai.yaml");
+  const docs = read("docs/engineering/grill-with-docs.md");
+  assert.match(skill, /Read-only exploration and tracker-only settled scope need no worktree/u);
+  assert.match(skill, /Before the first accepted glossary or ADR write.*Spec workflow lane/isu);
+  assert.match(skill, /one material decision at a time/u);
+  assert.match(skill, /selected source and invocation restrictions.*same settled scope.*same lane identity/isu);
+  assert.match(skill, /handoff packet containing the task identity, proposed Spec, target, current baseline.*empty change list.*owned worktree.*every accepted glossary or ADR path or hunk.*content identity/isu);
+  assert.match(skill, /partial publication, uncommitted accepted decision, identity mismatch, or failed read-back preserves it/u);
+  assert.match(metadata, /Plan read-only; isolate accepted document writes/u);
+  assert.match(docs, /Read-only design and tracker-only scope.*no worktree/isu);
+  assert.match(docs, /Accepted document writes.*exact registered worktree.*successful `to-spec` handoff read-back/isu);
+  assert.match(docs, /generic Skill tool.*host-supported named-skill loading/isu);
+  assert.match(docs, /task identity, proposed Spec, target,.*baseline.*accepted.*path or hunk.*content identity/isu);
+  assert.match(docs, /explicitly run `\/to-spec` with that packet/iu);
+  assert.doesNotMatch(docs, /closing message tends to be open-ended/u);
+});
+
 test("promoted README invocation groups match each skill's invocation policy", () => {
   const reference = read("README.md").split(/^## Reference$/mu)[1];
   assert.notEqual(reference, undefined, "top-level README needs its Reference index");
@@ -690,7 +724,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
 
   assert.match(grill, /Spec workflow lane.*one Codex task.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
   assert.match(grill, /same target.*without.*shared planning checkout.*global workflow lock.*cross-lane.*mutation/isu);
-  assert.match(grill, /Call the Skill tool twice.*"grilling".*"domain-modeling".*same lane identity/isu);
+  assert.match(grill, /Load "grilling" and "domain-modeling" as separate named skills.*generic Skill tool.*otherwise.*host-supported.*SKILL\.md.*same lane identity/isu);
   assert.match(grill, /handoff packet.*tell the human to run `\/to-spec`.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
   assert.match(grill, /Recoverable blocker.*lane registry.*observed evidence.*smallest human action.*preserved stages.*same `\/grill-with-docs`/isu);
   assert.match(domain, /active Spec workflow lane.*accepted.*CONTEXT\.md.*ADR.*only.*planning worktree/isu);

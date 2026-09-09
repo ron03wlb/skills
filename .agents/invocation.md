@@ -13,13 +13,21 @@ Bucket `README.md`s and the top-level `README.md` group entries into **User-invo
 
 ## Dependencies between them
 
-Dependencies are expressed as an explicit instruction to **call the Skill tool** with the named skill (`Call the Skill tool with "grilling"`), not deep `../other-skill/FILE.md` cross-references, and not a bare `/skill`-style mention left for the model to interpret. Naming the tool is what gets it fired: most harnesses expose skill invocation as a tool the model calls, and spelling that out gets a higher hit rate than dropping a `/name` into prose and hoping it's read as a command. Dropping the leading `/` also keeps this harness-neutral rather than less: a skill name on its own carries no assumption about which harness's trigger syntax it belongs to. Shared reference docs live inside the skill that owns them; other skills reach that material by calling the Skill tool with it, not by linking across folders.
+Dependencies use an explicit instruction to load and follow a **named skill**. Resolve invocation permission and the required source first, then choose the host's loading mechanism:
+
+- When a generic Skill tool is available, use it for permitted dependencies, retaining the selected source.
+- Otherwise use the host-supported named-skill mechanism to read and follow the required `SKILL.md`. The absence of a tool name alone does not require another human invocation of already authorized work.
+- Report actual missing or inaccessible content, conflicting identities, and higher-priority host restrictions at their boundary. Tool availability cannot authorize a dependency or select a different source.
+
+When a workflow pins its source, Matt/Ron owners and their references stay in the selected immutable package; generic helpers use the current host catalog. Never silently substitute a newer local skill for a pinned owner. If the host cannot load the selected identity, report that limitation instead of following another copy.
+
+Shared reference docs live inside the skill that owns them; other skills load that named owner to reach its material. Express dependencies by name rather than deep `../other-skill/FILE.md` cross-references or bare `/skill` labels. Host-supported reading of the resolved `SKILL.md` is a loading mechanism, not a new dependency convention.
 
 This is about **operative** instructions: a skill's own steps telling the agent to go run another skill right now. Router prose that just names skills for a human to pick from (`ask-matt`, bucket `README.md`s) isn't invoking anything, so it keeps `/skill`-style names as plain labels.
 
-The Skill tool takes one skill per call. A step that needs two skills is two calls, not one call with two names: say so (`Call the Skill tool twice, for "grilling" and "domain-modeling"`), not "call it with X and Y," which reads as a single call taking both.
+Use one named skill per invocation. A step that needs two skills loads each separately: `Load "grilling" and "domain-modeling" as separate named skills; use the generic Skill tool when available, otherwise the host-supported named-skill mechanism.` With the Skill tool, that means two calls, each with one name.
 
-This whole convention only holds when the named skill is **model-invoked**. A user-invoked skill can never be reached this way, full stop: per the invariant above, no other skill can call it, including by naming it to the Skill tool. When a step's precondition is a user-invoked skill (e.g. `setup-matt-pocock-skills`), phrase it as an instruction for the human to act on: "tell the user to run `/setup-matt-pocock-skills`", never as a Skill tool call.
+This convention only permits dependencies that are **model-invoked**. A user-invoked skill can never be called automatically by another skill, including through the Skill tool or a loading fallback. Reading its file does not change that restriction. When a step needs a user-invoked skill (e.g. `setup-matt-pocock-skills`), tell the human to run `/setup-matt-pocock-skills`. Loading fallback changes the mechanism only; invocation policy and source authority still apply.
 
 ## Passive vs active domain work
 
