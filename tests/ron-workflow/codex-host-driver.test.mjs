@@ -445,3 +445,59 @@ test("a stalled physical write has bounded observation, preserves its owner and 
   assert.equal(h.lane().requests[0].state, "forwarded");
   assert.equal(h.durable().fault, null);
 });
+
+test("a never-returning native call is observed within the tick budget and its late original result is retained", async () => {
+  let settleNative;
+  const pendingNative = new Promise(resolve => { settleNative = resolve; });
+  const h = harness({ native: () => pendingNative });
+  const driver = api.createDriver({ ...h.dependencies, heartbeatMs: 1000, tickMs: 5,
+    transportWaitMs: 5, hostOverheadMs: 5 });
+
+  const started = Date.now();
+  await driver.tick();
+  assert.ok(Date.now() - started < 200);
+  assert.equal(h.calls(), 1);
+  assert.deepEqual(h.durable().fault, {
+    identity: "native:42:call:original-id",
+    kind: "native",
+    requestId: "original-id",
+    state: "unresolved",
+    recoveryRounds: 0,
+    receiptRefs: ["original-id"],
+  });
+  await driver.tick();
+  assert.equal(h.calls(), 1, "bounded native observation never replays the original tool call");
+
+  settleNative({ late: true });
+  await sleep(0);
+  await driver.tick();
+  assert.equal(h.calls(), 1);
+  assert.equal(h.lane().requests[0].state, "forwarded");
+  assert.equal(h.durable().fault, null);
+});
+
+test("unchanged settled ticks do not emit another driver delta", async () => {
+  const h = harness();
+  await h.driver.tick();
+  const reports = h.output.filter(item => item.type === "driver").length;
+  await h.driver.tick();
+  assert.equal(h.output.filter(item => item.type === "driver").length, reports);
+});
+
+test("status reporting ignores timestamps and emits only compact semantic changes", async () => {
+  let sequence = 0;
+  const h = harness({ write: message => {
+    if (message?.heartbeat) return { output: frame({ type: "status", status: {
+      run: { runId: "run", state: "RUNNING", controlRevision: 0, updatedAt: `tick-${sequence++}` },
+      nodes: [{ issueId: "I_1", state: "EXECUTING", updatedAt: `tick-${sequence}` }],
+      legalActions: [], diagnoses: [],
+    } }) };
+    return { output: message?.id ? frame({ type: "response-accepted", id: message.id }) : "" };
+  } });
+  await h.driver.tick();
+  await h.driver.tick();
+  const statuses = h.output.filter(item => item.type === "status");
+  assert.equal(statuses.length, 1);
+  assert.deepEqual(statuses[0].run, { runId: "run", state: "RUNNING", controlRevision: 0 });
+  assert.deepEqual(statuses[0].nodes, [{ issueId: "I_1", state: "EXECUTING" }]);
+});

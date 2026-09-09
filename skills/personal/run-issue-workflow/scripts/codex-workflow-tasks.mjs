@@ -39,11 +39,18 @@ const assertCloseOutcomeIdentity = (result, request) => {
 
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
-export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout, discoverTasks = discoverLocalCodexTasks }) {
+export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout,
+  discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null }) {
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
   const transientFaults = new Map();
+  const taskObservations = new Map();
+  const fallbackRounds = new Map();
+  let batchOffset = 0;
+  let eventWaitSupported = true;
+  let hostCallCount = 0;
+  let hostReturnedBytes = 0;
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
@@ -93,7 +100,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           receiptRefs: fault.receiptRefs });
       }
       try {
+        hostCallCount += 1;
         const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args));
+        hostReturnedBytes += JSON.stringify(result)?.length ?? 0;
         if (fault) recordFault({ ...fault, state: "settled", receiptRefs: fault.receiptRefs });
         return result;
       } catch (error) {
@@ -506,15 +515,90 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       throw new Error("Task message retry budget exhausted after native read-back");
     },
     async wait(taskRefs) {
-      const result = await call("wait_threads", { targets: taskRefs.map((ref) => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) })), timeoutMs: 30000 });
-      // Fresh task status is authoritative; a wait timeout or commentary is not completion.
-      for (const target of result.polls ?? result.results ?? result.threads ?? []) {
-        const threadId = target.thread?.id ?? target.threadId;
-        if (threadId && target.cursor) cursors.set(threadId, target.cursor);
+      if (!Array.isArray(taskRefs) || taskRefs.length === 0) throw new Error("Task observation requires at least one exact task reference");
+      if (taskRefs.some(ref => typeof ref?.threadId !== "string" || typeof ref?.hostId !== "string")) {
+        throw new Error("Task observation requires exact thread and host identities");
       }
-      const states = await Promise.all(taskRefs.map(ref => read(ref)));
-      return { coordinatorActive: !host.disconnected, taskSettled: states.every(({ state }) => state === "RESUMABLE"),
-        ...(states.length === 1 && states[0].closeRequest ? { closeRequestIdentity: states[0].closeRequest.requestIdentity } : {}) };
+      const batchSize = Math.min(8, taskRefs.length);
+      const batch = Array.from({ length: batchSize }, (_, index) => taskRefs[(batchOffset + index) % taskRefs.length]);
+      batchOffset = (batchOffset + batchSize) % taskRefs.length;
+      const targets = batch.map(ref => ({ ...ref, ...(cursors.has(ref.threadId) ? { afterCursor: cursors.get(ref.threadId) } : {}) }));
+      const batchKey = batch.map(({ threadId, hostId }) => `${hostId}:${threadId}`).join("|");
+      const callsBefore = hostCallCount, bytesBefore = hostReturnedBytes;
+      let result, mode = "event";
+      if (eventWaitSupported) {
+        try {
+          result = await call("wait_threads", { targets, timeoutMs: 60000 });
+        } catch (error) {
+          if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
+          eventWaitSupported = false;
+        }
+      }
+      const changed = [];
+      const states = [];
+      let fullHistoryReads = 0;
+      if (!eventWaitSupported) {
+        mode = "fallback";
+        const round = fallbackRounds.get(batchKey) ?? 0;
+        const before = await readObservationSignal();
+        if (before?.control || before?.deadline) {
+          return { coordinatorActive: !host.disconnected, taskSettled: false,
+            observation: { kind: "interrupted", mode, signal: before.control ? "control" : "deadline", batchSize: batch.length,
+              fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+              modelRoundTrips: "unavailable", tokens: "unavailable" } };
+        }
+        await sleep([15000, 30000, 60000][Math.min(round, 2)]);
+        const after = await readObservationSignal();
+        if (after?.control || after?.deadline) {
+          return { coordinatorActive: !host.disconnected, taskSettled: false,
+            observation: { kind: "interrupted", mode, signal: after.control ? "control" : "deadline", batchSize: batch.length,
+              fullHistoryReads: 0, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+              modelRoundTrips: "unavailable", tokens: "unavailable" } };
+        }
+        for (const ref of batch) {
+          const state = await read(ref); fullHistoryReads += 1; states.push(state);
+          const semantic = JSON.stringify({ state: state.state, closeRequestIdentity: state.closeRequest?.requestIdentity ?? null,
+            modelYield: state.modelYield?.yieldIdentity ?? null, recoveryResult: state.recoveryResult?.state ?? null });
+          const previous = taskObservations.get(ref.threadId);
+          if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: state.state });
+          taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
+            closeRequestIdentity: state.closeRequest?.requestIdentity });
+        }
+        fallbackRounds.set(batchKey, changed.length ? 0 : Math.min(round + 1, 2));
+      } else {
+        const observations = result.polls ?? result.results ?? result.threads ?? [];
+        const refsById = new Map(batch.map(ref => [ref.threadId, ref]));
+        for (const target of observations) {
+          const threadId = target.thread?.id ?? target.threadId;
+          const ref = refsById.get(threadId);
+          if (!ref) continue;
+          if (target.cursor) cursors.set(threadId, target.cursor);
+          const status = String(target.thread?.status?.type ?? target.status?.type ?? target.status ?? target.state ?? "unknown").toLowerCase();
+          const terminal = Boolean(target.finalText || target.final || target.event === "completion"
+            || ["idle", "notloaded", "completed", "failed", "error"].includes(status));
+          const attention = Boolean(target.needsAttention || target.event === "attention" || status === "needs_attention");
+          const anomaly = status === "unknown" || Boolean(target.error);
+          const semantic = JSON.stringify({ status, terminal, attention, error: Boolean(target.error) });
+          const previous = taskObservations.get(threadId);
+          if (terminal || attention || previous !== undefined && previous.semantic !== semantic) {
+            changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
+          }
+          if (terminal || attention || anomaly) {
+            const state = await read(ref); fullHistoryReads += 1; states.push(state);
+            taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",
+              closeRequestIdentity: state.closeRequest?.requestIdentity });
+          } else {
+            taskObservations.set(threadId, { semantic, settled: false });
+          }
+        }
+      }
+      const cached = taskRefs.map(ref => taskObservations.get(ref.threadId));
+      const closeRequestIdentity = taskRefs.length === 1 ? cached[0]?.closeRequestIdentity : undefined;
+      return { coordinatorActive: !host.disconnected, taskSettled: cached.every(value => value?.settled === true),
+        ...(closeRequestIdentity ? { closeRequestIdentity } : {}),
+        observation: { kind: changed.length ? "changed" : "unchanged", mode, batchSize: batch.length,
+          changed, fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+          modelRoundTrips: "unavailable", tokens: "unavailable" } };
     },
   };
 }

@@ -142,14 +142,22 @@
     let persisted = Promise.resolve();
     let activeWrite = null;
     let pulseTimer, pulsePending, pulsing = false;
+    let reportVersion = 0, lastDriverSignature = null, lastStatusSignature = null;
+    const reportSignatures = new Map();
     const save = () => store("workflow.host", copy(lane));
+    const publish = value => { reportVersion += 1; report(value); };
+    const publishDelta = (key, value) => {
+      const signature = JSON.stringify(value);
+      if (reportSignatures.get(key) === signature) return false;
+      reportSignatures.set(key, signature); publish(value); return true;
+    };
     const requestIdFor = message => message?.id ?? message?.responseChunk?.id ?? null;
-    const faultFor = (kind, requestId = null) => ({
-      identity: `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`,
-      kind: "transport",
+    const faultFor = (scope, kind, requestId = null) => ({
+      identity: `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`,
+      kind: scope,
       ...(requestId ? { requestId } : {}),
       state: "unresolved",
-      recoveryRounds: lane.fault?.identity === `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`
+      recoveryRounds: lane.fault?.identity === `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`
         ? lane.fault.recoveryRounds : 0,
       receiptRefs: requestId ? [requestId] : [],
     });
@@ -197,7 +205,7 @@
         if (!pulsing || !lane.active) return;
         pulsePending = (async () => {
           if (activeWrite) {
-            report({ type: "transport-observation", sessionId: lane.sessionId, kind: activeWrite.kind, state: "pending" });
+            publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind: activeWrite.kind, state: "pending" });
             return;
           }
           await write({ heartbeat: true }, "heartbeat");
@@ -223,14 +231,23 @@
     };
     const diagnostic = (reason, details = {}) => {
       lane.diagnostics.push({ reason, ...details }); save();
-      report({ type: "transport-diagnostic", reason });
+      publish({ type: "transport-diagnostic", reason });
     };
     const reportFrame = message => {
       if (message.type === "status") {
         const status = message.status;
-        report({ type: "status", run: status?.run, nodes: status?.nodes,
-          actions: status?.legalActions?.map(({ type, issueId }) => ({ type, issueId })), diagnoses: status?.diagnoses });
-      } else report(message);
+        const compact = { type: "status",
+          run: status?.run ? { runId: status.run.runId, state: status.run.state, controlRevision: status.run.controlRevision,
+            ...(status.run.controlCommand ? { controlCommand: status.run.controlCommand } : {}) } : undefined,
+          nodes: status?.nodes?.map(node => ({ issueId: node.issueId, state: node.state,
+            ...(node.task?.state ? { taskState: node.task.state } : {}),
+            ...(node.close?.completionState ? { completionState: node.close.completionState } : {}) })),
+          actions: status?.legalActions?.map(({ type, issueId }) => ({ type, issueId })),
+          diagnoses: status?.diagnoses?.map(({ reasonCode, limitationClass, affectedNodes, nextOwner }) => (
+            { reasonCode, limitationClass, affectedNodes, nextOwner })) };
+        const signature = JSON.stringify(compact);
+        if (signature !== lastStatusSignature) { lastStatusSignature = signature; publish(compact); }
+      } else publish(message);
     };
     const receive = async (message, raw) => {
       const found = lane.requests.find(item => item.id === message.id);
@@ -289,34 +306,37 @@
         lane.pendingIo = null; save();
       } else if (!activeWrite && lane.pendingIo) {
         lane.pendingIo.state = "uncertain";
-        lane.fault = faultFor(lane.pendingIo.kind, lane.pendingIo.requestId); save(); await flush();
-        report({ type: "reconciliation-required", id: lane.pendingIo.requestId,
+        lane.fault = faultFor("transport", lane.pendingIo.kind, lane.pendingIo.requestId); save(); await flush();
+        publish({ type: "reconciliation-required", id: lane.pendingIo.requestId,
           reason: "Original physical write owner is absent; reconcile its late outcome before another write" });
         return false;
       }
       const current = activeWrite ?? beginWrite(message, kind);
       if (current.kind !== kind || current.requestId !== requestIdFor(message)) {
-        report({ type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
+        publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind: current.kind, state: "pending" });
         return false;
       }
       const observed = await observe(current.promise);
       if (observed.state === "pending") {
         if (lane.pendingIo) lane.pendingIo.state = "observing";
-        lane.fault = faultFor(kind, current.requestId); save();
+        lane.fault = faultFor("transport", kind, current.requestId); save();
         if (kind !== "heartbeat") await flush();
-        report({ type: "transport-observation", sessionId: lane.sessionId, kind, state: "pending",
+        publishDelta("transport", { type: "transport-observation", sessionId: lane.sessionId, kind, state: "pending",
           waitMs: transportWaitMs, hostOverheadMs, faultIdentity: lane.fault.identity });
         return false;
       }
       activeWrite = null;
       if (observed.state === "failed") {
         if (lane.pendingIo) { lane.pendingIo.state = "uncertain"; lane.pendingIo.ownerSettled = true; }
-        lane.fault = faultFor(kind, current.requestId); save();
+        lane.fault = faultFor("transport", kind, current.requestId); save();
         if (kind !== "heartbeat") await flush();
-        report({ type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: lane.fault.identity });
+        publishDelta("transport", { type: "transport-uncertain", sessionId: lane.sessionId, kind, faultIdentity: lane.fault.identity });
         return false;
       }
-      lane.pendingIo = null; lane.fault = null; save(); await drain();
+      lane.pendingIo = null;
+      if (lane.fault?.kind === "transport") lane.fault = null;
+      reportSignatures.delete("transport");
+      save(); await drain();
       if (kind !== "heartbeat") await flush();
       return true;
     };
@@ -333,7 +353,7 @@
     const callNative = async request => {
       const message = request.request;
       if (request.payloadMissing || !allowed.includes(message.name) || typeof tools[message.name] !== "function") {
-        report({ type: "reconciliation-required", id: request.id, reason: "Unsupported or unavailable tool" }); return;
+        publish({ type: "reconciliation-required", id: request.id, reason: "Unsupported or unavailable tool" }); return;
       }
       const args = message.name === "mcp__codex_app__list_threads" && message.arguments.limit > 50
         ? { ...message.arguments, limit: 50 } : message.arguments;
@@ -343,6 +363,8 @@
         result => ({ id: request.id, result }), error => ({ id: request.id, error: String(error.message ?? error) }),
       ).then(async response => {
         const current = lane.requests.find(item => item.id === request.id);
+        if (lane.fault?.identity === `native:${lane.sessionId}:call:${request.id}`) lane.fault = null;
+        reportSignatures.delete(`native:${request.id}`);
         current.response = response; await transition(current, "returned");
       });
       native.set(request.id, pending);
@@ -364,7 +386,7 @@
         if (request.conflict) continue;
         if (request.state === "received" && lane.active) await callNative(request);
         if (request.state === "dispatched" && !native.has(request.id)) {
-          report({ type: "reconciliation-required", id: request.id, reason: "Original native outcome is uncertain; read its task/intent owner before retry" });
+          publish({ type: "reconciliation-required", id: request.id, reason: "Original native outcome is uncertain; read its task/intent owner before retry" });
         }
         const pending = native.get(request.id);
         if (pending) {
@@ -374,10 +396,15 @@
             clearTimeout(timer);
             if (request.state === "dispatched") await heartbeat();
           }
+          if (request.state === "dispatched") {
+            lane.fault = faultFor("native", "call", request.id); save(); await flush();
+            publishDelta(`native:${request.id}`, { type: "native-observation", id: request.id, state: "pending",
+              waitMs: tickMs, faultIdentity: lane.fault.identity });
+          }
           if (request.state === "returned") { await pending; native.delete(request.id); }
         }
         if (request.state === "returned" && lane.active) {
-          if (!request.response) report({ type: "reconciliation-required", id: request.id, reason: "Native payload was intentionally excluded from disk; recover the original owner outcome" });
+          if (!request.response) publish({ type: "reconciliation-required", id: request.id, reason: "Native payload was intentionally excluded from disk; recover the original owner outcome" });
           else {
             await transition(request, "forwarding");
             if (!await write(request.response, "response")) return;
@@ -394,9 +421,12 @@
       }
       if (lane.active) await heartbeat();
       await drain(); await flush();
-      report({ type: "driver", active: lane.active, sessionId: lane.sessionId,
+      const driverDelta = { type: "driver", active: lane.active, sessionId: lane.sessionId,
         pending: lane.requests.filter(item => item.state !== "forwarded").map(({ id, state }) => ({ id, state })),
-        partialBytes: partialBytes(lane) });
+        partialBytes: partialBytes(lane) };
+      const signature = JSON.stringify(driverDelta);
+      if (signature !== lastDriverSignature) { lastDriverSignature = signature; publish(driverDelta); }
+      return signature;
     };
     const boundedTick = async () => {
       if (ticking) throw new Error("Original active driver tick is still pending");
@@ -425,7 +455,11 @@
       tick: () => withPulse(boundedTick),
       async run(yieldControl) {
         await withPulse(async () => {
-          do { await boundedTick(); await yieldControl(); } while (lane.active || native.size);
+          let observedVersion = reportVersion;
+          do {
+            await boundedTick();
+            if (reportVersion !== observedVersion) { observedVersion = reportVersion; await yieldControl(); }
+          } while (lane.active || native.size);
         });
       },
       resume({ previousDriverId, stoppedEvidence }) {

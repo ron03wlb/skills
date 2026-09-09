@@ -516,3 +516,90 @@ test("one read-only transport fault consumes exactly 5/15/30 recovery seconds ac
     assert.deepEqual(delays, [5000, 15000, 30000]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test("event waits rotate batches of eight, reuse cursors and read full history only for a material terminal event", async () => {
+  const refs = Array.from({ length: 9 }, (_, index) => ({ threadId: `worker-${index + 1}`, hostId: "local" }));
+  const batches = [];
+  let waits = 0, reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", host: { async call(name, args) {
+    if (name.endsWith("wait_threads")) {
+      batches.push(args.targets);
+      assert.ok(args.timeoutMs <= 60000);
+      waits += 1;
+      if (waits === 3) return { polls: [{ threadId: args.targets[0].threadId, cursor: "terminal-cursor", status: "completed", event: "completion" }] };
+      return { timedOut: true, polls: args.targets.map(target => ({ threadId: target.threadId,
+        cursor: `cursor-${target.threadId}`, status: "running", event: "unchanged" })) };
+    }
+    if (name.endsWith("read_thread")) {
+      reads += 1;
+      return { thread: { id: args.threadId, hostId: args.hostId, status: { type: "idle" } },
+        turns: [{ id: "done", status: "completed", items: [{ type: "agentMessage", phase: "final_answer", text: "done" }] }] };
+    }
+    throw new Error(name);
+  } } });
+
+  const first = await tasks.wait(refs);
+  const second = await tasks.wait(refs);
+  const third = await tasks.wait(refs);
+  assert.deepEqual(batches.map(batch => batch.length), [8, 8, 8]);
+  assert.deepEqual(batches[0].map(({ threadId }) => threadId), refs.slice(0, 8).map(({ threadId }) => threadId));
+  assert.equal(batches[1][0].threadId, "worker-9", "the next bounded batch rotates fairly");
+  assert.equal(batches[1][1].afterCursor, "cursor-worker-1");
+  assert.equal(reads, 1, "unchanged running polls never request full task history");
+  assert.equal(first.observation.fullHistoryReads, 0);
+  assert.equal(second.observation.kind, "unchanged");
+  assert.equal(third.observation.kind, "changed");
+  assert.equal(third.observation.fullHistoryReads, 1);
+  assert.equal(third.observation.modelRoundTrips, "unavailable");
+  assert.equal(third.observation.tokens, "unavailable");
+  assert.ok(third.observation.returnedBytes > 0);
+});
+
+test("unsupported event notification falls back at 15/30/60 seconds and resets only after semantic change", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const delays = [];
+  let state = "active", reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", sleep: async delay => { delays.push(delay); },
+    host: { async call(name, args) {
+      if (name.endsWith("wait_threads")) throw new Error("Unsupported desktop tool: wait_threads");
+      if (name.endsWith("read_thread")) {
+        reads += 1;
+        return { thread: { id: args.threadId, hostId: args.hostId, status: { type: state } }, turns: [] };
+      }
+      throw new Error(name);
+    } } });
+
+  await tasks.wait([ref]);
+  await tasks.wait([ref]);
+  await tasks.wait([ref]);
+  await tasks.wait([ref]);
+  assert.deepEqual(delays, [15000, 30000, 60000, 60000]);
+  state = "idle";
+  const changed = await tasks.wait([ref]);
+  await tasks.wait([ref]);
+  assert.equal(changed.observation.kind, "changed");
+  assert.equal(delays.at(-1), 15000, "a material state transition resets the next fallback interval");
+  assert.equal(reads, 6);
+});
+
+test("fallback task observation yields independently for a control or execution deadline", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  for (const signal of [{ control: "PAUSE" }, { deadline: "2026-09-09T20:00:00.000Z" }]) {
+    const delays = [];
+    let checks = 0;
+    const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+      sleep: async delay => { delays.push(delay); },
+      readObservationSignal: async () => (++checks === (signal.control ? 1 : 2) ? signal : null),
+      host: { async call(name) {
+        if (name.endsWith("wait_threads")) throw new Error("wait_threads is not available");
+        throw new Error(`Task history must not be read after ${signal.control ? "control" : "deadline"}`);
+      } },
+    });
+    const observed = await tasks.wait([ref]);
+    assert.equal(observed.observation.kind, "interrupted");
+    assert.equal(observed.observation.signal, signal.control ? "control" : "deadline");
+    assert.deepEqual(delays, signal.control ? [] : [15000]);
+    assert.equal(observed.observation.fullHistoryReads, 0);
+    assert.equal(observed.observation.nativeCalls, 1, "the unsupported event probe remains visible in metrics");
+  }
+});
