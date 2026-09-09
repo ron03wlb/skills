@@ -32,6 +32,10 @@ const closeRequestFrom = prompt => {
   return { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence,
     ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
 };
+const assertCloseOutcomeIdentity = (result, request) => {
+  if (result.runId !== request.runId || result.issueId !== request.issueId
+    || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
+};
 
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
@@ -103,6 +107,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const closeResultMatch = finals.map(final => final?.match(/^Workflow close result: (\{.+\})$/mu)).find(Boolean);
     let closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
     if (receipt?.accepted) {
+      // Omitted input cannot hide a present contradiction in the current turn.
+      // Matching identity alone still cannot prove that turn owns this prompt.
+      const currentMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
+      if (currentMatch) assertCloseOutcomeIdentity(JSON.parse(currentMatch[1]), closeRequest);
       // A same-identity continuation may have an older outcome in another turn.
       // Only the turn containing this exact accepted prompt can add its result.
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] }).includes(receipt.prompt));
@@ -110,8 +118,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        if (closeResult.runId !== closeRequest.runId || closeResult.issueId !== closeRequest.issueId
-          || closeResult.requestIdentity !== closeRequest.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
+        assertCloseOutcomeIdentity(closeResult, closeRequest);
         receipts.observe(receipt.promptIdentity, closeResult);
       }
       else closeResult = receipt.outcome?.result;
