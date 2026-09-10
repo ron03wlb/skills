@@ -30,7 +30,7 @@ None up front. The skill writes into two places and creates both lazily. When a 
 
 Nothing needs to exist before you start, and nothing is created speculatively.
 
-New choices use the named [grilling](https://aihero.dev/skills-grilling) owner for decision boundaries, reusing the caller's already loaded source and settled scope when available.
+New choices use the named [grilling](https://aihero.dev/skills-grilling) owner for decision boundaries and any supplied decision aperture, reusing the caller's already loaded source and settled scope when available. Choices outside the human frontier follow governing evidence or a reversible default and retain that basis in the record.
 
 ## Two artifacts, two bars
 
@@ -82,7 +82,7 @@ No, and there is no plan for a skill that does. A domain language you do not und
 
 ## It's working if
 
-- It asks about a business meaning only when the governing evidence cannot resolve it.
+- It asks about a business meaning only when governing evidence cannot resolve it and the choice remains inside the human frontier.
 - `CONTEXT.md` changes **during** the conversation, not in a burst at the end.
 - A planning-lane invocation leaves the target checkout and every other lane unchanged.
 - A reversible but meaningful choice can receive an ADR; ordinary conventions remain references.

@@ -10,7 +10,7 @@ Route the situation; do not perform the work.
 
 ## Build flow
 
-1. Use `/grill-with-docs` for codebase-backed design: delegate reversible choices, ask about unclear intent or costly commitments including SQL, and isolate accepted document writes. Without a codebase, use `/grill-me`.
+1. Use `/grill-with-docs` for codebase-backed design: ask about persistence boundaries, major directions and one SQL change set; delegate ordinary details and isolate document writes. Without a codebase, use `/grill-me`.
 2. Use `/to-spec`; tracker-only publication needs no worktree, while accepted document writes reuse the same registered lane and installed writer. It revalidates or writes the Planning Seal, is the sole authority that classifies a Tracker Spec as Single-Issue or Multi-Issue, and publishes the exact next command.
 3. Follow that command: a Single-Issue Tracker Spec uses `/run-issue-workflow`; invoke it as `/run-issue-workflow <Spec-ID>`. A Multi-Issue Tracker Spec uses `/to-tickets`; invoke it as `/to-tickets <Spec-ID>` and then `/run-issue-workflow <Spec-ID>`. An approved Standalone Spec or explicit direct current-branch task uses `/implement`.
 4. `/execute-issue <Issue-ID>` is the exact implementation leaf for direct human invocation or an authorized coordinator. Known permissions and SQL prerequisites are prepared by planning before Run-ready; `pre-execute-issue` returns its exact attestation and same lane to that producer. Execution invokes it in the same lane only for direct entry or newly discovered prerequisites. Recovery preserves the operation under isolated ownership. Direct `/pre-execute-issue <Issue-ID>` stops after attestation read-back.

@@ -1,6 +1,6 @@
 ---
 name: grill-with-docs
-description: Settle one codebase-backed design with delegated reversible choices and scoped glossary or ADR writes.
+description: Settle one codebase-backed design through boundary-first questions and scoped glossary or ADR writes.
 disable-model-invocation: true
 ---
 
@@ -10,7 +10,11 @@ Bind one proposed Tracker Spec, target, starting baseline, and owning Codex task
 
 Two lanes may grill against the same target without a shared planning checkout, global workflow lock, or cross-lane state mutation. Keep accepted document edits inside the lane; the target checkout and every other lane remain untouched.
 
-Load "grilling" and "domain-modeling" as separate named skills: use the generic Skill tool when available; otherwise use the host-supported mechanism to read and follow each required `SKILL.md`. Keep the selected source and invocation restrictions, passing the same settled scope and, when writing accepted decisions, the same lane identity to each. This invocation delegates evidence-backed reversible design choices and their qualifying document writes within the agreed goal; an explicit read-only or review request narrows that scope. Apply `grilling`'s decision boundaries, including prior approval for every SQL adjustment and preparing approved SQL before dependent implementation. Group independent human questions; retain any pacing limit the user explicitly requests.
+Load "grilling" and "domain-modeling" as separate named skills: use the generic Skill tool when available; otherwise use the host-supported mechanism to read and follow each required `SKILL.md`. Keep the selected source and invocation restrictions, passing the same settled scope and, when writing accepted decisions, the same lane identity to each. This invocation delegates evidence-backed reversible design choices and their qualifying document writes within the agreed goal; an explicit read-only or review request narrows that scope.
+
+Pass a **boundary-first decision aperture** to both skills. A design choice reaches the human frontier when evidence cannot settle it and it would change a table creation, split, merge, ownership, aggregate, system-of-record, destructive lifecycle, or migration boundary, or set a major module, system, external-contract, trust, or authorization direction. Scope or operation permissions and costly or irreversible commitments always remain human decisions. Within those settled boundaries, resolve ordinary business and implementation details from explicit decisions and project contracts, then source conventions, then suitable established practice. Multiple plausible answers alone do not create a human question. Record the selected default, basis, practical reversal, and any verification assumption for the handoff.
+
+Apply `grilling`'s SQL gate: derive columns, types, indexes, queries, bindings, and validation details from evidence, then present one coherent exact SQL change set for prior approval instead of asking about each constituent choice. Split approval only when effects or permissions are independent, and prepare approved SQL before dependent implementation. Group independent human questions; retain any pacing limit the user explicitly requests.
 
 `domain-modeling` records each accepted glossary or ADR change in the isolated planning worktree as it settles. Accepted includes inherited decisions, explicit human decisions, and choices made under the scoped delegation; record their actual basis and source without labeling delegated choices human-confirmed. Unaccepted proposals stay in the conversation. Use project document conventions; record durable rationale in ADRs and carry precise behavior, numeric defaults, exclusions, and verification needs in the settled scope for `to-spec`.
 

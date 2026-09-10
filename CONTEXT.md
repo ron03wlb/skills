@@ -96,8 +96,12 @@ _Avoid_: Consumer cleanup, implicit ownership transfer, path-based ownership inf
 The explicit transfer of accepted glossary and ADR changes from `grill-with-docs` to `to-spec`, which alone may seal those exact changes in a **Planning Seal**. Accepted changes may follow inherited decisions, explicit human decisions, or **Delegated design decisions**, with their actual basis and source retained. The transfer uses a user-visible **Planning handoff packet** rather than hidden durable workflow state and excludes durable workflow plans, scratch output, unaccepted drafts, and unrelated work.
 _Avoid_: Dirty-doc inference, Direct target contribution, generic planning handoff
 
+**Decision aperture**:
+A caller- or human-selected boundary over a design tree that identifies which unresolved choices must enter the human frontier. Choices outside it remain in scope and become **Delegated design decisions** from governing evidence or reversible defaults. It cannot grant operation permission or absorb a costly or irreversible commitment.
+_Avoid_: Question limit, skipped design work, assumed approval
+
 **Delegated design decision**:
-An evidence-backed choice made by the agent within the user's agreed goal and delegated planning scope, whose consequences can be reversed at low cost. It records its evidence and delegation source, is not an individual human approval, and grants no new operation permission. Unresolved business intent and costly commitments, including every SQL adjustment, require the missing human decision first.
+An evidence-backed choice made by the agent within the user's agreed goal and delegated planning scope, whose consequences can be reversed at low cost. It records its evidence and delegation source, is not an individual human approval, and grants no new operation permission. Ordinary business detail outside the **Decision aperture** may follow project conventions or suitable established practice; a choice inside the aperture and every costly commitment, including each exact SQL change set, require the missing human decision first.
 _Avoid_: Assumed consent, implicit database authority, human-confirmed by the agent
 
 **Planning handoff packet**:

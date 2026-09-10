@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0070
 ---
 
 # Delegate reversible design decisions and gate SQL adjustments

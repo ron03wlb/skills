@@ -51,3 +51,23 @@ test("shared decision and ADR references resolve to existing documents and ancho
     }
   }
 });
+
+test("caller apertures keep boundary-first questions separate from delegated detail", () => {
+  const grilling = read("skills/productivity/grilling/SKILL.md");
+  const grillWithDocs = read("skills/engineering/grill-with-docs/SKILL.md");
+  const domain = read("skills/engineering/domain-modeling/SKILL.md");
+  const context = read("CONTEXT.md");
+  const oldAdr = read("docs/adr/0068-delegate-reversible-design-decisions-and-gate-sql.md");
+  const currentAdr = read("docs/adr/0070-use-a-boundary-first-decision-aperture.md");
+  const docs = read("docs/engineering/grill-with-docs.md") + read("docs/productivity/grilling.md");
+
+  assert.match(grilling, /decision aperture.*filters the human frontier.*delegated defaults/isu);
+  assert.match(grilling, /without a supplied aperture.*business meaning.*human frontier/isu);
+  assert.match(grillWithDocs, /boundary-first decision aperture.*table creation.*major module.*multiple plausible answers alone.*human question/isu);
+  assert.match(grillWithDocs, /one coherent exact SQL change set.*prior approval.*instead of asking about each constituent choice/isu);
+  assert.match(domain, /supplied decision aperture.*outside the human frontier directly/isu);
+  assert.match(context, /Decision aperture.*human frontier.*Delegated design decisions/isu);
+  assert.match(oldAdr, /^status: superseded by ADR-0070$/mu);
+  assert.match(currentAdr, /status: accepted.*boundary-first aperture.*ordinary business and implementation details.*one coherent exact change set/isu);
+  assert.match(docs, /boundary-first.*persistence boundaries.*ordinary business and implementation details.*decision aperture.*human frontier/isu);
+});

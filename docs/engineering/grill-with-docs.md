@@ -1,6 +1,6 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then settles the design with evidence and focused questions. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) directly decides reversible choices within the agreed goal and records qualifying decisions; unclear business intent and costly commitments, including SQL adjustments, still require your missing decision. Only accepted glossary or ADR writes require an isolated planning worktree.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then runs a **boundary-first** interview. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) asks about persistence boundaries, major directions and costly commitments, while ordinary business and implementation details follow project evidence or suitable established practice. Only accepted glossary or ADR writes require an isolated planning worktree.
 
 Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
@@ -39,6 +39,20 @@ One lane belongs to one task, one proposed Spec, and one target. Multiple lanes 
 - Accepted document writes stay in the exact registered worktree; preserve it through partial publication and dispose only that clean worktree after successful `to-spec` handoff read-back.
 - Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree is created or retained.
 
+## The boundary-first interview
+
+The skill still maps the whole design, but its decision aperture controls what reaches you:
+
+| Choice | Handling |
+| --- | --- |
+| Create, split or merge a table; change ownership, aggregate, system-of-record, destructive lifecycle or migration boundaries | Ask when evidence cannot settle it |
+| Set a major module, system, external-contract, trust or authorization direction | Ask when evidence cannot settle it |
+| Add scope, operation permission, or a costly or irreversible commitment | Ask for the missing decision or approval |
+| Choose ordinary business or implementation detail inside settled boundaries | Follow explicit decisions, project contracts, source conventions, then suitable established practice |
+| Prepare SQL columns, types, indexes, queries, bindings and validation | Derive the details, then ask once for the coherent exact change set before editing SQL |
+
+Multiple plausible answers alone do not create a question. Delegated defaults retain their basis, reversal and verification assumptions in the handoff.
+
 ## The paper trail
 
 The recording destination follows the kind of decision, independently of whether you needed to approve it.
@@ -69,7 +83,10 @@ That is the skill failing to load one of its two dependencies. Without [grilling
 The handoff carries exact non-ADR requirements, including ordering, negative requirements, numeric defaults, and verification assumptions. `to-spec` preserves those in the Spec and retains each decision's basis. The packet is visible conversation content, so carry it into a new task explicitly; it is not a hidden persistent ledger.
 
 **Can it finish without asking me to approve every choice?**
-Yes. In-scope reversible choices follow evidence and delegated authority. You receive their reasoning and one closing handoff, without a second confirmation of settled choices. Unclear business intent, missing scope or permission, and costly commitments still require a concrete question. SQL always uses that costly-change branch. An explicit request for your review still applies.
+Yes. Ordinary business and implementation details inside settled boundaries follow evidence and delegated authority, even when several plausible answers exist. You receive their reasoning and one closing handoff without a second confirmation. Boundary choices that evidence cannot settle, missing scope or permission, and costly commitments still require a concrete question. SQL comes as one exact change-set approval. An explicit request for your review still applies.
+
+**Why is it still asking me implementation-level questions?**
+It should not ask merely because two detailed implementations are plausible. Check whether the choice changes a persistence, ownership, system, contract, trust or authorization boundary, or creates a costly commitment. If it does not, the skill should choose from project evidence or established practice and record the default in the handoff.
 
 **Can I point it at an existing repo that has no docs at all?**
 Yes. This is the right skill for a codebase with no ADRs, no domain language and no design principles: invoke it and say "help me document my repo". The community pattern pairs it with [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) for building or repairing a `CONTEXT.md`. Expect to steer it: it will read code and ask you about what it finds, and you are the one who says which of the words already in the codebase are the right ones.
@@ -91,10 +108,11 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 - Accepted files change only in the task's isolated planning worktree; the target checkout and other lanes stay untouched.
 - The glossary reads as pure vocabulary (your project's words with tight definitions) and contains no implementation detail or spec-like prose.
 - Questions the codebase can answer get answered by reading the codebase, not asked of you.
+- Ordinary details inside settled boundaries appear as delegated defaults rather than questions.
 - Durable rationale is recorded directly in your project's ADR format, with the decision's actual basis visible.
 - It challenges a word you used because your existing glossary defines it differently.
 - The closing message gives you the exact handoff and the later `/to-spec` command.
-- Independent questions can share a round; an all-reversible design needs no approval round.
+- Independent boundary questions can share a round; a design with only delegated details needs no approval round.
 
 ## Where it fits
 

@@ -18,6 +18,6 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 Model- or user-reachable (rich trigger phrasing so the model can reach for them).
 
 - **[clarify-needs](./clarify-needs/SKILL.md)** — Clarify vague needs through first-principles conversation, compare proposals, and converge on a reviewable needs summary.
-- **[grilling](./grilling/SKILL.md)** — Resolve reversible decisions within the agreed scope and ask about unclear intent or costly commitments.
+- **[grilling](./grilling/SKILL.md)** — Apply caller-defined decision apertures, resolve delegated choices, and ask about reserved or costly commitments.
 - **[explain-decision](./explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
 - **[writing-for-agents](./writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.

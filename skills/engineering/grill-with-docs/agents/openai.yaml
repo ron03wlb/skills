@@ -1,5 +1,5 @@
 interface:
   display_name: "Grill with Docs"
-  short_description: "Delegate reversible design; record scoped decisions"
+  short_description: "Grill boundaries; record delegated design decisions"
 policy:
   allow_implicit_invocation: false
