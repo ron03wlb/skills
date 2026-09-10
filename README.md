@@ -76,7 +76,7 @@ I built these skills as a way to fix common failure modes I see with Claude Code
 
 **The Problem**. The most common failure mode in software development is misalignment. You think the dev knows what you want. Then you see what they've built - and you realize it didn't understand you at all.
 
-This is just the same in the AI age. There is a communication gap between you and the agent. The fix for this is a **grilling session** - getting the agent to ask you detailed questions about what you're building.
+This is just the same in the AI age. There is a communication gap between you and the agent. A **grilling session** closes it by checking evidence, resolving reversible choices within the agreed goal, and asking focused questions about unclear intent or costly commitments.
 
 **The Fix** is to use:
 
@@ -177,7 +177,7 @@ Skills I use daily for code work.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a deterministic operation identity set for a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./skills/engineering/push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
-- **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Settle one proposed Spec and target; use an isolated planning worktree when writing accepted `CONTEXT.md` or ADR changes.
+- **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Delegate reversible design choices, ask about costly commitments including SQL, and record scoped glossary or ADR changes in an isolated planning worktree.
 - **[triage](./skills/engineering/triage/SKILL.md)** — Move issues through a state machine of triage roles.
 - **[improve-codebase-architecture](./skills/engineering/improve-codebase-architecture/SKILL.md)** — Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
 - **[setup-matt-pocock-skills](./skills/engineering/setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo before using the other engineering skills.
@@ -200,7 +200,7 @@ Skills I use daily for code work.
 - **[diagnosing-bugs](./skills/engineering/diagnosing-bugs/SKILL.md)** — Investigate unexplained failures and regressions through an evidence-led path; choose reproduction, source inspection, or probes as needed.
 - **[research](./skills/engineering/research/SKILL.md)** — Compare primary sources and preserve a cited repository note; delegate when useful independent work can proceed alongside it.
 - **[tdd](./skills/engineering/tdd/SKILL.md)** — Build approved behavior through a red-green loop at existing public interfaces, one vertical slice at a time.
-- **[domain-modeling](./skills/engineering/domain-modeling/SKILL.md)** — Sharpen a project's domain model and record accepted `CONTEXT.md` and ADR changes inside the active planning lane when one exists.
+- **[domain-modeling](./skills/engineering/domain-modeling/SKILL.md)** — Sharpen domain vocabulary and record durable decision rationale using project conventions and the active planning lane when one exists.
 - **[codebase-design](./skills/engineering/codebase-design/SKILL.md)** — Shared discipline and vocabulary for designing deep modules: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface.
 - **[code-review](./skills/engineering/code-review/SKILL.md)** — Two-axis review of the diff and any prospective workflow artifact declaration: **Standards** and **Spec**, with independent reviewers for material security, data, concurrency, migration, contract, or cross-module risk before integration; low-risk requested review may run inline.
 - **[resolving-merge-conflicts](./skills/engineering/resolving-merge-conflicts/SKILL.md)** — Work through an in-progress git merge or rebase conflict hunk by hunk, resolving by intent traced to each side's primary source, then finish the operation — never `--abort`.
@@ -213,7 +213,7 @@ General workflow tools, not code-specific.
 **User-invoked**
 
 - **[confirm-understanding](./skills/productivity/confirm-understanding/SKILL.md)** — Calibrate your understanding against chosen evidence with a bounded multiple-choice check.
-- **[grill-me](./skills/productivity/grill-me/SKILL.md)** — Get relentlessly interviewed about a plan or design until every branch of the decision tree is resolved.
+- **[grill-me](./skills/productivity/grill-me/SKILL.md)** — Sharpen an idea with evidence-backed reversible choices and focused questions about unclear intent or costly commitments.
 - **[handoff](./skills/productivity/handoff/SKILL.md)** — Compact the current conversation into a handoff document so another agent can continue the work.
 - **[teach](./skills/productivity/teach/SKILL.md)** — Teach the user a new skill or concept over multiple sessions, using the current directory as a stateful teaching workspace.
 - **[to-questionnaire](./skills/productivity/to-questionnaire/SKILL.md)** — Turn a decision you cannot fully answer into a Markdown questionnaire for the person who can.
@@ -222,6 +222,6 @@ General workflow tools, not code-specific.
 **Model-invoked**
 
 - **[clarify-needs](./skills/productivity/clarify-needs/SKILL.md)** — Clarify vague needs through first-principles conversation, compare proposals, and converge on a reviewable needs summary.
-- **[grilling](./skills/productivity/grilling/SKILL.md)** — Resolve unresolved material decisions within the agreed scope, then confirm shared understanding. The reusable interview loop behind `grill-me` and `grill-with-docs`.
+- **[grilling](./skills/productivity/grilling/SKILL.md)** — Resolve reversible decisions within the agreed scope and ask about unclear intent or costly commitments. The shared decision policy behind `grill-me` and `grill-with-docs`.
 - **[explain-decision](./skills/productivity/explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
 - **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.

@@ -1,8 +1,8 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then interviews you and the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) toward a shared understanding, one material decision at a time. It is the same interview [grill-me](https://aihero.dev/skills-grill-me) runs, pointed at a codebase. Only accepted glossary or ADR writes require an isolated planning worktree.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then settles the design with evidence and focused questions. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) directly decides reversible choices within the agreed goal and records qualifying decisions; unclear business intent and costly commitments, including SQL adjustments, still require your missing decision. Only accepted glossary or ADR writes require an isolated planning worktree.
 
-Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. That worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
+Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
 ## When to reach for it
 
@@ -22,7 +22,7 @@ The wayfinder split comes down to session count: `/grill-with-docs` for single-s
 
 ## Prerequisites
 
-The skill reads a Git repository; before accepted document writes, the task must own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's `CONTEXT.md` if a `CONTEXT-MAP.md` marks the repo as multi-context. Decisions go to its `docs/adr/`. Both are created lazily; the target checkout is not the writing surface.
+The skill reads a Git repository; before accepted document writes, the task must own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's glossary if a `CONTEXT-MAP.md` exists. ADRs follow the project's location and format, falling back to `docs/adr/`. Files are created lazily; the target checkout is not the writing surface.
 
 It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. Both receive the same settled scope and, for accepted document writes, the same task, proposed Spec, target, baseline, and worktree identity.
 
@@ -41,17 +41,18 @@ One lane belongs to one task, one proposed Spec, and one target. Multiple lanes 
 
 ## The paper trail
 
-Three things come out of a session, and they are not equal.
+The recording destination follows the kind of decision, independently of whether you needed to approve it.
 
 | What resolved | Where it lands |
 | --- | --- |
 | A term: the project's own word for a thing | `CONTEXT.md`, inline, the moment it resolves |
-| A decision that is hard to reverse, surprising without context, and a real trade-off | An ADR under `docs/adr/` |
-| Everything else you decided | The conversation, and nowhere else |
+| A decision whose rationale has lasting value, including a reversible trade-off | An ADR using the project's conventions |
+| Routine adoption of an existing convention | A reference to that convention |
+| Exact behavior, numeric defaults, exclusions, and verification needs | The settled scope in the handoff, then the Spec |
 
-That third row is the one that catches people out. `CONTEXT.md` is a glossary and is deliberately kept as one: no implementation details, no spec, no scratch notes. ADRs are gated on all three conditions at once, so most decisions do not qualify and most sessions produce none. A session that yields a sharper glossary and zero ADRs is working as designed, but it means the bulk of what you agreed exists only in the [context window](https://www.aihero.dev/ai-coding-dictionary/context-window) you agreed it in. Hand that same conversation to [to-spec](https://aihero.dev/skills-to-spec) rather than [clearing](https://www.aihero.dev/ai-coding-dictionary/clearing) it.
+`CONTEXT.md` stays a glossary. Related decisions can share one ADR; routine choices need no new file. The visible handoff carries requirements that do not belong in an ADR so a later [to-spec](https://aihero.dev/skills-to-spec) invocation can retain their exact meaning.
 
-The glossary is the point. Domain language is the thing this skill is actually building: the project's own words, agreed once, so you, the agent and your colleagues stop paying to re-derive them. It is worth saying that not everyone agrees this buys you agent performance: the sharpest public pushback is that a term and its plain-English expansion get the same result from the [model](https://www.aihero.dev/ai-coding-dictionary/model), and that the vocabulary really compresses communication between the humans who share it. That reading still leaves the glossary valuable; it just moves the value.
+SQL adjustments need prior approval even when the change is a local file or an embedded read query. The agent first inspects the current design and presents the proposed effect, then prepares and validates the approved SQL before dependent application implementation. Independent work can continue. Database execution retains its own permissions and any declared Manual prerequisite process.
 
 ## Common questions
 
@@ -59,13 +60,16 @@ The glossary is the point. Domain language is the thing this skill is actually b
 Scope decides it. Use this for anything you can settle in one session; use [wayfinder](https://aihero.dev/skills-wayfinder) when the effort is too big to hold in one, and it charts the work as a map of decision [tickets](https://www.aihero.dev/ai-coding-dictionary/ticket) first. Wayfinder is slower and denser, and reaching for it on a well-scoped feature is the common mistake. It does not replace this skill: it can drop into a grilling session for the parts of the map that suit one.
 
 **It ran, but no `CONTEXT.md` and no ADRs appeared.**
-Read-only or tracker-only planning can finish with an explicit empty accepted-change list. ADRs need all three gates, and a session with no new vocabulary may have no glossary changes either. If you accepted a qualifying document change, the handoff should identify its path or hunk and content identity in the registered isolated worktree. A missing dependency or lane mismatch must be reported rather than silently dropping that write.
+Read-only or tracker-only planning can finish with an explicit empty accepted-change list. A session that only reuses existing conventions may need no new documents. A qualifying decision within the delegated writing scope is recorded directly, and the handoff identifies its path or hunk and content identity in the registered isolated worktree.
 
 **It asked everything at once, with no recommendations, and never mentioned `CONTEXT.md`.**
 That is the skill failing to load one of its two dependencies. Without [grilling](https://aihero.dev/skills-grilling), you get an undifferentiated question dump; without [domain-modeling](https://aihero.dev/skills-domain-modeling), you get a good interview with no paper trail. Partial loading correlates with model and [effort](https://www.aihero.dev/ai-coding-dictionary/effort) level, and it is the most reported problem with this skill. If you suspect it, ask the agent which skills and lane identity it loaded.
 
 **Where did all my other decisions go?**
-Into the conversation only. This is the most substantive open complaint about the skill: the glossary is not a spec, most answers do not earn an ADR, and there is no ledger tying each resolved answer through to a spec, a ticket and a test. Precise answers (ordering guarantees, negative requirements, numeric defaults) get softened into weaker prose downstream, and the result can look complete while missing the thing you actually decided. The mitigation available today is to keep the session and feed it straight to [to-spec](https://aihero.dev/skills-to-spec), and to re-read the spec against your own answers rather than assuming it captured them.
+The handoff carries exact non-ADR requirements, including ordering, negative requirements, numeric defaults, and verification assumptions. `to-spec` preserves those in the Spec and retains each decision's basis. The packet is visible conversation content, so carry it into a new task explicitly; it is not a hidden persistent ledger.
+
+**Can it finish without asking me to approve every choice?**
+Yes. In-scope reversible choices follow evidence and delegated authority. You receive their reasoning and one closing handoff, without a second confirmation of settled choices. Unclear business intent, missing scope or permission, and costly commitments still require a concrete question. SQL always uses that costly-change branch. An explicit request for your review still applies.
 
 **Can I point it at an existing repo that has no docs at all?**
 Yes. This is the right skill for a codebase with no ADRs, no domain language and no design principles: invoke it and say "help me document my repo". The community pattern pairs it with [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) for building or repairing a `CONTEXT.md`. Expect to steer it: it will read code and ask you about what it finds, and you are the one who says which of the words already in the codebase are the right ones.
@@ -87,9 +91,10 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 - Accepted files change only in the task's isolated planning worktree; the target checkout and other lanes stay untouched.
 - The glossary reads as pure vocabulary (your project's words with tight definitions) and contains no implementation detail or spec-like prose.
 - Questions the codebase can answer get answered by reading the codebase, not asked of you.
-- You get few or no ADRs, and the ones you get are decisions you would be annoyed to have to re-litigate.
+- Durable rationale is recorded directly in your project's ADR format, with the decision's actual basis visible.
 - It challenges a word you used because your existing glossary defines it differently.
 - The closing message gives you the exact handoff and the later `/to-spec` command.
+- Independent questions can share a round; an all-reversible design needs no approval round.
 
 ## Where it fits
 

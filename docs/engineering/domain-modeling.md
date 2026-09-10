@@ -16,7 +16,7 @@ Reach for it when the *words* are the problem:
 | --- | --- |
 | Two people mean different things by "cancellation" | `domain-modeling`: pick the canonical term, list the other under `_Avoid_` |
 | "Account" is doing three jobs in three files | `domain-modeling`: split it into Customer and User |
-| You just made a hard-to-reverse architectural choice | `domain-modeling`: it offers an ADR, if the choice clears the bar |
+| You settled an architectural choice whose rationale will matter later | `domain-modeling`: record an ADR using project conventions |
 | The module's *shape* is the problem: where the seam goes, how deep the interface is | [codebase-design](https://aihero.dev/skills-codebase-design) |
 | You want the whole plan interrogated before you build | [grill-with-docs](https://aihero.dev/skills-grill-with-docs), which drives this skill underneath |
 | Existing-term lookup or incidental wording edit | Proceed directly; read the relevant `CONTEXT.md` entry when needed |
@@ -26,9 +26,11 @@ Reach for it when the *words* are the problem:
 None up front. The skill writes into two places and creates both lazily. When a caller supplies an active [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) workflow lane, both paths live inside that lane's isolated planning worktree:
 
 - **`CONTEXT.md`** at the repo root, created by the first resolved term. In a repo with a `CONTEXT-MAP.md` at the root, terms go into the per-context `CONTEXT.md` the map points at instead.
-- **`docs/adr/`**, created by the first ADR that clears the bar.
+- **The repository's ADR location and format**, falling back to `docs/adr/` when no convention exists, created by the first qualifying decision.
 
 Nothing needs to exist before you start, and nothing is created speculatively.
+
+New choices use the named [grilling](https://aihero.dev/skills-grilling) owner for decision boundaries, reusing the caller's already loaded source and settled scope when available.
 
 ## Two artifacts, two bars
 
@@ -37,17 +39,21 @@ The glossary and the ADR are held to different standards, and conflating them is
 | | `CONTEXT.md` | `docs/adr/NNNN-slug.md` |
 | --- | --- | --- |
 | Holds | Terms. What a thing **is**, in one or two sentences, with rejected synonyms under `_Avoid_` | One decision, in one to three sentences: context, choice, reason |
-| Bar to write | A vague term became canonical | **All three**: hard to reverse, surprising without context, the result of a real trade-off |
-| Written | Inline, the moment the term is settled, inside the active lane when one exists | Offered, not assumed, inside the same lane |
+| Bar to write | A vague term became canonical | The rationale has lasting value: a trade-off, boundary, constraint, or deliberate departure |
+| Written | Inline, the moment the term is settled, inside the active lane when one exists | Directly within document-writing authority, using project conventions and the same lane |
 | Never holds | Implementation details, a spec, a scratch pad, general programming concepts | A diary of every choice made this session |
 
-Miss any one of the ADR's three tests and there is no ADR. An easily-reversed decision will just get reversed; an unsurprising one is nobody's question; one with no real alternative records that you did the obvious thing.
+- A reversible choice with lasting rationale can receive an ADR; related decisions can share that rationale.
+- Routine adoption of an existing convention needs only its source reference.
+- Exact feature behavior and numeric defaults belong in the Spec or its settled handoff.
+
+Decisions retain their inherited, human-confirmed, or delegated basis and source; writing accepted status does not turn an agent's choice into individual human approval or proof of implementation.
 
 The `CONTEXT.md` rule is the one to actually hold onto, because it is the one that breaks in the field. **It is a glossary and nothing else.** Left unchecked, models treat "write to `CONTEXT.md`" as permission to persist every answer you give, and the file turns into a running spec. This is the most-reported problem with the skill, across several models.
 
 ## Cross-referencing, and where it stops
 
-The move that makes the skill click: when you state how something works, it checks the code and surfaces the contradiction. *"Your code cancels entire Orders, but you just said partial cancellation is possible, which is right?"* The language and the code are made to agree, out loud, before either is changed.
+When you state how something works, the skill checks the code and governing decisions. Evidence can resolve a vocabulary choice directly. If cancellation could still mean an entire Order or selected items, it asks that business question; current code cannot override your intended change.
 
 The limit is worth knowing. It cross-references **code** and the committed `CONTEXT.md`/ADRs, and nothing else. It does not search your issue tracker, so a naming collision that was argued out and deliberately settled in a closed issue months ago gets surfaced as if it were new. There is [an open request](https://github.com/mattpocock/skills/issues/717) to fix this; until then, the workaround is to put the instruction in your own `docs/agents/domain.md`, which the skills already read.
 
@@ -66,7 +72,7 @@ It was removed, and it was not deprecated. Its job moved into `domain-modeling`,
 Ask for it explicitly rather than waiting for it to accumulate. `/grill-with-docs help me scaffold my existing repo with a CONTEXT.md` is the documented route; expect a long interrogation: one user reported 50+ questions before the file was in shape. Incidental use builds the glossary far too slowly on a brownfield repo.
 
 **Can I keep the domain model and use my own ADR format?**
-Not cleanly today. The glossary half and the ADR half ship in one skill, so a team with an established ADR convention (different template, different location, different naming) gets instructions that conflict with its house style. The current options are to copy the skill locally and edit it, or to override the ADR conventions in your repo's own agent docs. Splitting the two apart is [an open request](https://github.com/mattpocock/skills/issues/557).
+Yes. Existing repository location, template, naming, numbering, and status conventions take precedence. The short numbered Markdown format is a fallback for a repository with no ADR convention.
 
 **Does a glossary actually earn its keep? It is one more artifact to review, and it can go stale.**
 Sometimes it does not, and it is worth being honest about where. DDD gets less useful the closer it gets to the implementation: the payoff is upstream, in naming and concept alignment, not in aggregates and layer ceremony. Synonym control matters at naming boundaries: module names, table names, status enums, issue titles, CLI commands. It matters much less in ordinary prose. There is also a live objection that domain terms compress communication *between humans* who already share them, and that an agent responds the same way to the plain-English description. On that reading, the glossary's value is keeping you and your reviewers aligned with what the agent is doing, not making the agent better. On a one-day build, skip it. And an unreviewed, agent-authored glossary is worse than none: it becomes confident-sounding lore that later sessions treat as truth.
@@ -76,10 +82,11 @@ No, and there is no plan for a skill that does. A domain language you do not und
 
 ## It's working if
 
-- It stops you mid-sentence to ask which of two things you meant, instead of picking one and moving on.
+- It asks about a business meaning only when the governing evidence cannot resolve it.
 - `CONTEXT.md` changes **during** the conversation, not in a burst at the end.
 - A planning-lane invocation leaves the target checkout and every other lane unchanged.
-- It refuses to write an ADR for something you could undo tomorrow, and says which of the three tests failed.
+- A reversible but meaningful choice can receive an ADR; ordinary conventions remain references.
+- SQL decisions await any missing approval before their artifacts are edited; an ADR never grants database execution authority.
 - New entries define what a thing *is* in one or two sentences and name the words you are giving up under `_Avoid_`.
 - It quotes your code back at you when your code and your sentence disagree.
 - `CONTEXT.md` gets shorter as often as it gets longer.

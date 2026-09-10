@@ -33,6 +33,21 @@ export const CLEANUP_SCHEMA = "dag-run-cleanup:v1";
 export const CLEANUP_PREVIEW_SCHEMA = "dag-run-cleanup-preview:v1";
 export const LOCK_OWNER_SCHEMA = "dag-run-lock-owner:v1";
 export const HOST_FAULT_SCHEMA = "codex-host-fault:v1";
+export const BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS = Object.freeze([5000, 15000, 30000]);
+
+export const createBoundedObservationFault = ({ runId, faultId, operation, category, state,
+  recoveryRounds, receiptRefs, updatedAt }) => ({
+  schema: HOST_FAULT_SCHEMA,
+  runId,
+  faultId,
+  operation,
+  category,
+  state,
+  recoveryRounds,
+  recoveryDelaysMs: [...BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS],
+  receiptRefs,
+  updatedAt,
+});
 
 const runIdPattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u;
 const cleanupEvidenceFields = new Set([
@@ -501,7 +516,7 @@ export function createRunStore({ gitCommonDir, coordinatorInstanceId = randomUUI
       || !isText(value.operation) || !isText(value.category)
       || !["unresolved", "settled", "exhausted"].includes(value.state)
       || !Number.isInteger(value.recoveryRounds) || value.recoveryRounds < 0 || value.recoveryRounds > 3
-      || JSON.stringify(value.recoveryDelaysMs) !== JSON.stringify([5000, 15000, 30000])
+      || JSON.stringify(value.recoveryDelaysMs) !== JSON.stringify(BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS)
       || !Array.isArray(value.receiptRefs) || value.receiptRefs.some(ref => !isText(ref))
       || !isText(value.updatedAt)) throw new TypeError("Host fault evidence is malformed or mismatched");
     assertNoToken(value);

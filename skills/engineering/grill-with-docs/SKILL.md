@@ -1,6 +1,6 @@
 ---
 name: grill-with-docs
-description: Sharpen one codebase-backed design; isolate any accepted glossary or ADR writes in its Spec planning lane.
+description: Settle one codebase-backed design with delegated reversible choices and scoped glossary or ADR writes.
 disable-model-invocation: true
 ---
 
@@ -10,6 +10,10 @@ Bind one proposed Tracker Spec, target, starting baseline, and owning Codex task
 
 Two lanes may grill against the same target without a shared planning checkout, global workflow lock, or cross-lane state mutation. Keep accepted document edits inside the lane; the target checkout and every other lane remain untouched.
 
-Load "grilling" and "domain-modeling" as separate named skills: use the generic Skill tool when available; otherwise use the host-supported mechanism to read and follow each required `SKILL.md`. Keep the selected source and invocation restrictions, passing the same settled scope and, when writing accepted decisions, the same lane identity to each. Work one material decision at a time. `domain-modeling` records each accepted glossary or ADR change in the isolated planning worktree as it settles; unaccepted discussion stays in the conversation.
+Load "grilling" and "domain-modeling" as separate named skills: use the generic Skill tool when available; otherwise use the host-supported mechanism to read and follow each required `SKILL.md`. Keep the selected source and invocation restrictions, passing the same settled scope and, when writing accepted decisions, the same lane identity to each. This invocation delegates evidence-backed reversible design choices and their qualifying document writes within the agreed goal; an explicit read-only or review request narrows that scope. Apply `grilling`'s decision boundaries, including prior approval for every SQL adjustment and preparing approved SQL before dependent implementation. Group independent human questions; retain any pacing limit the user explicitly requests.
+
+`domain-modeling` records each accepted glossary or ADR change in the isolated planning worktree as it settles. Accepted includes inherited decisions, explicit human decisions, and choices made under the scoped delegation; record their actual basis and source without labeling delegated choices human-confirmed. Unaccepted proposals stay in the conversation. Use project document conventions; record durable rationale in ADRs and carry precise behavior, numeric defaults, exclusions, and verification needs in the settled scope for `to-spec`.
 
 At the end, create an exact handoff packet containing the task identity, proposed Spec, target, current baseline, an explicit empty change list for tracker-only work or the owned worktree and every accepted glossary or ADR path or hunk with its content identity. Tell the human to run `/to-spec` with that handoff packet. Keep the lane registered through publication. The owning task may dispose of only its exact clean planning worktree after successful `to-spec` handoff read-back; a partial publication, uncommitted accepted decision, identity mismatch, or failed read-back preserves it for the same-command retry.
+
+Include each decision's basis and source, remaining verification assumptions, exact non-ADR requirements, and any SQL approval and prerequisite ordering in that existing packet. Finish without a second confirmation of already settled choices. The packet grants no implementation, SQL execution, or automatic publication authority.

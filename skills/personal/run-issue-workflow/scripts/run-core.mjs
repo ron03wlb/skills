@@ -1,5 +1,5 @@
 import { nextRecoveryPhase, nextRepairWave } from "./recovery-evidence.mjs";
-import { CONTROL_COMMANDS, validateJournal } from "./run-journal.mjs";
+import { CONTROL_COMMANDS, summarizeIssueExecutionBudget, validateJournal } from "./run-journal.mjs";
 import {
   createCloseWaitEvidence,
   validateCloseAuthorityEvidence,
@@ -73,6 +73,10 @@ export const REASON_CODES = Object.freeze({
   parentStateUncertain: "parent_state_uncertain",
   pausedByUser: "paused_by_user",
   stoppedByUser: "stopped_by_user",
+  executionTimeout: "execution_timeout",
+  executionBudgetUnknown: "execution_budget_unknown",
+  repositoryCloseLeaseHealthUnknown: "repository_close_lease_health_unknown",
+  targetWriterHealthUnknown: "target_writer_health_unknown",
 });
 
 const compareIds = (left, right) => String(left).localeCompare(String(right), "en");
@@ -562,7 +566,7 @@ const publicRun = (run, state, maxParallel = 3) => ({
   controlCommand: isRecord(run) && CONTROL_COMMANDS.includes(run.controlCommand) ? run.controlCommand : null,
 });
 
-const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationCount = 0 }) => ({
+const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationCount = 0, executionBudget = null }) => ({
   issueId: node.issueId,
   blockers: Array.isArray(node.blockers) ? [...node.blockers] : [],
   state,
@@ -573,6 +577,7 @@ const publicNode = ({ node, state, dispatch = null, retryCount = 0, remediationC
     retryCount,
     remediationCount,
     ...(node.reservedWorkers === undefined ? {} : { reservedWorkers: node.reservedWorkers }),
+    ...(executionBudget === null ? {} : { executionBudget }),
   },
   close: {
     completionState: isText(node.completionState) ? node.completionState : "UNKNOWN",
@@ -748,6 +753,10 @@ export function reduceRun(input) {
       "recovery.intent",
       "recovery.task",
       "dispatch.recorded",
+      "execution.started",
+      "execution.observed",
+      "execution.uncertain",
+      "execution.exhausted",
       "retry.recorded",
       "remediation.recorded",
       "repository-close-wait.started",
@@ -769,6 +778,12 @@ export function reduceRun(input) {
     .sort((left, right) => compareIds(left.issueId, right.issueId))
     .map((node) => ({ ...node, blockers: [...node.blockers].sort(compareIds) }));
   const allNodeIds = normalizedNodes.map(({ issueId }) => issueId);
+  const executionBudgetByIssue = new Map(allNodeIds.map((issueId) => {
+    const summary = summarizeIssueExecutionBudget(input.journal, issueId);
+    return [issueId, summary.activeStartSequence === null && summary.consumedMs === 0
+      ? null
+      : { limitMs: summary.limitMs, consumedMs: summary.consumedMs, state: summary.state }];
+  }));
   const dispatchAttemptsByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
   const latestDispatchByIssue = new Map();
   const retryCountByIssue = new Map(allNodeIds.map((issueId) => [issueId, 0]));
@@ -813,7 +828,9 @@ export function reduceRun(input) {
       .filter(([, state]) => ["BLOCKED", "FAILED"].includes(state))
       .map(([blocker]) => blocker);
     let state;
-    if (failedBlockers.length > 0) {
+    if (["EXHAUSTED", "UNKNOWN"].includes(executionBudgetByIssue.get(issueId)?.state)) {
+      state = "BLOCKED";
+    } else if (failedBlockers.length > 0) {
       state = "BLOCKED";
       failedDependencyDiagnoses.push(diagnosis({
         reasonCode: REASON_CODES.failedDependency,
@@ -844,10 +861,36 @@ export function reduceRun(input) {
     dispatch: latestDispatchByIssue.get(node.issueId),
     retryCount: retryCountByIssue.get(node.issueId),
     remediationCount: remediationCountByIssue.get(node.issueId),
+    executionBudget: executionBudgetByIssue.get(node.issueId),
   }));
   failedDependencyDiagnoses.sort((left, right) => compareIds(left.affectedNodes[0], right.affectedNodes[0]));
   const nodeDiagnoses = normalizedNodes.flatMap((node) => {
     const state = stateById.get(node.issueId);
+    const executionBudget = executionBudgetByIssue.get(node.issueId);
+    if (executionBudget?.state === "EXHAUSTED") {
+      return [diagnosis({
+        reasonCode: REASON_CODES.executionTimeout,
+        limitationClass: "instance-blocker",
+        evidence: [`Issue ${node.issueId} consumed ${executionBudget.consumedMs} ms of its cumulative ${executionBudget.limitMs} ms execution budget.`],
+        noAutomaticTransition: "Preserve the original owner and late outcomes; do not authorize execution, repair, retry, or close dispatch.",
+        affectedNodes: [node.issueId],
+        allNodes: allNodeIds,
+        nextOwner: "original-execute-issue-owner",
+        resumePredicates: ["original_owner_settles_at_safe_boundary"],
+      })];
+    }
+    if (executionBudget?.state === "UNKNOWN") {
+      return [diagnosis({
+        reasonCode: REASON_CODES.executionBudgetUnknown,
+        limitationClass: "unresolved-evidence",
+        evidence: [`Issue ${node.issueId} has ${executionBudget.consumedMs} ms proved, but its active interval elapsed time is unknown.`],
+        noAutomaticTransition: "Preserve the original owner and do not authorize execution, repair, retry, or close dispatch until native elapsed evidence settles the interval.",
+        affectedNodes: [node.issueId],
+        allNodes: allNodeIds,
+        nextOwner: "original-execute-issue-owner",
+        resumePredicates: ["exact_native_execution_elapsed_is_reconciled"],
+      })];
+    }
     if (node.recovery && !node.recoveryActive) {
       return [diagnosis({ reasonCode: "technical_failure_recovery", evidence: [node.recovery.observedResult],
         noAutomaticTransition: "Only the exact failure owner may diagnose or repair within approved scope.", affectedNodes: [node.issueId], allNodes: allNodeIds,
@@ -1077,24 +1120,26 @@ export function reduceRun(input) {
   const repositoryCloseLeaseState = input.run.repositoryCloseLeaseState ?? "ABSENT";
   const repositoryCloseLeaseOperationId = input.run.repositoryCloseLeaseOperationId ?? null;
   const repositoryCloseLeaseOwner = input.run.repositoryCloseLeaseOwner;
-  const repositoryCloseLeaseHealthy = repositoryCloseLeaseState === "ACTIVE"
-    && input.run.repositoryCloseLeaseHealth === "HEALTHY"
+  const repositoryCloseLeaseOwnerExact = repositoryCloseLeaseState === "ACTIVE"
     && isRecord(repositoryCloseLeaseOwner)
     && repositoryCloseLeaseOwner.operationId === repositoryCloseLeaseOperationId
     && isText(repositoryCloseLeaseOwner.coordinatorInstanceId)
     && isText(repositoryCloseLeaseOwner.generation);
+  const repositoryCloseLeaseWaitable = repositoryCloseLeaseOwnerExact
+    && ["HEALTHY", "UNKNOWN"].includes(input.run.repositoryCloseLeaseHealth);
   const repositoryCloseLeaseUncertain = repositoryCloseLeaseState === "UNKNOWN"
-    || (repositoryCloseLeaseState === "ACTIVE" && !repositoryCloseLeaseHealthy);
+    || (repositoryCloseLeaseState === "ACTIVE" && !repositoryCloseLeaseWaitable);
   const repositoryCloseLeaseAvailable = repositoryCloseLeaseState === "ABSENT";
   const closeWriterOwner = input.run.closeWriterOwner;
-  const targetCloseWriterHealthy = input.run.closeWriterState === "ACTIVE"
-    && input.run.closeWriterHealth === "HEALTHY"
+  const targetCloseWriterOwnerExact = input.run.closeWriterState === "ACTIVE"
     && isRecord(closeWriterOwner)
     && closeWriterOwner.operationId === input.run.closeWriterRunId
     && isText(closeWriterOwner.coordinatorInstanceId)
     && isText(closeWriterOwner.generation);
+  const targetCloseWriterWaitable = targetCloseWriterOwnerExact
+    && ["HEALTHY", "UNKNOWN"].includes(input.run.closeWriterHealth);
   const targetCloseWriterUncertain = input.run.closeWriterState === "UNKNOWN"
-    || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterHealthy);
+    || (input.run.closeWriterState === "ACTIVE" && !targetCloseWriterWaitable);
   const targetCloseWriterAvailable = input.run.closeWriterState === "ABSENT";
   const closeoutAvailable = repositoryCloseLeaseAvailable && targetCloseWriterAvailable && input.run.targetState === "CLEAN";
   const remediations = retrying.flatMap((issueId) => {
@@ -1174,7 +1219,7 @@ export function reduceRun(input) {
     nodes: normalizedNodes,
     controlRevision,
   });
-  if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseHealthy && waitingIssueId !== null) {
+  if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseWaitable && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_repository_close_lease",
       issueId: waitingIssueId,
@@ -1187,7 +1232,7 @@ export function reduceRun(input) {
       preWaitEvidence,
     });
   } else if (!executionActionsScheduled && input.run.targetState === "CLEAN" && repositoryCloseLeaseAvailable
-    && targetCloseWriterHealthy && waitingIssueId !== null) {
+    && targetCloseWriterWaitable && waitingIssueId !== null) {
     normalActions.push({
       type: "wait_target_writer",
       issueId: waitingIssueId,

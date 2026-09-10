@@ -4,6 +4,13 @@ import { validateModelPolicy, validateModelSetting } from "./issue-model-policy.
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
+export const ISSUE_EXECUTION_LIMIT_MS = 6 * 60 * 60 * 1000;
+export const ISSUE_EXECUTION_PHASES = Object.freeze([
+  "IMPLEMENTATION",
+  "IMPLEMENTATION_RETRY",
+  "IMPLEMENTATION_REPAIR",
+  "CONFLICT_REPAIR",
+]);
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
 export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
@@ -18,6 +25,10 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "control.reconciled",
   "control.revised",
   "dispatch.recorded",
+  "execution.started",
+  "execution.observed",
+  "execution.uncertain",
+  "execution.exhausted",
   "retry.recorded",
   "remediation.recorded",
   "repository-close-wait.started",
@@ -50,6 +61,10 @@ const eventFields = new Map([
   ["control.reconciled", new Set(["type", "at", "revision", "requestRevision", "command", "requestId"])],
   ["control.revised", new Set(["type", "at", "revision", "command", "requestId"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
+  ["execution.started", new Set(["type", "at", "issueId", "phase", "phaseIdentity", "taskRef"])],
+  ["execution.observed", new Set(["type", "at", "issueId", "startSequence", "elapsedMs", "state", "source"])],
+  ["execution.uncertain", new Set(["type", "at", "issueId", "startSequence", "reason"])],
+  ["execution.exhausted", new Set(["type", "at", "issueId", "consumedMs"])],
   ["retry.recorded", new Set([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
   ])],
@@ -90,6 +105,10 @@ const requirePositiveInteger = (value, label, maximum = Number.MAX_SAFE_INTEGER)
   if (!Number.isInteger(value) || value < 1 || value > maximum) {
     throw new TypeError(`${label} must be an integer from 1 through ${maximum}`);
   }
+};
+
+const requireNonNegativeInteger = (value, label) => {
+  if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${label} must be a non-negative safe integer`);
 };
 
 const assertExactFields = (value, allowed, label) => {
@@ -238,6 +257,31 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requirePositiveInteger(event.attempt, "dispatch attempt", 3);
       validateTaskRef(event.taskRef, "dispatch taskRef");
       break;
+    case "execution.started":
+      requireText(event.issueId, "execution Issue");
+      if (!ISSUE_EXECUTION_PHASES.includes(event.phase)) throw new TypeError("Unsupported Issue execution phase");
+      requireText(event.phaseIdentity, "execution phase identity");
+      validateTaskRef(event.taskRef, "execution taskRef");
+      break;
+    case "execution.observed":
+      requireText(event.issueId, "execution observation Issue");
+      requirePositiveInteger(event.startSequence, "execution start sequence");
+      requireNonNegativeInteger(event.elapsedMs, "execution elapsedMs");
+      if (!["ACTIVE", "SETTLED"].includes(event.state)) throw new TypeError("Unsupported Issue execution observation state");
+      if (!["MONOTONIC", "NATIVE"].includes(event.source)) {
+        throw new TypeError("Unsupported Issue execution observation source");
+      }
+      break;
+    case "execution.uncertain":
+      requireText(event.issueId, "uncertain execution Issue");
+      requirePositiveInteger(event.startSequence, "uncertain execution start sequence");
+      if (event.reason !== "MONOTONIC_OR_NATIVE_ELAPSED_UNAVAILABLE") throw new TypeError("Unsupported uncertain execution reason");
+      break;
+    case "execution.exhausted":
+      requireText(event.issueId, "execution exhaustion Issue");
+      requireNonNegativeInteger(event.consumedMs, "execution exhaustion consumedMs");
+      if (event.consumedMs < ISSUE_EXECUTION_LIMIT_MS) throw new TypeError("Execution exhaustion cannot precede the six-hour limit");
+      break;
     case "retry.recorded":
       requireText(event.issueId, "retry issueId");
       requirePositiveInteger(event.attempt, "retry attempt", 3);
@@ -287,7 +331,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requireText(event.issueId, "close wait issueId");
       requireText(event.target, "close wait target");
       validateTargetWriterOwner(event.owner, "close wait owner");
-      if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"].includes(event.outcome)) {
+      if (!["RELEASED", "TIMED_OUT", "OWNER_CHANGED", "OWNER_HEALTH_UNKNOWN", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"].includes(event.outcome)) {
         throw new TypeError("Unsupported close wait outcome");
       }
       if (!Array.isArray(event.evidence) || event.evidence.length === 0 || !event.evidence.every((item) => (
@@ -437,6 +481,58 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       }
     }
   }
+  if (event.type === "execution.started") {
+    const dispatch = events.find(item => item.type === "dispatch.recorded" && item.issueId === event.issueId
+      && event.phaseIdentity === `dispatch:${item.sequence}` && sameTaskRef(item.taskRef, event.taskRef));
+    const repair = events.find(item => item.type === "repair.recorded" && item.issueId === event.issueId
+      && item.requestIdentity === event.phaseIdentity && sameTaskRef(item.taskRef, event.taskRef));
+    const recovery = events.find(item => item.type === "recovery.intent" && item.issueId === event.issueId
+      && ["CONTINUE", "REPAIR"].includes(item.phase) && item.requestIdentity === event.phaseIdentity);
+    const recoveryTask = recovery && events.find(item => item.type === "recovery.task" && item.issueId === event.issueId
+      && item.requestIdentity === recovery.requestIdentity && sameTaskRef(item.taskRef, event.taskRef));
+    const upgrade = events.find(item => item.type === "model.upgrade" && item.issueId === event.issueId
+      && item.requestIdentity === event.phaseIdentity && sameTaskRef(item.taskRef, event.taskRef));
+    const phaseOwner = event.phase === "IMPLEMENTATION"
+      ? dispatch?.attempt === 1
+      : event.phase === "IMPLEMENTATION_RETRY"
+        ? dispatch?.attempt > 1
+        : event.phase === "CONFLICT_REPAIR"
+          ? Boolean(repair)
+          : Boolean(recoveryTask || upgrade);
+    const duplicate = events.some(item => item.type === "execution.started" && item.issueId === event.issueId
+      && item.phaseIdentity === event.phaseIdentity);
+    const active = events.findLast(item => item.type === "execution.started" && item.issueId === event.issueId
+      && !events.some(candidate => candidate.type === "execution.observed" && candidate.startSequence === item.sequence
+        && candidate.state === "SETTLED"));
+    if (!phaseOwner || duplicate || active) {
+      throw new TypeError("Execution start requires its exact owned action, unique phase, and no active predecessor");
+    }
+  }
+  if (event.type === "execution.observed") {
+    const started = events.find(item => item.type === "execution.started" && item.sequence === event.startSequence);
+    const previous = events.filter(item => item.type === "execution.observed" && item.startSequence === event.startSequence);
+    if (!started || started.issueId !== event.issueId) throw new TypeError("Execution observation requires its exact Issue start");
+    if (previous.some(item => item.state === "SETTLED")) throw new TypeError("Execution interval is already settled");
+    if (event.elapsedMs < (previous.at(-1)?.elapsedMs ?? 0)) throw new TypeError("Execution elapsed time cannot decrease or reset");
+  }
+  if (event.type === "execution.uncertain") {
+    const started = events.find(item => item.type === "execution.started" && item.sequence === event.startSequence);
+    const latestEvidence = events.findLast(item => ["execution.observed", "execution.uncertain"].includes(item.type)
+      && item.startSequence === event.startSequence);
+    const duplicate = latestEvidence?.type === "execution.uncertain";
+    const settled = events.some(item => item.type === "execution.observed" && item.startSequence === event.startSequence
+      && item.state === "SETTLED");
+    if (!started || started.issueId !== event.issueId || duplicate || settled) {
+      throw new TypeError("Uncertain execution requires one unsettled exact Issue start");
+    }
+  }
+  if (event.type === "execution.exhausted") {
+    const previous = events.filter(item => item.type === "execution.exhausted" && item.issueId === event.issueId);
+    const summary = summarizeIssueExecutionBudget(events, event.issueId);
+    if (previous.length > 0 || summary.consumedMs !== event.consumedMs || summary.consumedMs < ISSUE_EXECUTION_LIMIT_MS) {
+      throw new TypeError("Execution exhaustion must record the exact first cumulative six-hour crossing");
+    }
+  }
   if (event.type === "retry.recorded") {
     const dispatched = events.find((item) => (
       item.type === "dispatch.recorded" && item.issueId === event.issueId && item.attempt === event.attempt
@@ -552,4 +648,29 @@ export function validateJournal(events, options = {}) {
     validated.push(event);
   }
   return events;
+}
+
+export function summarizeIssueExecutionBudget(events, issueId) {
+  const starts = events.filter(event => event.type === "execution.started" && event.issueId === issueId);
+  let consumedMs = 0;
+  let activeStartSequence = null;
+  for (const started of starts) {
+    const observations = events.filter(event => event.type === "execution.observed"
+      && event.issueId === issueId && event.startSequence === started.sequence);
+    consumedMs += observations.at(-1)?.elapsedMs ?? 0;
+    if (!observations.some(event => event.state === "SETTLED")) activeStartSequence = started.sequence;
+  }
+  const latestActiveEvidence = activeStartSequence === null ? null : events.findLast(event => (
+    ["execution.observed", "execution.uncertain"].includes(event.type)
+      && event.issueId === issueId && event.startSequence === activeStartSequence
+  ));
+  const uncertain = latestActiveEvidence?.type === "execution.uncertain";
+  const exhausted = consumedMs >= ISSUE_EXECUTION_LIMIT_MS
+    || events.some(event => event.type === "execution.exhausted" && event.issueId === issueId);
+  return {
+    limitMs: ISSUE_EXECUTION_LIMIT_MS,
+    consumedMs,
+    state: exhausted ? "EXHAUSTED" : uncertain ? "UNKNOWN" : activeStartSequence === null ? "AVAILABLE" : "ACTIVE",
+    activeStartSequence,
+  };
 }

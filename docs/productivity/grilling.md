@@ -1,8 +1,8 @@
 ## What it does
 
-`grilling` stress-tests a plan, decision, or idea by resolving unresolved material decisions within the agreed scope. Its decision tree contains questions that could change product behavior, scope, authority, or material risk; routine implementation details follow source and existing conventions.
+`grilling` stress-tests a plan, decision, or idea by resolving unresolved material decisions within the agreed scope. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) decides evidence-backed reversible choices and asks you about unclear intent or costly commitments. Your explicit decisions and project contracts lead, followed by source conventions and suitable established practice.
 
-Each round contains only material questions whose prerequisites are already settled: the current **frontier**. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) looks up available facts and recommends an answer for each decision. Once all material decisions are settled, it asks you to confirm the shared understanding before acting. Silence is not agreement or approval.
+Each round contains only human questions whose prerequisites are already settled: the current **frontier**. Once decisions and required evidence are settled, you receive one summary with their bases and assumptions. Already settled choices need no blanket reconfirmation; an explicit request for your review still applies. Silence is not agreement or approval.
 
 ## When to reach for it
 
@@ -13,16 +13,25 @@ Reach for it when a plan or design still has material uncertainties you want sur
 - For a plain interview, use [grill-me](https://aihero.dev/skills-grill-me).
 - To record accepted glossary or ADR changes in a codebase, use [grill-with-docs](https://aihero.dev/skills-grill-with-docs).
 
+## Decide or ask
+
+| Situation | What happens |
+| --- | --- |
+| An applicable accepted decision or consistent convention settles the choice | Reuse it and cite its source |
+| The goal is clear and the in-scope choice is cheap to reverse | Choose directly, explain the evidence and reversal, and identify the delegated basis |
+| Business meaning remains unclear after investigation | Ask the smallest question that resolves it |
+| A proposal adds scope, permission, or a costly commitment | Prepare its effect and recommendation, then ask only for missing approval |
+| Any SQL adjustment, including an embedded read query or local SQL file | Obtain approval for the adjustment before editing; prepare and validate approved SQL before dependent implementation |
+
+Reversibility is about consequences: reverting code does not undo data damage or a commitment made to another system. SQL preparation does not grant permission to apply it to a database. Read-only inspection of existing SQL needs no adjustment approval.
+
 ## The decision tree
 
-The **decision tree** tracks material decisions and their dependencies inside the agreed scope. After you answer a round, `grilling` recomputes the frontier. A pending background fact-finding task holds only the decisions that depend on it; other ready questions can proceed. An empty ready frontier while material decisions await evidence is not completion.
+The **decision tree** tracks material decisions and their dependencies inside the agreed scope. Delegated choices resolve as their evidence becomes available. Independent human questions can share a concise round with recommendations; dependent questions wait. A pending fact lookup or human answer holds only dependent work. An empty ready frontier while material decisions await evidence is not completion.
 
 Accepted decisions remain settled on continuation and re-entry. A decision returns to the frontier only when new evidence invalidates its basis; the agent identifies that evidence and the affected decision. Unrelated hypothetical branches do not extend the interview.
 
-The calling skill can narrow the round:
-
-- [grill-me](https://aihero.dev/skills-grill-me) uses the full available frontier.
-- [grill-with-docs](https://aihero.dev/skills-grill-with-docs) keeps its explicit limit of one material decision at a time while recording accepted domain changes.
+An explicit user or caller pacing limit still applies. `grill-with-docs` adds scoped document writes and a planning handoff; it does not force independent decisions into separate rounds.
 
 ## Pulled out on purpose
 
@@ -30,16 +39,17 @@ The calling skill can narrow the round:
 
 Keeping the technique in one place means you can also reach for it directly when you just want the interview — without the ADR-writing or [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket)-shaping that its wrappers add on top.
 
-For an Issue workflow, the decision tree includes actual installation, task/message, local integration/cleanup and tracker permissions. The agent prepares concrete operations and looks up host capabilities before asking once for missing approval. Declared SQL brings environment, effect, rights, operator, recovery and outcome validation into planning; no SQL is recorded as N/A. Later leaves reuse unchanged decisions and scoped approvals. Final confirmation grants no new scope and leaves actual permission and Manual prerequisite requirements intact.
+For an Issue workflow, the decision tree includes actual installation, task/message, local integration/cleanup and tracker permissions. The agent prepares concrete operations and looks up host capabilities before asking once for missing approval. Declared SQL brings environment, effect, rights, operator, recovery and outcome validation into planning; no SQL is recorded as N/A. Later leaves reuse unchanged decisions and scoped approvals. A settled design grants no new execution scope and leaves operation permissions and Manual prerequisite requirements intact.
 
 ## It's working if
 
-- Each [turn](https://www.aihero.dev/ai-coding-dictionary/turn) numbers the currently answerable questions and recommends an answer for each, within the calling skill's decision limit.
+- A routine or reversible design can finish without a question, with the chosen approach and its evidence visible.
+- A [turn](https://www.aihero.dev/ai-coding-dictionary/turn) that needs your decision gives a concrete recommendation and explains why your input is missing.
 - Later questions follow the dependencies created by answers already settled.
 - Accepted decisions stay settled unless the agent identifies new evidence that invalidates them.
-- Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) and routine repository choices are resolved from evidence; material decisions still come back to you.
-- Once the material decisions are settled, you see a final confirmation instead of questions about unrelated possibilities.
-- No implementation starts until you confirm the shared understanding.
+- Facts available from the [environment](https://www.aihero.dev/ai-coding-dictionary/environment) are investigated before you are asked.
+- SQL adjustments come to you before the artifact is edited, and previously approved adjustments are not asked again without a changed scope or basis.
+- The closing summary distinguishes human decisions from delegated choices and preserves the next step's actual authority.
 
 ## Where it fits
 

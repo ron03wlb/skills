@@ -1,0 +1,11 @@
+---
+status: accepted
+---
+
+# Delegate reversible design decisions and gate SQL adjustments
+
+Within the agreed goal, design requests delegate evidence-backed choices that can be reversed at low cost; `grill-with-docs` also authorizes qualifying document writes in its existing isolated planning lane. Use explicit decisions and governing project contracts, then source conventions, then suitable established practice. Ask only for unresolved goal or business meaning, missing scope or operation permission, or an irreversible or costly commitment. Every SQL adjustment is costly, including local artifacts, indexes, and embedded read queries: present the proposed effect and obtain missing approval before editing SQL, then prepare and validate the approved artifact before dependent application implementation. Independent work can continue; database application and declared Manual prerequisites retain their existing authority and attestation boundaries.
+
+Record inherited, human-confirmed, and delegated decision bases with their sources. A reversible choice can warrant an ADR when its rationale has lasting value; routine conventions need only a reference, while exact feature requirements belong in the settled scope and subsequent Spec. Follow repository ADR conventions. Once all decisions and evidence prerequisites are settled, summarize and hand off without blanket reconfirmation, retaining explicit user review requests. The existing Planning handoff packet carries provenance and SQL prerequisites without a new schema or registry; `to-spec` consumes settled choices without a second interview. ADR-0050's explicit publication handoff and ADR-0054's lane ownership and relevant baseline revalidation remain in force.
+
+Basis: the human approved delegated reversible decisions with an exception for unresolved business intent, then explicitly classified SQL adjustments as costly and requested implementation in the 2026-09-10 conversation. This replaces the interview's universal per-material-decision and final-confirmation gates, and the ADR rule requiring irreversibility, to reduce waiting while preserving scoped authority. Structural checks and independent scenario observations must remain distinct; the policy alone establishes no measured latency improvement.

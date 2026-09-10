@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
+import { createIssueExecutionBudgetController } from "./issue-execution-budget.mjs";
+import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
 import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
 import { validateModelPolicy } from "./issue-model-policy.mjs";
 
@@ -420,6 +423,7 @@ export function createCoordinator({
   compatibleRecordedVersion,
   actionStops = new Map(),
   now,
+  monotonicNow = () => performance.now(),
   sleep,
 }) {
   for (const method of [
@@ -428,6 +432,9 @@ export function createCoordinator({
     "readWriterLock",
     "observeRepositoryCloseLease",
     "observeTargetMutationWriter",
+    "readLeaseHealth",
+    "readHostFault",
+    "writeHostFault",
   ]) requireMethod(store, method);
   if (workflowVersion !== undefined) validateWorkflowVersion(workflowVersion);
   requireMethod(tracker, "read");
@@ -442,7 +449,10 @@ export function createCoordinator({
   if (typeof reconcile !== "function") throw new TypeError("Coordinator requires reconcile()");
   requireMethod(handoff, "read");
   if (typeof now !== "function") throw new TypeError("Coordinator requires now()");
+  if (typeof monotonicNow !== "function") throw new TypeError("Coordinator requires monotonicNow()");
   if (typeof sleep !== "function") throw new TypeError("Coordinator requires sleep()");
+
+  const executionBudgets = createIssueExecutionBudgetController({ store, tasks, now, monotonicNow });
 
   const readTracker = async (request) => {
     const attempts = [];
@@ -485,6 +495,8 @@ export function createCoordinator({
   };
 
   const dispatchIssue = async ({ action, current, status, writer, modelRouting }) => {
+    const monotonicStartedAt = monotonicNow();
+    let initiatedHere = false;
     if (action.attempt > 1) {
       const journal = store.readEvents(current.runIdentity.runId);
       const priorDispatch = journal.findLast((event) => (
@@ -502,10 +514,11 @@ export function createCoordinator({
           && task.retryRequest.issueId === action.issueId
           && task.retryRequest.attempt === action.attempt;
         if (!accepted) {
-          await tasks.message(
+          const delivery = await tasks.message(
             priorDispatch.taskRef,
             `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Retry request: ${JSON.stringify({runId: current.runIdentity.runId, issueId: action.issueId, attempt: action.attempt})}`,
           );
+          initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
         }
       } else if (task?.state === "INACTIVE" && Array.isArray(task.inactiveEvidence)
         && task.inactiveEvidence.length > 0 && task.inactiveEvidence.every(isText)) {
@@ -517,12 +530,17 @@ export function createCoordinator({
         if (!Array.isArray(existing) || existing.length > 1) {
           return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
         }
-        nextTaskRef = existing[0] ?? await tasks.create({
-          issueId: action.issueId,
-          runIdentity: current.runIdentity,
-          environment: "local",
-          attempt: action.attempt,
-        });
+        nextTaskRef = existing[0];
+        if (!nextTaskRef) {
+          nextTaskRef = await tasks.create({
+            issueId: action.issueId,
+            runIdentity: current.runIdentity,
+            environment: "local",
+            attempt: action.attempt,
+          });
+          initiatedHere = typeof tasks.executionStartEvidence !== "function"
+            || tasks.executionStartEvidence(nextTaskRef) === "CURRENT_MONOTONIC";
+        }
         if (!isTaskRef(nextTaskRef)) throw new Error("ISSUE_LANE_NOT_READY");
         replacement = {
           supersedesAttempt: action.attempt - 1,
@@ -550,13 +568,16 @@ export function createCoordinator({
         priorTaskRef: priorDispatch.taskRef,
         replacement,
       });
-      writer.append({
+      const dispatch = writer.append({
         type: "dispatch.recorded",
         at: now(),
         issueId: action.issueId,
         attempt: action.attempt,
         taskRef: nextTaskRef,
       });
+      executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
+        phase: "IMPLEMENTATION_RETRY", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: nextTaskRef,
+        monotonicStartedAt: initiatedHere ? monotonicStartedAt : null });
       return null;
     }
     const prepared = current.preparedLanes?.[action.issueId];
@@ -568,12 +589,17 @@ export function createCoordinator({
     if (!Array.isArray(existing) || existing.length > 1) {
       return issueLaneAmbiguous(status, action.issueId, Array.isArray(existing) ? existing.length : 0);
     }
-    const taskRef = existing[0] ?? await tasks.create({
-      issueId: action.issueId,
-      runIdentity: current.runIdentity,
-      environment: "local",
-      modelInput: current.modelInputs?.[action.issueId], modelDecision: modelRouting?.decisions?.[action.issueId], writer,
-    });
+    let taskRef = existing[0];
+    if (!taskRef) {
+      taskRef = await tasks.create({
+        issueId: action.issueId,
+        runIdentity: current.runIdentity,
+        environment: "local",
+        modelInput: current.modelInputs?.[action.issueId], modelDecision: modelRouting?.decisions?.[action.issueId], writer,
+      });
+      initiatedHere = typeof tasks.executionStartEvidence !== "function"
+        || tasks.executionStartEvidence(taskRef) === "CURRENT_MONOTONIC";
+    }
     if (!isTaskRef(taskRef)) throw new Error("ISSUE_LANE_NOT_READY");
     if (prepared) {
       const task = await tasks.read(taskRef);
@@ -581,20 +607,26 @@ export function createCoordinator({
         && task.retryRequest.issueId === action.issueId && task.retryRequest.attempt === 1;
       if (!accepted) {
         if (task.state !== "RESUMABLE") throw new Error("Prepared lane has not settled; preserve it before execution");
-        await tasks.message(taskRef, `Use $execute-issue to retry Issue ${action.issueId} from its prepared prerequisite candidate in this exact task and worktree. Reuse the freshly read attestation and existing approvals. Retry request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, attempt: 1 })}`);
+        const delivery = await tasks.message(taskRef, `Use $execute-issue to retry Issue ${action.issueId} from its prepared prerequisite candidate in this exact task and worktree. Reuse the freshly read attestation and existing approvals. Retry request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, attempt: 1 })}`);
+        initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
       }
     }
-    writer.append({
+    const dispatch = writer.append({
       type: "dispatch.recorded",
       at: now(),
       issueId: action.issueId,
       attempt: action.attempt,
       taskRef,
     });
+    executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
+      phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef,
+      monotonicStartedAt: initiatedHere ? monotonicStartedAt : null });
     return null;
   };
 
   const repairIssue = async ({ action, current, writer }) => {
+    const monotonicStartedAt = monotonicNow();
+    let initiatedHere = false;
     const journal = store.readEvents(current.runIdentity.runId);
     const prior = journal.filter(event => event.type === "repair.recorded" && event.issueId === action.issueId);
     const taskRef = current.taskRefs?.[action.issueId];
@@ -612,11 +644,16 @@ export function createCoordinator({
     const accepted = task.repairRequest?.requestIdentity === intent.requestIdentity && task.repairRequest.runId === current.runIdentity.runId;
     if (!accepted) {
       if (task.state !== "RESUMABLE") throw new Error("Original Issue task is not ready for conflict repair");
-      await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
+      const delivery = await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
+      initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
     }
+    executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
+      phase: "CONFLICT_REPAIR", phaseIdentity: intent.requestIdentity, taskRef,
+      monotonicStartedAt: initiatedHere ? monotonicStartedAt : null });
   };
 
   const recoverIssue = async ({ action, current, writer }) => {
+    const monotonicStartedAt = monotonicNow();
     const failure = bindTechnicalFailure(action.failure);
     const journal = store.readEvents(current.runIdentity.runId);
     const phase = nextRecoveryPhase(failure);
@@ -646,7 +683,12 @@ export function createCoordinator({
     if (previousOwner.state !== "RESUMABLE" || previousOwner.cwd !== failure.worktree
       || previousOwner.snapshot?.turns?.[0]?.status !== "completed") throw new Error("Previous writer became active or changed ownership during recovery");
     const task = await tasks.read(transfer.taskRef);
-    if (task.recoveryRequest?.requestIdentity === intent.requestIdentity) return;
+    if (task.recoveryRequest?.requestIdentity === intent.requestIdentity) {
+      if (["CONTINUE", "REPAIR"].includes(phase)) executionBudgets.start({ writer,
+        runId: current.runIdentity.runId, issueId: action.issueId, phase: "IMPLEMENTATION_REPAIR",
+        phaseIdentity: intent.requestIdentity, taskRef: transfer.taskRef });
+      return;
+    }
     if (task.state === "RUNNING") return;
     if (task.state !== "RESUMABLE") throw new Error("Repair task has unresolved active work; preserve it");
     if (phase === "ENVIRONMENT") {
@@ -674,10 +716,15 @@ export function createCoordinator({
       ? ` On success, include resolution {mode: CHANGED_INPUTS|OUTCOME_READ_BACK,attemptIdentity,targetHead,command,inputs,source,evidence,exitCode} bound to the exact failed attempt. CHANGED_INPUTS proves fresh relevant environment/external/configuration inputs; OUTCOME_READ_BACK proves exitCode 0 for the exact UNKNOWN native attempt with unchanged inputs. Preserve the original evidence. This returns verification to the original close owner and is never integration PASS or permission to close.`
       : ["READBACK", "ENVIRONMENT"].includes(phase) && failure.completionIdentity == null
         ? ` On successful initial-execution recovery, include resolution {mode:EXECUTION_READY,candidate,targetHead,command,exitCode:0,source,evidence} proving the exact failed operation. The coordinator will continue execution in this same exclusive task without spending a material wave; this result is not completion.` : "";
-    await tasks.message(transfer.taskRef, `${work}${resolution}\nOriginal failure and authority: ${JSON.stringify(failure)}\nRecovery request: ${JSON.stringify(request)}`);
+    const delivery = await tasks.message(transfer.taskRef, `${work}${resolution}\nOriginal failure and authority: ${JSON.stringify(failure)}\nRecovery request: ${JSON.stringify(request)}`);
+    if (["CONTINUE", "REPAIR"].includes(phase)) executionBudgets.start({ writer,
+      runId: current.runIdentity.runId, issueId: action.issueId, phase: "IMPLEMENTATION_REPAIR",
+      phaseIdentity: intent.requestIdentity, taskRef: transfer.taskRef,
+      monotonicStartedAt: delivery?.observed === true && delivery?.initiatedHere !== true ? null : monotonicStartedAt });
   };
 
   const upgradeIssue = async ({ action, current, writer }) => {
+    const monotonicStartedAt = monotonicNow();
     const evidence = current.modelYields?.[action.issueId];
     const taskRef = current.taskRefs?.[action.issueId];
     if (!evidence || !isTaskRef(taskRef)) throw new Error("Upgrade requires validated owner repair evidence");
@@ -690,7 +737,10 @@ export function createCoordinator({
         reason: `Confirmed finding ${evidence.finding.identity} remained after two consecutive material, verified and reviewed repair waves.` });
     }
     if (intent.yieldIdentity !== evidence.yieldIdentity) throw new Error("The single upgrade allowance already belongs to another handoff");
-    await tasks.upgrade({ ref: taskRef, intent, runIdentity: current.runIdentity, writer });
+    const result = await tasks.upgrade({ ref: taskRef, intent, runIdentity: current.runIdentity, writer });
+    executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
+      phase: "IMPLEMENTATION_REPAIR", phaseIdentity: intent.requestIdentity, taskRef,
+      monotonicStartedAt: result?.accepted || result?.initiatedHere ? monotonicStartedAt : null });
   };
 
   const closeIssue = async ({ action, current, status, step = false }) => {
@@ -863,6 +913,7 @@ export function createCoordinator({
       ownerChanged: REASON_CODES.repositoryCloseLeaseOwnerChanged,
       timeout: REASON_CODES.repositoryCloseLeaseWaitTimeout,
       coordinatorLost: REASON_CODES.repositoryCloseLeaseWaitCoordinatorLost,
+      healthUnknown: REASON_CODES.repositoryCloseLeaseHealthUnknown,
       interrupted: REASON_CODES.repositoryCloseLeaseWaitInterrupted,
       evidenceChanged: REASON_CODES.repositoryCloseLeaseEvidenceChanged,
       absentPredicate: "repository_close_lease_is_absent_or_healthy",
@@ -876,6 +927,7 @@ export function createCoordinator({
       ownerChanged: REASON_CODES.targetWriterOwnerChanged,
       timeout: REASON_CODES.targetWriterWaitTimeout,
       coordinatorLost: REASON_CODES.targetWriterWaitCoordinatorLost,
+      healthUnknown: REASON_CODES.targetWriterHealthUnknown,
       interrupted: REASON_CODES.targetWriterWaitInterrupted,
       evidenceChanged: REASON_CODES.targetWriterEvidenceChanged,
       absentPredicate: "target_writer_is_absent_or_healthy",
@@ -899,6 +951,10 @@ export function createCoordinator({
       [waitKind.coordinatorLost]: {
         owningSource: "active coordinator liveness read-back",
         smallestHumanAction: "Start one active coordinator by retrying the same command.",
+      },
+      [waitKind.healthUnknown]: {
+        owningSource: waitKind.livenessSource,
+        smallestHumanAction: `Restore exact readable owner-generation health evidence for the retained ${waitKind.label}, then retry the same command.`,
       },
       [waitKind.interrupted]: {
         owningSource: "append-only coordinator journal read-back",
@@ -1028,10 +1084,68 @@ export function createCoordinator({
     recoveryStatus = writer.rebuildStatus(current.facts);
     const observedOutcome = await settleObservedOwner(observeOwner());
     if (observedOutcome) return observedOutcome;
-    const health = repositoryCloseWait ? current.facts.run.repositoryCloseLeaseHealth : current.facts.run.closeWriterHealth;
-    if (health !== "HEALTHY") {
-      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["Current owner health is unproven; the lease remains untouched."] });
-      return stop(waitKind.coordinatorLost, ["Current owner health is unproven."], [waitKind.reconcilePredicate]);
+    const readHealth = () => {
+      try {
+        const state = store.readLeaseHealth({
+          leaseKind: repositoryCloseWait ? "repository-close" : "target-mutation",
+          target: current.runIdentity.target,
+          owner: action.owner,
+        });
+        return ["HEALTHY", "INACTIVE"].includes(state) ? state : "UNKNOWN";
+      } catch { return "UNKNOWN"; }
+    };
+    const healthFaultId = `sha256:${createHash("sha256").update(JSON.stringify(canonicalize({
+      runId: current.runIdentity.runId,
+      waitType: waitKind.startedType,
+      target: current.runIdentity.target,
+      owner: action.owner,
+    }))).digest("hex")}`;
+    const writeHealthFault = (state, recoveryRounds) => store.writeHostFault(createBoundedObservationFault({
+      runId: current.runIdentity.runId,
+      faultId: healthFaultId,
+      operation: `${waitKind.startedType}:health`,
+      category: "lease-health-unknown",
+      state,
+      recoveryRounds,
+      receiptRefs: [String(started.sequence), action.owner.operationId, action.owner.coordinatorInstanceId, action.owner.generation],
+      updatedAt: now(),
+    }));
+    let health = readHealth();
+    let healthFault = store.readHostFault({ runId: current.runIdentity.runId, faultId: healthFaultId });
+    if (health === "HEALTHY" && healthFault && healthFault.state !== "settled") {
+      healthFault = writeHealthFault("settled", healthFault.recoveryRounds);
+    }
+    if (health === "UNKNOWN") {
+      if (!healthFault || healthFault.state === "settled") healthFault = writeHealthFault("unresolved", 0);
+      if (healthFault.state === "exhausted") {
+        appendSettlement({ started, outcome: "OWNER_HEALTH_UNKNOWN", evidence: ["Exact owner-generation health remains unknown after the shared 5/15/30 second fault policy; the lease remains untouched."] });
+        return stop(waitKind.healthUnknown, ["Exact owner-generation health is unknown; no inactive, release, reclaim, or cancellation claim is authorized."], [waitKind.reconcilePredicate]);
+      }
+      while (health === "UNKNOWN" && healthFault.recoveryRounds < BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS.length) {
+        if (request.mode === "step") return { waiting: true };
+        const delayMs = BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS[healthFault.recoveryRounds];
+        const waited = typeof tasks.waitForSignal === "function"
+          ? await tasks.waitForSignal(delayMs)
+          : await sleep(delayMs);
+        if (waited?.coordinatorActive === false) {
+          appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["The active coordinator disconnected during bounded health recovery; retain owner and progress."] });
+          return stop(waitKind.coordinatorLost, ["Coordinator liveness became inactive during health recovery."], ["coordinator_is_active"]);
+        }
+        if (waited?.control || waited?.deadline) return { waiting: true };
+        healthFault = writeHealthFault("unresolved", healthFault.recoveryRounds + 1);
+        const ownerOutcome = await settleObservedOwner(observeOwner());
+        if (ownerOutcome) return ownerOutcome;
+        health = readHealth();
+      }
+      if (health === "UNKNOWN") {
+        healthFault = writeHealthFault("exhausted", healthFault.recoveryRounds);
+        appendSettlement({ started, outcome: "OWNER_HEALTH_UNKNOWN", evidence: ["Exact owner-generation health remains unknown after the shared 5/15/30 second fault policy; the lease remains untouched."] });
+        return stop(waitKind.healthUnknown, ["Exact owner-generation health is unknown; UNKNOWN is not inactive ownership."], [waitKind.reconcilePredicate]);
+      }
+      healthFault = writeHealthFault("settled", healthFault.recoveryRounds);
+    } else if (health === "INACTIVE") {
+      appendSettlement({ started, outcome: "COORDINATOR_INACTIVE", evidence: ["Exact owner-generation health is inactive; the lease remains untouched."] });
+      return stop(waitKind.coordinatorLost, ["Exact owner-generation health is inactive."], [waitKind.reconcilePredicate]);
     }
     // One observation slice yields back to scheduling; elapsed time never invalidates healthy ownership.
     const waitResult = request.mode === "step" ? undefined : await sleep(1000);
@@ -1357,7 +1471,9 @@ export function createCoordinator({
             let adopted = false;
             for (const observation of pending) {
               if (observation.refs?.length === 1 && isTaskRef(observation.refs[0])) {
-                writer.append({ type: "dispatch.recorded", at: now(), issueId: observation.issueId, attempt: 1, taskRef: observation.refs[0] });
+                const dispatch = writer.append({ type: "dispatch.recorded", at: now(), issueId: observation.issueId, attempt: 1, taskRef: observation.refs[0] });
+                executionBudgets.start({ writer, runId: runIdentity.runId, issueId: observation.issueId,
+                  phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: observation.refs[0] });
                 actionStops.delete(`${runIdentity.runId}:${observation.issueId}`);
                 adopted = true;
               } else {
@@ -1368,6 +1484,8 @@ export function createCoordinator({
             }
             if (adopted) continue;
           }
+          await executionBudgets.sync({ writer, runId: runIdentity.runId,
+            issueIds: current.facts.nodes.map(node => node.issueId), nodes: current.facts.nodes });
           await refreshActionStops(current);
           lastStatus = rebuildStatus(current.facts);
           for (const pending of request.controlQueue?.splice(0) ?? []) {
@@ -1393,7 +1511,9 @@ export function createCoordinator({
             if (activeTaskRefs.some((taskRef) => !isTaskRef(taskRef))) {
               throw new Error("ACTIVE_TASK_REFERENCE_MISSING");
             }
-            const waited = await tasks.wait(activeTaskRefs);
+            const remainingMs = executionBudgets.remainingMs({ runId: runIdentity.runId,
+              issueIds: lastStatus.frontier.active });
+            const waited = await tasks.wait(activeTaskRefs, remainingMs === null ? undefined : { timeoutMs: remainingMs });
             if (waited?.coordinatorActive === false) return lastStatus;
             if (waited?.observation?.signal === "deadline") return lastStatus;
             continue;
