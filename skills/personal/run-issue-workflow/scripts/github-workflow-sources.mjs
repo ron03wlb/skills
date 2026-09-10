@@ -50,8 +50,7 @@ export function createAutomaticHostCleanupPacket({ result, taskCwd, originalTask
     && result.integrationVerification.identity === integrationRecord.current.identity;
   const resultMatches = result?.candidate === record.candidate && result.targetHead === target.head && result.candidateReachable === true
     && worktreePath(result.worktree) === worktreePath(record.worktree) && worktreePath(taskCwd) === worktreePath(record.worktree)
-    && result.directoryState?.registered === false && result.directoryState.exists === true && result.directoryState.empty === true
-    && result.directoryState.itemCount === 0 && originalTaskMatches && isAutomaticHostCleanupReason(result.reasonCode)
+    && result.directoryState === "EMPTY_UNREGISTERED" && originalTaskMatches && isAutomaticHostCleanupReason(result.reasonCode)
     && ["EBUSY", "EPERM", "EACCES"].includes(failure?.code)
     && typeof failure.message === "string" && failure.message.length > 0;
   if (!resultMatches || !integrationMatches) return null;

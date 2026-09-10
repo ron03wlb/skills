@@ -317,7 +317,7 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
             integrationVerification: { state: integrationVerification.state, identity: integrationVerification.identity,
               checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
                 environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
-            worktree: lane, taskRef: ref, directoryState: { registered: false, exists: true, empty: true, itemCount: 0 },
+            worktree: lane, taskRef: ref, directoryState: "EMPTY_UNREGISTERED",
             reasonCode: "host_release_unavailable",
             observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }

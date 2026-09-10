@@ -34,7 +34,7 @@ function qualifySettledRouting({ command, packageVersionId }) {
   const result = { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId, issueId, requestIdentity,
     authorityEvidence, candidate, targetHead: candidate, candidateReachable: true,
     integrationVerification: { state: "PASS", identity: integrationRecord.current.identity, checks: [check] },
-    worktree, taskRef, directoryState: { registered: false, exists: true, empty: true, itemCount: 0 },
+    worktree, taskRef, directoryState: "EMPTY_UNREGISTERED",
     reasonCode: "host_release_unavailable", observations: [{ code: "EBUSY", message: "qualified sharing violation" }] };
   const task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed" }] },
     closeRequest: { runId, issueId, requestIdentity }, closeResult: result };

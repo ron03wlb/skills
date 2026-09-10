@@ -95,7 +95,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     let lane = await composition.prepareCodexWorkflow(options);
     let versionId = runtime.version.id;
     let effectiveRuntime = workflowRuntime;
-    return { specId: lane.specId, workflowRuntime,
+    return { specId: lane.specId, get workflowRuntime() { return effectiveRuntime; },
       async run(request) {
         const status = await lane.run(request);
         if (status.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")
