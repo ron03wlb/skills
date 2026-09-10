@@ -50,7 +50,24 @@ test("managed entry evidence binds reviewed candidate, immutable manifest and fa
   try {
     mkdirSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts"), { recursive: true });
     writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), "Reviewed workflow\n");
-    writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts/installed-entry.mjs"), "export const installed = true;\n");
+    writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts/installed-entry.mjs"), `
+const version = process.argv[3];
+const stages = [
+  ["settled-host-cleanup-routing", "HOST_CLEANUP_BLOCKED was terminal"],
+  ["stable-close-identity", "controlRevision changed request identity"],
+  ["interrupted-helper-continuation", "fixed inspector lifetime lost remaining helpers"],
+];
+if (process.argv[2] === "--qualify-repair-package") {
+  let results = stages.map(([stage, failureSignature]) => ({ stage, failureSignature,
+    command: JSON.stringify([process.execPath, process.argv[1], "--qualify-repair-package", version]),
+    result: "PASS", packageVersionId: version }));
+  if (process.env.WORKFLOW_QUALIFICATION_FAULT === "subset") results = results.slice(0, 1);
+  if (process.env.WORKFLOW_QUALIFICATION_FAULT === "wrong-version") results[0].packageVersionId = "f".repeat(64);
+  if (process.env.WORKFLOW_QUALIFICATION_FAULT === "failed") results[0].result = "FAIL";
+  process.stdout.write(JSON.stringify(results));
+}
+export const installed = true;
+`);
     copyHostAssets(sourceRepository);
     mkdirSync(join(sourceRepository, "docs/agents/references"), { recursive: true });
     writeFileSync(join(sourceRepository, "docs/agents/run-preparation.md"), "Preparation owner\n");
@@ -62,31 +79,31 @@ test("managed entry evidence binds reviewed candidate, immutable manifest and fa
     const candidate = git("rev-parse", "HEAD");
     const first = installWorkflow({ sourceRepository, sourceCommit: candidate, cacheDirectory, skillDirectory: codexEntry });
     installWorkflow({ sourceRepository, sourceCommit: candidate, cacheDirectory, skillDirectory: agentsEntry });
-    const failedStageResults = [
-      { stage: "settled-host-cleanup-routing", failureSignature: "HOST_CLEANUP_BLOCKED was terminal", command: "node --test routing", result: "PASS", packageVersionId: first.version.id },
-      { stage: "stable-close-identity", failureSignature: "controlRevision changed request identity", command: "node --test identity", result: "PASS", packageVersionId: first.version.id },
-      { stage: "interrupted-helper-continuation", failureSignature: "fixed inspector lifetime lost remaining helpers", command: "node --test cleanup", result: "PASS", packageVersionId: first.version.id },
-    ];
     const evidence = readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
-      expectedSourceCommit: candidate, failedStageResults });
+      expectedSourceCommit: candidate });
     assert.equal(evidence.schema, "codex-workflow-effective-evidence:v1");
     assert.equal(evidence.candidate, candidate);
     assert.match(evidence.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(evidence.entries.map(item => item.path), [codexEntry, agentsEntry]);
     assert.ok(evidence.entries.every(item => item.packageVersionId === first.version.id));
-    assert.deepEqual(evidence.failedStageResults, failedStageResults);
+    assert.deepEqual(evidence.failedStageResults.map(result => result.stage), [
+      "settled-host-cleanup-routing", "stable-close-identity", "interrupted-helper-continuation",
+    ]);
+    assert.ok(evidence.failedStageResults.every(result => result.packageVersionId === first.version.id && result.result === "PASS"));
     assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry],
-      expectedSourceCommit: candidate, failedStageResults }), /complete managed workflow entry set/u);
-    assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
-      expectedSourceCommit: candidate, failedStageResults: failedStageResults.slice(0, 1) }), /complete original failed-stage set/u);
-    assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
-      expectedSourceCommit: candidate,
-      failedStageResults: [{ ...failedStageResults[0], packageVersionId: "f".repeat(64) }, ...failedStageResults.slice(1)] }), /failed-stage result/u);
+      expectedSourceCommit: candidate }), /complete managed workflow entry set/u);
+    for (const fault of ["subset", "wrong-version", "failed"]) {
+      process.env.WORKFLOW_QUALIFICATION_FAULT = fault;
+      try {
+        assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
+          expectedSourceCommit: candidate }), /failed-stage/u);
+      } finally { delete process.env.WORKFLOW_QUALIFICATION_FAULT; }
+    }
     fs.renameSync(agentsEntry, `${agentsEntry}.preserved`);
     mkdirSync(join(root, "foreign")); fs.symlinkSync(join(root, "foreign"), agentsEntry, process.platform === "win32" ? "junction" : "dir");
     try {
       assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
-        expectedSourceCommit: candidate, failedStageResults }), /managed entry/u);
+        expectedSourceCommit: candidate }), /managed entry/u);
     } finally { fs.rmSync(agentsEntry); fs.renameSync(`${agentsEntry}.preserved`, agentsEntry); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

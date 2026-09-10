@@ -22,8 +22,45 @@ const one = (values, label) => {
 };
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
 const automaticHostCleanupReasons = new Set(["host_release_unavailable", "host_task_ownership_unproven"]);
+const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
 
 export const isAutomaticHostCleanupReason = reasonCode => automaticHostCleanupReasons.has(reasonCode);
+
+export function createAutomaticHostCleanupPacket({ result, taskCwd, originalTaskRef, integrationRecord,
+  record, target, targetName, issueId, specId }) {
+  const failure = result?.observations?.[0];
+  const originalTaskMatches = originalTaskRef?.threadId === result?.taskRef?.threadId
+    && originalTaskRef?.hostId === result?.taskRef?.hostId;
+  const integrationChecks = integrationRecord?.current?.results?.map((attempt, index) => {
+    const obligation = integrationRecord.obligation?.[index], inputs = attempt.inputs;
+    if (!Array.isArray(obligation?.command) || !obligation.command.length || !obligation.command.every(value => typeof value === "string")
+      || !Array.isArray(obligation.configFiles) || !obligation.configFiles.every(value => typeof value === "string")
+      || !inputs?.environment || typeof inputs.environment !== "object" || Array.isArray(inputs.environment)
+      || !Object.keys(inputs.environment).length || !isDeepStrictEqual(inputs.external, {})
+      || !Array.isArray(inputs.configuration) || inputs.configuration.length !== obligation.configFiles.length
+      || inputs.configuration.some((item, configIndex) => item?.file !== obligation.configFiles[configIndex]
+        || !/^[a-f0-9]{64}$/u.test(item.digest))) return null;
+    return { command: obligation.command, configFiles: obligation.configFiles, environment: inputs.environment,
+      externalInputs: { kind: "none" } };
+  });
+  const integrationMatches = integrationRecord?.current?.state === "PASS" && Array.isArray(integrationChecks)
+    && !integrationChecks.includes(null)
+    && result?.integrationVerification?.state === "PASS" && Array.isArray(result.integrationVerification.checks)
+    && isDeepStrictEqual(result.integrationVerification.checks, integrationChecks)
+    && result.integrationVerification.identity === integrationRecord.current.identity;
+  const resultMatches = result?.candidate === record.candidate && result.targetHead === target.head && result.candidateReachable === true
+    && worktreePath(result.worktree) === worktreePath(record.worktree) && worktreePath(taskCwd) === worktreePath(record.worktree)
+    && result.directoryState?.registered === false && result.directoryState.exists === true && result.directoryState.empty === true
+    && result.directoryState.itemCount === 0 && originalTaskMatches && isAutomaticHostCleanupReason(result.reasonCode)
+    && ["EBUSY", "EPERM", "EACCES"].includes(failure?.code)
+    && typeof failure.message === "string" && failure.message.length > 0;
+  if (!resultMatches || !integrationMatches) return null;
+  return {
+    completion: { issueId, specId, target: targetName, targetWorktree: target.worktree,
+      topic: record.topic, worktree: record.worktree, candidate: record.candidate },
+    taskRef: originalTaskRef, failure: { code: failure.code, message: failure.message }, integrationChecks,
+  };
+}
 
 export function createGitHubWorkflowSources({ repository, repositoryName, store, tasks, workflowVersion, installationCacheDirectory }) {
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repositoryName)) throw new Error("Static GitHub repository identity is required");
@@ -72,7 +109,6 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     }
     return { issueId: issue.node_id, state: issue.state.toUpperCase() };
   };
-  const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {
       const split = line.indexOf(" "); return split < 0 ? [line, true] : [line.slice(0, split), line.slice(split + 1)];
@@ -393,38 +429,11 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             requestEvidence: { runIdentity: selectedIdentity, issueId: issue.node_id, candidateReachable: node.candidateReachable,
               worktreeState: node.worktreeState, authorityEvidence: node.closeAuthorityEvidence } });
           if (cleanup.blocked) {
-            const result = task.closeResult;
-            const failure = result.failure;
-            const originalTaskMatches = originalTaskRef?.threadId === result.taskRef?.threadId && originalTaskRef?.hostId === result.taskRef?.hostId;
-            const integrationChecks = integrationRecord?.current?.results?.map((attempt, index) => {
-              const obligation = integrationRecord.obligation?.[index], inputs = attempt.inputs;
-              if (!Array.isArray(obligation?.command) || !obligation.command.length || !obligation.command.every(value => typeof value === "string")
-                || !Array.isArray(obligation.configFiles) || !obligation.configFiles.every(value => typeof value === "string")
-                || !inputs?.environment || typeof inputs.environment !== "object" || Array.isArray(inputs.environment)
-                || !Object.keys(inputs.environment).length || !isDeepStrictEqual(inputs.external, {})
-                || !Array.isArray(inputs.configuration) || inputs.configuration.length !== obligation.configFiles.length
-                || inputs.configuration.some((item, configIndex) => item?.file !== obligation.configFiles[configIndex]
-                  || !/^[a-f0-9]{64}$/u.test(item.digest))) return null;
-              return { command: obligation.command, configFiles: obligation.configFiles, environment: inputs.environment,
-                externalInputs: { kind: "none" } };
-            });
-            const integrationMatches = integrationRecord?.current?.state === "PASS" && Array.isArray(integrationChecks)
-              && !integrationChecks.includes(null)
-              && result.integrationVerification?.state === "PASS" && Array.isArray(result.integrationVerification.checks)
-              && isDeepStrictEqual(result.integrationVerification.checks, integrationChecks)
-              && result.integrationVerification.identity === integrationRecord.current.identity;
-            const resultMatches = result.candidate === record.candidate && result.targetHead === target.head && result.candidateReachable === true
-              && worktreePath(result.worktree) === worktreePath(record.worktree) && worktreePath(task.cwd) === worktreePath(record.worktree)
-              && result.directoryState?.registered === false && result.directoryState.exists === true && result.directoryState.empty === true
-              && result.directoryState.itemCount === 0 && originalTaskMatches && isAutomaticHostCleanupReason(result.reasonCode)
-              && ["EBUSY", "EPERM", "EACCES"].includes(failure?.code)
-              && typeof failure.message === "string" && failure.message.length > 0;
-            if (resultMatches && integrationMatches) {
-              node.pendingHostCleanup = {
-                completion: { issueId: issue.node_id, specId: authority.specId, target: authority.target, targetWorktree: target.worktree,
-                  topic: record.topic, worktree: record.worktree, candidate: record.candidate },
-                taskRef: originalTaskRef, failure: { code: failure.code, message: failure.message }, integrationChecks,
-              };
+            const pending = createAutomaticHostCleanupPacket({ result: task.closeResult, taskCwd: task.cwd,
+              originalTaskRef, integrationRecord, record, target, targetName: authority.target,
+              issueId: issue.node_id, specId: authority.specId });
+            if (pending) {
+              node.pendingHostCleanup = pending;
             } else {
               contradictions.push({ code: "host_cleanup_blocked", reasonCode: cleanup.blocked.reasonCode,
                 affectedNodes: [issue.node_id], evidence: [...cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`),

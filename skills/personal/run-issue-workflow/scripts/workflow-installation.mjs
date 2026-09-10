@@ -79,8 +79,13 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
 
 const failedStageFields = ["command", "failureSignature", "packageVersionId", "result", "stage"];
 const requiredFailedStages = ["interrupted-helper-continuation", "settled-host-cleanup-routing", "stable-close-identity"];
+const failedStageSignatures = new Map([
+  ["interrupted-helper-continuation", "fixed inspector lifetime lost remaining helpers"],
+  ["settled-host-cleanup-routing", "HOST_CLEANUP_BLOCKED was terminal"],
+  ["stable-close-identity", "controlRevision changed request identity"],
+]);
 
-export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories, expectedSourceCommit, failedStageResults }) {
+export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories, expectedSourceCommit }) {
   const selected = selectWorkflowVersion({ cacheDirectory });
   if (selected.state !== "AVAILABLE") throw new Error(`Current workflow package is unavailable: ${selected.reason}`);
   if (selected.version.sourceCommit !== expectedSourceCommit) {
@@ -103,6 +108,18 @@ export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirector
     }
     return { path, target, packageVersionId: selected.version.id };
   });
+  const entryPath = join(expectedTarget, "scripts", "installed-entry.mjs");
+  const qualificationArgv = [entryPath, "--qualify-repair-package", selected.version.id];
+  let failedStageResults;
+  try {
+    failedStageResults = JSON.parse(execFileSync(process.execPath, qualificationArgv, {
+      encoding: "utf8", maxBuffer: 8 * 1024 * 1024, timeout: 600000, windowsHide: true,
+    }));
+  } catch (error) {
+    const reason = error.stderr?.toString().trim() || error.message;
+    throw new Error(`Installed workflow failed-stage qualification did not pass: ${reason}`);
+  }
+  const qualificationCommand = JSON.stringify([process.execPath, ...qualificationArgv]);
   const stages = Array.isArray(failedStageResults) ? new Set(failedStageResults.map(result => result?.stage)) : new Set();
   if (failedStageResults?.length !== requiredFailedStages.length || stages.size !== requiredFailedStages.length
     || requiredFailedStages.some(stage => !stages.has(stage))) {
@@ -113,7 +130,8 @@ export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirector
     const keys = result && typeof result === "object" && !Array.isArray(result) ? Object.keys(result).sort() : [];
     const identity = `${result?.stage}:${result?.failureSignature}`;
     if (JSON.stringify(keys) !== JSON.stringify(failedStageFields)
-      || ![result.stage, result.failureSignature, result.command].every(value => typeof value === "string" && value.length > 0)
+      || result.failureSignature !== failedStageSignatures.get(result.stage)
+      || result.command !== qualificationCommand
       || !/^(?:PASS(?:ED)?|SUCCEEDED)\b/u.test(result.result ?? "")
       || result.packageVersionId !== selected.version.id || seen.has(identity)) {
       throw new Error("Installed workflow failed-stage result is malformed, duplicated or bound to another package");

@@ -141,19 +141,31 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
 
 }
 
+export async function runInstalledRepairQualification({ packageVersionId }) {
+  const entryPath = fileURLToPath(import.meta.url);
+  const command = JSON.stringify([process.execPath, entryPath, "--qualify-repair-package", packageVersionId]);
+  const qualification = await import("./workflow-repair-qualification.mjs");
+  return qualification.runWorkflowRepairQualification({ packageVersionId, command });
+}
+
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [repository, specId, runId, modelRoutingPath] = process.argv.slice(2);
-  let host;
-  let restoreInput = () => {};
-  try {
-    if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID] [model-routing JSON path]");
-    restoreInput = configureHostInput();
-    host = createCodexHostBridge();
-    const modelRouting = modelRoutingPath ? JSON.parse(readFileSync(modelRoutingPath, "utf8")) : undefined;
-    const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host, modelRouting });
-    emit({ type: "result", result, metrics: host.metrics() });
-  } catch (error) {
-    emit({ type: "error", message: error.message, metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
-    process.exitCode = 1;
-  } finally { host?.close(); restoreInput(); process.stdin.pause(); }
+  if (repository === "--qualify-repair-package") {
+    try { process.stdout.write(JSON.stringify(await runInstalledRepairQualification({ packageVersionId: specId }))); }
+    catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
+  } else {
+    let host;
+    let restoreInput = () => {};
+    try {
+      if (!repository) throw new Error("Usage: installed-entry.mjs <repository> [Spec number or comma-separated Spec batch] [Run ID] [model-routing JSON path]");
+      restoreInput = configureHostInput();
+      host = createCodexHostBridge();
+      const modelRouting = modelRoutingPath ? JSON.parse(readFileSync(modelRoutingPath, "utf8")) : undefined;
+      const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host, modelRouting });
+      emit({ type: "result", result, metrics: host.metrics() });
+    } catch (error) {
+      emit({ type: "error", message: error.message, metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
+      process.exitCode = 1;
+    } finally { host?.close(); restoreInput(); process.stdin.pause(); }
+  }
 }

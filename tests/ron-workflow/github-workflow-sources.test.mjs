@@ -318,7 +318,7 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
               checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
                 environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
             worktree: lane, taskRef: ref, directoryState: { registered: false, exists: true, empty: true, itemCount: 0 },
-            failure: { code: "EBUSY", message: "Exact task helpers retain the empty directory" }, reasonCode: "host_release_unavailable",
+            reasonCode: "host_release_unavailable",
             observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }
         else if (nativeMessages === 2) {
