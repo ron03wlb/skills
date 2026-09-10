@@ -45,6 +45,9 @@ test("lease health needs a live process and fresh exact-generation evidence and 
     assert.deepEqual(readLeaseHealthEvidence(root, owner, { now: () => 26000 }), {
       state: "UNKNOWN", reason: "HEARTBEAT_AGE_OR_CLOCK_UNKNOWN", owner,
     });
+    assert.deepEqual(readLeaseHealthEvidence(root, owner, { now: () => 9000 }), {
+      state: "UNKNOWN", reason: "HEARTBEAT_AGE_OR_CLOCK_UNKNOWN", owner,
+    }, "a backward wall clock preserves the exact owner and never authorizes reclamation");
     assert.deepEqual(readLeaseHealthEvidence(root, { ...owner, generation: "two" }, { now: () => 11000 }), {
       state: "UNKNOWN", reason: "OWNER_CHANGED", owner: { ...owner, generation: "two" },
     });
