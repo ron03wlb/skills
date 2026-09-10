@@ -106,6 +106,14 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
     let versionId = runtime.version.id;
     let effectiveRuntime = workflowRuntime;
+    let closedLane;
+    const closeLane = async () => {
+      const closing = lane;
+      if (closedLane === closing) return;
+      closedLane = closing;
+      try { await closing.close?.(); }
+      catch (error) { throw attachWorkflowRuntime(error, effectiveRuntime); }
+    };
     return { specId: lane.specId, get workflowRuntime() { return effectiveRuntime; },
       async run(request) {
         const status = await lane.run(request);
@@ -113,7 +121,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
           && !host.disconnected && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(status.run.state)) {
           const installed = selectWorkflowVersion({ cacheDirectory });
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
-            await lane.close?.();
+            await closeLane();
             const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
             if (typeof renewed.run !== "function") return { ...status, workflowRuntime: effectiveRuntime,
               capacityUnknown: true, reason: renewed.reason };
@@ -125,10 +133,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
         }
         return { ...status, workflowRuntime: effectiveRuntime };
       },
-      async close() {
-        try { await lane.close?.(); }
-        catch (error) { throw attachWorkflowRuntime(error, effectiveRuntime); }
-      },
+      close: closeLane,
     };
   }
   let result;

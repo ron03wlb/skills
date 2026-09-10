@@ -340,10 +340,19 @@ test("selected batch close failures retain runtime evidence and finish lane clea
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const closes = [];
-export async function prepareCodexWorkflow({ specId }) {
+export const fixtureState = { reenter: false };
+export async function prepareCodexWorkflow({ specId, host }) {
   return {
     specId,
-    async run() { return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] }; },
+    async run() {
+      if (fixtureState.reenter) {
+        fixtureState.reenter = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: "fixture-reentry-run" },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+    },
     async close() {
       closes.push(specId);
       if (specId === "I_1") throw new Error("Fixture selected lane close failed");
@@ -432,6 +441,22 @@ await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-clos
         return true;
       },
     );
+
+    composition.closes.splice(0);
+    composition.fixtureState.reenter = true;
+    let installedDuringReentry;
+    f.host.installCurrent = () => {
+      writeFileSync(join(f.source, "skills/personal/run-issue-workflow/SKILL.md"), "Fixture package after re-entry request\n");
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "package selected during re-entry");
+      installedDuringReentry = f.install();
+    };
+    const reentryFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
+      specIds: ["1"], maxWorkers: 1 });
+    assert.equal(reentryFailure.state, "PRESERVED");
+    assert.match(reentryFailure.runs[0].error, /Fixture selected lane close failed/u);
+    assertRuntime(reentryFailure.runs[0]);
+    assert.ok(installedDuringReentry, "the lane reaches its runtime re-entry close boundary");
+    assert.deepEqual(composition.closes, ["I_1"], "final batch cleanup cannot repeat an uncertain re-entry close effect");
   } finally { f.close(); }
 });
 
