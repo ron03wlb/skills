@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
+import { createCodexMessageReceipts } from "../../skills/personal/run-issue-workflow/scripts/codex-close-receipts.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
@@ -374,6 +375,10 @@ test("accepted execution messages survive restart and omitted native history wit
     assert.deepEqual((await resumed.read(ref, { runId: "run" })).repairRequest, { state: "ACCEPTED", ...request });
     await resumed.message(ref, prompt);
     assert.equal(sends, 1, "an accepted owner receipt suppresses resend when native history omits the prompt");
+    await assert.rejects(resumed.message(ref, prompt.replace("secret-native-detail", "changed-native-detail")),
+      /operation has conflicting prompt identity/iu,
+      "the same operation marker cannot acquire a different prompt after acceptance");
+    assert.equal(sends, 1, "conflicting prompt bytes fail before another native send");
     const receipt = readdirSync(join(root, ".git", "matt-workflow-control", "runs", "run"))
       .find(name => name.startsWith("task-messages-"));
     const receiptPath = join(root, ".git", "matt-workflow-control", "runs", "run", receipt);
@@ -385,6 +390,27 @@ test("accepted execution messages survive restart and omitted native history wit
       value: { ...records[1].value, prompt: "injected-native-payload" } })}\n`);
     await assert.rejects(resumed.read(ref, { runId: "run" }), /receipt identity differs/iu,
       "a receipt with non-allowlisted durable payload fields fails closed");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("persisted execution receipts reject conflicting prompt ownership for the same operation", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-message-conflict-"));
+  const gitCommonDir = join(root, ".git");
+  const taskRef = { threadId: "worker", hostId: "local" };
+  const request = { runId: "run", issueId: "I_1", attempt: 2 };
+  try {
+    const receipts = createCodexMessageReceipts({ gitCommonDir, runId: "run", taskRef });
+    receipts.reserve({ kind: "retry", request, promptIdentity: `sha256:${"a".repeat(64)}` });
+    receipts.accept(`sha256:${"a".repeat(64)}`, "native-response");
+    const receipt = readdirSync(join(gitCommonDir, "matt-workflow-control", "runs", "run"))
+      .find(name => name.startsWith("task-messages-"));
+    const receiptPath = join(gitCommonDir, "matt-workflow-control", "runs", "run", receipt);
+    const records = readFileSync(receiptPath, "utf8").trimEnd().split("\n").map(JSON.parse);
+    appendFileSync(receiptPath, `${JSON.stringify({ ...records[0], sequence: 3,
+      value: { ...records[0].value, promptIdentity: `sha256:${"b".repeat(64)}` } })}\n`);
+    assert.throws(() => createCodexMessageReceipts({ gitCommonDir, runId: "run", taskRef }).read(),
+      /operation has conflicting prompt identity/iu,
+      "re-entry fails closed when durable records assign two prompts to one operation");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

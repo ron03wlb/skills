@@ -34,6 +34,10 @@ const validMessageIntent = value => {
     && /^sha256:[a-f0-9]{64}$/u.test(value.request.yieldIdentity);
   return typeof value.request.operationId === "string" && Boolean(value.request.operationId);
 };
+const messageOperationIdentity = value => digest({
+  kind: value.kind,
+  request: Object.fromEntries(messageRequestFields[value.kind].map(field => [field, value.request[field]])),
+});
 const recoveryDelaysMs = [5000, 15000, 30000];
 
 // Evidence only, scoped to the existing Run and native task. This is neither a
@@ -138,6 +142,22 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
       }
       return record;
     });
+    const promptsByOperation = new Map();
+    const operationsByPrompt = new Map();
+    for (const record of records.filter(item => item.phase === "intent")) {
+      const operationIdentity = messageOperationIdentity(record.value);
+      const promptIdentity = record.value.promptIdentity;
+      if (promptsByOperation.has(operationIdentity)
+        && promptsByOperation.get(operationIdentity) !== promptIdentity) {
+        throw new Error("Task message operation has conflicting prompt identity");
+      }
+      if (operationsByPrompt.has(promptIdentity)
+        && operationsByPrompt.get(promptIdentity) !== operationIdentity) {
+        throw new Error("Task message prompt identity belongs to another operation");
+      }
+      promptsByOperation.set(operationIdentity, promptIdentity);
+      operationsByPrompt.set(promptIdentity, operationIdentity);
+    }
     for (const [index, record] of records.entries()) {
       if (!["accepted", "observation"].includes(record.phase)) continue;
       const previous = records.slice(0, index);
@@ -196,6 +216,18 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
     reserve({ kind, request, promptIdentity }) {
       const value = { kind, request, promptIdentity };
       if (!validMessageIntent(value)) throw new Error("Task message receipt intent is malformed");
+      const records = entries();
+      const operationIdentity = messageOperationIdentity(value);
+      const operationIntent = records.find(record => record.phase === "intent"
+        && messageOperationIdentity(record.value) === operationIdentity)?.value;
+      if (operationIntent && operationIntent.promptIdentity !== promptIdentity) {
+        throw new Error("Task message operation has conflicting prompt identity");
+      }
+      const promptIntent = records.find(record => record.phase === "intent"
+        && record.value.promptIdentity === promptIdentity)?.value;
+      if (promptIntent && messageOperationIdentity(promptIntent) !== operationIdentity) {
+        throw new Error("Task message prompt identity belongs to another operation");
+      }
       const existing = read(promptIdentity);
       if (existing) return { created: false, ...existing };
       const current = read();
