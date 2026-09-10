@@ -125,7 +125,10 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
         }
         return { ...status, workflowRuntime: effectiveRuntime };
       },
-      async close() { await lane.close?.(); },
+      async close() {
+        try { await lane.close?.(); }
+        catch (error) { throw attachWorkflowRuntime(error, effectiveRuntime); }
+      },
     };
   }
   let result;
@@ -149,19 +152,29 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
   if (!specIds) return selectInstalledLane({ repository, specId, runId, host, modelRouting });
   if (runId || specIds.length === 0 || new Set(specIds).size !== specIds.length) throw new Error("Batch entry requires explicit distinct Specs and no ambiguous Run ID");
   const lanes = [];
-  try {
-    for (const id of specIds) {
-      try {
-        const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true, modelRouting: modelRouting?.[id] });
-        lanes.push(typeof lane.run === "function" ? lane : { specId: id, workflowRuntime: lane.workflowRuntime,
-          run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: lane.workflowRuntime,
-            capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
-      } catch (error) { lanes.push({ specId: id, workflowRuntime: error.workflowRuntime,
-        run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: error.workflowRuntime,
-          capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
-    }
-    return await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected });
-  } finally { for (const lane of lanes) await lane.close?.(); }
+  for (const id of specIds) {
+    try {
+      const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true, modelRouting: modelRouting?.[id] });
+      lanes.push(typeof lane.run === "function" ? lane : { specId: id, workflowRuntime: lane.workflowRuntime,
+        run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: lane.workflowRuntime,
+          capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
+    } catch (error) { lanes.push({ specId: id, workflowRuntime: error.workflowRuntime,
+      run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: error.workflowRuntime,
+        capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
+  }
+  let result;
+  let failure;
+  try { result = await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected }); }
+  catch (error) { failure = error; }
+  for (const lane of lanes) {
+    try { await lane.close?.(); }
+    catch (error) { failure ??= attachWorkflowRuntime(error, lane.workflowRuntime); }
+  }
+  if (failure) {
+    const selectedRuntime = lanes.find(lane => lane.workflowRuntime)?.workflowRuntime;
+    throw selectedRuntime ? attachWorkflowRuntime(failure, selectedRuntime) : failure;
+  }
+  return result;
 
 }
 

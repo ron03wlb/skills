@@ -332,6 +332,109 @@ export async function runCodexWorkflow() { throw new Error("Fixture execution fa
   } finally { f.close(); }
 });
 
+test("selected batch close failures retain runtime evidence and finish lane cleanup", async () => {
+  const f = fixture();
+  try {
+    f.addCompleted(1, false, false);
+    f.addCompleted(2, false, false);
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const closes = [];
+export async function prepareCodexWorkflow({ specId }) {
+  return {
+    specId,
+    async run() { return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] }; },
+    async close() {
+      closes.push(specId);
+      if (specId === "I_1") throw new Error("Fixture selected lane close failed");
+    },
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "selected lane close failure fixture");
+    const current = f.install();
+    const entry = join(current.root, scriptsPath, "installed-entry.mjs");
+    const compositionPath = join(current.root, scriptsPath, "codex-workflow.mjs");
+    const { runInstalledEntry } = await import(pathToFileURL(entry).href);
+    const composition = await import(pathToFileURL(compositionPath).href);
+    const assertRuntime = error => {
+      assert.deepEqual(error.workflowRuntime.packageVersion, current.version);
+      assert.equal(error.workflowRuntime.packageRoot, current.root);
+      assert.match(error.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    };
+
+    await assert.rejects(
+      runInstalledEntry({ repository: f.repository, host: f.host, specIds: ["1", "2"], maxWorkers: 1 }),
+      error => {
+        assert.match(error.message, /Fixture selected lane close failed/u);
+        assertRuntime(error);
+        return true;
+      },
+    );
+    assert.deepEqual(composition.closes, ["I_1", "I_2"], "a rejecting close cannot skip later selected lanes");
+
+    composition.closes.splice(0);
+    await assert.rejects(
+      runInstalledEntry({ repository: f.repository, host: f.host, specIds: ["1", "2"], maxWorkers: 4 }),
+      error => {
+        assert.match(error.message, /Batch worker limit must be between one and three/u);
+        assertRuntime(error);
+        return true;
+      },
+    );
+    assert.deepEqual(composition.closes, ["I_1", "I_2"], "cleanup failure cannot replace the first batch failure or stop cleanup");
+
+    const cliHarness = `
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { pathToFileURL } from "node:url";
+const originalExec = childProcess.execFileSync;
+const issues = new Map(JSON.parse(process.env.WORKFLOW_FIXTURE_ISSUES));
+childProcess.execFileSync = (name, args, options) => {
+  if (name !== "gh") return originalExec(name, args, options);
+  if (args[0] === "issue" && args[1] === "view") {
+    const issue = issues.get(Number(args[2]));
+    return JSON.stringify({ id: issue.node_id, body: issue.body });
+  }
+  const [, number, suffix = ""] = args[1].match(/^repos\\/example\\/repo\\/issues\\/(\\d+)(.*)$/u) ?? [];
+  if (!number) throw new Error(\`Unexpected tracker route: \${args[1]}\`);
+  const issue = issues.get(Number(number));
+  const response = suffix.startsWith("/comments") ? issue.comments
+    : suffix.startsWith("/events") ? issue.events
+      : suffix.includes("blocked_by") ? (issue.blockers ?? []).map(id => ({ node_id: id }))
+        : suffix === "/parent" ? { node_id: issue.parent } : issue;
+  return JSON.stringify([response]);
+};
+syncBuiltinESMExports();
+process.argv = [process.execPath, process.env.WORKFLOW_FIXTURE_ENTRY,
+  process.env.WORKFLOW_FIXTURE_REPOSITORY, "1,2"];
+await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-close-failure");
+`;
+    assert.throws(
+      () => originalExec(process.execPath, ["--input-type=module", "-e", cliHarness], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          WORKFLOW_FIXTURE_ENTRY: entry,
+          WORKFLOW_FIXTURE_REPOSITORY: f.repository,
+          WORKFLOW_FIXTURE_ISSUES: JSON.stringify([...f.issues]),
+        },
+      }),
+      error => {
+        const line = error.stdout.split(/\r?\n/u).find(value => value.startsWith("workflow-host "));
+        const emitted = JSON.parse(line.slice("workflow-host ".length));
+        assert.equal(emitted.type, "error");
+        assert.match(emitted.message, /Fixture selected lane close failed/u);
+        assert.deepEqual(emitted.workflowRuntime.packageVersion, current.version);
+        assert.equal(emitted.workflowRuntime.packageRoot, current.root);
+        assert.match(emitted.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+        return true;
+      },
+    );
+  } finally { f.close(); }
+});
+
 test("an explicit Run alone cannot bypass the current canonical operation identity", async () => {
   const f = fixture();
   try {
