@@ -491,7 +491,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
   }
   if (event.type === "execution.uncertain") {
     const started = events.find(item => item.type === "execution.started" && item.sequence === event.startSequence);
-    const duplicate = events.some(item => item.type === "execution.uncertain" && item.startSequence === event.startSequence);
+    const latestEvidence = events.findLast(item => ["execution.observed", "execution.uncertain"].includes(item.type)
+      && item.startSequence === event.startSequence);
+    const duplicate = latestEvidence?.type === "execution.uncertain";
     const settled = events.some(item => item.type === "execution.observed" && item.startSequence === event.startSequence
       && item.state === "SETTLED");
     if (!started || started.issueId !== event.issueId || duplicate || settled) {
@@ -632,8 +634,11 @@ export function summarizeIssueExecutionBudget(events, issueId) {
     consumedMs += observations.at(-1)?.elapsedMs ?? 0;
     if (!observations.some(event => event.state === "SETTLED")) activeStartSequence = started.sequence;
   }
-  const uncertain = activeStartSequence !== null && events.some(event => event.type === "execution.uncertain"
-    && event.issueId === issueId && event.startSequence === activeStartSequence);
+  const latestActiveEvidence = activeStartSequence === null ? null : events.findLast(event => (
+    ["execution.observed", "execution.uncertain"].includes(event.type)
+      && event.issueId === issueId && event.startSequence === activeStartSequence
+  ));
+  const uncertain = latestActiveEvidence?.type === "execution.uncertain";
   const exhausted = consumedMs >= ISSUE_EXECUTION_LIMIT_MS
     || events.some(event => event.type === "execution.exhausted" && event.issueId === issueId);
   return {

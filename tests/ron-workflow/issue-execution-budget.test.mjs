@@ -60,6 +60,46 @@ test("one Issue execution budget accumulates implementation and conflict repair 
   });
 });
 
+test("replacement, retry, re-entry, conflict repair, and a late outcome retain one cumulative budget", () => {
+  const replacementRef = { threadId: "thread-2", hostId: "local" };
+  const repairIdentity = "sha256:" + "5".repeat(64);
+  const events = journal([
+    { type: "grant.recorded", at: "2026-09-10T00:00:00.000Z", runIdentity, maxParallel: 3 },
+    { type: "dispatch.recorded", at: "2026-09-10T00:00:00.000Z", issueId, attempt: 1, taskRef },
+    { type: "execution.started", at: "2026-09-10T00:00:00.000Z", issueId, phase: "IMPLEMENTATION", phaseIdentity: "dispatch:2", taskRef },
+    { type: "execution.observed", at: "2026-09-10T02:00:00.000Z", issueId, startSequence: 3,
+      elapsedMs: 2 * 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
+    { type: "retry.recorded", at: "2026-09-10T02:00:01.000Z", issueId, attempt: 1,
+      reason: "Native terminal failure with inactive prior task", priorTaskRef: taskRef,
+      replacement: { supersedesAttempt: 1, nextTaskRef: replacementRef,
+        inactiveEvidence: ["Native read-back proves the prior task is inactive"] } },
+    { type: "dispatch.recorded", at: "2026-09-10T02:00:02.000Z", issueId, attempt: 2, taskRef: replacementRef },
+    { type: "execution.started", at: "2026-09-10T02:00:02.000Z", issueId, phase: "IMPLEMENTATION_RETRY",
+      phaseIdentity: "dispatch:6", taskRef: replacementRef },
+    { type: "execution.observed", at: "2026-09-10T05:00:02.000Z", issueId, startSequence: 7,
+      elapsedMs: 3 * 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
+    { type: "repair.recorded", at: "2026-09-10T05:00:03.000Z", issueId, wave: 1,
+      candidate: "3".repeat(40), targetHead: "4".repeat(40), taskRef: replacementRef,
+      requestIdentity: repairIdentity },
+    { type: "execution.started", at: "2026-09-10T05:00:03.000Z", issueId, phase: "CONFLICT_REPAIR",
+      phaseIdentity: repairIdentity, taskRef: replacementRef },
+    { type: "execution.observed", at: "2026-09-10T06:00:03.000Z", issueId, startSequence: 10,
+      elapsedMs: 60 * 60 * 1000, state: "ACTIVE", source: "MONOTONIC" },
+    { type: "execution.exhausted", at: "2026-09-10T06:00:03.000Z", issueId,
+      consumedMs: ISSUE_EXECUTION_LIMIT_MS },
+    { type: "execution.observed", at: "2026-09-10T06:00:04.000Z", issueId, startSequence: 10,
+      elapsedMs: 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
+  ]);
+
+  validateJournal(events, { storageRunId: runIdentity.runId });
+  assert.deepEqual(summarizeIssueExecutionBudget(events, issueId), {
+    limitMs: ISSUE_EXECUTION_LIMIT_MS,
+    consumedMs: ISSUE_EXECUTION_LIMIT_MS,
+    state: "EXHAUSTED",
+    activeStartSequence: null,
+  });
+});
+
 test("execution evidence cannot reset, double-settle, or replace uncertain elapsed time", () => {
   const base = [
     { type: "grant.recorded", at: "2026-09-10T00:00:00.000Z", runIdentity, maxParallel: 3 },
@@ -205,7 +245,7 @@ test("the runtime controller uses monotonic time and records the exact six-hour 
   assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, ISSUE_EXECUTION_LIMIT_MS);
 });
 
-test("runtime re-entry preserves proved elapsed as UNKNOWN until exact native settlement", async () => {
+test("runtime re-entry resolves and can renew UNKNOWN from exact native active evidence", async () => {
   const events = journal([
     { type: "grant.recorded", at: "2026-09-10T00:00:00.000Z", runIdentity, maxParallel: 3 },
     { type: "dispatch.recorded", at: "2026-09-10T00:00:00.000Z", issueId, attempt: 1, taskRef },
@@ -229,11 +269,25 @@ test("runtime re-entry preserves proved elapsed as UNKNOWN until exact native se
   assert.equal(summarizeIssueExecutionBudget(events, issueId).state, "UNKNOWN");
   assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, 3_600_000);
 
-  task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed", durationMs: 3_700_000 }] } };
+  task = { state: "RUNNING", snapshot: { turns: [{ status: "inProgress", durationMs: 3_700_000 }] } };
   await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
   assert.deepEqual(summarizeIssueExecutionBudget(events, issueId), {
     limitMs: ISSUE_EXECUTION_LIMIT_MS,
     consumedMs: 3_700_000,
+    state: "ACTIVE",
+    activeStartSequence: 3,
+  });
+
+  task = { state: "RUNNING", snapshot: { turns: [{ status: "inProgress" }] } };
+  await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
+  assert.equal(summarizeIssueExecutionBudget(events, issueId).state, "UNKNOWN");
+  assert.equal(events.filter(event => event.type === "execution.uncertain").length, 2);
+
+  task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed", durationMs: 3_800_000 }] } };
+  await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
+  assert.deepEqual(summarizeIssueExecutionBudget(events, issueId), {
+    limitMs: ISSUE_EXECUTION_LIMIT_MS,
+    consumedMs: 3_800_000,
     state: "AVAILABLE",
     activeStartSequence: null,
   });

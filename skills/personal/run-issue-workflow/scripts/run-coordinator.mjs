@@ -1116,7 +1116,7 @@ export function createCoordinator({
       healthFault = writeHealthFault("settled", healthFault.recoveryRounds);
     }
     if (health === "UNKNOWN") {
-      healthFault ??= writeHealthFault("unresolved", 0);
+      if (!healthFault || healthFault.state === "settled") healthFault = writeHealthFault("unresolved", 0);
       if (healthFault.state === "exhausted") {
         appendSettlement({ started, outcome: "OWNER_HEALTH_UNKNOWN", evidence: ["Exact owner-generation health remains unknown after the shared 5/15/30 second fault policy; the lease remains untouched."] });
         return stop(waitKind.healthUnknown, ["Exact owner-generation health is unknown; no inactive, release, reclaim, or cancellation claim is authorized."], [waitKind.reconcilePredicate]);

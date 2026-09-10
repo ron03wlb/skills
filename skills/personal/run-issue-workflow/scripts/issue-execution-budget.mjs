@@ -35,7 +35,9 @@ export function createIssueExecutionBudgetController({ store, tasks, now, monoto
   };
 
   const markUncertain = ({ writer, issueId, started, journal }) => {
-    if (journal.some(event => event.type === "execution.uncertain" && event.startSequence === started.sequence)) return;
+    const latestEvidence = journal.findLast(event => ["execution.observed", "execution.uncertain"].includes(event.type)
+      && event.startSequence === started.sequence);
+    if (latestEvidence?.type === "execution.uncertain") return;
     writer.append({
       type: "execution.uncertain",
       at: now(),

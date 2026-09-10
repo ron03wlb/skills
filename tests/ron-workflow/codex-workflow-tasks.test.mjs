@@ -527,7 +527,7 @@ test("one read-only transport fault consumes exactly 5/15/30 recovery seconds ac
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a settled deterministic fault identity resumes its consumed budget after adapter re-entry", async () => {
+test("a later fault after proved settlement receives a fresh bounded recovery policy", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-settled-fault-budget-"));
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const ref = { threadId: "worker", hostId: "local" };
@@ -553,10 +553,10 @@ test("a settled deterministic fault identity resumes its consumed budget after a
     assert.equal(fault.recoveryRounds, 1);
     await createCodexWorkflowTasks(options).wait([ref]);
     fault = store.readHostFault({ runId: "run-1", faultId: fault.faultId });
-    assert.deepEqual(delays, [5000, 15000], "the stable identity continues with its next unconsumed delay");
+    assert.deepEqual(delays, [5000, 5000], "proved settlement separates the later fault episode");
     assert.equal(calls, 4);
     assert.equal(fault.state, "settled");
-    assert.equal(fault.recoveryRounds, 2);
+    assert.equal(fault.recoveryRounds, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -664,6 +664,31 @@ test("task observation never waits past the Issue execution budget boundary", as
 
   await tasks.wait([ref], { timeoutMs: 1234 });
   assert.equal(observedTimeout, 1234);
+});
+
+test("task observation fault recovery cannot outlive the remaining Issue execution budget", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-observation-deadline-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const recoveryWindows = [];
+  let calls = 0;
+  const tasks = createCodexWorkflowTasks({ store, runId: "run", project: {}, packageRoot: "/installed",
+    waitForObservationSignal: async ({ timeoutMs }) => { recoveryWindows.push(timeoutMs); return null; },
+    host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      calls += 1;
+      throw new Error("temporary connection failure");
+    } },
+  });
+
+  try {
+    const observed = await tasks.wait([ref], { timeoutMs: 1 });
+    assert.equal(observed.observation.kind, "interrupted");
+    assert.equal(observed.observation.signal, "deadline");
+    assert.ok(recoveryWindows.length <= 1);
+    assert.ok(recoveryWindows.every(windowMs => windowMs <= 1));
+    assert.ok(calls <= 1, "the expired Issue budget forbids a second native observation call");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("control interrupts wait_threads fault recovery before another native call", async () => {
