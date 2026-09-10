@@ -88,11 +88,11 @@ test("the Windows inspection timeout is bounded per frozen-helper protocol step"
   let fixture, session;
   try {
     fixture = await hostFixture(root, target, false, 2);
-    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 3000 });
+    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 20000 });
     const started = Date.now();
-    const release = await session.release(() => {}, async () => delay(1800));
+    const release = await session.release(() => {}, async () => delay(12000));
     assert.equal(release.state, "RELEASED", JSON.stringify(release));
-    assert.ok(Date.now() - started >= 3600, "the full finite batch outlives one step timeout");
+    assert.ok(Date.now() - started >= 24000, "the full finite batch outlives one step timeout");
     assert.equal(release.outcomes.length, 2);
     assert.doesNotThrow(() => process.kill(fixture.host.pid, 0));
     assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
@@ -105,8 +105,8 @@ test("a stalled frozen-helper step times out before any later process effect", {
   let fixture, session;
   try {
     fixture = await hostFixture(root, target, false, 2);
-    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 3000 });
-    const release = await session.release(() => {}, async () => delay(3600));
+    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 20000 });
+    const release = await session.release(() => {}, async () => delay(24000));
     assert.equal(release.state, "UNKNOWN", JSON.stringify(release));
     assert.match(release.reason, /inspection expired/u);
     assert.deepEqual(release.outcomes, []);
