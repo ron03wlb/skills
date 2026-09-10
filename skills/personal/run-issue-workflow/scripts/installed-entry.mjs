@@ -94,6 +94,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
     let lane = await composition.prepareCodexWorkflow(options);
     let versionId = runtime.version.id;
+    let effectiveRuntime = workflowRuntime;
     return { specId: lane.specId, workflowRuntime,
       async run(request) {
         const status = await lane.run(request);
@@ -103,12 +104,15 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
             await lane.close?.();
             const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
-            if (typeof renewed.run !== "function") return { ...status, capacityUnknown: true, reason: renewed.reason };
+            if (typeof renewed.run !== "function") return { ...status, workflowRuntime: effectiveRuntime,
+              capacityUnknown: true, reason: renewed.reason };
             lane = renewed; versionId = installed.version.id;
-            return lane.run({ ...request, mode: "snapshot" }); // Reconcile before the next shared-capacity allocation.
+            effectiveRuntime = renewed.workflowRuntime;
+            const renewedStatus = await lane.run({ ...request, mode: "snapshot" });
+            return { ...renewedStatus, workflowRuntime: effectiveRuntime }; // Reconcile before the next shared-capacity allocation.
           }
         }
-        return status;
+        return { ...status, workflowRuntime: effectiveRuntime };
       },
       async close() { await lane.close?.(); },
     };

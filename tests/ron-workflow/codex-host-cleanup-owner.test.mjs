@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createCodexHostCleanupOwner } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow.mjs";
+import { createCodexHostCleanupOwner, readCodexHostIntegrationEnvironment } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
+
+test("Codex host environment evidence separates persisted declaration from current runtime", () => {
+  const declared = { runtime: "persisted-runtime" };
+  const current = readCodexHostIntegrationEnvironment(declared);
+  assert.deepEqual(current, { schema: "codex-host-integration-environment:v1", declared,
+    host: { runtime: process.version, platform: process.platform, arch: process.arch,
+      executable: realpathSync.native(process.execPath) } });
+  assert.notStrictEqual(current.declared, declared);
+});
 
 test("Codex close owner recovers one exact settled empty worktree before tracker continuation", async () => {
   const root = realpathSync.native(mkdtempSync(join(tmpdir(), "codex-close-owner-")));
@@ -27,12 +36,20 @@ test("Codex close owner recovers one exact settled empty worktree before tracker
     } };
     const store = createRunStore({ gitCommonDir: join(repository, ".git") });
     const runIdentity = { runId: "run", specId: "issue", approvedScopeHash: "scope", target: "main" };
-    const recover = createCodexHostCleanupOwner({ store, tasks, repositoryId: "github:example/repo" });
+    const currentEnvironment = { schema: "codex-host-integration-environment:v1",
+      declared: { runtime: "persisted-runtime" }, host: { runtime: process.version, platform: process.platform, arch: process.arch } };
+    let environmentReads = 0;
+    const recover = createCodexHostCleanupOwner({ store, tasks, repositoryId: "github:example/repo",
+      readCurrentIntegrationEnvironment(declared) {
+        environmentReads++;
+        assert.deepEqual(declared, { runtime: "persisted-runtime" });
+        return currentEnvironment;
+      } });
     const pending = {
       completion: { issueId: "issue", specId: "issue", target: "main", targetWorktree: repository,
         topic: "issue", worktree, candidate },
       taskRef, failure: { code: "EACCES", message: "fixture sharing violation" },
-      integrationChecks: [{ command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: process.version },
+      integrationChecks: [{ command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: "persisted-runtime" },
         externalInputs: { kind: "none" } }],
     };
     await assert.rejects(recover({ issueId: "foreign", runIdentity, pending }), /Issue identity/u);
@@ -45,5 +62,10 @@ test("Codex close owner recovers one exact settled empty worktree before tracker
     assert.equal(store.observeRepositoryCloseLease().state, "ABSENT");
     assert.equal(store.readTargetMutationWriterLock("main"), null);
     assert.equal(git("rev-parse", "HEAD"), candidate);
+    assert.ok(environmentReads >= 1, "the recovery owner reads current environment instead of replaying persisted input");
+    const verificationRoot = join(repository, ".git", "workflow-verification");
+    const operationDirectory = join(verificationRoot, readdirSync(verificationRoot)[0]);
+    const verification = JSON.parse(readFileSync(join(operationDirectory, readdirSync(operationDirectory)[0]), "utf8"));
+    assert.deepEqual(verification.current.results[0].inputs.environment, currentEnvironment);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

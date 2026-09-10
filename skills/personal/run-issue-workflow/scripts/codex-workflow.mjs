@@ -17,17 +17,28 @@ import { verifyIntegratedCandidate } from "../../../engineering/close-issue/scri
 
 export const supportsCompletedRunReentry = true;
 
-export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
+export function readCodexHostIntegrationEnvironment(declared) {
+  if (!declared || typeof declared !== "object" || Array.isArray(declared) || !Object.keys(declared).length) {
+    throw new TypeError("Declared integration environment is required");
+  }
+  return { schema: "codex-host-integration-environment:v1", declared: structuredClone(declared),
+    host: { runtime: process.version, platform: process.platform, arch: process.arch,
+      executable: realpathSync.native(process.execPath) } };
+}
+
+export function createCodexHostCleanupOwner({ store, tasks, repositoryId,
+  readCurrentIntegrationEnvironment = readCodexHostIntegrationEnvironment }) {
   if (!store || typeof tasks?.read !== "function" || typeof repositoryId !== "string" || !repositoryId) {
     throw new TypeError("Codex host cleanup owner requires its store, task reader and repository identity");
   }
+  if (typeof readCurrentIntegrationEnvironment !== "function") throw new TypeError("Current integration environment reader is required");
   return async ({ issueId, runIdentity, pending }) => {
     if (!runIdentity || !pending?.completion || !Array.isArray(pending.integrationChecks)) {
       throw new Error("Automatic host cleanup requires its exact integration obligation");
     }
     const completion = pending.completion;
     if (issueId !== completion.issueId) throw new Error("Automatic host cleanup Issue identity differs from its completion");
-    const integrationChecks = pending.integrationChecks.map(check => {
+    const integrationCheckDescriptors = pending.integrationChecks.map(check => {
       if (!check || JSON.stringify(Object.keys(check).sort()) !== JSON.stringify(["command", "configFiles", "environment", "externalInputs"].sort())
         || !Array.isArray(check.command) || !check.command.length || !check.command.every(value => typeof value === "string")
         || !Array.isArray(check.configFiles) || !check.configFiles.every(value => typeof value === "string")
@@ -35,8 +46,14 @@ export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
         || !Object.keys(check.environment).length || JSON.stringify(check.externalInputs) !== JSON.stringify({ kind: "none" })) {
         throw new Error("Automatic host cleanup received a malformed integration check");
       }
-      return { command: check.command, configFiles: check.configFiles, environment: check.environment,
-        readExternalInputs: async () => ({}) };
+      return structuredClone(check);
+    });
+    const readIntegrationChecks = () => integrationCheckDescriptors.map(check => {
+      const environment = readCurrentIntegrationEnvironment(structuredClone(check.environment));
+      if (!environment || typeof environment !== "object" || Array.isArray(environment) || !Object.keys(environment).length) {
+        throw new Error("Automatic host cleanup could not read its current integration environment");
+      }
+      return { command: check.command, configFiles: check.configFiles, environment, readExternalInputs: async () => ({}) };
     });
     return recoverPendingHostCleanup({
       leaseInput: { store, target: runIdentity.target, repositoryId, specId: runIdentity.specId,
@@ -45,7 +62,7 @@ export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
       readTask: async taskRef => (await tasks.read(taskRef, { runId: runIdentity.runId })).snapshot,
       verifyIntegration: leases => verifyIntegratedCandidate({ leases, targetWorktree: completion.targetWorktree,
         candidate: completion.candidate, issueId: completion.issueId,
-        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: integrationChecks }),
+        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: readIntegrationChecks() }),
     });
   };
 }

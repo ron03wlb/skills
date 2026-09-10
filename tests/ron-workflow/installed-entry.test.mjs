@@ -252,6 +252,19 @@ test("a mixed installed batch observes the existing active worker while retainin
   } finally { f.close(); }
 });
 
+test("a batch installed entry reports each lane's effective package evidence", async () => {
+  const f = fixture();
+  try {
+    f.addCompleted(1); f.addCompleted(2);
+    const result = await f.entry({ specIds: ["1", "2"], maxWorkers: 1 });
+    assert.equal(result.state, "SUCCEEDED", JSON.stringify(result));
+    assert.ok(result.runs.every(status => status.workflowRuntime?.packageVersion?.id === f.retained.version.id
+      && status.workflowRuntime.packageRoot === f.retained.root
+      && /^sha256:[a-f0-9]{64}$/u.test(status.workflowRuntime.manifestSha256)),
+    "every batch lane exposes the effective package version, root and manifest digest");
+  } finally { f.close(); }
+});
+
 test("a prior-format incomplete Run adopts recovery semantics without changing its Grant or accepted task intent", async () => {
   const f = fixture({ legacyRuntime: "recovery-v0" });
   try {
@@ -333,6 +346,10 @@ test("installed selection retains current scope, native identity, batch ownershi
       const result = await f.entry({ specIds: ["1", "I_2"], maxWorkers: 1 });
       assert.equal(result.state, "SUCCEEDED", JSON.stringify(result));
       assert.deepEqual(result.runs.map(({ run }) => run.runId), [single.runIdentity.runId, multi.runIdentity.runId]);
+      assert.ok(result.runs.every(status => status.workflowRuntime?.packageVersion?.id === f.retained.version.id
+        && status.workflowRuntime.packageRoot === f.retained.root
+        && /^sha256:[a-f0-9]{64}$/u.test(status.workflowRuntime.manifestSha256)),
+      "every batch lane exposes the effective package version, root and manifest digest");
       assert.deepEqual([single, multi].map(({ runIdentity }) => f.store.readEvents(runIdentity.runId)), before);
       await assert.rejects(f.entry({ specIds: ["1", "I_1"] }), /distinct Specs/u);
     });
