@@ -1,5 +1,5 @@
 interface:
   display_name: "Grill with Docs"
-  short_description: "Plan read-only; isolate accepted document writes"
+  short_description: "Delegate reversible design; record scoped decisions"
 policy:
   allow_implicit_invocation: false

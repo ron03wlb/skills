@@ -484,11 +484,10 @@ test("grill-with-docs metadata and docs preserve both planning branches and the 
   const docs = read("docs/engineering/grill-with-docs.md");
   assert.match(skill, /Read-only exploration and tracker-only settled scope need no worktree/u);
   assert.match(skill, /Before the first accepted glossary or ADR write.*Spec workflow lane/isu);
-  assert.match(skill, /one material decision at a time/u);
   assert.match(skill, /selected source and invocation restrictions.*same settled scope.*same lane identity/isu);
   assert.match(skill, /handoff packet containing the task identity, proposed Spec, target, current baseline.*empty change list.*owned worktree.*every accepted glossary or ADR path or hunk.*content identity/isu);
   assert.match(skill, /partial publication, uncommitted accepted decision, identity mismatch, or failed read-back preserves it/u);
-  assert.match(metadata, /Plan read-only; isolate accepted document writes/u);
+  assert.match(metadata, /allow_implicit_invocation: false/u);
   assert.match(docs, /Read-only design and tracker-only scope.*no worktree/isu);
   assert.match(docs, /Accepted document writes.*exact registered worktree.*successful `to-spec` handoff read-back/isu);
   assert.match(docs, /generic Skill tool.*host-supported named-skill loading/isu);

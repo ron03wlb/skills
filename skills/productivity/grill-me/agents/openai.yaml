@@ -1,5 +1,5 @@
 interface:
   display_name: "Grill Me"
-  short_description: "Sharpen a plan through interview"
+  short_description: "Sharpen an idea with evidence and focused questions"
 policy:
   allow_implicit_invocation: false

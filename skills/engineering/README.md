@@ -9,7 +9,7 @@ Reachable only when you type them (Claude Code: `disable-model-invocation: true`
 - **[verify-target-before-push](./verify-target-before-push/SKILL.md)** — Verify a deterministic operation identity set for a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
-- **[grill-with-docs](./grill-with-docs/SKILL.md)** — Settle one proposed Spec and target; use an isolated planning worktree when writing accepted `CONTEXT.md` or ADR changes.
+- **[grill-with-docs](./grill-with-docs/SKILL.md)** — Delegate reversible design choices, ask about costly commitments including SQL, and record scoped glossary or ADR changes in an isolated planning worktree.
 - **[triage](./triage/SKILL.md)** — Move issues through a state machine of triage roles.
 - **[improve-codebase-architecture](./improve-codebase-architecture/SKILL.md)** — Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
 - **[setup-matt-pocock-skills](./setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo.
@@ -34,7 +34,7 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 - **[diagnosing-bugs](./diagnosing-bugs/SKILL.md)** — Investigate unexplained failures and regressions through an evidence-led path; choose reproduction, source inspection, or probes as needed.
 - **[research](./research/SKILL.md)** — Compare primary sources and preserve a cited repository note; delegate when useful independent work can proceed alongside it.
 - **[tdd](./tdd/SKILL.md)** — Build approved behavior through a red-green loop at existing public interfaces, one vertical slice at a time.
-- **[domain-modeling](./domain-modeling/SKILL.md)** — Sharpen a project's domain model and record accepted `CONTEXT.md` and ADR changes inside the active planning lane when one exists.
+- **[domain-modeling](./domain-modeling/SKILL.md)** — Sharpen domain vocabulary and record durable decision rationale using project conventions and the active planning lane when one exists.
 - **[codebase-design](./codebase-design/SKILL.md)** — Shared discipline and vocabulary for designing deep modules: small interfaces, clean seams, testable through the interface.
 - **[code-review](./code-review/SKILL.md)** — Two-axis review of the diff and any prospective workflow artifact declaration: **Standards** and **Spec**, with independent reviewers for material security, data, concurrency, migration, contract, or cross-module risk before integration; low-risk requested review may run inline.
 - **[resolving-merge-conflicts](./resolving-merge-conflicts/SKILL.md)** — Work through an in-progress git merge or rebase conflict hunk by hunk, resolving by intent traced to each side's primary source, then finish the operation — never `--abort`.

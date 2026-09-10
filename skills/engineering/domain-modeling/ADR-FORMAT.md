@@ -1,15 +1,15 @@
 # ADR Format
 
-ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
+Follow the repository's existing ADR location, template, naming, numbering, and status conventions. When none exists, use `docs/adr/` with sequential names: `0001-slug.md`, `0002-slug.md`, etc.
 
-Create the `docs/adr/` directory lazily: only when the first ADR is needed.
+Create the selected ADR directory lazily: only when the first ADR is needed.
 
 ## Template
 
 ```md
 # {Short title of the decision}
 
-{1-3 sentences: what's the context, what did we decide, and why.}
+{1-3 sentences: context, decision, rationale, and evidence. Identify whether the basis is inherited, human-confirmed, or delegated, with its source.}
 ```
 
 That's it. An ADR can be a single paragraph. The value is in recording *that* a decision was made and *why*, not in filling out sections.
@@ -21,20 +21,17 @@ Only include these when they add genuine value. Most ADRs won't need them.
 - **Status** frontmatter (`proposed | accepted | deprecated | superseded by ADR-NNNN`): useful when decisions are revisited
 - **Considered Options**: only when the rejected alternatives are worth remembering
 - **Consequences**: only when non-obvious downstream effects need to be called out
+- **Reversal or validation**: the practical way to revisit the choice or check an assumption when it affects the decision
 
 ## Numbering
 
-Scan `docs/adr/` for the highest existing number and increment by one.
+When using the fallback convention, scan `docs/adr/` for the highest existing number and increment by one.
 
-## When to offer an ADR
+## When to record an ADR
 
-All three of these must be true:
+Record a settled decision when its rationale has lasting value: a meaningful trade-off, a non-obvious boundary, an external constraint, or a deliberate departure that future work might otherwise undo. Reversibility does not disqualify it. Group related decisions around one rationale; avoid an ADR per routine choice.
 
-1. **Hard to reverse**: the cost of changing your mind later is meaningful
-2. **Surprising without context**: a future reader will look at the code and wonder "why on earth did they do it this way?"
-3. **The result of a real trade-off**: there were genuine alternatives and you picked one for specific reasons
-
-If a decision is easy to reverse, skip it: you'll just reverse it. If it's not surprising, nobody will wonder why. If there was no real alternative, there's nothing to record beyond "we did the obvious thing."
+Routine adoption of an existing convention needs only its source reference. Exact feature behavior, numeric defaults, exclusions, and acceptance checks belong in the Spec or the settled handoff leading to it, not in the glossary. An ADR records decision provenance, not implementation status or new operation permission. Under scoped delegation, accepted status may describe an agent-decided choice; identify it honestly rather than claiming individual human approval.
 
 ### What qualifies
 

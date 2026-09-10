@@ -1,6 +1,6 @@
 ## What it does
 
-`grill-me` takes a **loose idea** and interviews you until you can commit to it. You do not need a worked-out plan to start: producing one is what the [session](https://www.aihero.dev/ai-coding-dictionary/session) is for. It asks a round of questions whose prerequisites are already settled, then waits for your answers. Independent decisions can share a round; dependent questions wait until the answers they need are available.
+`grill-me` sharpens a **loose idea** through evidence-backed choices and focused questions. You do not need a worked-out plan to start: producing one is what the [session](https://www.aihero.dev/ai-coding-dictionary/session) is for. Reversible choices within the agreed goal resolve directly; unclear intent and costly commitments come back to you with recommendations. Independent questions can share a round; dependent questions wait for the evidence or answers they need.
 
 It is **[stateless](https://www.aihero.dev/ai-coding-dictionary/stateless)**. It writes no files and leaves no workspace behind. The only thing it leaves is a sharper version of the idea, in your own head.
 
@@ -39,13 +39,13 @@ Talking your way through an ungrillable question is where sessions balloon. The 
 ## Common questions
 
 **How many questions should I expect, and how do I know when it ends?**
-There is no fixed count. It ends when every material branch has been visited, dependencies are resolved, and you confirm that the shared understanding is complete.
+There is no fixed count. It ends when the in-scope decisions and required evidence are settled. You receive their bases and assumptions without blanket reconfirmation of already settled choices; an explicit request for your review still applies.
 
 **It asked me two hundred questions. What went wrong?**
 Usually the scope was too large. Ask the agent to break the work into smaller pieces first, then grill each one. Very long sessions also drift into the **[dumb zone](https://www.aihero.dev/ai-coding-dictionary/smart-zone)**, where the [context window](https://www.aihero.dev/ai-coding-dictionary/context-window) is full enough that the questions get worse.
 
 **Can it ask several questions at once?**
-Not in this mode. One-question pacing is deliberate because each answer can change what should be asked next; batching is a separate grilling mode.
+Yes, when the questions are independent and their prerequisites are settled. Your explicit pacing preference still applies; a question dependent on an unanswered choice waits for a later round.
 
 **What if I genuinely don't know the answer?**
 Say so. "I don't know" is a real answer, and a question you can't answer is usually a sign to prototype rather than to guess.
@@ -58,7 +58,7 @@ More than for most skills. Grilling leans on the [model](https://www.aihero.dev/
 
 ## It's working if
 
-- You disagree with something. A session with no pushback from you is a session you didn't need.
+- Questions focus on missing intent or costly commitments; a clearly scoped reversible decision can finish without a question.
 - Questions arrive in numbered rounds with recommendations, and none requires guessing an answer you have not yet given.
 - You end up somewhere you didn't expect, because a question surfaced a decision you had been making implicitly.
 - At the end you could defend each choice to someone who wasn't there.

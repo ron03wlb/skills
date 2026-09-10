@@ -25,6 +25,8 @@ For GitLab publication failures, the installed producer binding distinguishes a 
 
 ## One optimistic publication
 
+Inherited, human-confirmed, and delegated choices retain their actual bases and sources. A choice covered by the recorded delegation needs no individual or blanket reconfirmation. Exact non-ADR behavior, numeric defaults, exclusions, and verification assumptions carry into the Spec; a missing basis or changed scope returns only the affected decision to planning.
+
 Before publication or a Planning Seal write, `to-spec` re-reads only relevant glossary, ADR, and source facts. Compatible target movement binds the latest baseline. Relevant semantic drift returns the changed fact, the owning source, the smallest human action, preserved progress, and the same `/to-spec` retry after renewed confirmation.
 
 Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordinary tracker publication uses a current transaction with Planning Seal, publication, and `handoff.completed` read-back; it creates no target operational-plan file or commit. Existing valid incomplete legacy and profile-v1 operations keep their frozen exact-resume behavior.
@@ -33,6 +35,8 @@ Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordina
 The installed Codex GitHub path records publication and handoff fields in structured comments, preserving the native comment identities and exact body digests. The producer still owns approval and checkpoint completion; installation or a readable comment alone never starts a Run.
 
 Planning now prepares the exact operation inventory and read-only host capability evidence before one request for missing permission. Existing approvals carry forward. Declared SQL is handed to [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) before Run-ready, with its environment, committed content and human APPLIED/NO_OP outcome bound; no SQL is N/A. GitHub publication is described truthfully as immediate pre-read, write and exact post-read, rather than unsupported atomic CAS.
+
+Every SQL adjustment needs its scoped approval before artifact edits. The Spec carries approved SQL preparation and validation before dependent application implementation, while independent work stays eligible. Approval to prepare the artifact grants no database execution permission.
 
 ## It's working if
 

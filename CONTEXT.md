@@ -93,11 +93,15 @@ The rule that a workflow operation which creates a repository artifact must eith
 _Avoid_: Consumer cleanup, implicit ownership transfer, path-based ownership inference
 
 **Planning artifact handoff**:
-The explicit transfer of accepted glossary and ADR changes from `grill-with-docs` to `to-spec`, which alone may seal those exact changes in a **Planning Seal**. The transfer uses a user-visible **Planning handoff packet** rather than hidden durable workflow state and excludes durable workflow plans, scratch output, unaccepted drafts, and unrelated work.
+The explicit transfer of accepted glossary and ADR changes from `grill-with-docs` to `to-spec`, which alone may seal those exact changes in a **Planning Seal**. Accepted changes may follow inherited decisions, explicit human decisions, or **Delegated design decisions**, with their actual basis and source retained. The transfer uses a user-visible **Planning handoff packet** rather than hidden durable workflow state and excludes durable workflow plans, scratch output, unaccepted drafts, and unrelated work.
 _Avoid_: Dirty-doc inference, Direct target contribution, generic planning handoff
 
+**Delegated design decision**:
+An evidence-backed choice made by the agent within the user's agreed goal and delegated planning scope, whose consequences can be reversed at low cost. It records its evidence and delegation source, is not an individual human approval, and grants no new operation permission. Unresolved business intent and costly commitments, including every SQL adjustment, require the missing human decision first.
+_Avoid_: Assumed consent, implicit database authority, human-confirmed by the agent
+
 **Planning handoff packet**:
-The compact user-visible terminal output from `grill-with-docs` that binds its **Spec workflow lane**, target, baseline, accepted terms, ADR decisions, exact paths or hunks, and expected content identities for one later explicit `to-spec` invocation. It is scope provenance rather than commit authority; a fresh task requires the packet or renewed human scope confirmation, while target movement requires **Planning baseline revalidation** rather than inference from dirty state.
+The compact user-visible terminal output from `grill-with-docs` that binds its **Spec workflow lane**, target, baseline, accepted terms, ADR decisions, exact paths or hunks, and expected content identities for one later explicit `to-spec` invocation. It also carries decision bases and sources, exact non-ADR requirements, verification assumptions, and applicable SQL approval and prerequisite ordering. It is scope provenance rather than commit authority; a fresh task requires the packet or renewed human scope confirmation, while target movement requires **Planning baseline revalidation** rather than inference from dirty state.
 _Avoid_: Hidden planning journal, automatic `to-spec`, Planning Seal
 
 **Spec workflow lane**:

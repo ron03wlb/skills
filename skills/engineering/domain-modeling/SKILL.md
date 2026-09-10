@@ -43,25 +43,27 @@ If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The ma
 │       └── docs/adr/
 ```
 
-Create files lazily: only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
+Create files lazily: only when you have something to write. If no `CONTEXT.md` exists, create one when the first term is resolved. Use the repository's ADR location and conventions; [ADR-FORMAT.md](./ADR-FORMAT.md) supplies the fallback when none exists.
 
 ## During the session
 
+Load "grilling" as a named model-invoked skill before resolving a new choice: use the generic Skill tool when available, otherwise the host-supported mechanism to read and follow its required `SKILL.md`. Preserve the selected source and invocation restrictions, and reuse an already loaded matching owner and settled scope. Apply its decision boundaries. Inherited decisions and evidence-backed reversible choices under scoped delegation can be recorded directly; identify their source and basis. Ask only for unresolved intent or a costly commitment that evidence and existing approval cannot settle, including any SQL adjustment. Recording an ADR does not approve editing or executing SQL.
+
 ### Challenge against the glossary
 
-When the user uses a term that conflicts with the existing language in `CONTEXT.md`, call it out immediately. "Your glossary defines 'cancellation' as X, but you seem to mean Y. Which is it?"
+When a term conflicts with `CONTEXT.md`, identify the contradiction and check the governing requirement. Preserve the existing meaning when the evidence resolves it; ask a concrete question only when the intended business meaning remains ambiguous.
 
 ### Sharpen fuzzy language
 
-When the user uses vague or overloaded terms, propose a precise canonical term. "You're saying 'account': do you mean the Customer or the User? Those are different things."
+Resolve vague terms from the accepted model and source where possible. If "account" could still mean Customer or User with different behavior, ask that missing business decision with a recommendation.
 
 ### Discuss concrete scenarios
 
-When domain relationships are being discussed, stress-test them with specific scenarios. Invent scenarios that probe edge cases and force the user to be precise about the boundaries between concepts.
+Stress-test relationships with concrete in-scope scenarios. Resolve cases covered by existing decisions yourself; bring back only scenarios that expose a missing intent or costly commitment.
 
 ### Cross-reference with code
 
-When the user states how something works, check whether the code agrees. If you find a contradiction, surface it: "Your code cancels entire Orders, but you just said partial cancellation is possible. Which is right?"
+Check whether code agrees with the stated behavior. Surface a contradiction with the relevant source and governing decision; do not treat current implementation as authority to override the user's intended change.
 
 ### Update CONTEXT.md inline
 
@@ -69,12 +71,6 @@ When a term is resolved, update `CONTEXT.md` right there. Don't batch these up: 
 
 `CONTEXT.md` should be totally devoid of implementation details. Do not treat `CONTEXT.md` as a spec, a scratch pad, or a repository for implementation decisions. It is a glossary and nothing else.
 
-### Offer ADRs sparingly
+### Record durable decisions
 
-Only offer to create an ADR when all three are true:
-
-1. **Hard to reverse**: the cost of changing your mind later is meaningful
-2. **Surprising without context**: a future reader will wonder "why did they do it this way?"
-3. **The result of a real trade-off**: there were genuine alternatives and you picked one for specific reasons
-
-If any of the three is missing, skip the ADR. Use the format in [ADR-FORMAT.md](./ADR-FORMAT.md).
+Use [ADR-FORMAT.md](./ADR-FORMAT.md) for the recording threshold and project-first format. Record a qualifying settled decision directly within document-writing authority; deciding whether it deserves an ADR is separate from deciding whether it needs human approval. Record the actual decision basis, evidence, rationale, and relevant reversal or validation assumption. Preserve an existing ADR unless an authorized decision explicitly supersedes its affected scope.
