@@ -337,7 +337,8 @@ test("a lost task creation response reuses its exact discovered lane without a s
   try {
     const initial = createCodexWorkflowTasks(options);
     assert.deepEqual(await initial.create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
-    assert.equal(initial.executionStartEvidence(ref), "OBSERVED", "uncertain creation never invents a fresh monotonic start");
+    assert.equal(initial.executionStartEvidence(ref), "CURRENT_MONOTONIC",
+      "same-invocation creation read-back retains its conservative monotonic start");
     assert.match(prompt, /Matt\/Ron workflow owners and runtime/u);
     assert.match(prompt, /shared docs\/ references/u);
     assert.match(prompt, /Generic host support skills explicitly required/u);
@@ -351,8 +352,11 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.equal((await resumed.read(ref)).state, "RESUMABLE");
     assert.equal((await resumed.wait([ref])).taskSettled, true);
     assert.equal((await resumed.wait([ref])).taskSettled, true);
-    await resumed.message(ref, `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`);
+    const retryPrompt = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`;
+    assert.deepEqual(await resumed.message(ref, retryPrompt), { observed: true, initiatedHere: true });
     assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
+    assert.deepEqual(await resumed.message(ref, retryPrompt), { observed: true });
+    assert.equal(messages, 1, "a later adapter entry does not treat prior accepted history as a new start");
     assert.match(prompt.replaceAll("\\", "/"), /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
     assert.match(prompt, /Generic host support skills explicitly required/u, "continuations correct the boundary without editing accepted creation history");
     assert.deepEqual(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), originalIntent);

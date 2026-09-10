@@ -340,7 +340,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         try {
           const existing = await findIssueLane({ issueId, runIdentity });
           if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
-          executionStartEvidence.set(existing[0].threadId, "OBSERVED");
+          executionStartEvidence.set(existing[0].threadId, "CURRENT_MONOTONIC");
           return existing[0];
         } catch (error) {
           if (!error.message.startsWith("TASK_CREATION_UNRESOLVED:")) throw error;
@@ -482,7 +482,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           : "Continuation submission is uncertain; independently reconcile its original message before any resend." });
       if (accepted) return { accepted: true, effectiveReadBack: "unavailable" };
       const after = await readHistory(ref, value => userTexts(value).includes(prompt));
-      if (userTexts(after).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      if (userTexts(after).includes(prompt)) {
+        return { observed: true, initiatedHere: true, effectiveReadBack: "unavailable" };
+      }
       throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
     },
     async observePendingCreations({ runIdentity, issueIds }) {
@@ -541,7 +543,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
           if (userTexts(snapshot).includes(frozenPrompt)) {
             receipts?.accept(reservation.promptIdentity, "native-history");
-            return close ? undefined : { observed: true };
+            return close ? undefined : { observed: true, initiatedHere: true };
           }
           if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });

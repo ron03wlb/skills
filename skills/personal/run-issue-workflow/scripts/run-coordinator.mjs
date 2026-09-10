@@ -518,7 +518,7 @@ export function createCoordinator({
             priorDispatch.taskRef,
             `Use $execute-issue to retry Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Retry request: ${JSON.stringify({runId: current.runIdentity.runId, issueId: action.issueId, attempt: action.attempt})}`,
           );
-          initiatedHere = delivery?.observed !== true;
+          initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
         }
       } else if (task?.state === "INACTIVE" && Array.isArray(task.inactiveEvidence)
         && task.inactiveEvidence.length > 0 && task.inactiveEvidence.every(isText)) {
@@ -608,7 +608,7 @@ export function createCoordinator({
       if (!accepted) {
         if (task.state !== "RESUMABLE") throw new Error("Prepared lane has not settled; preserve it before execution");
         const delivery = await tasks.message(taskRef, `Use $execute-issue to retry Issue ${action.issueId} from its prepared prerequisite candidate in this exact task and worktree. Reuse the freshly read attestation and existing approvals. Retry request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, attempt: 1 })}`);
-        initiatedHere = delivery?.observed !== true;
+        initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
       }
     }
     const dispatch = writer.append({
@@ -645,7 +645,7 @@ export function createCoordinator({
     if (!accepted) {
       if (task.state !== "RESUMABLE") throw new Error("Original Issue task is not ready for conflict repair");
       const delivery = await tasks.message(taskRef, `Use $execute-issue to repair Issue ${action.issueId} in this original task, topic branch and worktree under the unchanged read-back DAG Run Grant. The close owner restored the target after a merge conflict. Merge the exact current target baseline into this topic without rebasing or resetting; resolve only the existing AC and exclusions. Semantic scope conflicts stop this Issue and its dependants. Verify the new candidate and obtain clean independent Standards and Spec review before a new implementation_complete; do not integrate or close. Persistent repair wave ${intent.wave}/10. Repair request: ${JSON.stringify({ runId: current.runIdentity.runId, issueId: action.issueId, candidate: intent.candidate, baseline: intent.targetHead, wave: intent.wave, requestIdentity: intent.requestIdentity })}`);
-      initiatedHere = delivery?.observed !== true;
+      initiatedHere = delivery?.observed !== true || delivery?.initiatedHere === true;
     }
     executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
       phase: "CONFLICT_REPAIR", phaseIdentity: intent.requestIdentity, taskRef,
@@ -720,7 +720,7 @@ export function createCoordinator({
     if (["CONTINUE", "REPAIR"].includes(phase)) executionBudgets.start({ writer,
       runId: current.runIdentity.runId, issueId: action.issueId, phase: "IMPLEMENTATION_REPAIR",
       phaseIdentity: intent.requestIdentity, taskRef: transfer.taskRef,
-      monotonicStartedAt: delivery?.observed === true ? null : monotonicStartedAt });
+      monotonicStartedAt: delivery?.observed === true && delivery?.initiatedHere !== true ? null : monotonicStartedAt });
   };
 
   const upgradeIssue = async ({ action, current, writer }) => {
@@ -740,7 +740,7 @@ export function createCoordinator({
     const result = await tasks.upgrade({ ref: taskRef, intent, runIdentity: current.runIdentity, writer });
     executionBudgets.start({ writer, runId: current.runIdentity.runId, issueId: action.issueId,
       phase: "IMPLEMENTATION_REPAIR", phaseIdentity: intent.requestIdentity, taskRef,
-      monotonicStartedAt: result?.accepted ? monotonicStartedAt : null });
+      monotonicStartedAt: result?.accepted || result?.initiatedHere ? monotonicStartedAt : null });
   };
 
   const closeIssue = async ({ action, current, status, step = false }) => {
