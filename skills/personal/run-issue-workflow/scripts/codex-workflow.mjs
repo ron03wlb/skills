@@ -22,10 +22,22 @@ export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
     throw new TypeError("Codex host cleanup owner requires its store, task reader and repository identity");
   }
   return async ({ issueId, runIdentity, pending }) => {
-    if (!runIdentity || !pending?.completion || !Array.isArray(pending.integrationChecks)
-      || pending.integrationChecks.length !== 0) throw new Error("Automatic host cleanup requires an exact zero-check integration obligation");
+    if (!runIdentity || !pending?.completion || !Array.isArray(pending.integrationChecks)) {
+      throw new Error("Automatic host cleanup requires its exact integration obligation");
+    }
     const completion = pending.completion;
     if (issueId !== completion.issueId) throw new Error("Automatic host cleanup Issue identity differs from its completion");
+    const integrationChecks = pending.integrationChecks.map(check => {
+      if (!check || JSON.stringify(Object.keys(check).sort()) !== JSON.stringify(["command", "configFiles", "environment", "externalInputs"].sort())
+        || !Array.isArray(check.command) || !check.command.length || !check.command.every(value => typeof value === "string")
+        || !Array.isArray(check.configFiles) || !check.configFiles.every(value => typeof value === "string")
+        || !check.environment || typeof check.environment !== "object" || Array.isArray(check.environment)
+        || !Object.keys(check.environment).length || JSON.stringify(check.externalInputs) !== JSON.stringify({ kind: "none" })) {
+        throw new Error("Automatic host cleanup received a malformed integration check");
+      }
+      return { command: check.command, configFiles: check.configFiles, environment: check.environment,
+        readExternalInputs: async () => ({}) };
+    });
     return recoverPendingHostCleanup({
       leaseInput: { store, target: runIdentity.target, repositoryId, specId: runIdentity.specId,
         approvedPublicationIdentity: runIdentity.approvedScopeHash, issueId: completion.issueId },
@@ -33,7 +45,7 @@ export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
       readTask: async taskRef => (await tasks.read(taskRef, { runId: runIdentity.runId })).snapshot,
       verifyIntegration: leases => verifyIntegratedCandidate({ leases, targetWorktree: completion.targetWorktree,
         candidate: completion.candidate, issueId: completion.issueId,
-        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: pending.integrationChecks }),
+        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: integrationChecks }),
     });
   };
 }

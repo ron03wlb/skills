@@ -31,7 +31,9 @@ test("Codex close owner recovers one exact settled empty worktree before tracker
     const pending = {
       completion: { issueId: "issue", specId: "issue", target: "main", targetWorktree: repository,
         topic: "issue", worktree, candidate },
-      taskRef, failure: { code: "EACCES", message: "fixture sharing violation" }, integrationChecks: [],
+      taskRef, failure: { code: "EACCES", message: "fixture sharing violation" },
+      integrationChecks: [{ command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: process.version },
+        externalInputs: { kind: "none" } }],
     };
     await assert.rejects(recover({ issueId: "foreign", runIdentity, pending }), /Issue identity/u);
     assert.equal(existsSync(worktree), true, "foreign action identity has no filesystem effect");

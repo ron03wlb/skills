@@ -396,9 +396,23 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             const result = task.closeResult;
             const failure = result.failure;
             const originalTaskMatches = originalTaskRef?.threadId === result.taskRef?.threadId && originalTaskRef?.hostId === result.taskRef?.hostId;
-            const integrationMatches = integrationRecord?.current?.state === "PASS" && integrationRecord.obligation?.length === 0
+            const integrationChecks = integrationRecord?.current?.results?.map((attempt, index) => {
+              const obligation = integrationRecord.obligation?.[index], inputs = attempt.inputs;
+              if (!Array.isArray(obligation?.command) || !obligation.command.length || !obligation.command.every(value => typeof value === "string")
+                || !Array.isArray(obligation.configFiles) || !obligation.configFiles.every(value => typeof value === "string")
+                || !inputs?.environment || typeof inputs.environment !== "object" || Array.isArray(inputs.environment)
+                || !Object.keys(inputs.environment).length || !isDeepStrictEqual(inputs.external, {})
+                || !Array.isArray(inputs.configuration) || inputs.configuration.length !== obligation.configFiles.length
+                || inputs.configuration.some((item, configIndex) => item?.file !== obligation.configFiles[configIndex]
+                  || !/^[a-f0-9]{64}$/u.test(item.digest))) return null;
+              return { command: obligation.command, configFiles: obligation.configFiles, environment: inputs.environment,
+                externalInputs: { kind: "none" } };
+            });
+            const integrationMatches = integrationRecord?.current?.state === "PASS" && Array.isArray(integrationChecks)
+              && !integrationChecks.includes(null)
               && result.integrationVerification?.state === "PASS" && Array.isArray(result.integrationVerification.checks)
-              && result.integrationVerification.checks.length === 0 && result.integrationVerification.identity === integrationRecord.current.identity;
+              && isDeepStrictEqual(result.integrationVerification.checks, integrationChecks)
+              && result.integrationVerification.identity === integrationRecord.current.identity;
             const resultMatches = result.candidate === record.candidate && result.targetHead === target.head && result.candidateReachable === true
               && worktreePath(result.worktree) === worktreePath(record.worktree) && worktreePath(task.cwd) === worktreePath(record.worktree)
               && result.directoryState?.registered === false && result.directoryState.exists === true && result.directoryState.empty === true
@@ -409,12 +423,12 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
               node.pendingHostCleanup = {
                 completion: { issueId: issue.node_id, specId: authority.specId, target: authority.target, targetWorktree: target.worktree,
                   topic: record.topic, worktree: record.worktree, candidate: record.candidate },
-                taskRef: originalTaskRef, failure: { code: failure.code, message: failure.message }, integrationChecks: [],
+                taskRef: originalTaskRef, failure: { code: failure.code, message: failure.message }, integrationChecks,
               };
             } else {
               contradictions.push({ code: "host_cleanup_blocked", reasonCode: cleanup.blocked.reasonCode,
                 affectedNodes: [issue.node_id], evidence: [...cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`),
-                  "Automatic close-owner recovery requires exact task, completion, directory, OS failure and zero-check integration PASS evidence."] });
+                  "Automatic close-owner recovery requires exact task, completion, directory, OS failure and executable integration PASS evidence."] });
             }
           }
         }

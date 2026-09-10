@@ -194,12 +194,14 @@ test("real Windows current-directory recovery releases only the exact helper and
     assert.ok(mismatched.observations.some(item => item.code === "RECOVERY_ALREADY_ATTEMPTED"));
     assert.doesNotThrow(() => process.kill(remainingPid, 0));
     writeFileSync(interruptedResult, exactResult);
+    rmSync(interruptedResult); // Model abrupt owner loss after flushed progress but before result publication.
     const recovered = await recoverPendingHostCleanup(input);
     assert.equal(recovered.state, "HOST_CLEANUP_RECOVERED", JSON.stringify(recovered));
     assert.equal(recovered.directoryState, "ABSENT");
     assert.equal(recovered.processes.length, 2);
     assert.deepEqual(recovered.processes.map(item => item.Pid).sort(), fixture.ownedPids.sort());
-    assert.ok(recovered.observations.some(item => item.code === "WINDOWS_HELPERS_UNKNOWN"), "the original interrupted result is retained");
+    assert.ok(recovered.observations.some(item => item.code === "WINDOWS_HELPERS_UNKNOWN"
+      && /before publishing its durable result/u.test(item.message)), "the unpublished interrupted result boundary is retained");
     assert.ok(recovered.observations.some(item => item.code === "WINDOWS_HELPERS_RELEASED"), "the one resume result is retained");
     assert.ok(reads >= 10, "ownership is refreshed across every yielding boundary");
     assert.equal(existsSync(worktree), false);

@@ -65,7 +65,9 @@ function readInterruptedRecovery({ recordPath, recoveryIdentity, leases, complet
     }
     exited.add(key);
   }
-  const result = regularFile(resultPath);
+  const resultFile = lstatSync(resultPath, { throwIfNoEntry: false });
+  const result = resultFile ? regularFile(resultPath) : { state: "UNKNOWN",
+    reason: "Interrupted cleanup owner ended before publishing its durable result", outcomes: progress };
   if (result.state !== "UNKNOWN" || typeof result.reason !== "string" || !result.reason
     || !Array.isArray(result.outcomes) || result.outcomes.length !== progress.length
     || result.outcomes.some((outcome, index) => !sameOutcome(outcome, progress[index]))) {

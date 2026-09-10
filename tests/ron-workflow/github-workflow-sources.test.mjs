@@ -295,6 +295,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     let nativeFinal = "";
     let nativeMessages = 0;
     let integrationVerification;
+    const integrationCheck = { command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: process.version },
+      readExternalInputs: async () => ({}) };
     const host = { async call(name, args) {
       if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: lane, status: { type: "idle" } },
         turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] },
@@ -304,7 +306,7 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
         if (nativeMessages === 1) {
           git("merge", "--ff-only", packet.candidate);
           integrationVerification = await createIntegrationVerification({ gitCommonDir: join(root, ".git"), operationId: execution.key,
-            issueId: "I_1", candidate: packet.candidate }).verify({ targetHead: packet.candidate, checks: [], assertCurrent: () => {}, repository: root });
+            issueId: "I_1", candidate: packet.candidate }).verify({ targetHead: packet.candidate, checks: [integrationCheck], assertCurrent: () => {}, repository: root });
           git("worktree", "remove", lane);
           mkdirSync(lane); // Reproduce Windows partial removal: registration gone, empty directory remains.
           const request = JSON.parse(nativePrompt.match(/Current close request evidence: (\{.+\})/u)[1]);
@@ -312,7 +314,9 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
             runId: request.runIdentity.runId, issueId: request.issueId,
             requestIdentity: nativePrompt.match(/Close request identity: (sha256:[a-f0-9]+)/u)[1], authorityEvidence: request.authorityEvidence,
             candidate: packet.candidate, targetHead: packet.candidate, candidateReachable: true,
-            integrationVerification: { state: integrationVerification.state, identity: integrationVerification.identity, checks: [] },
+            integrationVerification: { state: integrationVerification.state, identity: integrationVerification.identity,
+              checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
+                environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
             worktree: lane, taskRef: ref, directoryState: { registered: false, exists: true, empty: true, itemCount: 0 },
             failure: { code: "EBUSY", message: "Exact task helpers retain the empty directory" }, reasonCode: "host_release_unavailable",
             observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
@@ -341,6 +345,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
         assert.equal(pending.completion.candidate, packet.candidate);
         assert.deepEqual(pending.taskRef, ref);
         assert.deepEqual(pending.failure, { code: "EBUSY", message: "Exact task helpers retain the empty directory" });
+        assert.deepEqual(pending.integrationChecks, [{ command: integrationCheck.command,
+          configFiles: integrationCheck.configFiles, environment: integrationCheck.environment, externalInputs: { kind: "none" } }]);
         rmdirSync(lane);
         return { state: "HOST_CLEANUP_RECOVERED", directoryState: "ABSENT", observations: [] };
       } } };
