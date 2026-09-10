@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { installWorkflow, selectWorkflowVersion } from "../../skills/personal/run-issue-workflow/scripts/workflow-installation.mjs";
+import { installWorkflow, readWorkflowInstallationEvidence, selectWorkflowVersion } from "../../skills/personal/run-issue-workflow/scripts/workflow-installation.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
 const hostAssets = ["scripts/codex-host-driver.js", "references/codex-host-driver.md"];
@@ -40,6 +40,50 @@ test("Run renewal preserves its journaled workflow version across coordinator re
     writer.release();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("managed entry evidence binds reviewed candidate, immutable manifest and failed-stage replay", () => {
+  const root = mkdtempSync(join(tmpdir(), "workflow-effective-evidence-"));
+  const sourceRepository = join(root, "source"), cacheDirectory = join(root, "packages");
+  const codexEntry = join(root, ".codex", "skills", "run-issue-workflow");
+  const agentsEntry = join(root, ".agents", "skills", "run-issue-workflow");
+  try {
+    mkdirSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts"), { recursive: true });
+    writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"), "Reviewed workflow\n");
+    writeFileSync(join(sourceRepository, "skills/personal/run-issue-workflow/scripts/installed-entry.mjs"), "export const installed = true;\n");
+    copyHostAssets(sourceRepository);
+    mkdirSync(join(sourceRepository, "docs/agents/references"), { recursive: true });
+    writeFileSync(join(sourceRepository, "docs/agents/run-preparation.md"), "Preparation owner\n");
+    writeFileSync(join(sourceRepository, "docs/agents/references/approved-pre-run-workflow-maintenance.md"), "Maintenance owner\n");
+    writeFileSync(join(sourceRepository, "docs/agents/references/workflow-stop-diagnosis.md"), "Diagnosis owner\n");
+    const git = (...args) => execFileSync("git", ["-C", sourceRepository, ...args], { encoding: "utf8" }).trim();
+    git("init", "-b", "main"); git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.invalid");
+    git("add", "."); git("-c", "commit.gpgsign=false", "commit", "-m", "reviewed candidate");
+    const candidate = git("rev-parse", "HEAD");
+    const first = installWorkflow({ sourceRepository, sourceCommit: candidate, cacheDirectory, skillDirectory: codexEntry });
+    installWorkflow({ sourceRepository, sourceCommit: candidate, cacheDirectory, skillDirectory: agentsEntry });
+    const failedStageResults = [
+      { stage: "settled-host-cleanup-routing", failureSignature: "HOST_CLEANUP_BLOCKED was terminal", command: "node --test routing", result: "PASS", packageVersionId: first.version.id },
+      { stage: "stable-close-identity", failureSignature: "controlRevision changed request identity", command: "node --test identity", result: "PASS", packageVersionId: first.version.id },
+      { stage: "interrupted-helper-continuation", failureSignature: "fixed inspector lifetime lost remaining helpers", command: "node --test cleanup", result: "PASS", packageVersionId: first.version.id },
+    ];
+    const evidence = readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
+      expectedSourceCommit: candidate, failedStageResults });
+    assert.equal(evidence.schema, "codex-workflow-effective-evidence:v1");
+    assert.equal(evidence.candidate, candidate);
+    assert.match(evidence.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    assert.deepEqual(evidence.entries.map(item => item.path), [codexEntry, agentsEntry]);
+    assert.ok(evidence.entries.every(item => item.packageVersionId === first.version.id));
+    assert.deepEqual(evidence.failedStageResults, failedStageResults);
+    assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
+      expectedSourceCommit: candidate, failedStageResults: [{ ...failedStageResults[0], packageVersionId: "f".repeat(64) }] }), /failed-stage result/u);
+    fs.renameSync(agentsEntry, `${agentsEntry}.preserved`);
+    mkdirSync(join(root, "foreign")); fs.symlinkSync(join(root, "foreign"), agentsEntry, process.platform === "win32" ? "junction" : "dir");
+    try {
+      assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
+        expectedSourceCommit: candidate, failedStageResults }), /managed entry/u);
+    } finally { fs.rmSync(agentsEntry); fs.renameSync(`${agentsEntry}.preserved`, agentsEntry); }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("an installed entry update preserves a running workflow's exact executable version", () => {

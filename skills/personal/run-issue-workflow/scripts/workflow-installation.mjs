@@ -33,7 +33,8 @@ function validateCatalog(catalog) {
 
 function verifyPackage(root, version) {
   if (lstatSync(root).isSymbolicLink()) throw new Error("Package directory is a link");
-  const manifest = readJson(join(root, ".workflow-version.json"));
+  const manifestBytes = readFileSync(join(root, ".workflow-version.json"));
+  const manifest = JSON.parse(manifestBytes);
   if (manifest.schema !== "codex-workflow-version:v1" || !sameVersion(manifest.version, version)) {
     throw new Error("Package version identity differs from its trusted installation");
   }
@@ -52,7 +53,7 @@ function verifyPackage(root, version) {
   if (sha256(JSON.stringify({ sourceCommit: version.sourceCommit, files: manifest.files })) !== version.id) {
     throw new Error("Package content manifest changed");
   }
-  return root;
+  return { root, manifestSha256: `sha256:${sha256(manifestBytes)}` };
 }
 
 export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
@@ -68,12 +69,53 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
       throw new Error("Recorded workflow version is not in the trusted installation");
     }
     if (!/^[a-f0-9]{64}$/u.test(version.id)) throw new Error("Invalid workflow version identity");
-    const root = verifyPackage(join(cacheDirectory, "versions", version.id), version);
-    return { state: "AVAILABLE", version, root };
+    const verified = verifyPackage(join(cacheDirectory, "versions", version.id), version);
+    return { state: "AVAILABLE", version, ...verified };
   } catch (error) {
     return { state: "UNAVAILABLE", version, reason: error.message,
       recovery: "Restore this exact trusted package or use the already-approved maintenance scope to install a reviewed compatible version; preserve the Run and original Start. Run preparation owns the pre-Run handoff." };
   }
+}
+
+const failedStageFields = ["command", "failureSignature", "packageVersionId", "result", "stage"];
+
+export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories, expectedSourceCommit, failedStageResults }) {
+  const selected = selectWorkflowVersion({ cacheDirectory });
+  if (selected.state !== "AVAILABLE") throw new Error(`Current workflow package is unavailable: ${selected.reason}`);
+  if (selected.version.sourceCommit !== expectedSourceCommit) {
+    throw new Error("Current workflow package candidate differs from the reviewed source commit");
+  }
+  if (!Array.isArray(skillDirectories) || skillDirectories.length === 0) throw new TypeError("At least one managed workflow entry is required");
+  const paths = skillDirectories.map(path => resolve(path));
+  if (new Set(paths.map(path => process.platform === "win32" ? path.toLowerCase() : path)).size !== paths.length) {
+    throw new TypeError("Managed workflow entries must be unique");
+  }
+  const expectedTarget = join(selected.root, skillPath);
+  const entries = paths.map(path => {
+    const item = lstatSync(path, { throwIfNoEntry: false });
+    const target = item?.isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : null;
+    if (!item?.isSymbolicLink() || target !== expectedTarget || realpathSync.native(path) !== realpathSync.native(expectedTarget)) {
+      throw new Error(`Current managed entry does not select the reviewed workflow package: ${path}`);
+    }
+    return { path, target, packageVersionId: selected.version.id };
+  });
+  if (!Array.isArray(failedStageResults) || failedStageResults.length === 0) {
+    throw new TypeError("At least one original failed-stage result is required");
+  }
+  const seen = new Set();
+  for (const result of failedStageResults) {
+    const keys = result && typeof result === "object" && !Array.isArray(result) ? Object.keys(result).sort() : [];
+    const identity = `${result?.stage}:${result?.failureSignature}`;
+    if (JSON.stringify(keys) !== JSON.stringify(failedStageFields)
+      || ![result.stage, result.failureSignature, result.command].every(value => typeof value === "string" && value.length > 0)
+      || !/^(?:PASS(?:ED)?|SUCCEEDED)\b/u.test(result.result ?? "")
+      || result.packageVersionId !== selected.version.id || seen.has(identity)) {
+      throw new Error("Installed workflow failed-stage result is malformed, duplicated or bound to another package");
+    }
+    seen.add(identity);
+  }
+  return { schema: "codex-workflow-effective-evidence:v1", candidate: selected.version.sourceCommit,
+    packageVersion: selected.version, manifestSha256: selected.manifestSha256, entries, failedStageResults };
 }
 
 function recoverInstallation({ recoveryPath, sourceRepository, sourceCommit, cacheDirectory, skillDirectory, catalog }) {

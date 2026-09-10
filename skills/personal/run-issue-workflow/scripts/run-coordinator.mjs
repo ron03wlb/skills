@@ -77,7 +77,7 @@ const canonicalize = (value) => {
   return value;
 };
 const closeRequestAuthority = (evidence) => {
-  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, integrationRecheck, ...authority } = evidence;
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, integrationRecheck, controlRevision, ...authority } = evidence;
   if (authority.authorityEvidence) {
     const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
     authority.authorityEvidence = fixed;
@@ -226,6 +226,7 @@ const diagnosedStop = (status, {
   affectedNodes,
   resumePredicates,
   operatorPacket,
+  nextOwner = "human",
 }) => {
   const allNodes = status.nodes.map(({ issueId }) => issueId);
   return {
@@ -249,7 +250,7 @@ const diagnosedStop = (status, {
       noAutomaticTransition,
       affectedNodes,
       unaffectedNodes: allNodes.filter((issueId) => !affectedNodes.includes(issueId)),
-      nextOwner: "human",
+      nextOwner,
       resumePredicates,
       ...(operatorPacket === undefined ? {} : { operatorPacket }),
     }],
@@ -803,11 +804,25 @@ export function createCoordinator({
     }
     const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
     const continuation = accepted ? planCloseContinuation({ task, requestIdentity, requestEvidence }) : { needed: false };
-    if (continuation.blocked) return { stopped: diagnosedStop(status, {
-      reasonCode: continuation.blocked.reasonCode, evidence: continuation.blocked.evidence.map(item => item.message),
-      affectedNodes: [action.issueId], noAutomaticTransition: "Exact integration or cleanup evidence requires its recovery owner before close redispatch.",
-      resumePredicates: ["owning_failure_diagnosed_and_exact_verification_proved"],
-    }) };
+    if (continuation.blocked) {
+      if (sourceNode.pendingHostCleanup && typeof leaf?.recoverHostCleanup === "function") {
+        const recovery = await leaf.recoverHostCleanup({ issueId: action.issueId, runIdentity: current.runIdentity,
+          pending: sourceNode.pendingHostCleanup });
+        if (recovery?.state === "HOST_CLEANUP_RECOVERED" && recovery.directoryState === "ABSENT") return { active: true };
+        return { stopped: diagnosedStop(status, {
+          reasonCode: recovery?.reasonCode ?? "host_helper_recovery_failed",
+          evidence: (recovery?.observations ?? continuation.blocked.evidence).map(item => `${item.code}: ${item.message}`),
+          attemptedRecovery: recovery?.observations ?? [], affectedNodes: [action.issueId], nextOwner: "close-issue",
+          noAutomaticTransition: "The bounded close-owner host recovery did not prove physical absence; preserve its reservation and current Run evidence.",
+          resumePredicates: ["owning_source_diagnosis_or_exact_worktree_physical_absence_is_proven"],
+        }) };
+      }
+      return { stopped: diagnosedStop(status, {
+        reasonCode: continuation.blocked.reasonCode, evidence: continuation.blocked.evidence.map(item => item.message),
+        affectedNodes: [action.issueId], noAutomaticTransition: "Exact integration or cleanup evidence requires its recovery owner before close redispatch.",
+        resumePredicates: ["owning_failure_diagnosed_and_exact_verification_proved"],
+      }) };
+    }
     if (continuation.exhausted) return { stopped: diagnosedStop(status, {
       reasonCode: "close_retry_budget_exhausted", evidence: ["Three native close continuations settled without progress; preserve the original task and current Git/tracker state."],
       affectedNodes: [action.issueId], noAutomaticTransition: "The unchanged close progress exhausted its persistent continuation budget.", resumePredicates: ["close_progress_or_owning_source_failure_is_resolved"],

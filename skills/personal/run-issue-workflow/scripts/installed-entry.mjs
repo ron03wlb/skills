@@ -69,6 +69,8 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     && current.version.protocolVersion === selected.version.protocolVersion
     && current.version.sourceRepository === selected.version.sourceRepository;
   const runtime = compatible ? current : selected;
+  const workflowRuntime = { packageVersion: runtime.version, packageRoot: runtime.root,
+    manifestSha256: runtime.manifestSha256 };
   const composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
   // Protocol/source compatibility alone does not prove the runtime has this entry's replay gates.
   // A disposable terminal snapshot cannot decide whether missing support is safe.
@@ -92,7 +94,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
     let lane = await composition.prepareCodexWorkflow(options);
     let versionId = runtime.version.id;
-    return { specId: lane.specId,
+    return { specId: lane.specId, workflowRuntime,
       async run(request) {
         const status = await lane.run(request);
         if (status.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")
@@ -119,7 +121,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
       return selectInstalledLane({ repository, specId, runId: result.status.run.runId, host });
     }
   }
-  return result;
+  return { ...result, workflowRuntime };
 }
 
 export async function runInstalledEntry({ repository, specId, runId, host, specIds, maxWorkers = 3, modelRouting }) {

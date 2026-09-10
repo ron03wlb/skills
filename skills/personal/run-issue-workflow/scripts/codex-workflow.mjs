@@ -11,9 +11,32 @@ import { createWorkflowRuntime } from "./run-workflow.mjs";
 import { validateJournal } from "./run-journal.mjs";
 import { recoveryDigest } from "./recovery-evidence.mjs";
 import { bodyDigest } from "./github-workflow-records.mjs";
-import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
+import { deriveExecuteIssueOperationIdentity, deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
+import { recoverPendingHostCleanup } from "../../../engineering/close-issue/scripts/pending-host-cleanup.mjs";
+import { verifyIntegratedCandidate } from "../../../engineering/close-issue/scripts/merge-candidate.mjs";
 
 export const supportsCompletedRunReentry = true;
+
+export function createCodexHostCleanupOwner({ store, tasks, repositoryId }) {
+  if (!store || typeof tasks?.read !== "function" || typeof repositoryId !== "string" || !repositoryId) {
+    throw new TypeError("Codex host cleanup owner requires its store, task reader and repository identity");
+  }
+  return async ({ issueId, runIdentity, pending }) => {
+    if (!runIdentity || !pending?.completion || !Array.isArray(pending.integrationChecks)
+      || pending.integrationChecks.length !== 0) throw new Error("Automatic host cleanup requires an exact zero-check integration obligation");
+    const completion = pending.completion;
+    if (issueId !== completion.issueId) throw new Error("Automatic host cleanup Issue identity differs from its completion");
+    return recoverPendingHostCleanup({
+      leaseInput: { store, target: runIdentity.target, repositoryId, specId: runIdentity.specId,
+        approvedPublicationIdentity: runIdentity.approvedScopeHash, issueId: completion.issueId },
+      completion, taskRef: pending.taskRef, failure: pending.failure,
+      readTask: async taskRef => (await tasks.read(taskRef, { runId: runIdentity.runId })).snapshot,
+      verifyIntegration: leases => verifyIntegratedCandidate({ leases, targetWorktree: completion.targetWorktree,
+        candidate: completion.candidate, issueId: completion.issueId,
+        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: pending.integrationChecks }),
+    });
+  };
+}
 
 export function assessRecoveryCompatibility({ journal, taskIntents }) {
   try {
@@ -69,7 +92,8 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
     cleanup: { listRuns: owners.readCleanupRuns },
     now: () => new Date().toISOString(), sleep: (ms) => setTimeout(ms),
-    leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
+    leaf: { recoverHostCleanup: createCodexHostCleanupOwner({ store, tasks, repositoryId: `github:${configuration.repository}` }),
+      async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
       const dispatch = store.readEvents(identity.runId).findLast(({ type }) => type === "dispatch.recorded");
       if (!dispatch) throw new Error("Parent close requires the existing Run task");
       const task = await tasks.read(dispatch.taskRef, { runId: identity.runId });

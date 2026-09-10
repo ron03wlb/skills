@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, realpathSync, rmdirSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, join, sep } from "node:path";
 import { CODEX_HOST_RELEASE_CAPABILITY } from "../../../personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
 import { withCloseIssueLeases } from "./close-lease.mjs";
@@ -10,6 +10,89 @@ const ownsSettledTask = (snapshot, taskRef, worktree) => taskRef?.threadId && ta
   && snapshot?.thread?.id === taskRef.threadId && snapshot.thread.hostId === taskRef.hostId
   && ["idle", "notLoaded"].includes(snapshot.thread.status?.type) && snapshot.turns?.[0]?.status === "completed"
   && isAbsolute(snapshot.thread.cwd ?? "") && resolve(snapshot.thread.cwd) === resolve(worktree);
+
+const PROCESS_FIELDS = ["CommandHash", "Cwd", "Executable", "Kind", "ParentPid", "Pid", "Started"];
+const OUTCOME_FIELDS = ["Pid", "Reason", "Started", "State", "TerminationRequested"];
+const samePath = (left, right) => typeof left === "string" && typeof right === "string"
+  && resolve(left).toLowerCase() === resolve(right).toLowerCase();
+const hasExactFields = (value, fields) => value && typeof value === "object" && !Array.isArray(value)
+  && JSON.stringify(Object.keys(value).sort()) === JSON.stringify(fields);
+const sameProcess = (left, right) => left.Pid === right.Pid && left.ParentPid === right.ParentPid
+  && left.Started === right.Started && samePath(left.Executable, right.Executable)
+  && left.CommandHash === right.CommandHash && samePath(left.Cwd, right.Cwd) && left.Kind === right.Kind;
+const sameOutcome = (left, right) => OUTCOME_FIELDS.every(field => left[field] === right[field]);
+
+function readInterruptedRecovery({ recordPath, recoveryIdentity, leases, completion, taskRef, targetHead, failure }) {
+  const regularFile = path => {
+    const item = lstatSync(path, { throwIfNoEntry: false });
+    if (!item?.isFile() || item.isSymbolicLink()) throw new Error("Interrupted recovery audit file is missing or unsafe");
+    return JSON.parse(readFileSync(path, "utf8"));
+  };
+  const record = regularFile(recordPath);
+  if (record.schema !== "exact-helper-recovery:v1" || record.state !== "ATTEMPTED"
+    || record.recoveryIdentity !== recoveryIdentity || record.operationId !== leases.operationId
+    || record.candidate !== completion.candidate || !isAbsolute(record.worktree ?? "") || !samePath(record.worktree, completion.worktree)
+    || record.taskRef?.threadId !== taskRef.threadId || record.taskRef?.hostId !== taskRef.hostId
+    || record.targetHead !== targetHead || record.failure?.code !== failure.code || record.failure?.message !== failure.message
+    || !Array.isArray(record.processes) || !record.processes.length || record.processes.length > 64) {
+    throw new Error("Interrupted recovery reservation does not match current close authority");
+  }
+  const identities = new Set();
+  for (const process of record.processes) {
+    if (!hasExactFields(process, PROCESS_FIELDS) || !Number.isInteger(process.Pid) || process.Pid < 1
+      || !Number.isInteger(process.ParentPid) || process.ParentPid < 1 || !/^\d+$/u.test(process.Started)
+      || !isAbsolute(process.Executable) || !/^[a-f0-9]{64}$/u.test(process.CommandHash)
+      || !samePath(process.Cwd, completion.worktree) || !["node-repl", "computer-use", "template-picker", "codebase-memory"].includes(process.Kind)) {
+      throw new Error("Interrupted recovery contains an invalid process identity");
+    }
+    const key = `${process.Pid}:${process.Started}`;
+    if (identities.has(key)) throw new Error("Interrupted recovery contains duplicate process identities");
+    identities.add(key);
+  }
+  const progressPath = `${recordPath}.progress`, resultPath = `${recordPath}.result`;
+  const progressFile = lstatSync(progressPath, { throwIfNoEntry: false });
+  if (!progressFile?.isFile() || progressFile.isSymbolicLink()) throw new Error("Interrupted recovery progress is missing or unsafe");
+  const progressText = readFileSync(progressPath, "utf8");
+  if (!progressText.endsWith("\n")) throw new Error("Interrupted recovery progress is incomplete");
+  const progress = progressText.trimEnd().split("\n").map(line => JSON.parse(line));
+  const exited = new Set();
+  for (const outcome of progress) {
+    const process = record.processes.find(item => item.Pid === outcome.Pid && item.Started === outcome.Started);
+    const key = `${outcome.Pid}:${outcome.Started}`;
+    if (!hasExactFields(outcome, OUTCOME_FIELDS) || outcome.State !== "EXITED" || outcome.Reason !== null
+      || typeof outcome.TerminationRequested !== "boolean" || !process || exited.has(key)) {
+      throw new Error("Interrupted recovery progress is not an exact completed effect");
+    }
+    exited.add(key);
+  }
+  const result = regularFile(resultPath);
+  if (result.state !== "UNKNOWN" || typeof result.reason !== "string" || !result.reason
+    || !Array.isArray(result.outcomes) || result.outcomes.length !== progress.length
+    || result.outcomes.some((outcome, index) => !sameOutcome(outcome, progress[index]))) {
+    throw new Error("Interrupted recovery result does not match durable progress");
+  }
+  const remaining = record.processes.filter(process => !exited.has(`${process.Pid}:${process.Started}`));
+  if (!remaining.length) throw new Error("Interrupted recovery has no reserved process left to resume");
+  const resumePath = `${recordPath}.resume.json`;
+  if (lstatSync(resumePath, { throwIfNoEntry: false }) || lstatSync(`${resumePath}.result`, { throwIfNoEntry: false })
+    || lstatSync(`${resumePath}.progress`, { throwIfNoEntry: false })) throw new Error("Interrupted recovery resume was already attempted");
+  return { record, progress, result, remaining, resumePath };
+}
+
+function assertResumedProof(proof, remaining) {
+  if (proof?.state !== "READY" || !Array.isArray(proof.processes) || !proof.processes.length) {
+    throw new Error("Interrupted recovery found no exact reserved helper");
+  }
+  const seen = new Set();
+  for (const process of proof.processes) {
+    const key = `${process.Pid}:${process.Started}`;
+    if (!hasExactFields(process, PROCESS_FIELDS) || seen.has(key)
+      || !remaining.some(expected => sameProcess(process, expected))) {
+      throw new Error("Current helper set is not an exact subset of the interrupted reservation");
+    }
+    seen.add(key);
+  }
+}
 
 // Read-only failure boundary, called by the existing close owner inside its two leases.
 // Native desktop release remains unavailable; the separate owner entry below uses a bounded Windows adapter.
@@ -82,7 +165,7 @@ export async function recoverPendingHostCleanup({ leaseInput, completion, taskRe
       if (git("rev-parse", "HEAD") !== targetHead || proof?.state !== "PASS" || proof.candidate !== completion.candidate
         || proof.issueId !== completion.issueId || proof.targetHead !== targetHead) throw new Error("Current integration PASS is required before host recovery");
     };
-    let session;
+    let session, auditProcesses = [], activeRecordPath = null;
     const observations = [...assessment.observations];
     const confirmAbsence = async () => {
       await assertVerification();
@@ -91,8 +174,8 @@ export async function recoverPendingHostCleanup({ leaseInput, completion, taskRe
       if (!ownsSettledTask(snapshot, taskRef, completion.worktree)) throw new Error("Task ownership changed after directory removal");
       if (lstatSync(completion.worktree, { throwIfNoEntry: false })) throw new Error("Exact Issue directory reappeared during verification");
       return { state: "HOST_CLEANUP_RECOVERED", candidate: completion.candidate, worktree: completion.worktree, taskRef,
-        directoryState: "ABSENT", targetHead, recoveryIdentity, recordPath: session ? recordPath : null,
-        processes: session?.proof.processes ?? [], observations };
+        directoryState: "ABSENT", targetHead, recoveryIdentity, recordPath: activeRecordPath,
+        processes: auditProcesses, observations };
     };
     try {
       await assertVerification();
@@ -108,18 +191,45 @@ export async function recoverPendingHostCleanup({ leaseInput, completion, taskRe
         observations.push({ code: error.code, message: error.message });
       }
       if (removed) return await confirmAbsence();
-      if (lstatSync(recordPath, { throwIfNoEntry: false })) return { ...assessment, reasonCode: "host_helper_recovery_failed",
-        observations: [...observations, { code: "RECOVERY_ALREADY_ATTEMPTED", message: `Retain ${recordPath}; read back its effects instead of releasing another helper set` }] };
-      session = await openSession({ worktree: completion.worktree, cwd: completion.targetWorktree });
+      const existingRecord = lstatSync(recordPath, { throwIfNoEntry: false });
+      let interrupted, progressPath, resultPath;
+      if (existingRecord) {
+        try { interrupted = readInterruptedRecovery({ recordPath, recoveryIdentity, leases, completion, taskRef, targetHead, failure }); }
+        catch (error) { return { ...assessment, reasonCode: "host_helper_recovery_failed",
+          observations: [...observations, { code: "RECOVERY_ALREADY_ATTEMPTED", message: `${error.message}; retain ${recordPath}` }] }; }
+        // This durable marker is the only automatic continuation authority. A
+        // lost response cannot reserve a second resume or a newly discovered set.
+        writeFileSync(interrupted.resumePath, JSON.stringify({ schema: "exact-helper-recovery-resume:v1", recoveryIdentity,
+          state: "ATTEMPTED", operationId: leases.operationId, candidate: completion.candidate, worktree: completion.worktree,
+          taskRef: { threadId: taskRef.threadId, hostId: taskRef.hostId }, targetHead, failure,
+          priorProgress: interrupted.progress, remaining: interrupted.remaining, at: new Date().toISOString() }), { flag: "wx", flush: true });
+        activeRecordPath = recordPath;
+        auditProcesses = interrupted.record.processes;
+        progressPath = `${interrupted.resumePath}.progress`;
+        resultPath = `${interrupted.resumePath}.result`;
+        observations.push({ code: "WINDOWS_HELPERS_UNKNOWN", message: JSON.stringify(interrupted.result) });
+        session = await openSession({ worktree: completion.worktree, cwd: completion.targetWorktree,
+          expectedProcesses: interrupted.remaining });
+        assertResumedProof(session.proof, interrupted.remaining);
+      } else {
+        session = await openSession({ worktree: completion.worktree, cwd: completion.targetWorktree });
+        auditProcesses = session.proof.processes;
+        activeRecordPath = recordPath;
+        progressPath = `${recordPath}.progress`;
+        resultPath = `${recordPath}.result`;
+      }
       await assertVerification();
       assessment = await assessPendingHostCleanup(input);
       if (assessment.reasonCode !== "host_release_unavailable") return assessment;
       mkdirSync(join(leases.gitCommonDir, "workflow-host"), { recursive: true });
-      // Reservation survives lost responses. No automatic second process batch for this completion/task.
-      writeFileSync(recordPath, JSON.stringify({ schema: "exact-helper-recovery:v1", recoveryIdentity, state: "ATTEMPTED",
-        operationId: leases.operationId, candidate: completion.candidate, worktree: completion.worktree, taskRef,
-        targetHead, failure, processes: session.proof.processes, at: new Date().toISOString() }), { flag: "wx", flush: true });
-      const release = await session.release(outcome => appendFileSync(`${recordPath}.progress`, `${JSON.stringify(outcome)}\n`, { flush: true }), async () => {
+      if (!interrupted) {
+        // Reservation survives lost responses. Only its exact remaining members
+        // can receive the one interrupted continuation above.
+        writeFileSync(recordPath, JSON.stringify({ schema: "exact-helper-recovery:v1", recoveryIdentity, state: "ATTEMPTED",
+          operationId: leases.operationId, candidate: completion.candidate, worktree: completion.worktree, taskRef,
+          targetHead, failure, processes: session.proof.processes, at: new Date().toISOString() }), { flag: "wx", flush: true });
+      }
+      const release = await session.release(outcome => appendFileSync(progressPath, `${JSON.stringify(outcome)}\n`, { flush: true }), async () => {
         const snapshot = await readTask(taskRef);
         leases.assertCurrent();
         if (!ownsSettledTask(snapshot, taskRef, completion.worktree)) throw new Error("Task ownership changed before next helper");
@@ -130,7 +240,7 @@ export async function recoverPendingHostCleanup({ leaseInput, completion, taskRe
           || realpathSync.native(completion.worktree) !== resolve(completion.worktree)) throw new Error("Directory ownership changed before next helper");
       });
       observations.push({ code: `WINDOWS_HELPERS_${release.state}`, message: JSON.stringify(release) });
-      writeFileSync(`${recordPath}.result`, JSON.stringify(release), { flag: "wx", flush: true });
+      writeFileSync(resultPath, JSON.stringify(release), { flag: "wx", flush: true });
       if (release.state !== "RELEASED") return { ...assessment, reasonCode: "host_helper_recovery_failed", observations };
       // A new turn or new files after termination must not be mistaken for successful cleanup.
       await assertVerification();

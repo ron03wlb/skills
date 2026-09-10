@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import {
+  closeRequestIdentityFor,
   createCoordinator as createCoordinatorRuntime,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
@@ -37,6 +38,25 @@ const identity = {
   classification: "SINGLE",
   decompositionIdentity: null,
 };
+
+test("close request authority remains stable across same-Run control revisions", () => {
+  const evidence = {
+    runIdentity: identity,
+    maxParallel: 3,
+    issueId: "15",
+    target: identity.target,
+    controlRevision: 0,
+    authorityEvidence: {
+      candidateCommit: "b".repeat(40),
+      completionEvidenceId: "IC_done",
+      completionBodySha256: `sha256:${"c".repeat(64)}`,
+      worktreeIdentity: `sha256:${"d".repeat(64)}`,
+    },
+  };
+
+  assert.equal(closeRequestIdentityFor({ ...evidence, controlRevision: 1 }), closeRequestIdentityFor(evidence));
+  assert.notEqual(closeRequestIdentityFor({ ...evidence, target: "other-target" }), closeRequestIdentityFor(evidence));
+});
 
 test("technical failure diagnosis and isolated repair retain one operation budget across coordinator restart", async () => {
   const { root, store } = createStoreFixture();
@@ -1621,6 +1641,81 @@ test("stale accepted close request blocks instead of reusing or duplicating clos
     assert.equal(status.diagnoses.at(-1).reasonCode, "close_request_evidence_changed");
     assert.equal(messageCalls, 0);
     assert.equal(waitCalls, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a legacy accepted close identity survives a same-Run RESUME revision for host cleanup recovery", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const authorityEvidence = closeAuthorityEvidenceFor("15");
+  const acceptedEvidence = {
+    runIdentity: identity,
+    maxParallel: 3,
+    issueId: "15",
+    target: identity.target,
+    targetState: "CLEAN",
+    targetHead: "a".repeat(40),
+    controlRevision: 0,
+    trackerState: "OPEN",
+    completionState: "COMPLETE",
+    candidateReachable: true,
+    worktreeState: "PRESENT",
+    authorityEvidence,
+  };
+  const legacyRequestIdentity = `sha256:${"e".repeat(64)}`;
+  assert.notEqual(legacyRequestIdentity, closeRequestIdentityFor(acceptedEvidence));
+  assert.equal(closeRequestIdentityFor({ ...acceptedEvidence, controlRevision: 1 }), closeRequestIdentityFor(acceptedEvidence));
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: "2026-08-30T12:59:00.000Z", runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: "2026-08-30T12:59:01.000Z", issueId: "15", attempt: 1, taskRef });
+  seed.append({ type: "control.revised", at: "2026-08-30T12:59:02.000Z", revision: 1, command: "RESUME" });
+  seed.release();
+  let recoveries = 0;
+  const tasks = {
+    async findIssueLane() { throw new Error("the accepted lane is already bound"); },
+    async create() { throw new Error("no replacement lane is legal"); },
+    async read() {
+      return {
+        state: "RESUMABLE",
+        snapshot: { turns: [{ status: "completed" }] },
+        closeRequest: { state: "ACCEPTED", runId: identity.runId, issueId: "15", requestIdentity: legacyRequestIdentity, evidence: acceptedEvidence },
+        closeResult: { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: identity.runId, issueId: "15",
+          requestIdentity: legacyRequestIdentity, authorityEvidence, reasonCode: "host_task_ownership_unproven",
+          observations: [{ code: "EACCES", message: "The exact empty worktree remains owned by the settled task." }] },
+      };
+    },
+    async message() { throw new Error("same-Run recovery must not send a replacement close request"); },
+    async wait() { throw new Error("the coordinator must reconcile after host recovery"); },
+  };
+  const pendingHostCleanup = { owner: "legacy-close-receipt" };
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: "NONE", completionState: "COMPLETE",
+      candidateReachable: true, worktreeState: "PRESENT", closeAuthorityEvidence: authorityEvidence, pendingHostCleanup }],
+  });
+
+  try {
+    const status = await createCoordinator({
+      store,
+      tracker: { async read() { return {}; } },
+      tasks,
+      reconcile,
+      leaf: { async recoverHostCleanup({ issueId, runIdentity, pending }) {
+        recoveries += 1;
+        assert.equal(issueId, "15");
+        assert.deepEqual(runIdentity, identity);
+        assert.deepEqual(pending, pendingHostCleanup);
+        return { state: "HOST_CLEANUP_RECOVERED", directoryState: "ABSENT", observations: [] };
+      } },
+      now: () => "2026-08-30T13:00:00.000Z",
+      sleep: async () => {},
+    }).run({ specId: "15", mode: "step" });
+
+    assert.equal(status.run.state, "RUNNING", JSON.stringify(status));
+    assert.equal(recoveries, 1);
+    assert.deepEqual(status.diagnoses, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

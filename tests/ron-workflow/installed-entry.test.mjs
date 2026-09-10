@@ -37,6 +37,9 @@ function fixture({ legacyRuntime = false } = {}) {
   const verificationPath = "skills/engineering/execute-issue/scripts/verification-cache.mjs";
   mkdirSync(join(source, "skills/engineering/execute-issue/scripts"), { recursive: true });
   cpSync(fileURLToPath(new URL(`../../${verificationPath}`, import.meta.url)), join(source, verificationPath));
+  const closeScriptsPath = "skills/engineering/close-issue/scripts";
+  mkdirSync(join(source, closeScriptsPath), { recursive: true });
+  cpSync(fileURLToPath(new URL(`../../${closeScriptsPath}`, import.meta.url)), join(source, closeScriptsPath), { recursive: true });
   const referencesPath = "skills/personal/run-issue-workflow/references";
   mkdirSync(join(source, referencesPath), { recursive: true });
   cpSync(fileURLToPath(new URL(`../../${referencesPath}/codex-host-driver.md`, import.meta.url)), join(source, referencesPath, "codex-host-driver.md"));
@@ -167,6 +170,9 @@ test("installed packages bind a newly authorized model policy and contain its ex
       authorization: "Approved Terra/Sol/Astra pool and one bounded upgrade for this exact scope" };
     const first = await f.entry({ specId: "1", modelRouting: { policy } });
     assert.equal(first.status.run.state, "SUCCEEDED", JSON.stringify(first.status));
+    assert.deepEqual(first.workflowRuntime.packageVersion, f.retained.version);
+    assert.equal(first.workflowRuntime.packageRoot, f.retained.root);
+    assert.match(first.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy);
     await f.entry({ specId: "1" });
     assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy, "terminal re-entry preserves membership without repeating the input");
@@ -188,6 +194,8 @@ test("explicit completed Spec re-entry preserves the original Run and Grant acro
       specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash,
       authorization: "New model policy requested after this legacy Run already existed" } } });
     assert.equal(again.status.run.state, "SUCCEEDED", JSON.stringify(again.status));
+    assert.deepEqual(again.workflowRuntime.packageVersion, current.version);
+    assert.equal(again.workflowRuntime.packageRoot, current.root);
     assert.equal(again.status.run.runId, runIdentity.runId);
     const events = f.store.readEvents(runIdentity.runId);
     assert.deepEqual(events.slice(0, prefix.length), prefix);
@@ -203,10 +211,12 @@ test("explicit completed Spec re-entry preserves the original Run and Grant acro
     try {
       const fallback = await f.entry({ specId: "I_1" });
       assert.equal(fallback.status.run.state, "SUCCEEDED");
+      assert.deepEqual(fallback.workflowRuntime.packageVersion, f.retained.version);
       assert.deepEqual(f.store.readEvents(runIdentity.runId).at(-1).workflowVersion, f.retained.version, "returning to the verified retained runtime is observed too");
     } finally { writeFileSync(manifestPath, manifestBytes); }
     const restored = await f.entry({ specId: "1" });
     assert.equal(restored.status.run.state, "SUCCEEDED");
+    assert.deepEqual(restored.workflowRuntime.packageVersion, current.version);
     assert.deepEqual(f.store.readEvents(runIdentity.runId).filter(({ type }) => type === "runtime.observed").map(({ workflowVersion }) => workflowVersion),
       [current.version, f.retained.version, current.version]);
     assert.equal(f.store.listRunIds().length, 1);
