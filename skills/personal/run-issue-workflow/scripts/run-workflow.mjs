@@ -69,8 +69,8 @@ export function createWorkflowRuntime({
             rebuildStatus,
             now,
           });
-          const submitControl = async (command) => {
-            const result = await applyControl(command);
+          const submitControl = async (command, controlIdentity) => {
+            const result = await applyControl(command, controlIdentity);
             if (result.changed) {
               for (const waiter of waiters.splice(0)) {
                 if (result.revision > waiter.afterRevision) waiter.resolve();
@@ -82,6 +82,10 @@ export function createWorkflowRuntime({
           const textControl = controls
             ? await controls.connect({
               readStatus,
+              readControl: async revision => {
+                const status = await readStatus();
+                return store.readEvents(status.run.runId).find(event => event.type === "control.revised" && event.revision === revision) ?? null;
+              },
               submitControl,
               onDisconnect(error) {
                 controlFailure = error;

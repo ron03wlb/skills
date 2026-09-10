@@ -47,6 +47,42 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     idleTimer.unref?.();
   };
   const emit = (value) => output.write(`workflow-host ${JSON.stringify(value)}\n`);
+  const selectControl = runId => runId ? controls.get(runId) : controls.size === 1 ? [...controls.values()][0] : null;
+  const controlResult = async ({ id, runId, command, revision, inspect = false }) => {
+    const control = selectControl(runId);
+    if (!control) throw new Error("Select one active Run ID for control");
+    if (id !== undefined && (typeof id !== "string" || !id)
+      || revision !== undefined && (!Number.isInteger(revision) || revision < 1)) throw new Error("Malformed control identity");
+    if (revision === undefined) {
+      if (inspect) throw new Error("Control inspection requires its original revision");
+      return control.submitControl(command);
+    }
+    const status = await control.readStatus();
+    const currentRevision = status?.run?.controlRevision;
+    if (!Number.isInteger(currentRevision) || currentRevision < 0) throw new Error("Current Run control revision is unavailable");
+    const recorded = typeof control.readControl === "function" ? await control.readControl(revision) : null;
+    if (recorded) {
+      if (recorded.revision !== revision || recorded.command !== command
+        || id !== undefined && recorded.requestId !== id) {
+        return { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status };
+      }
+      if (!inspect && currentRevision > revision) {
+        return { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status };
+      }
+      return { accepted: true, changed: true, revision, reconciled: true, status };
+    }
+    if (inspect) {
+      return currentRevision >= revision
+        ? { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status }
+        : { accepted: false, changed: false, revision: currentRevision, reason: "control_outcome_unresolved", status };
+    }
+    if (currentRevision + 1 !== revision) {
+      return { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status };
+    }
+    const result = await control.submitControl(command, { id, revision });
+    if (result?.changed && result.revision !== revision) throw new Error("Applied control revision differs from its original identity");
+    return result;
+  };
   const close = (reason = "owner-close") => {
     if (closed) return;
     closed = true;
@@ -99,6 +135,16 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
         }
         return;
       }
+      if (message.inspectControl !== undefined) {
+        const value = message.inspectControl;
+        if (!value || typeof value.command !== "string" || !["PAUSE", "RESUME", "STOP", "REFRESH"].includes(value.command)) {
+          throw new Error("Malformed control inspection");
+        }
+        const result = await controlResult({ id: value.id, runId: value.runId, command: value.command,
+          revision: value.revision, inspect: true });
+        emit({ type: "control-result", id: value.id, runId: value.runId, command: value.command, revision: value.revision, result });
+        return;
+      }
       if (message.responseChunk !== undefined) {
         const { id, index, count, length, data } = message.responseChunk ?? {};
         if (typeof id !== "string" || !pending.has(id) && !accepted.has(id)
@@ -118,12 +164,13 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
         fragments.delete(id);
       }
       if (typeof message.control === "string") {
-        const control = message.runId ? controls.get(message.runId) : controls.size === 1 ? [...controls.values()][0] : null;
-        if (!control) throw new Error("Select one active Run ID for control");
+        const selected = selectControl(message.runId);
+        if (!selected) throw new Error("Select one active Run ID for control");
         const result = message.control === "REFRESH"
-          ? { accepted: true, changed: false, status: await control.readStatus() }
-          : await control.submitControl(message.control);
-        emit({ type: "control-result", runId: message.runId, command: message.control, result });
+          ? { accepted: true, changed: false, status: await selected.readStatus() }
+          : await controlResult({ id: message.id, runId: message.runId, command: message.control, revision: message.revision });
+        emit({ type: "control-result", ...(message.id === undefined ? {} : { id: message.id }), runId: message.runId,
+          command: message.control, ...(message.revision === undefined ? {} : { revision: message.revision }), result });
         return;
       }
       const request = pending.get(message.id);
@@ -149,13 +196,22 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     }
   });
   return {
-    async call(name, args) {
+    async call(name, args, owner) {
       if (!CODEX_HOST_TOOLS.includes(name)) throw new Error(`Unsupported desktop tool: ${name}`);
       if (closed) throw new Error("CODEX_HOST_DISCONNECTED");
+      if (owner !== undefined && (owner === null || typeof owner !== "object" || Array.isArray(owner)
+        || Object.entries(owner).some(([key, value]) => !["kind", "runId", "issueId", "threadId", "requestKind", "receiptIdentity"].includes(key)
+          || typeof value !== "string" || !value)
+        || !["task-create", "task-message", "task-fork"].includes(owner.kind)
+        || !["runId", "issueId", "receiptIdentity"].every(key => typeof owner[key] === "string" && owner[key])
+        || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery"].includes(owner.requestKind)
+          || typeof owner.threadId !== "string" || !owner.threadId)
+        || owner.kind === "task-fork" && (typeof owner.threadId !== "string" || !owner.threadId)
+        || !/^sha256:[a-f0-9]{64}$/u.test(owner.receiptIdentity))) throw new Error("Malformed native request owner reference");
       toolCalls += 1;
       const id = randomUUID();
       return new Promise((resolve, reject) => {
-        const message = { type: "tool", id, name, arguments: args };
+        const message = { type: "tool", id, name, arguments: args, ...(owner === undefined ? {} : { owner }) };
         pending.set(id, { resolve, reject, message });
         emit(message);
       });

@@ -46,7 +46,7 @@ const eventFields = new Map([
   ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity", "priorRepairWaves"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
   ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion", "modelPolicy"])],
-  ["control.revised", new Set(["type", "at", "revision", "command"])],
+  ["control.revised", new Set(["type", "at", "revision", "command", "requestId"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
   ["retry.recorded", new Set([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
@@ -221,6 +221,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
     case "control.revised":
       requirePositiveInteger(event.revision, "control revision");
       if (!controlCommands.has(event.command)) throw new TypeError("Unsupported control command");
+      if (event.requestId !== undefined) requireText(event.requestId, "control requestId");
       break;
     case "dispatch.recorded":
       requireText(event.issueId, "dispatch issueId");
@@ -379,6 +380,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     }
     if (previousControl?.command === event.command) {
       throw new TypeError(`Repeated ${event.command} control is idempotent and must not create a revision`);
+    }
+    if (event.requestId !== undefined && events.some(item => item.type === "control.revised" && item.requestId === event.requestId)) {
+      throw new TypeError("Control request identity already belongs to another revision");
     }
   }
   if (event.type === "dispatch.recorded") {

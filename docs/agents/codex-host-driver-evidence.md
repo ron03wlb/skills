@@ -59,3 +59,17 @@ node scripts/measure-codex-host-observation.mjs
 ```
 
 On Windows x64 with Node v24.14.0, the repaired-candidate measurement workload used 32 checkpoint requests, 32 settled bridge requests, nine task references and three event waits. The checkpoint was 5,495 bytes; 1,000 serializations averaged 0.0144 ms with a 0.0175 ms p95. Three actual calls through the production PowerShell atomic checkpoint writer averaged 1,009.04 ms and had a 1,025.96 ms maximum. The task adapter's largest batch was eight, rotated to the ninth task, reused cursors, made three native wait calls returning 2,289 serialized characters and made zero full-history reads. All 32 settled bridge requests retained zero payload bytes. The measured heap delta was 1,570,088 bytes and actual elapsed time was 3,061.60 ms. This is a reproducible synthetic source measurement, not a production workload guarantee. The deterministic tests cover the long fallback windows with a virtual clock; no real Windows long soak was performed. Model round trips and token counts were unavailable from the host and are not estimated.
+
+## Issue 86 accepted-outcome reconciliation evidence
+
+Issue 86 extends durable ownership from creation and close messages to ordinary retry, repair, and recovery continuations. The Run/task receipt stores only the message kind, exact allowlisted operation-marker fields, prompt digest, acceptance source, and task identity. It stores no raw prompt. A reserved message is written before the native call; exact native response or task history records acceptance. Restart, omitted native history, a lost acknowledgement, a different pending intent, or a non-allowlisted receipt field cannot authorize another send. Existing close-receipt records remain unchanged.
+
+Mutation requests now carry allowlisted Run, Issue, task, operation-kind, and receipt-owner references through the bridge and payload-free driver checkpoint. Task creation and replacement/fork paths retain the same boundary. The control file carries the original request ID and expected next Run revision. `control.revised` records that request ID, and a restored sending control performs only exact journal inspection. Matching ID, command, Run, and revision settles the original result; an absent event remains unresolved and a conflicting or newer revision is stale. The three observations use the shared 5/15/30-second budget and never resubmit the control mutation.
+
+Deterministic fault-injection tests simulate accepted-before-recording, response loss, omitted history, adapter restart, conflicting receipt content, restored control submission, matching journal read-back, and stale control replay. They also assert that raw prompts, native results, bridge credentials, and malformed payload details do not enter durable checkpoints or receipts. These fixtures do not claim provider exactly-once delivery or a live native interruption.
+
+On the actual Windows x64 host with Node v24.14.0, the source-bound focused command below passed 159/159 tests in 30.972 seconds. This observation proves execution of the deterministic source suite on Windows; it is not a live Codex task/control interruption, multi-hour soak, installed-package Run, tracker mutation, or production latency measurement.
+
+```text
+node --test tests/ron-workflow/codex-workflow-tasks.test.mjs tests/ron-workflow/codex-host-driver.test.mjs tests/ron-workflow/codex-host-bridge.test.mjs tests/ron-workflow/run-issue-workflow-panel.test.mjs tests/ron-workflow/run-issue-workflow-core.test.mjs
+```

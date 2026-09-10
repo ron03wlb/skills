@@ -76,6 +76,28 @@ test("panel controls append one revisioned event and make duplicates read-only",
   assert.equal(appended.length, 1);
 });
 
+test("text controls bind their original request ID to the durable revision", async () => {
+  let current = status();
+  const appended = [];
+  const submit = createRunPanelControl({ readStatus: () => current, appendEvent: event => appended.push(event),
+    rebuildStatus: () => { current = status({ state: "PAUSING", controlRevision: 1, controlCommand: "PAUSE" }); return current; },
+    now: () => "2026-09-10T00:00:00.000Z" });
+  await submit("PAUSE", { id: "control-1", revision: 1 });
+  assert.equal(appended[0].requestId, "control-1");
+});
+
+test("text control revision is checked inside the serialized journal owner", async () => {
+  let current = status({ state: "PAUSING", controlRevision: 1, controlCommand: "PAUSE" });
+  const appended = [];
+  const submit = createRunPanelControl({ readStatus: () => current, appendEvent: event => appended.push(event),
+    rebuildStatus: () => { throw new Error("stale control must not rebuild state"); },
+    now: () => "2026-09-10T00:00:00.000Z" });
+  const result = await submit("STOP", { id: "control-before-pause", revision: 1 });
+  assert.equal(result.reason, "stale_control_revision");
+  assert.equal(result.revision, 1);
+  assert.deepEqual(appended, []);
+});
+
 test("panel controls serialize concurrent duplicates and reject out-of-state commands", async () => {
   let current = status();
   const appended = [];

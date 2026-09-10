@@ -103,6 +103,34 @@ test("batch text controls require an exact Run and echo its identity", async () 
   } finally { bridge.close(); }
 });
 
+test("control reconciliation reads the exact journal revision and rejects stale replay", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  let submissions = 0;
+  const revisions = new Map([[1, { type: "control.revised", revision: 1, command: "PAUSE", requestId: "control-1" }],
+    [2, { type: "control.revised", revision: 2, command: "RESUME" }]]);
+  try {
+    await bridge.controls.connect({
+      readStatus: async () => ({ run: { runId: "run", state: "RUNNING", controlRevision: 2, controlCommand: "RESUME" } }),
+      readControl: async revision => revisions.get(revision) ?? null,
+      submitControl: async () => { submissions += 1; throw new Error("stale control must not be submitted"); },
+    });
+    input.write(`${JSON.stringify({ inspectControl: { id: "control-1", runId: "run", command: "PAUSE", revision: 1 } })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(messages.at(-1).type, "control-result");
+    assert.equal(messages.at(-1).result.reconciled, true);
+    assert.equal(messages.at(-1).result.revision, 1);
+    input.write(`${JSON.stringify({ id: "control-1", control: "PAUSE", runId: "run", revision: 1 })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(messages.at(-1).result.reason, "stale_control_revision", "an old mutation frame is not accepted as read-only inspection");
+    input.write(`${JSON.stringify({ id: "control-2", control: "STOP", runId: "run", revision: 1 })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(messages.at(-1).result.reason, "stale_control_revision");
+    assert.equal(submissions, 0);
+  } finally { bridge.close(); }
+});
+
 test("request reconciliation excludes unrelated accepted history", async () => {
   const input = new PassThrough(), output = new PassThrough(), messages = [];
   output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));

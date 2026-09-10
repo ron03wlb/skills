@@ -354,6 +354,64 @@ test("a lost task creation response reuses its exact discovered lane without a s
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test("accepted execution messages survive restart and omitted native history without retaining their raw prompt", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-message-receipt-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const request = { runId: "run", issueId: "I_1", candidate: "a".repeat(40), baseline: "b".repeat(40), wave: 4,
+    requestIdentity: `sha256:${"c".repeat(64)}` };
+  const prompt = `Use $execute-issue to repair Issue I_1. secret-native-detail. Repair request: ${JSON.stringify(request)}`;
+  let sends = 0;
+  const options = { store, project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call(name, args) {
+      if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [{ status: "completed", items: [] }] };
+      if (name.endsWith("send_message_to_thread")) { sends += 1; return { threadId: ref.threadId, hostId: ref.hostId }; }
+      throw new Error(`Unexpected ${name}`);
+    } } };
+  try {
+    await createCodexWorkflowTasks(options).message(ref, prompt);
+    const resumed = createCodexWorkflowTasks(options);
+    assert.deepEqual((await resumed.read(ref, { runId: "run" })).repairRequest, { state: "ACCEPTED", ...request });
+    await resumed.message(ref, prompt);
+    assert.equal(sends, 1, "an accepted owner receipt suppresses resend when native history omits the prompt");
+    const receipt = readdirSync(join(root, ".git", "matt-workflow-control", "runs", "run"))
+      .find(name => name.startsWith("task-messages-"));
+    const receiptPath = join(root, ".git", "matt-workflow-control", "runs", "run", receipt);
+    const contents = readFileSync(receiptPath, "utf8");
+    assert.equal(contents.includes("secret-native-detail"), false, "general receipts retain allowlisted identity rather than raw prompts");
+    assert.match(contents, /"kind":"repair"/u);
+    const records = contents.trimEnd().split("\n").map(JSON.parse);
+    appendFileSync(receiptPath, `${JSON.stringify({ ...records[1], sequence: 3,
+      value: { ...records[1].value, prompt: "injected-native-payload" } })}\n`);
+    await assert.rejects(resumed.read(ref, { runId: "run" }), /receipt identity differs/iu,
+      "a receipt with non-allowlisted durable payload fields fails closed");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unresolved reserved execution message never resends or changes owner after a lost acknowledgement", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-message-unknown-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const request = { runId: "run", issueId: "I_1", attempt: 2 };
+  const prompt = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify(request)}`;
+  let sends = 0;
+  const options = { store, project: {}, packageRoot: "/installed", issueNumber: async () => 1, sleep: async () => {},
+    host: { async call(name) {
+      if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [{ status: "completed", items: [] }] };
+      if (name.endsWith("send_message_to_thread")) { sends += 1; throw new Error("response lost"); }
+      throw new Error(`Unexpected ${name}`);
+    } } };
+  try {
+    await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome is unresolved/iu);
+    await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome is unresolved/iu);
+    assert.equal(sends, 1, "UNKNOWN native acceptance never authorizes a second mutation");
+    assert.deepEqual((await createCodexWorkflowTasks(options).read(ref, { runId: "run" })).retryRequest, { state: "RESERVED", ...request });
+    const changed = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ ...request, attempt: 3 })}`;
+    await assert.rejects(createCodexWorkflowTasks(options).message(ref, changed), /different unresolved request/iu);
+    assert.equal(sends, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 
 test("exact local creation hints recover without reading unrelated coordinator history", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-exact-task-"));

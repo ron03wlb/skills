@@ -67,8 +67,59 @@
     if (sessionId == null) throw new Error("An original host session ID is required");
     return { schema: "codex-host-driver:v1", sessionId, active: exit_code === undefined,
       ...(exit_code === undefined ? {} : { exitCode: exit_code }), buffer: output,
-      requests: [], settledRequestCount: 0, frames: [], diagnostics: [], controls: [], driver: null, pendingIo: null,
+      requests: [], settledRequestCount: 0, frames: [], diagnostics: [], controls: [], runStatus: null, driver: null, pendingIo: null,
       fault: null, faults: [] };
+  }
+
+  const safeOwner = owner => {
+    if (!record(owner) || !["task-create", "task-message", "task-fork"].includes(owner.kind)
+      || Object.entries(owner).some(([key, value]) => !["kind", "runId", "issueId", "threadId", "requestKind", "receiptIdentity"].includes(key)
+        || typeof value !== "string" || !value)
+      || !["runId", "issueId", "receiptIdentity"].every(key => typeof owner[key] === "string" && owner[key])
+      || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery"].includes(owner.requestKind)
+        || typeof owner.threadId !== "string" || !owner.threadId)
+      || owner.kind === "task-fork" && (typeof owner.threadId !== "string" || !owner.threadId)
+      || !/^sha256:[a-f0-9]{64}$/u.test(owner.receiptIdentity)
+        && !/^run:[a-zA-Z0-9._-]{1,128}:issue:[a-zA-Z0-9_-]{1,128}:retry:[1-9][0-9]*$/u.test(owner.receiptIdentity)) return null;
+    return copy(owner);
+  };
+  const safeControlResult = result => !record(result) ? null : Object.fromEntries(
+    ["accepted", "changed", "revision", "reconciled", "reason"].filter(key => ["string", "number", "boolean"].includes(typeof result[key]))
+      .map(key => [key, result[key]]),
+  );
+  function ownerForRequest(message) {
+    const supplied = safeOwner(message?.owner);
+    if (supplied) return supplied;
+    if (message?.name === "mcp__codex_app__send_message_to_thread") {
+      const prompt = message.arguments?.prompt;
+      const matched = typeof prompt === "string" && [
+        ["close", /Close request identity: (sha256:[a-f0-9]{64})\. Current close request evidence: (\{[^\n]+\})/u],
+        ["retry", /Retry request: (\{.+\})$/mu],
+        ["repair", /Repair request: (\{.+\})$/mu],
+        ["recovery", /Recovery request: (\{.+\})$/mu],
+      ].map(([kind, pattern]) => [kind, prompt.match(pattern)]).find(([, match]) => match);
+      if (!matched) return null;
+      try {
+        const [requestKind, match] = matched;
+        const request = JSON.parse(match[requestKind === "close" ? 2 : 1]);
+        const receiptIdentity = requestKind === "close" ? match[1]
+          : request.requestIdentity ?? `run:${request.runId}:issue:${request.issueId}:${requestKind}:${request.attempt ?? request.wave ?? "owner"}`;
+        return safeOwner({ kind: "task-message", threadId: message.arguments.threadId, requestKind,
+          runId: request.runIdentity?.runId ?? request.runId, issueId: request.issueId, receiptIdentity });
+      } catch { return null; }
+    }
+    if (message?.name === "mcp__codex_app__create_thread") {
+      const prompt = message.arguments?.prompt;
+      const lane = typeof prompt === "string" ? prompt.match(/^Workflow lane ([a-f0-9]{64})$/mu) : null;
+      const grant = typeof prompt === "string" ? prompt.match(/Run Grant: (\{[^\n]+\})\. Read its grant\.recorded/u) : null;
+      if (!lane || !grant) return null;
+      try {
+        const authority = JSON.parse(grant[1]);
+        return safeOwner({ kind: "task-create", runId: authority.runId, issueId: `lane:${lane[1]}`,
+          receiptIdentity: `sha256:${lane[1]}` });
+      } catch { return null; }
+    }
+    return null;
   }
 
   // Durable receipts carry identity/progress only. Native payloads, panel URLs,
@@ -81,10 +132,16 @@
     return { schema: "codex-host-checkpoint:v1", sessionId: lane.sessionId, active: lane.active,
       exitCode: lane.exitCode, driverId: lane.driver?.id, partialBytes: partialBytes(lane),
       settledRequestCount: lane.settledRequestCount ?? settled.length,
-      requests: retainedRequests.map(({ id, request, state, history, conflict, settled }) => ({ id,
+      requests: retainedRequests.map(({ id, request, owner, state, history, conflict, settled }) => ({ id,
         name: allowed.includes(request.name) ? request.name : "unsupported", state, history: [...history], conflict: Boolean(conflict),
+        ...(owner ? { owner: copy(owner) } : {}),
         ...(settled ? { settled: true } : {}) })),
-      controls: lane.controls.map(({ message, state, sourceId }) => ({ message: { control: message.control, runId: message.runId }, state, sourceId })),
+      controls: lane.controls.map(({ message, state, sourceId, recoveryRounds, nextObservationAt, result }) => ({
+        message: { control: message.control, ...(message.runId === undefined ? {} : { runId: message.runId }),
+          ...(message.id === undefined ? {} : { id: message.id }), ...(message.revision === undefined ? {} : { revision: message.revision }) },
+        state, sourceId, recoveryRounds: recoveryRounds ?? 0,
+        ...(nextObservationAt === undefined ? {} : { nextObservationAt }), ...(result === undefined ? {} : { result: safeControlResult(result) }) })),
+      runStatus: lane.runStatus ? copy(lane.runStatus) : null,
       diagnostics: lane.diagnostics.map(() => ({ reason: "Retained transport diagnostic; raw bytes stay in the original cell" })),
       pendingIo: lane.pendingIo ? { kind: lane.pendingIo.kind, state: lane.pendingIo.state,
         ...(lane.pendingIo.requestId ? { requestId: lane.pendingIo.requestId } : {}) } : null,
@@ -99,6 +156,7 @@
     lane.requests = saved.requests.map(item => ({ ...item, request: { type: "tool", id: item.id, name: item.name }, payloadMissing: true }));
     lane.settledRequestCount = saved.settledRequestCount ?? lane.requests.filter(item => item.settled).length;
     lane.controls = saved.controls;
+    lane.runStatus = saved.runStatus ?? null;
     lane.diagnostics = saved.diagnostics;
     lane.pendingIo = saved.pendingIo;
     lane.fault = saved.fault ?? null;
@@ -134,8 +192,10 @@
       if (result.exit_code !== 0) throw new Error("Host control read failed");
       if (!result.output.trim()) return null;
       const message = JSON.parse(result.output);
-      if (typeof message.id !== "string" || !message.id || !["PAUSE", "RESUME", "STOP", "REFRESH"].includes(message.control)
-        || message.runId !== undefined && typeof message.runId !== "string") throw new Error("Malformed host control; retain its original file");
+      if (Object.keys(message).some(key => !["id", "control", "runId", "revision"].includes(key))
+        || typeof message.id !== "string" || !message.id || !["PAUSE", "RESUME", "STOP", "REFRESH"].includes(message.control)
+        || typeof message.runId !== "string" || !message.runId
+        || !Number.isInteger(message.revision) || message.revision < 1) throw new Error("Malformed host control; retain its original file");
       return message;
     };
   }
@@ -206,7 +266,7 @@
       recoveryRounds,
       recoveryDelaysMs,
       ...(state === "unresolved" ? { nextObservationAt } : {}),
-      receiptRefs: requestId ? [requestId] : [],
+      receiptRefs: requestId ? [requestId, lane.requests.find(item => item.id === requestId)?.owner?.receiptIdentity].filter(Boolean) : [],
     }; };
     const beginRecoveryObservation = async (scope, kind, requestId, flushFault = true) => {
       const identity = `${scope}:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
@@ -305,6 +365,11 @@
     const reportFrame = message => {
       if (message.type === "status") {
         const status = message.status;
+        if (status?.run?.runId && Number.isInteger(status.run.controlRevision)) {
+          lane.runStatus = { runId: status.run.runId, controlRevision: status.run.controlRevision,
+            ...(status.run.controlCommand ? { controlCommand: status.run.controlCommand } : {}) };
+          save();
+        }
         const compact = { type: "status",
           run: status?.run ? { runId: status.run.runId, state: status.run.state, controlRevision: status.run.controlRevision,
             ...(status.run.controlCommand ? { controlCommand: status.run.controlCommand } : {}) } : undefined,
@@ -322,13 +387,14 @@
       const found = lane.requests.find(item => item.id === message.id);
       if (found) {
         if (found.payloadMissing && found.request.name === message.name) {
-          found.request = message; found.payloadMissing = false; save();
+          found.request = message; found.owner ??= ownerForRequest(message); found.payloadMissing = false; save();
         } else if (JSON.stringify(found.request) !== JSON.stringify(message)) {
           found.conflict = true; diagnostic("Conflicting request identity", { raw, id: message.id });
         }
         return found;
       }
-      const request = { id: message.id, request: message, raw, state: "received", history: ["received"] };
+      const owner = ownerForRequest(message);
+      const request = { id: message.id, request: message, ...(owner ? { owner } : {}), raw, state: "received", history: ["received"] };
       lane.requests.push(request); save(); await flush(); checkpoint("received", copy(request));
       return request;
     };
@@ -365,9 +431,18 @@
           } else diagnostic("Unknown original-owner request state", { raw: item.raw });
         } else {
           if (message.type === "control-result") {
-            const control = lane.controls.find(value => value.state === "sending" && value.message.control === message.command
-              && (value.message.runId ?? null) === (message.runId ?? null));
-            if (control) { control.state = "returned"; control.result = message.result; }
+            const control = lane.controls.find(value => value.state === "sending"
+              && (message.id === undefined || value.sourceId === message.id)
+              && value.message.control === message.command && (value.message.runId ?? null) === (message.runId ?? null)
+              && (message.revision === undefined || value.message.revision === message.revision));
+            if (control && message.result?.reason !== "control_outcome_unresolved") {
+              control.state = "returned"; control.result = message.result;
+            }
+            if (message.result?.status?.run?.runId && Number.isInteger(message.result.status.run.controlRevision)) {
+              lane.runStatus = { runId: message.result.status.run.runId,
+                controlRevision: message.result.status.run.controlRevision,
+                ...(message.result.status.run.controlCommand ? { controlCommand: message.result.status.run.controlCommand } : {}) };
+            }
           }
           if (message.type === "result" || message.type === "error") lane.terminal = message;
           save(); reportFrame(message);
@@ -450,12 +525,31 @@
     const heartbeat = async () => {
       const queued = await readControl();
       if (queued && (!queued.id || !lane.controls.some(item => item.sourceId === queued.id))) {
-        const message = typeof queued === "string" ? { control: queued } : { control: queued.control, ...(queued.runId === undefined ? {} : { runId: queued.runId }) };
-        lane.controls.push({ message, state: "queued", sourceId: queued.id }); save(); await flush(); store("workflow.control", null);
+        const revision = queued.revision ?? (queued.id && lane.runStatus?.runId === queued.runId ? lane.runStatus.controlRevision + 1 : undefined);
+        const message = typeof queued === "string" ? { control: queued } : { control: queued.control,
+          ...(queued.runId === undefined ? {} : { runId: queued.runId }), ...(queued.id === undefined ? {} : { id: queued.id }),
+          ...(revision === undefined ? {} : { revision }) };
+        lane.controls.push({ message, state: "queued", sourceId: queued.id, recoveryRounds: 0 }); save(); await flush(); store("workflow.control", null);
       }
       const control = lane.controls.find(value => value.state === "queued");
-      if (control) { control.state = "sending"; save(); await write(control.message, "control"); }
-      else await write({ heartbeat: true }, "heartbeat");
+      if (control) {
+        control.state = "sending";
+        if (control.sourceId && Number.isInteger(control.message.revision)) control.nextObservationAt = Date.now() + 5000;
+        save(); await write(control.message, "control");
+      }
+      else {
+        const unresolved = lane.controls.find(value => value.state === "sending" && value.sourceId && Number.isInteger(value.message.revision)
+          && (value.nextObservationAt ?? 0) <= Date.now() && (value.recoveryRounds ?? 0) < 3);
+        if (unresolved) {
+          const round = unresolved.recoveryRounds ?? 0;
+          unresolved.recoveryRounds = round + 1;
+          if (round < 2) unresolved.nextObservationAt = Date.now() + [15000, 30000][round];
+          else delete unresolved.nextObservationAt;
+          save(); await flush();
+          await write({ inspectControl: { id: unresolved.sourceId, runId: unresolved.message.runId,
+            command: unresolved.message.control, revision: unresolved.message.revision } }, "control-inspection");
+        } else await write({ heartbeat: true }, "heartbeat");
+      }
     };
     const callNative = async request => {
       const message = request.request;
@@ -598,11 +692,12 @@
         claim();
         const request = lane.requests.find(item => item.id === id);
         if (!ownerEvidence?.observation || ownerEvidence.requestId !== id || !["dispatched", "returned"].includes(request?.state)
+          || request?.owner && ownerEvidence.receiptIdentity !== request.owner.receiptIdentity
           || native.has(id) || (result === undefined) === (error === undefined)) throw new Error("Exact original request owner evidence and outcome required");
         request.ownerEvidence = copy(ownerEvidence);
         request.response = result === undefined ? { id, error } : { id, result }; await transition(request, "returned");
       },
     };
   }
-  return Object.freeze({ allowed, parseTransport, createLane, createDriver, checkpointState, restoreCheckpoint, createCheckpointWriter, createControlReader });
+  return Object.freeze({ allowed, parseTransport, createLane, createDriver, checkpointState, restoreCheckpoint, createCheckpointWriter, createControlReader, ownerForRequest });
 })()

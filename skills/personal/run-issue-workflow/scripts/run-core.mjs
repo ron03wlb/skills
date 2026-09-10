@@ -1413,7 +1413,7 @@ export function reduceRun(input) {
   };
 }
 
-export function planControl(status, command, at) {
+export function planControl(status, command, at, requestId) {
   const supported = new Set(CONTROL_COMMANDS);
   if (!supported.has(command)) {
     return {
@@ -1476,7 +1476,7 @@ export function planControl(status, command, at) {
   return {
     accepted: true,
     changed: true,
-    event: { type: "control.revised", at, revision, command },
+    event: { type: "control.revised", at, revision, command, ...(requestId === undefined ? {} : { requestId }) },
     revision,
   };
 }

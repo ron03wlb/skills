@@ -17,6 +17,55 @@ test("the same dependency-free source loads without Node globals", () => {
   assert.equal(typeof api.parseTransport, "function");
 });
 
+test("workflow mutation requests expose only allowlisted durable owner references", () => {
+  const retry = { runId: "run", issueId: "I_1", attempt: 2 };
+  const message = { type: "tool", id: "request-1", name: "mcp__codex_app__send_message_to_thread",
+    arguments: { threadId: "worker", prompt: `private instructions Retry request: ${JSON.stringify(retry)}` } };
+  const owner = plain(api.ownerForRequest(message));
+  assert.deepEqual(owner, { kind: "task-message", threadId: "worker", requestKind: "retry", runId: "run", issueId: "I_1",
+    receiptIdentity: owner.receiptIdentity });
+  assert.equal(owner.receiptIdentity, "run:run:issue:I_1:retry:2");
+  assert.equal(JSON.stringify(owner).includes("private instructions"), false);
+  const lane = api.createLane({ sessionId: 42 });
+  lane.requests.push({ id: message.id, request: message, owner, state: "dispatched", history: ["received", "dispatched"] });
+  const checkpoint = plain(api.checkpointState(lane));
+  assert.deepEqual(checkpoint.requests[0].owner, owner);
+  assert.equal(JSON.stringify(checkpoint).includes("private instructions"), false);
+});
+
+test("a restored sending control reconciles its original revision instead of replaying the mutation", async () => {
+  const status = { type: "status", status: { run: { runId: "run", state: "RUNNING", controlRevision: 0 } } };
+  const firstValues = new Map([["workflow.host", api.createLane({ sessionId: 42, output: frame(status) })],
+    ["workflow.control", { id: "control-1", control: "PAUSE", runId: "run", revision: 1 }]]);
+  let durable;
+  const firstWrites = [];
+  const first = api.createDriver({ driverId: "first-cell", load: key => plain(firstValues.get(key) ?? null),
+    store: (key, value) => firstValues.set(key, plain(value)), report: () => {}, persist: async value => { durable = plain(value); },
+    tools: { async write_stdin(args) { const message = args.chars ? JSON.parse(args.chars) : null; firstWrites.push(message); return { output: "" }; } },
+    setTimeout: fn => setTimeout(fn, 1_000_000), clearTimeout, heartbeatMs: 1_000_000, tickMs: 1 });
+  await first.tick();
+  await first.tick();
+  assert.equal(firstWrites.filter(message => message?.control === "PAUSE").length, 1);
+  assert.equal(durable.controls[0].state, "sending");
+  durable.controls[0].nextObservationAt = 0;
+
+  const restored = api.restoreCheckpoint(durable);
+  const secondValues = new Map([["workflow.host", restored]]), secondWrites = [];
+  const second = api.createDriver({ driverId: "second-cell", load: key => plain(secondValues.get(key) ?? null),
+    store: (key, value) => secondValues.set(key, plain(value)), report: () => {}, persist: async () => {},
+    tools: { async write_stdin(args) {
+      const message = args.chars ? JSON.parse(args.chars) : null; secondWrites.push(message);
+      return { output: message?.inspectControl ? frame({ type: "control-result", id: "control-1", runId: "run", command: "PAUSE", revision: 1,
+        result: { accepted: true, changed: true, revision: 1, reconciled: true, status: { run: { runId: "run", state: "PAUSING", controlRevision: 1, controlCommand: "PAUSE" } } } }) : "" };
+    } }, setTimeout: fn => setTimeout(fn, 1_000_000), clearTimeout, heartbeatMs: 1_000_000, tickMs: 1 });
+  second.resume({ previousDriverId: "first-cell", stoppedEvidence: "cell stopped" });
+  await second.tick();
+  await second.tick();
+  assert.equal(secondWrites.some(message => message?.control === "PAUSE"), false, "restored controls use read-only inspection only");
+  assert.equal(secondWrites.filter(message => message?.inspectControl).length, 1);
+  assert.equal(secondValues.get("workflow.host").controls[0].state, "returned");
+});
+
 for (const ending of ["\n", "\r\n"]) {
   test(`fragmentation, payload and observed column-80 repeated-character redraw survive ${JSON.stringify(ending)}`, () => {
     const message = { ...request, arguments: { text: "same  spaces 漢字 \\n \\u001b[31m", limit: 100 } };
@@ -321,6 +370,8 @@ test("durable checkpoints exclude bridge credentials and all native payloads", (
     arguments: { target: { url: `http://localhost/?token=${secret}` } } }, state: "returned", history: ["received", "dispatched", "returned"],
     response: { result: { content: [{ text: secret }] } }, raw: secret, ownerEvidence: { observation: secret } });
   lane.diagnostics.push({ raw: secret, reason: secret });
+  lane.controls.push({ message: { id: "control-1", control: "PAUSE", runId: "run", revision: 1 }, sourceId: "control-1",
+    state: "returned", result: { accepted: true, changed: true, revision: 1, status: { secret } } });
   lane.pendingIo = { kind: "response", state: "sending", message: { result: secret }, error: secret };
   lane.terminal = { type: "error", message: secret };
   const serialized = JSON.stringify(api.checkpointState(lane));
@@ -355,7 +406,7 @@ test("fresh file controls retain exact Run identity and do not replay the same I
   await driver.tick();
   queued = { id: "control-1", control: "PAUSE", runId: "exact-run" };
   await driver.tick(); await driver.tick();
-  assert.deepEqual(h.writes.filter(item => item?.control), [{ control: "PAUSE", runId: "exact-run" }]);
+  assert.deepEqual(h.writes.filter(item => item?.control), [{ control: "PAUSE", runId: "exact-run", id: "control-1" }]);
   h.values.set("workflow.host", api.restoreCheckpoint(h.durable()));
   const resumed = api.createDriver({ ...h.dependencies, driverId: "new-cell", readControl: async () => queued });
   resumed.resume({ previousDriverId: "first-cell", stoppedEvidence: "cell ended" });

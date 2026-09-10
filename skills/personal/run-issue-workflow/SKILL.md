@@ -39,7 +39,7 @@ The entry selects a trusted immutable package snapshot and journals its version 
 The happy path is ordered:
 
 1. Reconcile every tracker, Git/worktree, completion, task, journal, and writer source.
-2. Dispatch dependency-ready Issues without exceeding `max_parallel`; every Issue has one lane. `execute-issue` owns its dedicated Issue worktree: the Codex task creates it, then execution verifies and adopts that exact worktree. A recorded creation intent prevents duplicate tasks after a lost response. A planning-prepared prerequisite lane is verified and adopted as that same task/worktree, then receives its first execution message under the Run Grant.
+2. Dispatch dependency-ready Issues without exceeding `max_parallel`; every Issue has one lane. `execute-issue` owns its dedicated Issue worktree: the Codex task creates it, then execution verifies and adopts that exact worktree. A recorded creation intent prevents duplicate tasks after a lost response. Retry, repair, and recovery continuations reserve their allowlisted Run/Issue/message identity before native delivery; accepted or unresolved original owners survive restart and omitted task history without another send. A planning-prepared prerequisite lane is verified and adopted as that same task/worktree, then receives its first execution message under the Run Grant.
 3. Treat valid `implementation_complete` as authority to serialize `close-issue`, not as node success.
 4. Diagnose concrete technical failures through an isolated task. Transfer exclusive Issue-worktree ownership only after the previous writer settles, retain the original operation and cumulative ten-wave material repair budget, and require verified replacement completion lineage before renewed close. Governing-workflow defects use a separate scoped maintenance worktree and exact installation owner; requirement conflicts return to planning.
 5. Release dependants only after the candidate is reachable from the Issue target branch, the exact worktree is absent, and the Issue is closed.
@@ -47,7 +47,7 @@ The happy path is ordered:
 
 Closeout and its waits consume no execution slot. The coordinator only observes closeout availability and sends an evidence-bound request; the real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.
 
-Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur only through the lifecycle reference and runtime reducers. If the panel cannot open, the same writer continues with text status and Pause/Stop through the host driver. A disconnected coordinator stops dispatching; app closure never means background progress. Use [OPERATOR.md](OPERATOR.md) for invocation, intervention, recovery, and inspection. Examples are display fixtures, never authority.
+Pause, Resume, Stop, cleanup, retry, task adoption, and writer actions occur only through the lifecycle reference and runtime reducers. Pause, Resume, and Stop carry one durable control request ID and expected next Run revision; recovery inspects that exact journaled control and never replays an uncertain mutation. If the panel cannot open, the same writer continues with text status and Pause/Stop through the host driver. A disconnected coordinator stops dispatching; app closure never means background progress. Use [OPERATOR.md](OPERATOR.md) for invocation, intervention, recovery, and inspection. Examples are display fixtures, never authority.
 
 ## 4. Recover or stop
 

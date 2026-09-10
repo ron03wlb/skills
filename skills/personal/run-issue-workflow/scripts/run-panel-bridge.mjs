@@ -97,10 +97,19 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
   requireFunction(now, "now");
 
   let tail = Promise.resolve();
-  return (command) => {
+  return (command, controlIdentity = {}) => {
     const pending = tail.then(async () => {
       const current = requireStatus(await readStatus());
-      const decision = planControl(current, command, now());
+      const hasIdentity = controlIdentity.id !== undefined || controlIdentity.revision !== undefined;
+      if (hasIdentity && (typeof controlIdentity.id !== "string" || !controlIdentity.id
+        || !Number.isInteger(controlIdentity.revision) || controlIdentity.revision < 1)) {
+        throw new TypeError("Text control identity requires its request ID and expected revision");
+      }
+      if (hasIdentity && controlIdentity.revision !== current.run.controlRevision + 1) {
+        return { accepted: false, changed: false, revision: current.run.controlRevision,
+          reason: "stale_control_revision", status: current };
+      }
+      const decision = planControl(current, command, now(), controlIdentity.id);
       let projected = current;
       if (decision.changed) {
         await appendEvent(decision.event);
