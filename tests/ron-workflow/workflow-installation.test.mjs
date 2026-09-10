@@ -44,7 +44,7 @@ test("Run renewal preserves its journaled workflow version across coordinator re
 
 test("managed entry evidence binds reviewed candidate, immutable manifest and failed-stage replay", () => {
   const root = mkdtempSync(join(tmpdir(), "workflow-effective-evidence-"));
-  const sourceRepository = join(root, "source"), cacheDirectory = join(root, "packages");
+  const sourceRepository = join(root, "source"), cacheDirectory = join(root, ".codex", "workflow-packages");
   const codexEntry = join(root, ".codex", "skills", "run-issue-workflow");
   const agentsEntry = join(root, ".agents", "skills", "run-issue-workflow");
   try {
@@ -75,6 +75,8 @@ test("managed entry evidence binds reviewed candidate, immutable manifest and fa
     assert.deepEqual(evidence.entries.map(item => item.path), [codexEntry, agentsEntry]);
     assert.ok(evidence.entries.every(item => item.packageVersionId === first.version.id));
     assert.deepEqual(evidence.failedStageResults, failedStageResults);
+    assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry],
+      expectedSourceCommit: candidate, failedStageResults }), /complete managed workflow entry set/u);
     assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
       expectedSourceCommit: candidate, failedStageResults: [{ ...failedStageResults[0], packageVersionId: "f".repeat(64) }] }), /failed-stage result/u);
     fs.renameSync(agentsEntry, `${agentsEntry}.preserved`);

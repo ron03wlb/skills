@@ -85,10 +85,13 @@ export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirector
   if (selected.version.sourceCommit !== expectedSourceCommit) {
     throw new Error("Current workflow package candidate differs from the reviewed source commit");
   }
-  if (!Array.isArray(skillDirectories) || skillDirectories.length === 0) throw new TypeError("At least one managed workflow entry is required");
-  const paths = skillDirectories.map(path => resolve(path));
-  if (new Set(paths.map(path => process.platform === "win32" ? path.toLowerCase() : path)).size !== paths.length) {
-    throw new TypeError("Managed workflow entries must be unique");
+  const codexHome = dirname(resolve(cacheDirectory));
+  const paths = [join(codexHome, "skills", "run-issue-workflow"),
+    join(dirname(codexHome), ".agents", "skills", "run-issue-workflow")];
+  const pathKey = path => process.platform === "win32" ? resolve(path).toLowerCase() : resolve(path);
+  const supplied = Array.isArray(skillDirectories) ? new Set(skillDirectories.map(pathKey)) : new Set();
+  if (supplied.size !== paths.length || paths.some(path => !supplied.has(pathKey(path)))) {
+    throw new TypeError("Evidence requires the complete managed workflow entry set derived from the trusted cache location");
   }
   const expectedTarget = join(selected.root, skillPath);
   const entries = paths.map(path => {
