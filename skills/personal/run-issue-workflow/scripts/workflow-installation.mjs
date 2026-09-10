@@ -78,6 +78,7 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
 }
 
 const failedStageFields = ["command", "failureSignature", "packageVersionId", "result", "stage"];
+const requiredFailedStages = ["interrupted-helper-continuation", "settled-host-cleanup-routing", "stable-close-identity"];
 
 export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories, expectedSourceCommit, failedStageResults }) {
   const selected = selectWorkflowVersion({ cacheDirectory });
@@ -102,8 +103,10 @@ export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirector
     }
     return { path, target, packageVersionId: selected.version.id };
   });
-  if (!Array.isArray(failedStageResults) || failedStageResults.length === 0) {
-    throw new TypeError("At least one original failed-stage result is required");
+  const stages = Array.isArray(failedStageResults) ? new Set(failedStageResults.map(result => result?.stage)) : new Set();
+  if (failedStageResults?.length !== requiredFailedStages.length || stages.size !== requiredFailedStages.length
+    || requiredFailedStages.some(stage => !stages.has(stage))) {
+    throw new TypeError("Evidence requires the complete original failed-stage set");
   }
   const seen = new Set();
   for (const result of failedStageResults) {

@@ -78,7 +78,10 @@ test("managed entry evidence binds reviewed candidate, immutable manifest and fa
     assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry],
       expectedSourceCommit: candidate, failedStageResults }), /complete managed workflow entry set/u);
     assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
-      expectedSourceCommit: candidate, failedStageResults: [{ ...failedStageResults[0], packageVersionId: "f".repeat(64) }] }), /failed-stage result/u);
+      expectedSourceCommit: candidate, failedStageResults: failedStageResults.slice(0, 1) }), /complete original failed-stage set/u);
+    assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry, agentsEntry],
+      expectedSourceCommit: candidate,
+      failedStageResults: [{ ...failedStageResults[0], packageVersionId: "f".repeat(64) }, ...failedStageResults.slice(1)] }), /failed-stage result/u);
     fs.renameSync(agentsEntry, `${agentsEntry}.preserved`);
     mkdirSync(join(root, "foreign")); fs.symlinkSync(join(root, "foreign"), agentsEntry, process.platform === "win32" ? "junction" : "dir");
     try {
