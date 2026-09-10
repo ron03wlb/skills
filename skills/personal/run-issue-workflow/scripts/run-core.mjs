@@ -1070,6 +1070,9 @@ export function reduceRun(input) {
   const upgrades = nodes.filter(node => node.state === "MODEL_YIELDED").slice(0, slots).map(({ issueId }) => ({ type: "upgrade_issue", issueId }));
   normalActions.push(...upgrades);
   const latestControl = input.journal.findLast(({ type }) => type === "control.revised");
+  const latestControlRequest = input.journal.findLast(event => (
+    ["control.revised", "control.reconciled"].includes(event.type) && event.requestId !== undefined
+  ));
   const controlRevision = latestControl?.revision ?? 0;
   const repositoryCloseLeaseState = input.run.repositoryCloseLeaseState ?? "ABSENT";
   const repositoryCloseLeaseOperationId = input.run.repositoryCloseLeaseOperationId ?? null;
@@ -1392,7 +1395,12 @@ export function reduceRun(input) {
       ...publicRun(input.run, state, maxParallel),
       controlRevision,
       controlCommand: latestControl?.command ?? null,
-      ...(latestControl?.requestId === undefined ? {} : { controlRequestId: latestControl.requestId }),
+      ...(latestControlRequest === undefined ? {} : {
+        controlRequestId: latestControlRequest.requestId,
+        controlRequestRevision: latestControlRequest.type === "control.reconciled"
+          ? latestControlRequest.requestRevision : latestControlRequest.revision,
+        controlRequestCommand: latestControlRequest.command,
+      }),
     },
     nodes,
     frontier: {
@@ -1431,12 +1439,20 @@ export function planControl(status, command, at, requestId) {
     STOP: new Set(["STOPPING", "STOPPED"]),
   };
   const idempotent = status.run.controlCommand === command || idempotentStates[command].has(status.run.state);
-  if (idempotent && requestId === undefined) {
+  if (idempotent) {
     return {
       accepted: true,
       changed: false,
-      event: null,
+      event: requestId === undefined ? null : {
+        type: "control.reconciled",
+        at,
+        revision: status.run.controlRevision,
+        requestRevision: status.run.controlRevision + 1,
+        command,
+        requestId,
+      },
       revision: status.run.controlRevision,
+      ...(requestId === undefined ? {} : { reconciled: true }),
     };
   }
   const legal = {

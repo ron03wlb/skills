@@ -60,16 +60,18 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
     const status = await control.readStatus();
     const currentRevision = status?.run?.controlRevision;
     if (!Number.isInteger(currentRevision) || currentRevision < 0) throw new Error("Current Run control revision is unavailable");
-    const recorded = typeof control.readControl === "function" ? await control.readControl(revision) : null;
+    const recorded = typeof control.readControl === "function" ? await control.readControl(revision, id) : null;
     if (recorded) {
-      if (recorded.revision !== revision || recorded.command !== command
+      const recordedRequestRevision = recorded.type === "control.reconciled" ? recorded.requestRevision : recorded.revision;
+      if (recordedRequestRevision !== revision || recorded.command !== command
         || id !== undefined && recorded.requestId !== id) {
         return { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status };
       }
       if (!inspect && currentRevision > revision) {
         return { accepted: false, changed: false, revision: currentRevision, reason: "stale_control_revision", status };
       }
-      return { accepted: true, changed: true, revision, reconciled: true, status };
+      return { accepted: true, changed: recorded.type !== "control.reconciled",
+        revision: recorded.type === "control.reconciled" ? currentRevision : revision, reconciled: true, status };
     }
     if (inspect) {
       return currentRevision >= revision

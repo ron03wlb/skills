@@ -128,12 +128,18 @@ test("control reconciliation reads the exact journal revision and rejects stale 
   output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
   const bridge = createCodexHostBridge({ input, output });
   let submissions = 0;
-  const revisions = new Map([[1, { type: "control.revised", revision: 1, command: "PAUSE", requestId: "control-1" }],
-    [2, { type: "control.revised", revision: 2, command: "RESUME" }]]);
+  const revisions = [
+    { type: "control.revised", revision: 1, command: "PAUSE", requestId: "control-1" },
+    { type: "control.revised", revision: 2, command: "RESUME" },
+    { type: "control.reconciled", revision: 2, requestRevision: 3, command: "RESUME", requestId: "control-3" },
+  ];
   try {
     await bridge.controls.connect({
       readStatus: async () => ({ run: { runId: "run", state: "RUNNING", controlRevision: 2, controlCommand: "RESUME" } }),
-      readControl: async revision => revisions.get(revision) ?? null,
+      readControl: async (revision, requestId) => revisions.find(event => (
+        (event.type === "control.reconciled" ? event.requestRevision : event.revision) === revision
+          && (requestId === undefined || event.requestId === requestId)
+      )) ?? null,
       submitControl: async () => { submissions += 1; throw new Error("stale control must not be submitted"); },
     });
     input.write(`${JSON.stringify({ inspectControl: { id: "control-1", runId: "run", command: "PAUSE", revision: 1 } })}\n`);
@@ -147,6 +153,11 @@ test("control reconciliation reads the exact journal revision and rejects stale 
     input.write(`${JSON.stringify({ id: "control-2", control: "STOP", runId: "run", revision: 1 })}\n`);
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(messages.at(-1).result.reason, "stale_control_revision");
+    input.write(`${JSON.stringify({ inspectControl: { id: "control-3", runId: "run", command: "RESUME", revision: 3 } })}\n`);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(messages.at(-1).result.reconciled, true);
+    assert.equal(messages.at(-1).result.changed, false);
+    assert.equal(messages.at(-1).result.revision, 2, "idempotent reconciliation retains the settled control revision");
     assert.equal(submissions, 0);
   } finally { bridge.close(); }
 });

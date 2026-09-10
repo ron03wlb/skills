@@ -82,9 +82,13 @@ export function createWorkflowRuntime({
           const textControl = controls
             ? await controls.connect({
               readStatus,
-              readControl: async revision => {
+              readControl: async (revision, requestId) => {
                 const status = await readStatus();
-                return store.readEvents(status.run.runId).find(event => event.type === "control.revised" && event.revision === revision) ?? null;
+                return store.readEvents(status.run.runId).find(event => (
+                  (event.type === "control.revised" && event.revision === revision
+                    || event.type === "control.reconciled" && event.requestRevision === revision)
+                  && (requestId === undefined || event.requestId === requestId)
+                )) ?? null;
               },
               submitControl,
               onDisconnect(error) {

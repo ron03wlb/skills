@@ -145,8 +145,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     recoveryRounds, recoveryDelaysMs, receiptRefs, updatedAt: new Date().toISOString(),
   });
   const exhaustedFault = fault => Object.assign(new Error(`Read-only host recovery budget exhausted for ${fault.operation} (${fault.faultId})`), { fault });
-  const call = async (name, args, { interruptible = false, owner } = {}) => {
-    const readOnly = ["read_thread", "list_threads", "wait_threads"].includes(name);
+  const call = async (name, args, { interruptible = false, owner, retryReadOnly = true } = {}) => {
+    const readOnly = retryReadOnly && ["read_thread", "list_threads", "wait_threads"].includes(name);
     let fault;
     if (readOnly) {
       for (const category of ["timeout", "temporary", "unavailable", "connection", "response-lost", "rate-limit", "network"]) {
@@ -199,9 +199,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false } = {}) => {
+  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true } = {}) => {
     let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
-      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
+      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly }));
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
@@ -210,7 +210,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
       const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
-        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
+        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly }));
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
     }
@@ -222,7 +222,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const observation = receipts.observe(promptIdentity);
       if (!observation) return false;
       await sleep(observation.delayMs);
-      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+      let snapshot;
+      try {
+        snapshot = await readHistory(ref, value => userTexts(value).includes(prompt), { retryReadOnly: false });
+      } catch (error) {
+        if (!faultCategory(error)) throw error;
+        continue;
+      }
       if (userTexts(snapshot).includes(prompt)) {
         receipts.accept(promptIdentity, "native-history");
         return true;

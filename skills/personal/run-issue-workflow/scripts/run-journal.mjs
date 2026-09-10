@@ -15,6 +15,7 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "recovery.intent",
   "recovery.task",
   "action.failed",
+  "control.reconciled",
   "control.revised",
   "dispatch.recorded",
   "retry.recorded",
@@ -46,6 +47,7 @@ const eventFields = new Map([
   ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity", "priorRepairWaves"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
   ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion", "modelPolicy"])],
+  ["control.reconciled", new Set(["type", "at", "revision", "requestRevision", "command", "requestId"])],
   ["control.revised", new Set(["type", "at", "revision", "command", "requestId"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
   ["retry.recorded", new Set([
@@ -223,6 +225,14 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       if (!controlCommands.has(event.command)) throw new TypeError("Unsupported control command");
       if (event.requestId !== undefined) requireText(event.requestId, "control requestId");
       break;
+    case "control.reconciled":
+      if (!Number.isInteger(event.revision) || event.revision < 0) {
+        throw new TypeError("reconciled control revision must be a non-negative integer");
+      }
+      requirePositiveInteger(event.requestRevision, "reconciled request revision");
+      if (!controlCommands.has(event.command)) throw new TypeError("Unsupported reconciled control command");
+      requireText(event.requestId, "reconciled control requestId");
+      break;
     case "dispatch.recorded":
       requireText(event.issueId, "dispatch issueId");
       requirePositiveInteger(event.attempt, "dispatch attempt", 3);
@@ -378,11 +388,23 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     if (event.revision !== previousRevision + 1) {
       throw new TypeError(`Expected next control revision ${previousRevision + 1}`);
     }
-    if (previousControl?.command === event.command && event.requestId === undefined) {
+    if (previousControl?.command === event.command) {
       throw new TypeError(`Repeated ${event.command} control is idempotent and must not create a revision`);
     }
-    if (event.requestId !== undefined && events.some(item => item.type === "control.revised" && item.requestId === event.requestId)) {
+    if (event.requestId !== undefined && events.some(item => ["control.revised", "control.reconciled"].includes(item.type)
+      && item.requestId === event.requestId)) {
       throw new TypeError("Control request identity already belongs to another revision");
+    }
+  }
+  if (event.type === "control.reconciled") {
+    const previousControl = events.findLast(({ type }) => type === "control.revised");
+    const previousRevision = previousControl?.revision ?? 0;
+    if (event.revision !== previousRevision || event.requestRevision !== previousRevision + 1) {
+      throw new TypeError("Idempotent control reconciliation must retain the current revision and expected request revision");
+    }
+    if (events.some(item => ["control.revised", "control.reconciled"].includes(item.type)
+      && item.requestId === event.requestId)) {
+      throw new TypeError("Control request identity already belongs to another control outcome");
     }
   }
   if (event.type === "dispatch.recorded") {

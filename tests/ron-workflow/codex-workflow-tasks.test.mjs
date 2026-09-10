@@ -616,6 +616,40 @@ test("an omitted model continuation outcome consumes one durable 5/15/30 budget 
   } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("message reconciliation and read transport share one 5/15/30 budget", async () => {
+  const root = mkdtempSync(join(tmpdir(), "model-upgrade-shared-budget-"));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init", "-b", "topic"); git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "candidate");
+  const candidate = git("rev-parse", "HEAD");
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const writer = store.acquireWriter("run");
+  const runIdentity = { runId: "run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+  const ref = { threadId: "worker", hostId: "local" };
+  const delays = [];
+  let sends = 0, failedHistoryReads = 0;
+  const options = { store, project: { path: root }, packageRoot: "/installed", issueNumber: async () => 1,
+    sleep: async delay => delays.push(delay), host: { async call(name) {
+      if (name.endsWith("read_thread") && sends === 0) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: root, status: { type: "idle" } },
+        turns: [{ status: "completed", items: [] }] };
+      if (name.endsWith("read_thread")) { failedHistoryReads += 1; throw new Error("temporary connection failure"); }
+      if (name.endsWith("send_message_to_thread")) { sends += 1; throw new Error("response lost"); }
+      throw new Error(name);
+    } } };
+  try {
+    writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity,
+      modelPolicy: { version: ISSUE_MODEL_POLICY_VERSION, specId: "I_1", target: "main", approvedScopeHash: "approved", authorization: "Explicit model pool and bounded escalation approval" } });
+    writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref, attempt: 1 });
+    const intent = writer.append({ type: "model.upgrade", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref,
+      candidate, worktree: root, topic: "topic", repairWaves: 2, model: "gpt-6-astra", thinking: "xhigh", reason: "Repeated confirmed finding",
+      requestIdentity: "sha256:" + "a".repeat(64), yieldIdentity: "sha256:" + "b".repeat(64) });
+    await assert.rejects(createCodexWorkflowTasks(options).upgrade({ ref, intent, runIdentity, writer }), /outcome unresolved/u);
+    assert.equal(sends, 1);
+    assert.equal(failedHistoryReads, 3, "each persisted owner round performs one transport attempt");
+    assert.deepEqual(delays, [5000, 15000, 30000]);
+    assert.deepEqual(store.listHostFaults("run"), [], "receipt reconciliation does not open a nested transport budget");
+  } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
+});
+
 test("one read-only transport fault consumes exactly 5/15/30 recovery seconds across re-entry", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-fault-budget-"));
   const store = createRunStore({ gitCommonDir: join(root, ".git") });

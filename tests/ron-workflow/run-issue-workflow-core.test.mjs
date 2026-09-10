@@ -2613,8 +2613,21 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   assert.equal(paused.run.state, "PAUSED");
   assert.equal(planControl(paused, "PAUSE", "2026-08-30T00:03:00.000Z").changed, false);
   const identifiedPause = planControl(paused, "PAUSE", "2026-08-30T00:03:00.000Z", "explicit-pause-2");
-  assert.deepEqual(identifiedPause.event, { type: "control.revised", at: "2026-08-30T00:03:00.000Z",
-    revision: 2, command: "PAUSE", requestId: "explicit-pause-2" });
+  assert.deepEqual(identifiedPause.event, { type: "control.reconciled", at: "2026-08-30T00:03:00.000Z",
+    revision: 1, requestRevision: 2, command: "PAUSE", requestId: "explicit-pause-2" });
+  const stillPaused = reduceRun({
+    ...facts([node("13")]),
+    journal: [
+      grant,
+      { ...pause.event, schema: "dag-run-event:v1", sequence: 2 },
+      { schema: "dag-run-event:v1", sequence: 3, type: "pause.transitioned",
+        at: "2026-08-30T00:02:00.000Z", revision: 1 },
+      { ...identifiedPause.event, schema: "dag-run-event:v1", sequence: 4 },
+    ],
+  });
+  assert.equal(stillPaused.run.state, "PAUSED", "an identified idempotent request preserves cooperative settlement");
+  assert.equal(stillPaused.run.controlRevision, 1);
+  assert.equal(stillPaused.run.controlRequestRevision, 2);
   assert.equal(planControl(paused, "RESUME", "2026-08-30T00:03:00.000Z").event.revision, 2);
   assert.equal(planControl(paused, "START", "2026-08-30T00:03:00.000Z").accepted, false);
 
@@ -3117,17 +3130,25 @@ test("the single writer appends ordered control events and atomically rebuilds d
       revision: 2,
       command: "PAUSE",
     }), /idempotent/u);
-    writer.append({
+    assert.throws(() => writer.append({
       type: "control.revised",
       at: "2026-08-30T00:04:00.000Z",
       revision: 2,
+      command: "PAUSE",
+      requestId: "explicit-pause-2",
+    }), /idempotent/u);
+    writer.append({
+      type: "control.reconciled",
+      at: "2026-08-30T00:04:00.000Z",
+      revision: 1,
+      requestRevision: 2,
       command: "PAUSE",
       requestId: "explicit-pause-2",
     });
     assert.throws(() => writer.append({
       type: "control.revised",
       at: "2026-08-30T00:05:00.000Z",
-      revision: 3,
+      revision: 2,
       command: "STOP",
       requestId: "explicit-pause-2",
     }), /request identity/u);

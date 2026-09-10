@@ -114,8 +114,10 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
         || !Number.isInteger(controlIdentity.revision) || controlIdentity.revision < 1)) {
         throw new TypeError("Text control identity requires its request ID and expected revision");
       }
-      if (hasIdentity && controlIdentity.revision === current.run.controlRevision
-        && controlIdentity.id === current.run.controlRequestId && command === current.run.controlCommand) {
+      const recordedRequestRevision = current.run.controlRequestRevision ?? current.run.controlRevision;
+      const recordedRequestCommand = current.run.controlRequestCommand ?? current.run.controlCommand;
+      if (hasIdentity && controlIdentity.revision === recordedRequestRevision
+        && controlIdentity.id === current.run.controlRequestId && command === recordedRequestCommand) {
         return { accepted: true, changed: false, revision: current.run.controlRevision, reconciled: true, status: current };
       }
       if (hasIdentity && controlIdentity.revision !== current.run.controlRevision + 1) {
@@ -124,7 +126,7 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
       }
       const decision = planControl(current, command, now(), controlIdentity.id);
       let projected = current;
-      if (decision.changed) {
+      if (decision.event) {
         await appendEvent(decision.event);
         projected = requireStatus(await rebuildStatus());
       }
@@ -132,6 +134,7 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
         accepted: decision.accepted,
         changed: decision.changed,
         revision: decision.revision,
+        ...(decision.reconciled ? { reconciled: true } : {}),
         ...(decision.reason ? { reason: decision.reason } : {}),
         status: projected,
       };

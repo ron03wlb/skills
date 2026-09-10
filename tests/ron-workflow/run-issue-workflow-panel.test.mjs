@@ -16,6 +16,8 @@ const status = ({
   controlRevision = 0,
   controlCommand = null,
   controlRequestId = null,
+  controlRequestRevision = null,
+  controlRequestCommand = null,
   nodes = [],
 } = {}) => ({
   schema: "dag-run-status:v1",
@@ -26,6 +28,8 @@ const status = ({
     controlRevision,
     controlCommand,
     controlRequestId,
+    controlRequestRevision,
+    controlRequestCommand,
   },
   nodes,
   frontier: { ready: [], active: [], closeable: [] },
@@ -82,8 +86,9 @@ test("text controls bind their original request ID to the durable revision", asy
   let current = status();
   const appended = [];
   const submit = createRunPanelControl({ readStatus: () => current, appendEvent: event => appended.push(event),
-    rebuildStatus: () => { const latest = appended.at(-1); current = status({ state: "PAUSING", controlRevision: latest.revision,
-      controlCommand: latest.command, controlRequestId: latest.requestId }); return current; },
+    rebuildStatus: () => { const latest = appended.at(-1); current = status({ state: "PAUSING",
+      controlRevision: latest.revision, controlCommand: "PAUSE", controlRequestId: latest.requestId,
+      controlRequestRevision: latest.requestRevision ?? latest.revision, controlRequestCommand: latest.command }); return current; },
     now: () => "2026-09-10T00:00:00.000Z" });
   await submit("PAUSE", { id: "control-1", revision: 1 });
   assert.equal(appended[0].requestId, "control-1");
@@ -91,9 +96,16 @@ test("text controls bind their original request ID to the durable revision", asy
   assert.equal(replay.reconciled, true);
   assert.equal(replay.changed, false);
   assert.equal(appended.length, 1);
-  await submit("PAUSE", { id: "control-2", revision: 2 });
+  const idempotent = await submit("PAUSE", { id: "control-2", revision: 2 });
   assert.equal(appended[1].requestId, "control-2");
-  assert.equal(appended[1].revision, 2);
+  assert.equal(appended[1].type, "control.reconciled");
+  assert.equal(appended[1].revision, 1);
+  assert.equal(appended[1].requestRevision, 2);
+  assert.equal(idempotent.changed, false);
+  assert.equal(idempotent.reconciled, true);
+  const repeatedIdempotent = await submit("PAUSE", { id: "control-2", revision: 2 });
+  assert.equal(repeatedIdempotent.reconciled, true);
+  assert.equal(appended.length, 2);
 });
 
 test("text control revision is checked inside the serialized journal owner", async () => {
