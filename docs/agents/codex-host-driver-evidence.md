@@ -75,6 +75,8 @@ Deterministic fault-injection tests simulate accepted-before-recording, response
 
 Conflict-recovery regressions combine those receipts with Issue 87 timing: fresh acceptance and same-invocation lost-ACK read-back retain the current execution start, while accepted or reserved receipts reconciled after restart remain historical observations. Receipt-backed terminal-history faults also yield at the remaining Issue observation budget without a nested retry or repeated native message.
 
+Independent Spec review added two contradiction regressions. A restored payload must match the retained driver owner, not only its tool name; owner drift preserves the original owner and durable conflict flag through another checkpoint restart without dispatch. A send result naming another thread or host is recorded as an allowlisted task-message identity conflict before any history reconciliation. Retry, repair, recovery, model-upgrade and ownership-handoff messages share this acceptance boundary. The receipt retains the observed thread/host identifiers and original prompt digest, not raw prompts or native results. Re-entry remains fail-closed even when the expected prompt appears in native history. These are deterministic injected contradictions, not live provider failures.
+
 On the actual Windows x64 host with Node v24.14.0, the original pre-conflict repaired source-bound focused command below passed 165/165 tests in 29.843 seconds. This historical observation proves execution of the deterministic source suite on Windows; it is not a live Codex task/control interruption, multi-hour soak, installed-package Run, tracker mutation, or production latency measurement.
 
 ```text

@@ -120,6 +120,10 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
     || !taskRef?.threadId || !taskRef.hostId) throw new Error("Task message receipt ownership is unproven");
   const identity = { runId, taskRef: { threadId: taskRef.threadId, hostId: taskRef.hostId } };
   const path = join(gitCommonDir, "matt-workflow-control", "runs", runId, `task-messages-${digest(identity.taskRef).slice(7)}.jsonl`);
+  const conflictingTaskRef = observed => observed !== null && typeof observed === "object" && !Array.isArray(observed)
+    && Object.keys(observed).length > 0 && Object.entries(observed).every(([key, value]) =>
+      ["threadId", "hostId"].includes(key) && typeof value === "string" && value)
+    && Object.entries(observed).some(([key, value]) => value !== taskRef[key]);
   const entries = () => {
     if (!existsSync(path)) return [];
     const text = readFileSync(path, "utf8");
@@ -134,7 +138,10 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
           || record.phase === "observation" && exactKeys(record.value, ["promptIdentity", "round", "delayMs"])
           && /^sha256:[a-f0-9]{64}$/u.test(record.value.promptIdentity)
           && Number.isInteger(record.value.round) && record.value.round >= 1 && record.value.round <= recoveryDelaysMs.length
-          && record.value.delayMs === recoveryDelaysMs[record.value.round - 1];
+          && record.value.delayMs === recoveryDelaysMs[record.value.round - 1]
+          || record.phase === "conflict" && exactKeys(record.value, ["promptIdentity", "source", "observedTaskRef"])
+          && /^sha256:[a-f0-9]{64}$/u.test(record.value.promptIdentity)
+          && record.value.source === "native-response" && conflictingTaskRef(record.value.observedTaskRef);
       if (!exactKeys(record, ["schema", "sequence", "owner", "phase", "value"])
         || record.schema !== "codex-task-message:v1" || record.sequence !== index + 1
         || digest(record.owner) !== digest(identity) || !validValue) {
@@ -159,10 +166,12 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
       operationsByPrompt.set(promptIdentity, operationIdentity);
     }
     for (const [index, record] of records.entries()) {
-      if (!["accepted", "observation"].includes(record.phase)) continue;
+      if (!["accepted", "observation", "conflict"].includes(record.phase)) continue;
       const previous = records.slice(0, index);
       const promptIdentity = record.value.promptIdentity;
       if (!previous.some(item => item.phase === "intent" && item.value.promptIdentity === promptIdentity)
+        || record.phase !== "conflict" && previous.some(item => item.phase === "conflict"
+          && item.value.promptIdentity === promptIdentity)
         || record.phase === "observation" && previous.some(item => item.phase === "accepted"
           && item.value.promptIdentity === promptIdentity)
         || record.phase === "observation" && record.value.round !== previous.filter(item => item.phase === "observation"
@@ -191,6 +200,10 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
   };
   const read = (promptIdentity) => {
     const records = entries();
+    if (records.some(record => record.phase === "conflict"
+      && (promptIdentity === undefined || record.value.promptIdentity === promptIdentity))) {
+      throw new Error("Conflicting native task identity; preserve the original message receipt");
+    }
     const intents = records.filter(record => record.phase === "intent"
       && (promptIdentity === undefined || record.value.promptIdentity === promptIdentity));
     const intent = intents.at(-1)?.value;
@@ -242,6 +255,11 @@ export function createCodexMessageReceipts({ gitCommonDir, runId, taskRef }) {
       if (!intent) throw new Error("Task message acceptance has no reserved request");
       if (intent.accepted) return;
       append({ phase: "accepted", value: { promptIdentity, source, threadId: taskRef.threadId } });
+    },
+    conflict(promptIdentity, observedTaskRef) {
+      if (!read(promptIdentity)) throw new Error("Task message conflict has no reserved request");
+      if (!conflictingTaskRef(observedTaskRef)) throw new Error("Task message conflict requires a different exact native identity");
+      append({ phase: "conflict", value: { promptIdentity, source: "native-response", observedTaskRef } });
     },
     observe(promptIdentity) {
       const intent = read(promptIdentity);

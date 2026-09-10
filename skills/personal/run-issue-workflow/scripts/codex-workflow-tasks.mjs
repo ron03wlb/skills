@@ -268,6 +268,18 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
+  const acceptNativeMessage = ({ ref, receipts, promptIdentity, result }) => {
+    const observedTaskRef = Object.fromEntries(["threadId", "hostId"]
+      .filter(key => typeof result?.[key] === "string" && result[key]).map(key => [key, result[key]]));
+    if (Object.entries(observedTaskRef).some(([key, value]) => value !== ref[key])) {
+      receipts.conflict(promptIdentity, observedTaskRef);
+      throw new Error("Conflicting native task identity; preserve the original message receipt");
+    }
+    if (uncertainNativeResult(result) || result?.threadId !== ref.threadId
+      || result.hostId !== undefined && result.hostId !== ref.hostId) return false;
+    receipts.accept(promptIdentity, "native-response");
+    return true;
+  };
   const read = async (ref, ownership = {}, { interruptible = false, observationBudget = null } = {}) => {
     const receipts = receiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let receipt = receipts?.read();
@@ -553,17 +565,14 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         } else {
           // The immutable handoff intent and receipt precede even this read-only settlement message.
           handoffReceipt = handoffReceipts.reserve({ kind: "recovery-handoff", request: handoffRequest, promptIdentity: handoffIdentity });
+          let result, nativeError;
           try {
-            const accepted = await call("send_message_to_thread", { ...originalTaskRef, prompt }, { owner: { kind: "task-message", runId: runIdentity.runId,
+            result = await call("send_message_to_thread", { ...originalTaskRef, prompt }, { owner: { kind: "task-message", runId: runIdentity.runId,
               issueId, threadId: originalTaskRef.threadId, requestKind: "recovery-handoff", receiptIdentity: handoffIdentity } });
-            if (uncertainNativeResult(accepted) || accepted?.threadId !== originalTaskRef.threadId
-              || accepted.hostId !== undefined && accepted.hostId !== originalTaskRef.hostId) {
-              throw new Error("Native recovery ownership acceptance is unproven");
-            }
-            handoffReceipts.accept(handoffIdentity, "native-response");
-          } catch (error) {
+          } catch (error) { nativeError = error; }
+          if (!acceptNativeMessage({ ref: originalTaskRef, receipts: handoffReceipts, promptIdentity: handoffIdentity, result })) {
             if (!await reconcileReservedMessage({ ref: originalTaskRef, receipts: handoffReceipts,
-              promptIdentity: handoffIdentity, prompt })) throw new Error("Recovery ownership message outcome is unresolved", { cause: error });
+              promptIdentity: handoffIdentity, prompt })) throw new Error("Recovery ownership message outcome is unresolved", { cause: nativeError });
           }
         }
       }
@@ -642,14 +651,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         { owner: { kind: "task-message", runId: runIdentity.runId, issueId: intent.issueId, threadId: ref.threadId,
           requestKind: "upgrade", receiptIdentity: promptIdentity } }); }
       catch { result = null; }
-      const accepted = result?.threadId === ref.threadId && (result.hostId === undefined || result.hostId === ref.hostId)
-        && !uncertainNativeResult(result);
+      const accepted = acceptNativeMessage({ ref, receipts: messageReceipts, promptIdentity, result });
       writer.append({ type: "model.acceptance", at: new Date().toISOString(), issueId: intent.issueId, requestIdentity: intent.requestIdentity,
         model: intent.model, thinking: intent.thinking, phase: "upgrade", acceptance: accepted ? "accepted" : "unknown",
         effectiveReadBack: "unavailable", evidence: accepted ? "Native continuation returned the original task identity."
           : "Continuation submission is uncertain; independently reconcile its original message before any resend." });
       if (accepted) {
-        messageReceipts.accept(promptIdentity, "native-response");
         return { accepted: true, effectiveReadBack: "unavailable" };
       }
       if (await reconcileReservedMessage({ ref, receipts: messageReceipts, promptIdentity, prompt })) {
@@ -718,21 +725,18 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         throw new Error("Task message outcome is unresolved; preserve the reserved request");
       }
       if (messageReservation) {
+        let result, nativeError;
         try {
-          const accepted = await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }, { owner: { kind: "task-message",
+          result = await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }, { owner: { kind: "task-message",
             runId: taskRequest.request.runId, issueId: taskRequest.request.issueId, threadId: ref.threadId,
             requestKind: taskRequest.kind, receiptIdentity: taskRequest.promptIdentity } });
-          if (uncertainNativeResult(accepted) || accepted?.threadId !== ref.threadId
-            || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) {
-            throw new Error("Native task message acceptance is unproven");
-          }
-          messageReceipts.accept(messageReservation.promptIdentity, "native-response");
+        } catch (error) { nativeError = error; }
+        if (acceptNativeMessage({ ref, receipts: messageReceipts, promptIdentity: messageReservation.promptIdentity, result })) {
           return { accepted: true };
-        } catch (error) {
-          if (await reconcileReservedMessage({ ref, receipts: messageReceipts,
-            promptIdentity: messageReservation.promptIdentity, prompt: frozenPrompt })) return { observed: true, initiatedHere: true };
-          throw new Error("Task message outcome is unresolved; preserve the reserved request", { cause: error });
         }
+        if (await reconcileReservedMessage({ ref, receipts: messageReceipts,
+          promptIdentity: messageReservation.promptIdentity, prompt: frozenPrompt })) return { observed: true, initiatedHere: true };
+        throw new Error("Task message outcome is unresolved; preserve the reserved request", { cause: nativeError });
       }
       for (const delay of [1000, 5000, 15000]) {
         try {

@@ -42,6 +42,36 @@ test("workflow mutation requests expose only allowlisted durable owner reference
     issueId: "I_1", receiptIdentity: "run:run:issue:I_1:recovery-handoff:operation-1" });
 });
 
+test("restored mutation payloads preserve conflicting original owners across checkpoint restart", async () => {
+  const owner = { kind: "task-message", runId: "run", issueId: "I_1", threadId: "worker-a",
+    requestKind: "retry", receiptIdentity: `sha256:${"a".repeat(64)}` };
+  const original = { type: "tool", id: "mutation-1", name: "mcp__codex_app__send_message_to_thread", owner,
+    arguments: { threadId: "worker-a", prompt: "original-private-prompt" } };
+  const conflicting = { ...original, owner: { ...owner, threadId: "worker-b", receiptIdentity: `sha256:${"b".repeat(64)}` },
+    arguments: { threadId: "worker-b", prompt: "conflicting-private-prompt" } };
+  const lane = api.createLane({ sessionId: 42 });
+  lane.driver = { id: "original-cell" };
+  lane.requests.push({ id: original.id, request: original, owner, state: "received", history: ["received"] });
+  let durable = plain(api.checkpointState(lane)), calls = 0;
+  for (const [index, message] of [conflicting, original].entries()) {
+    const restored = api.restoreCheckpoint(durable);
+    restored.buffer = frame(message);
+    const values = new Map([["workflow.host", restored]]);
+    const previousDriverId = durable.driverId;
+    const driver = api.createDriver({ driverId: `restored-${index}`, load: key => plain(values.get(key) ?? null),
+      store: (key, value) => values.set(key, plain(value)), report: () => {}, persist: async value => { durable = plain(value); },
+      tools: { async mcp__codex_app__send_message_to_thread() { calls++; return { threadId: "worker-b" }; },
+        async write_stdin() { return { output: "" }; } },
+      setTimeout: fn => setTimeout(fn, 1_000_000), clearTimeout, heartbeatMs: 1_000_000, tickMs: 1 });
+    driver.resume({ previousDriverId, stoppedEvidence: "exact previous cell stopped" });
+    await driver.tick();
+    assert.equal(calls, 0, "a different restored owner never authorizes native mutation, even after later matching input");
+    assert.equal(durable.requests[0].conflict, true);
+    assert.deepEqual(durable.requests[0].owner, owner);
+    assert.equal(JSON.stringify(durable).includes("private-prompt"), false);
+  }
+});
+
 test("a restored sending control reconciles its original revision instead of replaying the mutation", async () => {
   const status = { type: "status", status: { run: { runId: "run", state: "RUNNING", controlRevision: 0 } } };
   const firstValues = new Map([["workflow.host", api.createLane({ sessionId: 42, output: frame(status) })],

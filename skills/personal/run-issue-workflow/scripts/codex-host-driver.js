@@ -389,8 +389,12 @@
     const receive = async (message, raw) => {
       const found = lane.requests.find(item => item.id === message.id);
       if (found) {
-        if (found.payloadMissing && found.request.name === message.name) {
-          found.request = message; found.owner ??= ownerForRequest(message); found.payloadMissing = false; save();
+        const recoveredOwner = ownerForRequest(message);
+        const ownerMatches = !found.owner || recoveredOwner
+          && Object.keys(found.owner).length === Object.keys(recoveredOwner).length
+          && Object.keys(found.owner).every(key => found.owner[key] === recoveredOwner[key]);
+        if (found.payloadMissing && found.request.name === message.name && ownerMatches) {
+          found.request = message; found.owner ??= recoveredOwner; found.payloadMissing = false; save();
         } else if (JSON.stringify(found.request) !== JSON.stringify(message)) {
           found.conflict = true; diagnostic("Conflicting request identity", { raw, id: message.id });
         }

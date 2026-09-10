@@ -438,6 +438,38 @@ test("a reserved recovery message reconciled after restart retains its original 
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+for (const mismatch of [{ threadId: "foreign-worker", hostId: "local" }, { threadId: "worker", hostId: "foreign-host" }]) {
+  test(`conflicting native message identity remains rejected after history and restart: ${JSON.stringify(mismatch)}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-native-message-conflict-"));
+    const store = createRunStore({ gitCommonDir: join(root, ".git") });
+    const ref = { threadId: "worker", hostId: "local" };
+    const request = { runId: "run", issueId: "I_1", attempt: 2 };
+    const input = `private-message-text Retry request: ${JSON.stringify(request)}`;
+    let nativePrompt, sends = 0;
+    const delays = [];
+    const options = { store, project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+      sleep: async delay => delays.push(delay), host: { async call(name, args) {
+        if (name.endsWith("send_message_to_thread")) { sends++; nativePrompt = args.prompt; return { ...mismatch, privatePayload: "private-native-result" }; }
+        assert.equal(name, "mcp__codex_app__read_thread");
+        return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+          turns: [{ status: "completed", items: nativePrompt
+            ? [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] }] : [] }] };
+      } } };
+    try {
+      await assert.rejects(createCodexWorkflowTasks(options).message(ref, input), /conflicting native task identity/iu);
+      const resumed = createCodexWorkflowTasks(options);
+      await assert.rejects(resumed.message(ref, input), /conflicting native task identity/iu);
+      await assert.rejects(resumed.read(ref, { runId: "run" }), /conflicting native task identity/iu);
+      assert.equal(sends, 1, "contradictory native ownership never becomes history acceptance or another send");
+      assert.deepEqual(delays, [], "a known contradiction is not an ACK-loss observation round");
+      const receiptsPath = join(root, ".git", "matt-workflow-control", "runs", "run");
+      const contents = readFileSync(join(receiptsPath, readdirSync(receiptsPath).find(name => name.startsWith("task-messages-"))), "utf8");
+      assert.equal(contents.includes("private-message-text"), false);
+      assert.equal(contents.includes("private-native-result"), false);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+}
+
 test("persisted execution receipts reject conflicting prompt ownership for the same operation", () => {
   const root = mkdtempSync(join(tmpdir(), "codex-message-conflict-"));
   const gitCommonDir = join(root, ".git");
