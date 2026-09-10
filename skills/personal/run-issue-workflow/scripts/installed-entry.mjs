@@ -22,6 +22,11 @@ export function configureHostInput(input = process.stdin) {
 }
 
 const emit = (value) => process.stdout.write(`workflow-host ${JSON.stringify(value)}\n`);
+const attachWorkflowRuntime = (error, workflowRuntime) => {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  failure.workflowRuntime ??= workflowRuntime;
+  return failure;
+};
 
 async function selectInstalledLane({ repository, specId, runId, host, prepareOnly = false, modelRouting }) {
   repository = realpathSync(repository);
@@ -71,28 +76,34 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   const runtime = compatible ? current : selected;
   const workflowRuntime = { packageVersion: runtime.version, packageRoot: runtime.root,
     manifestSha256: runtime.manifestSha256 };
-  const composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href);
+  let composition;
+  try { composition = await import(pathToFileURL(join(runtime.root, "skills/personal/run-issue-workflow/scripts/codex-workflow.mjs")).href); }
+  catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
   // Protocol/source compatibility alone does not prove the runtime has this entry's replay gates.
   // A disposable terminal snapshot cannot decide whether missing support is safe.
   if (previousGrant && composition.supportsCompletedRunReentry !== true) {
-    if (current.state !== "AVAILABLE") return current;
+    if (current.state !== "AVAILABLE") return { ...current, workflowRuntime };
     return { state: "UNAVAILABLE", reason: "Selected runtime does not support completed Run re-entry",
-      recovery: "Restore a reviewed compatible runtime with completed Run re-entry support; preserve the original Run, Grant and retained package before retrying this entry." };
+      recovery: "Restore a reviewed compatible runtime with completed Run re-entry support; preserve the original Run, Grant and retained package before retrying this entry.", workflowRuntime };
   }
   if (previousGrant) {
     const journal = store.readEvents(previousGrant.runIdentity.runId);
     const issueIds = [...new Set(journal.filter(event => event.issueId).map(event => event.issueId))];
     const taskIntents = issueIds.map(issueId => store.readHostTask({ runId: previousGrant.runIdentity.runId, issueId })).filter(Boolean);
-    const compatibility = composition.assessRecoveryCompatibility?.({ journal, taskIntents });
+    let compatibility;
+    try { compatibility = composition.assessRecoveryCompatibility?.({ journal, taskIntents }); }
+    catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
     if (compatibility?.compatible !== true) return { state: "UNAVAILABLE", reason: compatibility?.reason ?? "Runtime cannot prove recovery evidence and task ownership compatibility",
-      nextOwner: "workflow-maintenance", recovery: "Preserve the same Run, Grant, retained package and accepted task intents; use the scoped maintenance owner to supply a reviewed compatible runtime." };
+      nextOwner: "workflow-maintenance", recovery: "Preserve the same Run, Grant, retained package and accepted task intents; use the scoped maintenance owner to supply a reviewed compatible runtime.", workflowRuntime };
   }
   const options = { repository, specId: previousGrant?.runIdentity.specId ?? specId,
     runIdentity: previousGrant?.runIdentity, workflowVersion: runtime.version,
     compatibleRecordedVersion: compatible ? previousGrant.workflowVersion : undefined, packageRoot: runtime.root, host, modelRouting };
   if (prepareOnly) {
-    if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run" };
-    let lane = await composition.prepareCodexWorkflow(options);
+    if (typeof composition.prepareCodexWorkflow !== "function") return { state: "UNAVAILABLE", reason: "This retained package has no compatible batch entry; preserve its Run", workflowRuntime };
+    let lane;
+    try { lane = await composition.prepareCodexWorkflow(options); }
+    catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
     let versionId = runtime.version.id;
     let effectiveRuntime = workflowRuntime;
     return { specId: lane.specId, get workflowRuntime() { return effectiveRuntime; },
@@ -117,12 +128,17 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
       async close() { await lane.close?.(); },
     };
   }
-  const result = await composition.runCodexWorkflow(options);
+  let result;
+  try { result = await composition.runCodexWorkflow(options); }
+  catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
   if (result.status?.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")) {
     const installed = selectWorkflowVersion({ cacheDirectory });
     if (installed.state === "AVAILABLE" && installed.version.id !== runtime.version.id && !host.disconnected
       && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(result.status.run.state)) {
-      return selectInstalledLane({ repository, specId, runId: result.status.run.runId, host });
+      try {
+        const renewed = await selectInstalledLane({ repository, specId, runId: result.status.run.runId, host });
+        return renewed?.workflowRuntime ? renewed : { ...renewed, workflowRuntime };
+      } catch (error) { throw attachWorkflowRuntime(error, workflowRuntime); }
     }
   }
   return { ...result, workflowRuntime };
@@ -137,8 +153,12 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
     for (const id of specIds) {
       try {
         const lane = await selectInstalledLane({ repository, specId: id, host, prepareOnly: true, modelRouting: modelRouting?.[id] });
-        lanes.push(typeof lane.run === "function" ? lane : { specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
-      } catch (error) { lanes.push({ specId: id, run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
+        lanes.push(typeof lane.run === "function" ? lane : { specId: id, workflowRuntime: lane.workflowRuntime,
+          run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: lane.workflowRuntime,
+            capacityUnknown: true, reason: lane.reason, nodes: [], legalActions: [] }) });
+      } catch (error) { lanes.push({ specId: id, workflowRuntime: error.workflowRuntime,
+        run: async () => ({ run: { state: "UNAVAILABLE", specId: id }, workflowRuntime: error.workflowRuntime,
+          capacityUnknown: true, reason: error.message, nodes: [], legalActions: [] }) }); }
     }
     return await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected });
   } finally { for (const lane of lanes) await lane.close?.(); }
@@ -168,7 +188,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       const result = await runInstalledEntry({ repository, specId: specId || undefined, runId: runId || undefined, host, modelRouting });
       emit({ type: "result", result, metrics: host.metrics() });
     } catch (error) {
-      emit({ type: "error", message: error.message, metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
+      emit({ type: "error", message: error.message, ...(error.workflowRuntime ? { workflowRuntime: error.workflowRuntime } : {}),
+        metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
       process.exitCode = 1;
     } finally { host?.close(); restoreInput(); process.stdin.pause(); }
   }

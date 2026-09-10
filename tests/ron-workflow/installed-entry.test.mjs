@@ -278,6 +278,12 @@ test("a prior-format incomplete Run adopts recovery semantics without changing i
     const rejected = await f.entry({ specId: "1" });
     assert.equal(rejected.state, "UNAVAILABLE");
     assert.equal(rejected.nextOwner, "workflow-maintenance");
+    assert.deepEqual(rejected.workflowRuntime.packageVersion, f.retained.version);
+    assert.equal(rejected.workflowRuntime.packageRoot, f.retained.root);
+    assert.match(rejected.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    const rejectedBatch = await f.entry({ specIds: ["1"], maxWorkers: 1 });
+    assert.equal(rejectedBatch.state, "PRESERVED");
+    assert.deepEqual(rejectedBatch.runs[0].workflowRuntime, rejected.workflowRuntime);
     assert.deepEqual(f.calls, [], "matching protocol and completed-reentry support alone cannot invoke the old runtime");
     cpSync(fileURLToPath(new URL(`../../${scriptsPath}/codex-workflow.mjs`, import.meta.url)), join(f.source, scriptsPath, "codex-workflow.mjs"));
     git(f.source, "add", "skills"); git(f.source, "commit", "-m", "Reviewed runtime with recovery evidence reader");
@@ -298,6 +304,34 @@ test("a prior-format incomplete Run adopts recovery semantics without changing i
   } finally { f.close(); }
 });
 
+test("selected package evidence survives thrown installed-entry preparation and execution", async () => {
+  const f = fixture();
+  try {
+    f.addCompleted(1, false, false);
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export async function prepareCodexWorkflow() { throw new Error("Fixture preparation failed"); }
+export async function runCodexWorkflow() { throw new Error("Fixture execution failed"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "throw after package selection");
+    const current = f.install();
+    const { runInstalledEntry } = await import(pathToFileURL(join(current.root, scriptsPath, "installed-entry.mjs")).href);
+    await assert.rejects(runInstalledEntry({ repository: f.repository, host: f.host, specId: "1" }), error => {
+      assert.match(error.message, /Fixture execution failed/u);
+      assert.deepEqual(error.workflowRuntime.packageVersion, current.version);
+      assert.equal(error.workflowRuntime.packageRoot, current.root);
+      assert.match(error.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+      return true;
+    });
+    const batch = await runInstalledEntry({ repository: f.repository, host: f.host, specIds: ["1"] });
+    assert.equal(batch.state, "PRESERVED");
+    assert.equal(batch.runs[0].run.state, "UNAVAILABLE");
+    assert.deepEqual(batch.runs[0].workflowRuntime.packageVersion, current.version);
+    assert.equal(batch.runs[0].workflowRuntime.packageRoot, current.root);
+    assert.match(batch.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+  } finally { f.close(); }
+});
+
 test("an explicit Run alone cannot bypass the current canonical operation identity", async () => {
   const f = fixture();
   try {
@@ -310,6 +344,7 @@ test("an explicit Run alone cannot bypass the current canonical operation identi
     const before = f.store.readEvents(wrongRun);
     const result = await f.entry({ runId: wrongRun });
     assert.equal(result.state, "UNAVAILABLE", JSON.stringify(result));
+    assert.equal(result.workflowRuntime, undefined, "a failure before package selection cannot invent effective-byte evidence");
     assert.deepEqual(f.store.readEvents(wrongRun), before);
     assert.equal(f.calls.length, 0);
   } finally { f.close(); }
@@ -503,6 +538,9 @@ test("a newer entry requires completed re-entry support in the selected runtime"
     const downgraded = await runInstalledEntry({ repository: f.repository, host: f.host, specId: "1" });
     assert.equal(downgraded.state, "UNAVAILABLE", "verified source/protocol alone cannot prove completed re-entry support");
     assert.match(downgraded.recovery, /compatible/u);
+    assert.deepEqual(downgraded.workflowRuntime.packageVersion, f.retained.version);
+    assert.equal(downgraded.workflowRuntime.packageRoot, f.retained.root);
+    assert.match(downgraded.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(f.store.readEvents(runIdentity.runId), beforeDowngrade);
     assert.equal(f.calls.length, callsBefore);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
