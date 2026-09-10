@@ -8,6 +8,7 @@ import {
 } from "../../skills/personal/run-issue-workflow/scripts/run-journal.mjs";
 import { reduceRun } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createIssueExecutionBudgetController } from "../../skills/personal/run-issue-workflow/scripts/issue-execution-budget.mjs";
+import { bindTechnicalFailure, recoveryDigest } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
 const issueId = "I_execution";
 const taskRef = { threadId: "thread-1", hostId: "local" };
@@ -89,6 +90,60 @@ test("replacement, retry, re-entry, conflict repair, and a late outcome retain o
       consumedMs: ISSUE_EXECUTION_LIMIT_MS },
     { type: "execution.observed", at: "2026-09-10T06:00:04.000Z", issueId, startSequence: 10,
       elapsedMs: 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
+  ]);
+
+  validateJournal(events, { storageRunId: runIdentity.runId });
+  assert.deepEqual(summarizeIssueExecutionBudget(events, issueId), {
+    limitMs: ISSUE_EXECUTION_LIMIT_MS,
+    consumedMs: ISSUE_EXECUTION_LIMIT_MS,
+    state: "EXHAUSTED",
+    activeStartSequence: null,
+  });
+});
+
+test("a recovery repair task retains the prior implementation interval and late settlement", () => {
+  const recoveryRef = { threadId: "thread-recovery", hostId: "local" };
+  const failure = bindTechnicalFailure({
+    runId: runIdentity.runId,
+    issueId,
+    operationId: "workflow-op-v1-" + "6".repeat(64),
+    candidate: "3".repeat(40),
+    targetHead: "4".repeat(40),
+    worktree: "C:/lane",
+    topic: "codex/issue-execution-budget",
+    owningSource: "implementation task",
+    observedResult: "focused verification failed",
+    command: ["node", "--test", "tests/ron-workflow/issue-execution-budget.test.mjs"],
+    ownerTaskRef: taskRef,
+    repairWaveCount: 0,
+    diagnosis: {
+      classification: "ISSUE_DEFECT",
+      reason: "The implementation needs an in-scope repair",
+      source: "focused verification",
+      scopeCompatible: true,
+    },
+  });
+  const requestIdentity = recoveryDigest({ failure, phase: "REPAIR", wave: 1 });
+  const events = journal([
+    { type: "grant.recorded", at: "2026-09-10T00:00:00.000Z", runIdentity, maxParallel: 3 },
+    { type: "dispatch.recorded", at: "2026-09-10T00:00:00.000Z", issueId, attempt: 1, taskRef },
+    { type: "execution.started", at: "2026-09-10T00:00:00.000Z", issueId,
+      phase: "IMPLEMENTATION", phaseIdentity: "dispatch:2", taskRef },
+    { type: "execution.observed", at: "2026-09-10T04:00:00.000Z", issueId, startSequence: 3,
+      elapsedMs: 4 * 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
+    { type: "recovery.intent", at: "2026-09-10T04:00:01.000Z", issueId, failure,
+      phase: "REPAIR", wave: 1, originalTaskRef: taskRef, requestIdentity },
+    { type: "recovery.task", at: "2026-09-10T04:00:02.000Z", issueId, requestIdentity,
+      failureIdentity: failure.identity, originalTaskRef: taskRef, taskRef: recoveryRef,
+      previousOwner: { taskRef, state: "SETTLED", worktree: failure.worktree }, phase: "REPAIR", wave: 1 },
+    { type: "execution.started", at: "2026-09-10T04:00:02.000Z", issueId,
+      phase: "IMPLEMENTATION_REPAIR", phaseIdentity: requestIdentity, taskRef: recoveryRef },
+    { type: "execution.observed", at: "2026-09-10T06:00:02.000Z", issueId, startSequence: 7,
+      elapsedMs: 2 * 60 * 60 * 1000, state: "ACTIVE", source: "MONOTONIC" },
+    { type: "execution.exhausted", at: "2026-09-10T06:00:02.000Z", issueId,
+      consumedMs: ISSUE_EXECUTION_LIMIT_MS },
+    { type: "execution.observed", at: "2026-09-10T06:00:03.000Z", issueId, startSequence: 7,
+      elapsedMs: 2 * 60 * 60 * 1000, state: "SETTLED", source: "NATIVE" },
   ]);
 
   validateJournal(events, { storageRunId: runIdentity.runId });
@@ -243,6 +298,42 @@ test("the runtime controller uses monotonic time and records the exact six-hour 
   await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
   assert.equal(events.filter(event => event.type === "execution.exhausted").length, 1);
   assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, ISSUE_EXECUTION_LIMIT_MS);
+});
+
+test("a backward monotonic clock cannot reduce or invent Issue execution time", async () => {
+  const events = journal([
+    { type: "grant.recorded", at: "2026-09-10T00:00:00.000Z", runIdentity, maxParallel: 3 },
+    { type: "dispatch.recorded", at: "2026-09-10T00:00:00.000Z", issueId, attempt: 1, taskRef },
+  ]);
+  let monotonic = 10_000;
+  const append = draft => {
+    const event = { ...draft, schema: EVENT_SCHEMA, sequence: events.length + 1 };
+    validateJournal([...events, event], { storageRunId: runIdentity.runId });
+    events.push(event);
+    return event;
+  };
+  const controller = createIssueExecutionBudgetController({
+    store: { readEvents: () => events },
+    tasks: { async read() { return { state: "RUNNING", snapshot: { turns: [{ status: "inProgress" }] } }; } },
+    now: () => "2026-09-10T00:00:00.000Z",
+    monotonicNow: () => monotonic,
+  });
+  controller.start({ writer: { append }, runId: runIdentity.runId, issueId, phase: "IMPLEMENTATION",
+    phaseIdentity: "dispatch:2", taskRef, monotonicStartedAt: monotonic });
+
+  monotonic = 20_000;
+  await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
+  assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, 10_000);
+  const observationCount = events.filter(event => event.type === "execution.observed").length;
+
+  monotonic = 5_000;
+  await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
+  assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, 10_000);
+  assert.equal(events.filter(event => event.type === "execution.observed").length, observationCount);
+
+  monotonic = 25_000;
+  await controller.sync({ writer: { append }, runId: runIdentity.runId, issueIds: [issueId] });
+  assert.equal(summarizeIssueExecutionBudget(events, issueId).consumedMs, 15_000);
 });
 
 test("runtime re-entry resolves and can renew UNKNOWN from exact native active evidence", async () => {
