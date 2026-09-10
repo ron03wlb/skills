@@ -68,7 +68,7 @@ Mutation requests now carry allowlisted Run, Issue, task, operation-kind, and re
 
 Deterministic fault-injection tests simulate accepted-before-recording, response loss, omitted history, adapter restart, conflicting receipt content, restored control submission, matching historical journal read-back, stale control replay, identityless late control results, browser request identity, model-upgrade continuation loss, recovery-handoff loss, and persisted 5/15/30-second message observations across re-entry. They also assert that raw prompts, native results, bridge credentials, and malformed payload details do not enter durable checkpoints or receipts. These fixtures do not claim provider exactly-once delivery or a live native interruption.
 
-On the actual Windows x64 host with Node v24.14.0, the repaired source-bound focused command below passed 162/162 tests in 42.207 seconds. This observation proves execution of the deterministic source suite on Windows; it is not a live Codex task/control interruption, multi-hour soak, installed-package Run, tracker mutation, or production latency measurement.
+On the actual Windows x64 host with Node v24.14.0, the repaired source-bound focused command below passed 163/163 tests in 40.407 seconds. This observation proves execution of the deterministic source suite on Windows; it is not a live Codex task/control interruption, multi-hour soak, installed-package Run, tracker mutation, or production latency measurement.
 
 ```text
 node --test tests/ron-workflow/codex-workflow-tasks.test.mjs tests/ron-workflow/codex-host-driver.test.mjs tests/ron-workflow/codex-host-bridge.test.mjs tests/ron-workflow/run-issue-workflow-panel.test.mjs tests/ron-workflow/run-issue-workflow-core.test.mjs

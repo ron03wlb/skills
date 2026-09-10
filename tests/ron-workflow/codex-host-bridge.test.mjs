@@ -30,6 +30,26 @@ test("the desktop bridge exchanges tool responses and text controls through its 
   bridge.close();
 });
 
+test("the bridge preserves allowlisted upgrade and recovery-handoff owner references", async () => {
+  const input = new PassThrough(), output = new PassThrough(), messages = [];
+  output.on("data", chunk => messages.push(JSON.parse(chunk.toString().trim().replace(/^workflow-host /u, ""))));
+  const bridge = createCodexHostBridge({ input, output });
+  try {
+    for (const requestKind of ["upgrade", "recovery-handoff"]) {
+      const owner = { kind: "task-message", runId: "run", issueId: "I_1", threadId: "worker", requestKind,
+        receiptIdentity: `sha256:${(requestKind === "upgrade" ? "a" : "b").repeat(64)}` };
+      const pending = bridge.call("mcp__codex_app__send_message_to_thread", { threadId: "worker", prompt: "private" }, owner);
+      const request = messages.at(-1);
+      assert.deepEqual(request.owner, owner);
+      input.write(`${JSON.stringify({ id: request.id, result: { threadId: "worker" } })}\n`);
+      assert.deepEqual(await pending, { threadId: "worker" });
+    }
+    await assert.rejects(bridge.call("mcp__codex_app__send_message_to_thread", { threadId: "worker", prompt: "private" },
+      { kind: "task-message", runId: "run", issueId: "I_1", threadId: "worker", requestKind: "foreign",
+        receiptIdentity: `sha256:${"c".repeat(64)}` }), /owner reference/u);
+  } finally { bridge.close(); }
+});
+
 test("disconnected desktop transport fails pending work and cannot invoke unrelated account tools", async () => {
   const input = new PassThrough();
   const output = new PassThrough();

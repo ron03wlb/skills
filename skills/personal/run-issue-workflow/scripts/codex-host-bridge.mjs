@@ -204,7 +204,7 @@ export function createCodexHostBridge({ input = process.stdin, output = process.
           || typeof value !== "string" || !value)
         || !["task-create", "task-message", "task-fork"].includes(owner.kind)
         || !["runId", "issueId", "receiptIdentity"].every(key => typeof owner[key] === "string" && owner[key])
-        || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery"].includes(owner.requestKind)
+        || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery", "upgrade", "recovery-handoff"].includes(owner.requestKind)
           || typeof owner.threadId !== "string" || !owner.threadId)
         || owner.kind === "task-fork" && (typeof owner.threadId !== "string" || !owner.threadId)
         || !/^sha256:[a-f0-9]{64}$/u.test(owner.receiptIdentity))) throw new Error("Malformed native request owner reference");
