@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import { setTimeout } from "node:timers/promises";
 import { join, resolve } from "node:path";
 import { delegatedInput, discoverLocalCodexTasks } from "./codex-task-discovery.mjs";
 import { createCodexCloseReceipts } from "./codex-close-receipts.mjs";
 import { completedCloseCleanup } from "./close-continuation.mjs";
 import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
+import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
@@ -40,12 +42,14 @@ const assertCloseOutcomeIdentity = (result, request) => {
 const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runtime remain pinned to ${packageRoot}, including its skills/ and shared docs/ references. Generic host support skills explicitly required by repository or higher-priority instructions use their installed sources from the current session's skill catalog; they do not replace a packaged workflow owner. Diagnose a truly missing dependency. Preserve original accepted task creation intents and identity across re-entry.`;
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout,
-  discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null, waitForObservationSignal }) {
+  discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null, waitForObservationSignal,
+  monotonicNow = () => performance.now() }) {
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
   const transientFaults = new Map();
   const taskObservations = new Map();
+  const executionStartEvidence = new Map();
   const fallbackRounds = new Map();
   let batchOffset = 0;
   let eventWaitSupported = true;
@@ -61,12 +65,23 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       await sleep(Math.min(1000, remaining));
     }
   });
+  const observationDeadline = budget => ({ deadline: new Date(Date.now() + Math.max(0, budgetRemaining(budget))).toISOString() });
+  const budgetRemaining = budget => budget === null ? Number.POSITIVE_INFINITY : Math.max(0,
+    budget.limitMs - Math.max(budget.simulatedElapsedMs, Math.max(0, monotonicNow() - budget.startedAt)));
+  const waitWithinBudget = async (timeoutMs, budget) => {
+    const remainingMs = budgetRemaining(budget);
+    if (remainingMs <= 0) return observationDeadline(budget);
+    const boundedMs = Math.min(timeoutMs, Math.ceil(remainingMs));
+    const signal = await waitSignal({ timeoutMs: boundedMs, readSignal: readObservationSignal });
+    if (!signal && budget !== null) budget.simulatedElapsedMs += boundedMs;
+    return signal ?? (budgetRemaining(budget) <= 0 ? observationDeadline(budget) : null);
+  };
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
     return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
   };
-  const recoveryDelaysMs = [5000, 15000, 30000];
+  const recoveryDelaysMs = BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS;
   const faultCategory = error => [
     ["timeout", /timeout/iu], ["temporary", /temporar/iu], ["unavailable", /unavailable/iu],
     ["connection", /connection/iu], ["response-lost", /response lost/iu],
@@ -84,12 +99,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (store?.writeHostFault && runId) return store.writeHostFault(value);
     transientFaults.set(value.faultId, value); return value;
   };
-  const recordFault = ({ faultId, operation, category, state, recoveryRounds, receiptRefs }) => writeFault({
-    schema: "codex-host-fault:v1", runId: runId ?? "unbound", faultId, operation, category, state,
-    recoveryRounds, recoveryDelaysMs, receiptRefs, updatedAt: new Date().toISOString(),
-  });
+  const recordFault = ({ faultId, operation, category, state, recoveryRounds, receiptRefs }) => writeFault(
+    createBoundedObservationFault({ runId: runId ?? "unbound", faultId, operation, category, state,
+      recoveryRounds, receiptRefs, updatedAt: new Date().toISOString() }),
+  );
   const exhaustedFault = fault => Object.assign(new Error(`Read-only host recovery budget exhausted for ${fault.operation} (${fault.faultId})`), { fault });
-  const call = async (name, args, { interruptible = false } = {}) => {
+  const call = async (name, args, { interruptible = false, observationBudget = null } = {}) => {
     const readOnly = ["read_thread", "list_threads", "wait_threads"].includes(name);
     let fault;
     if (readOnly) {
@@ -106,7 +121,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           throw exhaustedFault(fault);
         }
         if (interruptible) {
-          const signal = await waitSignal({ timeoutMs: recoveryDelaysMs[fault.recoveryRounds], readSignal: readObservationSignal });
+          const signal = await waitWithinBudget(recoveryDelaysMs[fault.recoveryRounds], observationBudget);
           if (signal?.control || signal?.deadline) {
             throw Object.assign(new Error("Task observation recovery was interrupted by control or deadline"), { observationSignal: signal });
           }
@@ -115,10 +130,26 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           receiptRefs: fault.receiptRefs });
       }
       try {
+        if (observationBudget !== null && budgetRemaining(observationBudget) <= 0) {
+          throw Object.assign(new Error("Task observation reached its Issue execution deadline"), {
+            observationSignal: observationDeadline(observationBudget),
+          });
+        }
+        const effectiveArgs = observationBudget !== null && name === "wait_threads"
+          ? { ...args, timeoutMs: Math.min(args.timeoutMs, Math.ceil(budgetRemaining(observationBudget))) }
+          : args;
         hostCallCount += 1;
-        const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, args));
+        const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, effectiveArgs));
         hostReturnedBytes += JSON.stringify(result)?.length ?? 0;
         if (fault) recordFault({ ...fault, state: "settled", receiptRefs: fault.receiptRefs });
+        if (observationBudget !== null && name === "wait_threads" && result?.timedOut) {
+          observationBudget.simulatedElapsedMs += effectiveArgs.timeoutMs;
+        }
+        if (observationBudget !== null && budgetRemaining(observationBudget) <= 0) {
+          throw Object.assign(new Error("Task observation reached its Issue execution deadline"), {
+            observationSignal: observationDeadline(observationBudget),
+          });
+        }
         return result;
       } catch (error) {
         const category = readOnly ? faultCategory(error) : null;
@@ -132,7 +163,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             throw new Error("Host recovery identity contradicts its retained operation or category", { cause: error });
           }
           fault = previous
-            ? recordFault({ ...previous, state: "unresolved", receiptRefs: previous.receiptRefs })
+            ? recordFault({ ...previous, state: "unresolved",
+              recoveryRounds: previous.state === "settled" ? 0 : previous.recoveryRounds,
+              receiptRefs: previous.receiptRefs })
             : recordFault({ faultId, operation: name, category, state: "unresolved", recoveryRounds: 0,
               receiptRefs: faultScope(name, args).refs.flat().filter(Boolean) });
         }
@@ -143,9 +176,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false } = {}) => {
+  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, observationBudget = null } = {}) => {
     let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
-      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
+      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, observationBudget }));
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
@@ -154,16 +187,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
       const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
-        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible }));
+        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, observationBudget }));
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
     }
   };
-  const read = async (ref, ownership = {}, { interruptible = false } = {}) => {
+  const read = async (ref, ownership = {}, { interruptible = false, observationBudget = null } = {}) => {
     const receipts = receiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let receipt = receipts?.read();
     const snapshot = await readHistory(ref, value => Boolean(receipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)),
-      { latestOnly: Boolean(receipt), interruptible });
+      { latestOnly: Boolean(receipt), interruptible, observationBudget });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const nativePrompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -278,6 +311,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (creationUnavailable(store.readEvents(runIdentity.runId), issueId)) throw new Error("MODEL_UNAVAILABLE: native Astra rejection proved no task was submitted");
       const existing = await findIssueLane({ issueId, runIdentity });
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+      executionStartEvidence.set(existing[0].threadId, "OBSERVED");
       return existing[0];
     }
     const policy = store.readEvents(runIdentity.runId).find(event => event.type === "grant.recorded")?.modelPolicy;
@@ -298,6 +332,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (!reservation.created) {
       const existing = await findIssueLane({ issueId, runIdentity });
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+      executionStartEvidence.set(existing[0].threadId, "OBSERVED");
       return existing[0];
     }
     let created;
@@ -326,6 +361,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (created.accepted && created.threadId && created.hostId) {
       const ref = { threadId: created.threadId, hostId: created.hostId };
       refs.set(key, ref);
+      executionStartEvidence.set(ref.threadId, "CURRENT_MONOTONIC");
       return ref;
     }
     // clientThreadId is a setup operation, never a task reference.
@@ -335,6 +371,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         try {
           const existing = await findIssueLane({ issueId, runIdentity });
           if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+          executionStartEvidence.set(existing[0].threadId, "CURRENT_MONOTONIC");
           return existing[0];
         } catch (error) {
           if (!error.message.startsWith("TASK_CREATION_UNRESOLVED:")) throw error;
@@ -345,6 +382,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   };
   return {
     findIssueLane, create, read,
+    executionStartEvidence(ref) { return executionStartEvidence.get(ref?.threadId) ?? "OBSERVED"; },
     async ensureMaintenanceTask({ issueId, runIdentity, failure, originalTaskRef }) {
       const scope = failure.diagnosis?.maintenance;
       if (!scope || !["repositoryId", "sourceRepository", "target", "approvedScopeHash", "authority", "operationId"].every(key => typeof scope[key] === "string" && scope[key])) {
@@ -475,7 +513,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           : "Continuation submission is uncertain; independently reconcile its original message before any resend." });
       if (accepted) return { accepted: true, effectiveReadBack: "unavailable" };
       const after = await readHistory(ref, value => userTexts(value).includes(prompt));
-      if (userTexts(after).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      if (userTexts(after).includes(prompt)) {
+        return { observed: true, initiatedHere: true, effectiveReadBack: "unavailable" };
+      }
       throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
     },
     async observePendingCreations({ runIdentity, issueIds }) {
@@ -496,11 +536,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
       const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${workflowSourceBoundary(packageRoot)}\n${prompt}`;
       const stored = receipts?.read();
-      if (stored?.prompt === frozenPrompt && stored.accepted) return;
+      if (stored?.prompt === frozenPrompt && stored.accepted) return close ? undefined : { observed: true };
       const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
-        return;
+        return close ? undefined : { observed: true };
       }
       // Native history and continuation waits may outlive the tracker snapshot
       // that selected this action. Only suppress delivery here; the coordinator
@@ -526,14 +566,15 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) throw new Error("Native close acceptance is unproven");
             receipts?.accept(reservation.promptIdentity, "native-response");
           }
-          return;
+          return close ? undefined : { accepted: true };
         }
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
           await sleep(delay);
           const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
           if (userTexts(snapshot).includes(frozenPrompt)) {
-            receipts?.accept(reservation.promptIdentity, "native-history"); return;
+            receipts?.accept(reservation.promptIdentity, "native-history");
+            return close ? undefined : { observed: true, initiatedHere: true };
           }
           if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
@@ -541,11 +582,24 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
       throw new Error("Task message retry budget exhausted after native read-back");
     },
-    async wait(taskRefs) {
+    async waitForSignal(timeoutMs) {
+      if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new TypeError("Observation signal wait requires a non-negative finite duration");
+      return waitSignal({ timeoutMs, readSignal: readObservationSignal });
+    },
+    async wait(taskRefs, { timeoutMs } = {}) {
       if (!Array.isArray(taskRefs) || taskRefs.length === 0) throw new Error("Task observation requires at least one exact task reference");
       if (taskRefs.some(ref => typeof ref?.threadId !== "string" || typeof ref?.hostId !== "string")) {
         throw new Error("Task observation requires exact thread and host identities");
       }
+      if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0)) {
+        throw new TypeError("Task observation timeout must be a non-negative finite duration");
+      }
+      const boundedTimeoutMs = timeoutMs === undefined ? null : Math.max(0, Math.ceil(timeoutMs));
+      const observationBudget = boundedTimeoutMs === null ? null : {
+        limitMs: boundedTimeoutMs,
+        startedAt: monotonicNow(),
+        simulatedElapsedMs: 0,
+      };
       const batchSize = Math.min(8, taskRefs.length);
       const batch = Array.from({ length: batchSize }, (_, index) => taskRefs[(batchOffset + index) % taskRefs.length]);
       batchOffset = (batchOffset + batchSize) % taskRefs.length;
@@ -569,7 +623,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: 15000 }, { interruptible: true });
+          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000) },
+            { interruptible: true, observationBudget });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
@@ -584,11 +639,14 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const round = fallbackRounds.get(batchKey) ?? 0;
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
-        const signaled = await waitSignal({ timeoutMs: [15000, 30000, 60000][Math.min(round, 2)], readSignal: readObservationSignal });
+        const signaled = await waitWithinBudget(
+          Math.min([15000, 30000, 60000][Math.min(round, 2)], boundedTimeoutMs ?? 60000),
+          observationBudget,
+        );
         if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
           const snapshotAttempt = await observeCall(() => call("read_thread", { ...ref, turnLimit: 1,
-            includeOutputs: false, maxOutputCharsPerItem: 1000 }, { interruptible: true }));
+            includeOutputs: false, maxOutputCharsPerItem: 1000 }, { interruptible: true, observationBudget }));
           if (snapshotAttempt.interruption) return snapshotAttempt.interruption;
           const snapshot = snapshotAttempt.value;
           if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
@@ -600,7 +658,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const previous = taskObservations.get(ref.threadId);
           if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: status });
           if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
-            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true }));
+            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
             taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
@@ -628,7 +686,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
           }
           if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
-            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true }));
+            const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
             taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",

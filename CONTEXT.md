@@ -240,6 +240,10 @@ _Avoid_: Path-overlap dependency, scheduler-invented blocker, title-based orderi
 The maximum of three dispatch attempts allowed for one Issue after transient worker or terminal failure inside a **DAG Run**. `implementation_blocked`, merge conflict, Scope change, authority or contract mismatch, and ambiguous evidence stop immediately and never consume or trigger an automatic retry.
 _Avoid_: Review repair wave, semantic retry, unlimited restart
 
+**Issue execution budget**:
+The cumulative active-work allowance owned by one Issue operation across implementation and conflict repair, including their execution-owned verification and review. It survives retries and owner recovery; verified healthy contention is excluded, while unknown elapsed evidence grants no additional allowance.
+_Avoid_: DAG retry budget, wall-clock task deadline, healthy-wait timeout
+
 **DAG concurrency limit**:
 The **DAG Run Grant** value `max_parallel` limiting simultaneous Issue execution dispatches, with a default of three. Serialized `close-issue` work does not consume an execution slot and still permits only one writer per **Issue target branch**.
 _Avoid_: Worker count guess, close-writer limit, unlimited fan-out
@@ -317,7 +321,7 @@ The active control engine's ephemeral `127.0.0.1` HTTP interface, protected by o
 _Avoid_: Public API, daemon database, command console
 
 **DAG run journal**:
-The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, bounded-remediation records, closeout-wait observations, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
+The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, **Issue execution budget** evidence, bounded-remediation records, closeout-wait observations, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
 _Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint
 
 **DAG status snapshot**:

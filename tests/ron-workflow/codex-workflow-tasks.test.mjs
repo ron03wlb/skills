@@ -233,7 +233,9 @@ test("policy-bound creation freezes validated native settings and refuses a belo
     await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: { ...decision, model: "gpt-5.6-terra" }, writer }), /floor/u);
     assert.equal(calls.length, 0);
     assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), null);
-    assert.deepEqual(await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer }), { threadId: "worker", hostId: "local" });
+    const createdRef = await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer });
+    assert.deepEqual(createdRef, { threadId: "worker", hostId: "local" });
+    assert.equal(tasks.executionStartEvidence(createdRef), "CURRENT_MONOTONIC");
     assert.equal(calls[0].args.model, "gpt-6-astra");
     assert.equal(calls[0].args.thinking, "high");
     assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }).modelDecision.inputIdentity, input.inputIdentity);
@@ -333,7 +335,10 @@ test("a lost task creation response reuses its exact discovered lane without a s
   } };
   const options = { host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version", issueNumber: async () => 1, sleep: async () => {} };
   try {
-    assert.deepEqual(await createCodexWorkflowTasks(options).create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
+    const initial = createCodexWorkflowTasks(options);
+    assert.deepEqual(await initial.create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
+    assert.equal(initial.executionStartEvidence(ref), "CURRENT_MONOTONIC",
+      "same-invocation creation read-back retains its conservative monotonic start");
     assert.match(prompt, /Matt\/Ron workflow owners and runtime/u);
     assert.match(prompt, /shared docs\/ references/u);
     assert.match(prompt, /Generic host support skills explicitly required/u);
@@ -342,12 +347,16 @@ test("a lost task creation response reuses its exact discovered lane without a s
     const resumed = createCodexWorkflowTasks(options);
     assert.deepEqual(await resumed.findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
     assert.deepEqual(await resumed.create({ issueId: "I_1", runIdentity }), ref);
+    assert.equal(resumed.executionStartEvidence(ref), "OBSERVED");
     assert.equal(creates, 1);
     assert.equal((await resumed.read(ref)).state, "RESUMABLE");
     assert.equal((await resumed.wait([ref])).taskSettled, true);
     assert.equal((await resumed.wait([ref])).taskSettled, true);
-    await resumed.message(ref, `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`);
+    const retryPrompt = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`;
+    assert.deepEqual(await resumed.message(ref, retryPrompt), { observed: true, initiatedHere: true });
     assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
+    assert.deepEqual(await resumed.message(ref, retryPrompt), { observed: true });
+    assert.equal(messages, 1, "a later adapter entry does not treat prior accepted history as a new start");
     assert.match(prompt.replaceAll("\\", "/"), /\/installed\/version\/skills\/engineering\/execute-issue\/SKILL.md/u);
     assert.match(prompt, /Generic host support skills explicitly required/u, "continuations correct the boundary without editing accepted creation history");
     assert.deepEqual(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), originalIntent);
@@ -518,7 +527,7 @@ test("one read-only transport fault consumes exactly 5/15/30 recovery seconds ac
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("a settled deterministic fault identity resumes its consumed budget after adapter re-entry", async () => {
+test("a later fault after proved settlement receives a fresh bounded recovery policy", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-settled-fault-budget-"));
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const ref = { threadId: "worker", hostId: "local" };
@@ -544,10 +553,10 @@ test("a settled deterministic fault identity resumes its consumed budget after a
     assert.equal(fault.recoveryRounds, 1);
     await createCodexWorkflowTasks(options).wait([ref]);
     fault = store.readHostFault({ runId: "run-1", faultId: fault.faultId });
-    assert.deepEqual(delays, [5000, 15000], "the stable identity continues with its next unconsumed delay");
+    assert.deepEqual(delays, [5000, 5000], "proved settlement separates the later fault episode");
     assert.equal(calls, 4);
     assert.equal(fault.state, "settled");
-    assert.equal(fault.recoveryRounds, 2);
+    assert.equal(fault.recoveryRounds, 1);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -640,6 +649,46 @@ test("fallback task observation yields independently for a control or execution 
     assert.equal(observed.observation.nativeCalls, signal.control ? 0 : 1,
       "a queued control prevents the event call while a later deadline retains the unsupported probe metric");
   }
+});
+
+test("task observation never waits past the Issue execution budget boundary", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let observedTimeout;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+    host: { async call(name, args) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      observedTimeout = args.timeoutMs;
+      return { timedOut: true, polls: [] };
+    } },
+  });
+
+  await tasks.wait([ref], { timeoutMs: 1234 });
+  assert.equal(observedTimeout, 1234);
+});
+
+test("task observation fault recovery cannot outlive the remaining Issue execution budget", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-observation-deadline-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const recoveryWindows = [];
+  let calls = 0;
+  const tasks = createCodexWorkflowTasks({ store, runId: "run", project: {}, packageRoot: "/installed",
+    waitForObservationSignal: async ({ timeoutMs }) => { recoveryWindows.push(timeoutMs); return null; },
+    host: { async call(name) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      calls += 1;
+      throw new Error("temporary connection failure");
+    } },
+  });
+
+  try {
+    const observed = await tasks.wait([ref], { timeoutMs: 1 });
+    assert.equal(observed.observation.kind, "interrupted");
+    assert.equal(observed.observation.signal, "deadline");
+    assert.ok(recoveryWindows.length <= 1);
+    assert.ok(recoveryWindows.every(windowMs => windowMs <= 1));
+    assert.ok(calls <= 1, "the expired Issue budget forbids a second native observation call");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("control interrupts wait_threads fault recovery before another native call", async () => {
