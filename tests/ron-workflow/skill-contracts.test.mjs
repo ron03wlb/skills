@@ -3370,6 +3370,11 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   const core = read(corePath);
   const coordinator = read(coordinatorPath);
   const operator = read(operatorPath);
+  const journal = read("skills/personal/run-issue-workflow/scripts/run-journal.mjs");
+  const executionBudget = read("skills/personal/run-issue-workflow/scripts/issue-execution-budget.mjs");
+  const storeSource = read("skills/personal/run-issue-workflow/scripts/run-store.mjs");
+  const leaseHealth = read("skills/personal/run-issue-workflow/scripts/lease-health.mjs");
+  const hostEvidence = read("docs/agents/codex-host-driver-evidence.md");
   assert.match(skill, /^disable-model-invocation:\s*true$/mu);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(skill, /READY.*INCOMPLETE.*UNKNOWN/isu);
@@ -3424,6 +3429,19 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(skill, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*every currently legal Issue dispatch.*repository-close-wait\.started.*repository-close-wait\.settled.*execution slot or retry/isu);
   assert.match(skill, /tracker identity\/state.*target HEAD\/state.*candidate commit\/reachability.*completion evidence ID\/body SHA-256\/state.*registered worktree identity\/state.*control revision/isu);
   assert.match(skill, /healthy target-writer contention retains.*`WAITING_FOR_TARGET_WRITER`.*`target-writer-wait\.\*`/isu);
+  assert.match(skill, /cumulative six-hour execution budget.*implementation retry.*conflict repair.*verification.*independent review.*retry.*task replacement.*transport restart.*explicit re-entry.*Verified healthy dependency or writer waiting is excluded/isu);
+  assert.match(skill, /At the cumulative six-hour boundary.*`execution\.exhausted`.*`execution_timeout`.*stop scheduling new execution, repair, retry, or close.*original task.*worktree.*candidate.*receipts.*late native outcomes.*Do not force-kill/isu);
+  assert.match(lifecycle, /`execution\.started`.*`execution\.observed`.*monotonic clock.*native `durationMs`.*`execution\.uncertain`.*never remove proved elapsed/isu);
+  assert.match(lifecycle, /`ISSUE_EXECUTION_LIMIT_MS`.*six hours.*smaller.*15-second.*remaining budget.*`execution\.exhausted`.*Other independent nodes retain their legal actions/isu);
+  assert.match(operator, /cumulative six-hour execution budget.*healthy dependency and writer waits are excluded.*beyond twelve hours.*`execution_timeout`.*does not force-kill.*claim cancellation/isu);
+  assert.match(journal, /ISSUE_EXECUTION_LIMIT_MS\s*=\s*6 \* 60 \* 60 \* 1000.*execution\.started.*execution\.observed.*execution\.uncertain.*execution\.exhausted/isu);
+  for (const evidence of [/monotonicNow/u, /nativeDurationMs/u, /MONOTONIC_OR_NATIVE_ELAPSED_UNAVAILABLE/u,
+    /recordExhaustion/u, /remainingMs/u]) assert.match(executionBudget, evidence);
+  assert.match(core, /executionTimeout: "execution_timeout".*executionBudget.*EXHAUSTED.*do not authorize execution, repair, retry, or close dispatch/isu);
+  assert.match(storeSource, /BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS.*5000, 15000, 30000.*createBoundedObservationFault/isu);
+  assert.match(leaseHealth, /sameLeaseOwner.*OWNER_CHANGED.*HEARTBEAT_AGE_OR_CLOCK_UNKNOWN.*PROCESS_CONFIRMED_ABSENT.*PROCESS_LIVENESS_UNKNOWN.*EXACT_OWNER_GENERATION_HEALTHY/isu);
+  assert.match(lifecycle, /beyond twelve hours.*5\/15\/30-second.*`OWNER_HEALTH_UNKNOWN`.*`UNKNOWN` is not `INACTIVE`.*never permits release, reclaim, cancellation, or duplicate close dispatch/isu);
+  assert.match(hostEvidence, /Issue 87.*six hours.*15 seconds.*twelve virtual hours.*no real Windows six-hour execution or twelve-hour contention soak/isu);
   assert.match(skill, /unknown repository-close or target-writer ownership.*coordinator loss.*changed immutable authority.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
   assert.match(core, /REPOSITORY_CLOSE_WAIT_TIMEOUT_MS\s*=\s*30_000/iu);
   assert.match(core, /WAITING_FOR_REPOSITORY_CLOSE_LEASE/iu);
@@ -3432,7 +3450,7 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
   assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
   assert.match(coordinator, /repository-close-wait\.started.*repository-close-wait\.settled.*target-writer-wait\.started.*target-writer-wait\.settled/isu);
   assert.doesNotMatch(coordinator, /acquireRepositoryCloseLease|acquireTargetMutationWriter|reclaimTargetMutationWriter/iu);
-  for (const outcome of ["OWNER_CHANGED", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
+  for (const outcome of ["OWNER_CHANGED", "OWNER_HEALTH_UNKNOWN", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
     assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
   }
   for (const evidence of [

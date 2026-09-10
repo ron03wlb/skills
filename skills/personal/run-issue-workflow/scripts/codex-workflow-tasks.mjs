@@ -7,6 +7,7 @@ import { delegatedInput, discoverLocalCodexTasks } from "./codex-task-discovery.
 import { createCodexCloseReceipts } from "./codex-close-receipts.mjs";
 import { completedCloseCleanup } from "./close-continuation.mjs";
 import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
+import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
@@ -46,6 +47,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const taskRuns = new Map();
   const transientFaults = new Map();
   const taskObservations = new Map();
+  const executionStartEvidence = new Map();
   const fallbackRounds = new Map();
   let batchOffset = 0;
   let eventWaitSupported = true;
@@ -66,7 +68,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     taskRuns.set(ref.threadId, selectedRunId);
     return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
   };
-  const recoveryDelaysMs = [5000, 15000, 30000];
+  const recoveryDelaysMs = BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS;
   const faultCategory = error => [
     ["timeout", /timeout/iu], ["temporary", /temporar/iu], ["unavailable", /unavailable/iu],
     ["connection", /connection/iu], ["response-lost", /response lost/iu],
@@ -84,10 +86,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (store?.writeHostFault && runId) return store.writeHostFault(value);
     transientFaults.set(value.faultId, value); return value;
   };
-  const recordFault = ({ faultId, operation, category, state, recoveryRounds, receiptRefs }) => writeFault({
-    schema: "codex-host-fault:v1", runId: runId ?? "unbound", faultId, operation, category, state,
-    recoveryRounds, recoveryDelaysMs, receiptRefs, updatedAt: new Date().toISOString(),
-  });
+  const recordFault = ({ faultId, operation, category, state, recoveryRounds, receiptRefs }) => writeFault(
+    createBoundedObservationFault({ runId: runId ?? "unbound", faultId, operation, category, state,
+      recoveryRounds, receiptRefs, updatedAt: new Date().toISOString() }),
+  );
   const exhaustedFault = fault => Object.assign(new Error(`Read-only host recovery budget exhausted for ${fault.operation} (${fault.faultId})`), { fault });
   const call = async (name, args, { interruptible = false } = {}) => {
     const readOnly = ["read_thread", "list_threads", "wait_threads"].includes(name);
@@ -278,6 +280,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (creationUnavailable(store.readEvents(runIdentity.runId), issueId)) throw new Error("MODEL_UNAVAILABLE: native Astra rejection proved no task was submitted");
       const existing = await findIssueLane({ issueId, runIdentity });
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+      executionStartEvidence.set(existing[0].threadId, "OBSERVED");
       return existing[0];
     }
     const policy = store.readEvents(runIdentity.runId).find(event => event.type === "grant.recorded")?.modelPolicy;
@@ -298,6 +301,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (!reservation.created) {
       const existing = await findIssueLane({ issueId, runIdentity });
       if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+      executionStartEvidence.set(existing[0].threadId, "OBSERVED");
       return existing[0];
     }
     let created;
@@ -326,6 +330,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     if (created.accepted && created.threadId && created.hostId) {
       const ref = { threadId: created.threadId, hostId: created.hostId };
       refs.set(key, ref);
+      executionStartEvidence.set(ref.threadId, "CURRENT_MONOTONIC");
       return ref;
     }
     // clientThreadId is a setup operation, never a task reference.
@@ -335,6 +340,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         try {
           const existing = await findIssueLane({ issueId, runIdentity });
           if (existing.length !== 1) throw new Error("ISSUE_LANE_AMBIGUOUS");
+          executionStartEvidence.set(existing[0].threadId, "OBSERVED");
           return existing[0];
         } catch (error) {
           if (!error.message.startsWith("TASK_CREATION_UNRESOLVED:")) throw error;
@@ -345,6 +351,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   };
   return {
     findIssueLane, create, read,
+    executionStartEvidence(ref) { return executionStartEvidence.get(ref?.threadId) ?? "OBSERVED"; },
     async ensureMaintenanceTask({ issueId, runIdentity, failure, originalTaskRef }) {
       const scope = failure.diagnosis?.maintenance;
       if (!scope || !["repositoryId", "sourceRepository", "target", "approvedScopeHash", "authority", "operationId"].every(key => typeof scope[key] === "string" && scope[key])) {
@@ -496,11 +503,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       if (issue) prompt = prompt.replace(`Issue ${issue[1]}`, `Issue #${await issueNumber(issue[1])}`);
       const frozenPrompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering", prompt.includes("$close-issue") ? "close-issue" : "execute-issue", "SKILL.md")}.\n${workflowSourceBoundary(packageRoot)}\n${prompt}`;
       const stored = receipts?.read();
-      if (stored?.prompt === frozenPrompt && stored.accepted) return;
+      if (stored?.prompt === frozenPrompt && stored.accepted) return close ? undefined : { observed: true };
       const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
-        return;
+        return close ? undefined : { observed: true };
       }
       // Native history and continuation waits may outlive the tracker snapshot
       // that selected this action. Only suppress delivery here; the coordinator
@@ -526,14 +533,15 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) throw new Error("Native close acceptance is unproven");
             receipts?.accept(reservation.promptIdentity, "native-response");
           }
-          return;
+          return close ? undefined : { accepted: true };
         }
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
           await sleep(delay);
           const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
           if (userTexts(snapshot).includes(frozenPrompt)) {
-            receipts?.accept(reservation.promptIdentity, "native-history"); return;
+            receipts?.accept(reservation.promptIdentity, "native-history");
+            return close ? undefined : { observed: true };
           }
           if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
@@ -541,11 +549,19 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
       throw new Error("Task message retry budget exhausted after native read-back");
     },
-    async wait(taskRefs) {
+    async waitForSignal(timeoutMs) {
+      if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new TypeError("Observation signal wait requires a non-negative finite duration");
+      return waitSignal({ timeoutMs, readSignal: readObservationSignal });
+    },
+    async wait(taskRefs, { timeoutMs } = {}) {
       if (!Array.isArray(taskRefs) || taskRefs.length === 0) throw new Error("Task observation requires at least one exact task reference");
       if (taskRefs.some(ref => typeof ref?.threadId !== "string" || typeof ref?.hostId !== "string")) {
         throw new Error("Task observation requires exact thread and host identities");
       }
+      if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs < 0)) {
+        throw new TypeError("Task observation timeout must be a non-negative finite duration");
+      }
+      const boundedTimeoutMs = timeoutMs === undefined ? null : Math.max(0, Math.ceil(timeoutMs));
       const batchSize = Math.min(8, taskRefs.length);
       const batch = Array.from({ length: batchSize }, (_, index) => taskRefs[(batchOffset + index) % taskRefs.length]);
       batchOffset = (batchOffset + batchSize) % taskRefs.length;
@@ -569,7 +585,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: 15000 }, { interruptible: true });
+          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000) }, { interruptible: true });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
@@ -584,7 +600,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const round = fallbackRounds.get(batchKey) ?? 0;
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
-        const signaled = await waitSignal({ timeoutMs: [15000, 30000, 60000][Math.min(round, 2)], readSignal: readObservationSignal });
+        const signaled = await waitSignal({ timeoutMs: Math.min([15000, 30000, 60000][Math.min(round, 2)], boundedTimeoutMs ?? 60000), readSignal: readObservationSignal });
         if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
           const snapshotAttempt = await observeCall(() => call("read_thread", { ...ref, turnLimit: 1,

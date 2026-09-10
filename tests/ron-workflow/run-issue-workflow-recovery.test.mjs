@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { maintainLeaseHealth, readLeaseHealth } from "../../skills/personal/run-issue-workflow/scripts/lease-health.mjs";
+import { maintainLeaseHealth, readLeaseHealth, readLeaseHealthEvidence } from "../../skills/personal/run-issue-workflow/scripts/lease-health.mjs";
 import { sameCloseWaitAuthority } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 
 test("normal target and close progress retain wait authority while candidate and scope changes do not", () => {
@@ -38,6 +38,15 @@ test("lease health needs a live process and fresh exact-generation evidence and 
     assert.equal(readLeaseHealth(root, owner, { now: () => 11000 }), "HEALTHY");
     assert.equal(readLeaseHealth(root, owner, { now: () => 26000 }), "UNKNOWN");
     assert.equal(readLeaseHealth(root, owner, { now: () => 11000, alive() { throw new Error("dead"); } }), "UNKNOWN");
+    assert.deepEqual(readLeaseHealthEvidence(root, owner, { now: () => 11000, alive() {
+      throw Object.assign(new Error("process absent"), { code: "ESRCH" });
+    } }), { state: "INACTIVE", reason: "PROCESS_CONFIRMED_ABSENT", owner });
     assert.equal(readLeaseHealth(root, { ...owner, generation: "two" }, { now: () => 11000 }), "UNKNOWN");
+    assert.deepEqual(readLeaseHealthEvidence(root, owner, { now: () => 26000 }), {
+      state: "UNKNOWN", reason: "HEARTBEAT_AGE_OR_CLOCK_UNKNOWN", owner,
+    });
+    assert.deepEqual(readLeaseHealthEvidence(root, { ...owner, generation: "two" }, { now: () => 11000 }), {
+      state: "UNKNOWN", reason: "OWNER_CHANGED", owner: { ...owner, generation: "two" },
+    });
   } finally { health.stop(); rmSync(root, { recursive: true }); }
 });

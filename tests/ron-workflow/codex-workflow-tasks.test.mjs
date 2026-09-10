@@ -233,7 +233,9 @@ test("policy-bound creation freezes validated native settings and refuses a belo
     await assert.rejects(tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: { ...decision, model: "gpt-5.6-terra" }, writer }), /floor/u);
     assert.equal(calls.length, 0);
     assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), null);
-    assert.deepEqual(await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer }), { threadId: "worker", hostId: "local" });
+    const createdRef = await tasks.create({ issueId: "I_1", runIdentity, modelInput: input, modelDecision: decision, writer });
+    assert.deepEqual(createdRef, { threadId: "worker", hostId: "local" });
+    assert.equal(tasks.executionStartEvidence(createdRef), "CURRENT_MONOTONIC");
     assert.equal(calls[0].args.model, "gpt-6-astra");
     assert.equal(calls[0].args.thinking, "high");
     assert.equal(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }).modelDecision.inputIdentity, input.inputIdentity);
@@ -333,7 +335,9 @@ test("a lost task creation response reuses its exact discovered lane without a s
   } };
   const options = { host, store, project: { projectId: "project", hostId: "local" }, packageRoot: "/installed/version", issueNumber: async () => 1, sleep: async () => {} };
   try {
-    assert.deepEqual(await createCodexWorkflowTasks(options).create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
+    const initial = createCodexWorkflowTasks(options);
+    assert.deepEqual(await initial.create({ issueId: "I_1", runIdentity }), ref, "owning-source discovery recovers a lost create response in the same invocation");
+    assert.equal(initial.executionStartEvidence(ref), "OBSERVED", "uncertain creation never invents a fresh monotonic start");
     assert.match(prompt, /Matt\/Ron workflow owners and runtime/u);
     assert.match(prompt, /shared docs\/ references/u);
     assert.match(prompt, /Generic host support skills explicitly required/u);
@@ -342,6 +346,7 @@ test("a lost task creation response reuses its exact discovered lane without a s
     const resumed = createCodexWorkflowTasks(options);
     assert.deepEqual(await resumed.findIssueLane({ issueId: "I_1", runIdentity }), [ref]);
     assert.deepEqual(await resumed.create({ issueId: "I_1", runIdentity }), ref);
+    assert.equal(resumed.executionStartEvidence(ref), "OBSERVED");
     assert.equal(creates, 1);
     assert.equal((await resumed.read(ref)).state, "RESUMABLE");
     assert.equal((await resumed.wait([ref])).taskSettled, true);
@@ -640,6 +645,21 @@ test("fallback task observation yields independently for a control or execution 
     assert.equal(observed.observation.nativeCalls, signal.control ? 0 : 1,
       "a queued control prevents the event call while a later deadline retains the unsupported probe metric");
   }
+});
+
+test("task observation never waits past the Issue execution budget boundary", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let observedTimeout;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+    host: { async call(name, args) {
+      assert.equal(name, "mcp__codex_app__wait_threads");
+      observedTimeout = args.timeoutMs;
+      return { timedOut: true, polls: [] };
+    } },
+  });
+
+  await tasks.wait([ref], { timeoutMs: 1234 });
+  assert.equal(observedTimeout, 1234);
 });
 
 test("control interrupts wait_threads fault recovery before another native call", async () => {

@@ -1792,11 +1792,13 @@ test("uncertain target mutation writer evidence stops before lane messaging", as
   });
   const sharedWriterStore = {
     ...store,
+    readLeaseHealth() { return "UNKNOWN"; },
     acquireCloseWriter() { throw new Error("legacy close writer API must not drive new closeout"); },
     readCloseWriterLock() { throw new Error("legacy close writer API must not drive new closeout"); },
     reclaimCloseWriter() { throw new Error("legacy close writer API must not drive new closeout"); },
   };
   let taskCalls = 0;
+  const recoveryDelays = [];
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
       taskCalls += 1;
@@ -1833,16 +1835,64 @@ test("uncertain target mutation writer evidence stops before lane messaging", as
       tasks,
       reconcile,
       now,
-      sleep: async () => {},
+      sleep: async delayMs => { recoveryDelays.push(delayMs); },
     });
     const status = await coordinator.run({ specId: "15" });
 
     assert.equal(status.run.state, "BLOCKED");
-    assert.equal(status.diagnoses.at(-1).reasonCode, "close_writer_conflict");
-    assert.match(status.diagnoses.at(-1).evidence.join(" "), /run-competing/u);
+    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_health_unknown");
+    assert.match(status.diagnoses.at(-1).evidence.join(" "), /UNKNOWN is not inactive ownership/u);
     assert.deepEqual(status.diagnoses.at(-1).affectedNodes, ["15"]);
+    assert.deepEqual(recoveryDelays, [5000, 15000, 30000]);
+    assert.equal(store.listHostFaults(identity.runId).at(-1).state, "exhausted");
+    assert.equal(store.readEvents(identity.runId).findLast(event => event.type === "target-writer-wait.settled").outcome,
+      "OWNER_HEALTH_UNKNOWN");
     assert.equal(taskCalls, 0);
     assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, "run-competing");
+  } finally {
+    competing.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("partially failed owner-health reads use the shared bounded policy and retain exact ownership", async () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const seed = store.acquireWriter(identity.runId);
+  seed.append({ type: "grant.recorded", at: "2026-08-30T13:20:00.000Z", runIdentity: identity, maxParallel: 3 });
+  seed.append({ type: "dispatch.recorded", at: "2026-08-30T13:20:01.000Z", issueId: "15", attempt: 1, taskRef });
+  seed.release();
+  const competing = store.acquireTargetMutationWriter({ target: identity.target, operationId: "run-health-recovery" });
+  let healthReads = 0;
+  const recoveryStore = {
+    ...store,
+    readLeaseHealth() { return ++healthReads < 3 ? "UNKNOWN" : "HEALTHY"; },
+  };
+  const owner = store.readTargetMutationWriterLock(identity.target);
+  const tasks = Object.fromEntries(
+    ["findIssueLane", "create", "read", "message", "wait"].map(name => [name, async () => {
+      throw new Error(`${name} is forbidden during writer health recovery`);
+    }]),
+  );
+  const reconcile = async () => reconciliation({
+    taskRefs: { 15: taskRef },
+    run: { closeWriterRunId: owner.operationId, closeWriterState: "ACTIVE", closeWriterHealth: "UNKNOWN", closeWriterOwner: owner },
+    nodes: [{ issueId: "15", blockers: [], trackerState: "OPEN", taskState: "NONE", completionState: "COMPLETE",
+      candidateReachable: false, worktreeState: "PRESENT" }],
+  });
+  const delays = [];
+
+  try {
+    const status = await createCoordinator({ store: recoveryStore, tracker: { async read() { return {}; } }, tasks,
+      reconcile, now: () => "2026-08-30T13:20:02.000Z",
+      sleep: async delayMs => { delays.push(delayMs); return delayMs === 1000 ? { coordinatorActive: false } : undefined; } })
+      .run({ specId: "15" });
+
+    assert.equal(status.diagnoses.at(-1).reasonCode, "target_writer_wait_coordinator_lost");
+    assert.deepEqual(delays, [5000, 15000, 1000]);
+    const fault = store.listHostFaults(identity.runId).at(-1);
+    assert.deepEqual({ state: fault.state, recoveryRounds: fault.recoveryRounds }, { state: "settled", recoveryRounds: 2 });
+    assert.equal(store.readTargetMutationWriterLock(identity.target).operationId, "run-health-recovery");
   } finally {
     competing.release();
     rmSync(root, { recursive: true, force: true });
@@ -2191,12 +2241,13 @@ test("repository close wait dispatches within max_parallel before requesting the
   }
 });
 
-test("healthy repository close wait continues beyond thirty seconds and only settles on coordinator loss", async () => {
+test("healthy repository close wait remains valid beyond twelve virtual hours and only settles on coordinator loss", async () => {
   const { root, store } = createStoreFixture();
   const competitorOperationId = `workflow-op-v1-${"c".repeat(64)}`;
   const competitor = store.acquireRepositoryCloseLease({ operationId: competitorOperationId });
   const taskRef = { threadId: "thread-15", hostId: "local" };
   let sleepCalls = 0;
+  let virtualElapsedMs = 0;
   const tasks = Object.fromEntries(
     ["findIssueLane", "create", "read", "message", "wait"].map((name) => [name, async () => {
       throw new Error(`${name} is forbidden while repository close wait times out`);
@@ -2230,8 +2281,12 @@ test("healthy repository close wait continues beyond thirty seconds and only set
       tracker: { async read() { return {}; } },
       tasks,
       reconcile,
-      now: () => "2026-09-03T01:30:00.000Z",
-      sleep: async () => { sleepCalls += 1; return sleepCalls >= 65 ? { coordinatorActive: false } : undefined; },
+      now: () => new Date(Date.parse("2026-09-03T01:30:00.000Z") + virtualElapsedMs).toISOString(),
+      sleep: async () => {
+        sleepCalls += 1;
+        virtualElapsedMs += 15 * 60 * 1000;
+        return sleepCalls >= 49 ? { coordinatorActive: false } : undefined;
+      },
     });
     const status = await coordinator.run({ specId: "15" });
     const waitEvents = store.readEvents(identity.runId)
@@ -2240,7 +2295,10 @@ test("healthy repository close wait continues beyond thirty seconds and only set
     assert.equal(status.run.state, "BLOCKED");
     assert.equal(status.diagnoses.at(-1).reasonCode, "repository_close_lease_wait_coordinator_lost");
     assert.equal(waitEvents.at(-1).outcome, "COORDINATOR_INACTIVE");
-    assert.equal(sleepCalls, 65);
+    assert.equal(sleepCalls, 49);
+    assert.ok(virtualElapsedMs > 12 * 60 * 60 * 1000);
+    assert.equal(store.readEvents(identity.runId).some(event => event.type === "execution.started"), false,
+      "verified healthy contention consumes no Issue execution budget");
     assert.equal(status.nodes[0].task.retryCount, 0);
     assert.deepEqual(status.diagnoses.at(-1).resumePredicates, [
       "coordinator_is_active",
@@ -4038,7 +4096,8 @@ test("conflict repair reuses the original lane and its persistent wave before cl
   let completed = false;
   const tasks = {
     async findIssueLane() { return [ref]; }, async create() { throw new Error("Never replace conflict lane"); },
-    async read() { return { state: running ? "RUNNING" : "RESUMABLE", repairRequest, closeRequest }; },
+    async read() { return { state: running ? "RUNNING" : "RESUMABLE", repairRequest, closeRequest,
+      snapshot: { turns: [{ status: running ? "inProgress" : "completed", ...(running ? {} : { durationMs: 1 }) }] } }; },
     async message(taskRef, prompt) {
       assert.deepEqual(taskRef, ref);
       if (prompt.includes("Repair request:")) {
