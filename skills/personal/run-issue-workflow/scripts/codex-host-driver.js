@@ -76,11 +76,12 @@
       || Object.entries(owner).some(([key, value]) => !["kind", "runId", "issueId", "threadId", "requestKind", "receiptIdentity"].includes(key)
         || typeof value !== "string" || !value)
       || !["runId", "issueId", "receiptIdentity"].every(key => typeof owner[key] === "string" && owner[key])
-      || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery"].includes(owner.requestKind)
+      || owner.kind === "task-message" && (!["close", "retry", "repair", "recovery", "upgrade", "recovery-handoff"].includes(owner.requestKind)
         || typeof owner.threadId !== "string" || !owner.threadId)
       || owner.kind === "task-fork" && (typeof owner.threadId !== "string" || !owner.threadId)
       || !/^sha256:[a-f0-9]{64}$/u.test(owner.receiptIdentity)
-        && !/^run:[a-zA-Z0-9._-]{1,128}:issue:[a-zA-Z0-9_-]{1,128}:retry:[1-9][0-9]*$/u.test(owner.receiptIdentity)) return null;
+        && !/^run:[a-zA-Z0-9._-]{1,128}:issue:[a-zA-Z0-9_-]{1,128}:retry:[1-9][0-9]*$/u.test(owner.receiptIdentity)
+        && !/^run:[a-zA-Z0-9._-]{1,128}:issue:[a-zA-Z0-9_-]{1,128}:recovery-handoff:[a-zA-Z0-9._-]{1,128}$/u.test(owner.receiptIdentity)) return null;
     return copy(owner);
   };
   const safeControlResult = result => !record(result) ? null : Object.fromEntries(
@@ -97,13 +98,15 @@
         ["retry", /Retry request: (\{.+\})$/mu],
         ["repair", /Repair request: (\{.+\})$/mu],
         ["recovery", /Recovery request: (\{.+\})$/mu],
+        ["upgrade", /Model upgrade request: (\{.+\})$/mu],
+        ["recovery-handoff", /Workflow recovery ownership: (\{.+\})$/mu],
       ].map(([kind, pattern]) => [kind, prompt.match(pattern)]).find(([, match]) => match);
       if (!matched) return null;
       try {
         const [requestKind, match] = matched;
         const request = JSON.parse(match[requestKind === "close" ? 2 : 1]);
         const receiptIdentity = requestKind === "close" ? match[1]
-          : request.requestIdentity ?? `run:${request.runId}:issue:${request.issueId}:${requestKind}:${request.attempt ?? request.wave ?? "owner"}`;
+          : request.requestIdentity ?? `run:${request.runId}:issue:${request.issueId}:${requestKind}:${request.operationId ?? request.attempt ?? request.wave ?? "owner"}`;
         return safeOwner({ kind: "task-message", threadId: message.arguments.threadId, requestKind,
           runId: request.runIdentity?.runId ?? request.runId, issueId: request.issueId, receiptIdentity });
       } catch { return null; }
@@ -432,9 +435,9 @@
         } else {
           if (message.type === "control-result") {
             const control = lane.controls.find(value => value.state === "sending"
-              && (message.id === undefined || value.sourceId === message.id)
+              && (message.id === undefined ? value.sourceId === undefined : value.sourceId === message.id)
               && value.message.control === message.command && (value.message.runId ?? null) === (message.runId ?? null)
-              && (message.revision === undefined || value.message.revision === message.revision));
+              && (message.revision === undefined ? value.message.revision === undefined : value.message.revision === message.revision));
             if (control && message.result?.reason !== "control_outcome_unresolved") {
               control.state = "returned"; control.result = message.result;
             }

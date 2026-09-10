@@ -2388,10 +2388,12 @@ test("end-to-end panel Pause, Resume, Refresh, and Stop share the coordinator wr
       const url = new URL(panelUrl);
       priorOrigin = url.origin;
       const headers = { authorization: `Bearer ${url.searchParams.get("token")}` };
+      let controlRevision = panelOpenCount === 1 ? 1 : 3;
       const submit = async (command) => {
         const response = await fetch(`${url.origin}/api/control/${command.toLowerCase()}`, {
           method: "POST",
-          headers,
+          headers: { ...headers, "x-workflow-control-id": `panel-${command.toLowerCase()}-${controlRevision}`,
+            "x-workflow-control-revision": String(controlRevision++) },
         });
         assert.equal(response.status, 200);
         return response.json();
@@ -2485,7 +2487,8 @@ test("end-to-end paused Run accepts Stop from the same panel", async () => {
       panelOpens += 1;
       const url = new URL(panelUrl);
       const headers = { authorization: `Bearer ${url.searchParams.get("token")}` };
-      const pause = await fetch(`${url.origin}/api/control/pause`, { method: "POST", headers });
+      const pause = await fetch(`${url.origin}/api/control/pause`, { method: "POST",
+        headers: { ...headers, "x-workflow-control-id": "panel-pause-1", "x-workflow-control-revision": "1" } });
       assert.equal(pause.status, 200);
       stopFlow = (async () => {
         while (true) {
@@ -2493,7 +2496,8 @@ test("end-to-end paused Run accepts Stop from the same panel", async () => {
           if (current.run.state === "PAUSED") break;
           await new Promise((resolve) => setTimeout(resolve, 5));
         }
-        const stop = await fetch(`${url.origin}/api/control/stop`, { method: "POST", headers });
+        const stop = await fetch(`${url.origin}/api/control/stop`, { method: "POST",
+          headers: { ...headers, "x-workflow-control-id": "panel-stop-2", "x-workflow-control-revision": "2" } });
         assert.equal(stop.status, 200);
       })();
     },
@@ -2995,7 +2999,8 @@ test("end-to-end explicit invocation applies retention unless cleanup preview is
       const url = new URL(panelUrl);
       const response = await fetch(`${url.origin}/api/control/stop`, {
         method: "POST",
-        headers: { authorization: `Bearer ${url.searchParams.get("token")}` },
+        headers: { authorization: `Bearer ${url.searchParams.get("token")}`,
+          "x-workflow-control-id": "panel-stop-1", "x-workflow-control-revision": "1" },
       });
       assert.equal(response.status, 200);
     },

@@ -35,6 +35,15 @@ const bearerToken = (request) => {
   return authorization.slice("Bearer ".length);
 };
 
+const controlIdentity = (request) => {
+  const id = request.headers["x-workflow-control-id"];
+  const encodedRevision = request.headers["x-workflow-control-revision"];
+  if (typeof id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/u.test(id)
+    || typeof encodedRevision !== "string" || !/^[1-9][0-9]*$/u.test(encodedRevision)) return null;
+  const revision = Number(encodedRevision);
+  return Number.isSafeInteger(revision) ? { id, revision } : null;
+};
+
 const send = (response, statusCode, contentType, body, headers = {}) => {
   response.writeHead(statusCode, {
     "cache-control": "no-store",
@@ -105,6 +114,10 @@ export function createRunPanelControl({ readStatus, appendEvent, rebuildStatus, 
         || !Number.isInteger(controlIdentity.revision) || controlIdentity.revision < 1)) {
         throw new TypeError("Text control identity requires its request ID and expected revision");
       }
+      if (hasIdentity && controlIdentity.revision === current.run.controlRevision
+        && controlIdentity.id === current.run.controlRequestId && command === current.run.controlCommand) {
+        return { accepted: true, changed: false, revision: current.run.controlRevision, reconciled: true, status: current };
+      }
       if (hasIdentity && controlIdentity.revision !== current.run.controlRevision + 1) {
         return { accepted: false, changed: false, revision: current.run.controlRevision,
           reason: "stale_control_revision", status: current };
@@ -162,7 +175,12 @@ export async function startRunPanelBridge({ readStatus, submitControl, renderPan
           sendJson(response, 413, { error: "control_body_not_allowed" });
           return;
         }
-        const result = await submitControl(controlRoutes.get(url.pathname));
+        const identity = controlIdentity(request);
+        if (!identity) {
+          sendJson(response, 400, { error: "control_identity_required" });
+          return;
+        }
+        const result = await submitControl(controlRoutes.get(url.pathname), identity);
         sendJson(response, result.accepted ? 200 : 409, result);
         return;
       }

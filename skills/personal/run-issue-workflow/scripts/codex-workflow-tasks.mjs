@@ -43,6 +43,8 @@ const taskRequestFrom = prompt => {
     ["retry", /Retry request: (\{.+\})$/mu],
     ["repair", /Repair request: (\{.+\})$/mu],
     ["recovery", /Recovery request: (\{.+\})$/mu],
+    ["upgrade", /Model upgrade request: (\{.+\})$/mu],
+    ["recovery-handoff", /Workflow recovery ownership: (\{.+\})$/mu],
   ].map(([kind, pattern]) => [kind, prompt.match(pattern)]).find(([, value]) => value);
   if (!match) return undefined;
   const [kind, parsed] = match;
@@ -51,6 +53,8 @@ const taskRequestFrom = prompt => {
     retry: ["runId", "issueId", "attempt"],
     repair: ["runId", "issueId", "candidate", "baseline", "wave", "requestIdentity"],
     recovery: ["runId", "issueId", "operationId", "requestIdentity", "phase", "wave", "failureIdentity"],
+    upgrade: ["runId", "issueId", "requestIdentity", "candidate", "repairWaves", "yieldIdentity"],
+    "recovery-handoff": ["runId", "issueId", "operationId"],
   }[kind];
   if (request === null || typeof request !== "object" || Array.isArray(request)
     || Object.keys(request).some(key => !fields.includes(key)) || fields.some(key => !Object.hasOwn(request, key))
@@ -71,6 +75,15 @@ const taskRequestFrom = prompt => {
     || request.wave !== null && (!Number.isInteger(request.wave) || request.wave < 1 || request.wave > 10)
     || typeof request.failureIdentity !== "string" || !request.failureIdentity)) {
     throw new Error("Task recovery request evidence is malformed");
+  }
+  if (kind === "upgrade" && (!/^sha256:[a-f0-9]{64}$/u.test(request.requestIdentity)
+    || !/^[a-f0-9]{40,64}$/u.test(request.candidate)
+    || !Number.isInteger(request.repairWaves) || request.repairWaves < 2 || request.repairWaves >= 10
+    || !/^sha256:[a-f0-9]{64}$/u.test(request.yieldIdentity))) {
+    throw new Error("Task upgrade request evidence is malformed");
+  }
+  if (kind === "recovery-handoff" && (typeof request.operationId !== "string" || !request.operationId)) {
+    throw new Error("Task recovery handoff request evidence is malformed");
   }
   return { kind, request, promptIdentity: promptIdentityFor(prompt) };
 };
@@ -202,12 +215,26 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
     }
   };
+  const reconcileReservedMessage = async ({ ref, receipts, promptIdentity, prompt }) => {
+    for (;;) {
+      const current = receipts.read(promptIdentity);
+      if (current?.accepted) return true;
+      const observation = receipts.observe(promptIdentity);
+      if (!observation) return false;
+      await sleep(observation.delayMs);
+      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+      if (userTexts(snapshot).includes(prompt)) {
+        receipts.accept(promptIdentity, "native-history");
+        return true;
+      }
+    }
+  };
   const read = async (ref, ownership = {}, { interruptible = false } = {}) => {
     const receipts = receiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let receipt = receipts?.read();
     const messageReceipts = messageReceiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let messageReceipt = messageReceipts?.read();
-    const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:)/u.test(text)),
+    const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
       { latestOnly: Boolean(receipt || messageReceipt), interruptible });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
@@ -240,7 +267,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const retryRequest = taskRequest?.kind === "retry" ? Object.fromEntries(Object.entries(taskRequest).filter(([key]) => key !== "kind")) : undefined;
     const repairRequest = taskRequest?.kind === "repair" ? Object.fromEntries(Object.entries(taskRequest).filter(([key]) => key !== "kind")) : undefined;
     const modelMatch = userTexts(snapshot).find(text => text.includes("Model upgrade request: "))?.match(/Model upgrade request: (\{.+\})$/mu);
-    const modelRequest = modelMatch ? { state: "ACCEPTED", ...JSON.parse(modelMatch[1]) } : undefined;
+    const modelRequest = taskRequest?.kind === "upgrade"
+      ? Object.fromEntries(Object.entries(taskRequest).filter(([key]) => key !== "kind"))
+      : modelMatch ? { state: "ACCEPTED", ...JSON.parse(modelMatch[1]) } : undefined;
     const final = (snapshot.turns?.[0]?.items ?? []).findLast(item => item.type === "agentMessage" && item.phase === "final_answer")?.text;
     const modelYieldMatch = final?.match(/^Workflow model yield: (\{.+\})$/mu);
     const modelYield = modelYieldMatch ? JSON.parse(modelYieldMatch[1]) : undefined;
@@ -458,20 +487,43 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       };
       await settledOwner();
       const purpose = `recovery:${operationId}`;
-      const marker = `Workflow recovery ownership: ${JSON.stringify({ runId: runIdentity.runId, issueId, operationId, originalTaskRef, worktree })}`;
+      const handoffRequest = { runId: runIdentity.runId, issueId, operationId };
+      const marker = `Workflow recovery ownership: ${JSON.stringify(handoffRequest)}`;
       const prompt = `${marker}\nThe coordinator is transferring this exact Issue worktree to an isolated repair task. Settle this turn without source edits, commits, closeout or installation. Preserve the original operation and worktree. Subsequent repair messages belong only to the recorded repair task. ${workflowSourceBoundary(packageRoot)}`;
       const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose, prompt });
       if (reservation.intent.prompt !== prompt) throw new Error("Recovery ownership intent differs; preserve the original request");
-      const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
-      if (!userTexts(history).includes(prompt)) {
-        // The immutable handoff intent precedes even this read-only settlement message.
-        try { await call("send_message_to_thread", { ...originalTaskRef, prompt }, { owner: { kind: "task-message", runId: runIdentity.runId,
-          issueId, threadId: originalTaskRef.threadId, requestKind: "recovery", receiptIdentity: modelEvidenceDigest({ purpose, prompt }) } }); }
-        catch { /* Read native history before deciding whether the handoff was accepted. */ }
-        const accepted = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
-        if (!userTexts(accepted).includes(prompt)) throw new Error("Recovery ownership message outcome is unresolved");
-        if ((await read(originalTaskRef)).state === "RUNNING") return { pending: true, waitingRef: originalTaskRef };
+      const handoffIdentity = promptIdentityFor(prompt);
+      const handoffReceipts = messageReceiptsFor(originalTaskRef, runIdentity.runId);
+      let handoffReceipt = handoffReceipts?.read(handoffIdentity);
+      if (!handoffReceipts) throw new Error("Recovery ownership receipt storage is unavailable");
+      if (handoffReceipt && !handoffReceipt.accepted) {
+        if (!await reconcileReservedMessage({ ref: originalTaskRef, receipts: handoffReceipts,
+          promptIdentity: handoffIdentity, prompt })) throw new Error("Recovery ownership message outcome is unresolved");
+        handoffReceipt = handoffReceipts.read(handoffIdentity);
       }
+      if (!handoffReceipt) {
+        const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
+        if (userTexts(history).includes(prompt)) {
+          handoffReceipt = handoffReceipts.reserve({ kind: "recovery-handoff", request: handoffRequest, promptIdentity: handoffIdentity });
+          handoffReceipts.accept(handoffIdentity, "native-history");
+        } else {
+          // The immutable handoff intent and receipt precede even this read-only settlement message.
+          handoffReceipt = handoffReceipts.reserve({ kind: "recovery-handoff", request: handoffRequest, promptIdentity: handoffIdentity });
+          try {
+            const accepted = await call("send_message_to_thread", { ...originalTaskRef, prompt }, { owner: { kind: "task-message", runId: runIdentity.runId,
+              issueId, threadId: originalTaskRef.threadId, requestKind: "recovery-handoff", receiptIdentity: handoffIdentity } });
+            if (uncertainNativeResult(accepted) || accepted?.threadId !== originalTaskRef.threadId
+              || accepted.hostId !== undefined && accepted.hostId !== originalTaskRef.hostId) {
+              throw new Error("Native recovery ownership acceptance is unproven");
+            }
+            handoffReceipts.accept(handoffIdentity, "native-response");
+          } catch (error) {
+            if (!await reconcileReservedMessage({ ref: originalTaskRef, receipts: handoffReceipts,
+              promptIdentity: handoffIdentity, prompt })) throw new Error("Recovery ownership message outcome is unresolved", { cause: error });
+          }
+        }
+      }
+      if ((await read(originalTaskRef, { runId: runIdentity.runId })).state === "RUNNING") return { pending: true, waitingRef: originalTaskRef };
       const previousOwner = await settledOwner();
       const discover = async () => {
         const listing = await call("list_threads", { limit: 50 });
@@ -517,18 +569,34 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const marker = { runId: runIdentity.runId, issueId: intent.issueId, requestIdentity: intent.requestIdentity,
         candidate: intent.candidate, repairWaves: intent.repairWaves, yieldIdentity: intent.yieldIdentity };
       const prompt = `Use the exact installed skill ${join(packageRoot, "skills/engineering/execute-issue/SKILL.md")} to resume Issue #${await issueNumber(intent.issueId)} after its controlled model yield. Continue in the same worktree and topic from candidate ${intent.candidate}, with ${intent.repairWaves}/10 repair waves already consumed. The sole automatic upgrade is consumed. Preserve the unchanged Grant, ACs, exclusions and completed work; verify and independently review the next material repair, then publish implementation_complete only when proved. Model upgrade request: ${JSON.stringify(marker)}`;
+      const promptIdentity = promptIdentityFor(prompt);
+      const messageReceipts = messageReceiptsFor(ref, runIdentity.runId);
+      if (!messageReceipts) throw new Error("Upgrade continuation receipt storage is unavailable");
+      const retained = messageReceipts.read(promptIdentity);
+      if (retained?.accepted) return { observed: true, effectiveReadBack: "unavailable" };
+      if (retained) {
+        if (await reconcileReservedMessage({ ref, receipts: messageReceipts, promptIdentity, prompt })) {
+          return { observed: true, effectiveReadBack: "unavailable" };
+        }
+        throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
+      }
       const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
-      if (userTexts(snapshot).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      if (userTexts(snapshot).includes(prompt)) {
+        messageReceipts.reserve({ kind: "upgrade", request: marker, promptIdentity });
+        messageReceipts.accept(promptIdentity, "native-history");
+        return { observed: true, effectiveReadBack: "unavailable" };
+      }
       const receipts = store.readEvents(runIdentity.runId).filter(event => event.type === "model.acceptance" && event.requestIdentity === intent.requestIdentity);
-      if (receipts.some(event => event.acceptance === "accepted") || receipts.length >= 3) throw new Error("Upgrade outcome unresolved; preserve the original continuation");
+      if (receipts.length) throw new Error("Upgrade outcome unresolved; preserve the original continuation");
       const task = await read(ref);
       if (task.state !== "RESUMABLE" || task.cwd !== intent.worktree) throw new Error("Upgrade cannot race an active or unowned executor");
       const git = (...args) => execFileSync("git", ["-C", intent.worktree, ...args], { encoding: "utf8" }).trim();
       if (git("rev-parse", "HEAD") !== intent.candidate || git("branch", "--show-current") !== intent.topic || git("status", "--porcelain=v1")) throw new Error("Upgrade candidate or clean worktree changed");
+      messageReceipts.reserve({ kind: "upgrade", request: marker, promptIdentity });
       let result;
       try { result = await call("send_message_to_thread", { ...ref, prompt, model: intent.model, thinking: intent.thinking },
         { owner: { kind: "task-message", runId: runIdentity.runId, issueId: intent.issueId, threadId: ref.threadId,
-          requestKind: "repair", receiptIdentity: intent.requestIdentity } }); }
+          requestKind: "upgrade", receiptIdentity: promptIdentity } }); }
       catch { result = null; }
       const accepted = result?.threadId === ref.threadId && (result.hostId === undefined || result.hostId === ref.hostId)
         && !uncertainNativeResult(result);
@@ -536,9 +604,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         model: intent.model, thinking: intent.thinking, phase: "upgrade", acceptance: accepted ? "accepted" : "unknown",
         effectiveReadBack: "unavailable", evidence: accepted ? "Native continuation returned the original task identity."
           : "Continuation submission is uncertain; independently reconcile its original message before any resend." });
-      if (accepted) return { accepted: true, effectiveReadBack: "unavailable" };
-      const after = await readHistory(ref, value => userTexts(value).includes(prompt));
-      if (userTexts(after).includes(prompt)) return { observed: true, effectiveReadBack: "unavailable" };
+      if (accepted) {
+        messageReceipts.accept(promptIdentity, "native-response");
+        return { accepted: true, effectiveReadBack: "unavailable" };
+      }
+      if (await reconcileReservedMessage({ ref, receipts: messageReceipts, promptIdentity, prompt })) {
+        return { observed: true, effectiveReadBack: "unavailable" };
+      }
       throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
     },
     async observePendingCreations({ runIdentity, issueIds }) {
@@ -566,6 +638,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         await read(ref, { runId: taskRequest.request.runId });
         return;
       }
+      if (messageReceipt) {
+        if (await reconcileReservedMessage({ ref, receipts: messageReceipts,
+          promptIdentity: messageReceipt.promptIdentity, prompt: frozenPrompt })) return;
+        throw new Error("Task message outcome is unresolved; preserve the reserved request");
+      }
       const stored = receipts?.read();
       if (stored?.prompt === frozenPrompt && stored.accepted) return;
       const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
@@ -591,7 +668,11 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const reservation = receipts?.reserve(frozenPrompt);
       const messageReservation = messageReceipts?.reserve(taskRequest);
       if (reservation && !reservation.created) throw new Error("Close message outcome is unresolved; preserve the reserved request");
-      if (messageReservation && !messageReservation.created) throw new Error("Task message outcome is unresolved; preserve the reserved request");
+      if (messageReservation && !messageReservation.created) {
+        if (await reconcileReservedMessage({ ref, receipts: messageReceipts,
+          promptIdentity: messageReservation.promptIdentity, prompt: frozenPrompt })) return;
+        throw new Error("Task message outcome is unresolved; preserve the reserved request");
+      }
       if (messageReservation) {
         try {
           const accepted = await call("send_message_to_thread", { ...ref, prompt: frozenPrompt }, { owner: { kind: "task-message",
@@ -604,11 +685,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           messageReceipts.accept(messageReservation.promptIdentity, "native-response");
           return;
         } catch (error) {
-          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
-          if (userTexts(snapshot).includes(frozenPrompt)) {
-            messageReceipts.accept(messageReservation.promptIdentity, "native-history");
-            return;
-          }
+          if (await reconcileReservedMessage({ ref, receipts: messageReceipts,
+            promptIdentity: messageReservation.promptIdentity, prompt: frozenPrompt })) return;
           throw new Error("Task message outcome is unresolved; preserve the reserved request", { cause: error });
         }
       }

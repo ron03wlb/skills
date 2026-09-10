@@ -24,13 +24,15 @@
     code { overflow-wrap: anywhere; }
   </style>
 </head>
-<body data-status-digest="<!--RUN_PANEL_DIGEST-->">
+<body data-status-digest="<!--RUN_PANEL_DIGEST-->" data-run-id="<!--RUN_PANEL_RUN_ID-->" data-control-revision="<!--RUN_PANEL_CONTROL_REVISION-->">
   <!--RUN_PANEL_CONTENT-->
   <script>
     (() => {
       const banner = document.querySelector("#bridge-status");
       const token = new URL(window.location.href).searchParams.get("token");
       const headers = token ? { authorization: `Bearer ${token}` } : {};
+      const runId = document.body.dataset.runId;
+      const renderedRevision = Number(document.body.dataset.controlRevision);
       const endpoints = {
         PAUSE: "/api/control/pause",
         RESUME: "/api/control/resume",
@@ -50,10 +52,19 @@
         button.addEventListener("click", async () => {
           button.disabled = true;
           try {
+            const storageKey = `workflow-control:${runId}:${button.dataset.control}`;
+            let identity;
+            try { identity = JSON.parse(window.sessionStorage.getItem(storageKey)); } catch { identity = null; }
+            if (!identity || typeof identity.id !== "string" || !Number.isSafeInteger(identity.revision)) {
+              identity = { id: window.crypto.randomUUID(), revision: renderedRevision + 1 };
+              window.sessionStorage.setItem(storageKey, JSON.stringify(identity));
+            }
             const response = await fetch(endpoints[button.dataset.control], {
               method: "POST",
-              headers,
+              headers: { ...headers, "x-workflow-control-id": identity.id,
+                "x-workflow-control-revision": String(identity.revision) },
             });
+            if (response.ok || response.status === 409) window.sessionStorage.removeItem(storageKey);
             if (!response.ok) throw new Error(`control rejected (${response.status})`);
             window.location.reload();
           } catch (error) {

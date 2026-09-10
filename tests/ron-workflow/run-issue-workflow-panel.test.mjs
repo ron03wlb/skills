@@ -15,6 +15,7 @@ const status = ({
   state = "RUNNING",
   controlRevision = 0,
   controlCommand = null,
+  controlRequestId = null,
   nodes = [],
 } = {}) => ({
   schema: "dag-run-status:v1",
@@ -24,6 +25,7 @@ const status = ({
     state,
     controlRevision,
     controlCommand,
+    controlRequestId,
   },
   nodes,
   frontier: { ready: [], active: [], closeable: [] },
@@ -80,10 +82,18 @@ test("text controls bind their original request ID to the durable revision", asy
   let current = status();
   const appended = [];
   const submit = createRunPanelControl({ readStatus: () => current, appendEvent: event => appended.push(event),
-    rebuildStatus: () => { current = status({ state: "PAUSING", controlRevision: 1, controlCommand: "PAUSE" }); return current; },
+    rebuildStatus: () => { const latest = appended.at(-1); current = status({ state: "PAUSING", controlRevision: latest.revision,
+      controlCommand: latest.command, controlRequestId: latest.requestId }); return current; },
     now: () => "2026-09-10T00:00:00.000Z" });
   await submit("PAUSE", { id: "control-1", revision: 1 });
   assert.equal(appended[0].requestId, "control-1");
+  const replay = await submit("PAUSE", { id: "control-1", revision: 1 });
+  assert.equal(replay.reconciled, true);
+  assert.equal(replay.changed, false);
+  assert.equal(appended.length, 1);
+  await submit("PAUSE", { id: "control-2", revision: 2 });
+  assert.equal(appended[1].requestId, "control-2");
+  assert.equal(appended[1].revision, 2);
 });
 
 test("text control revision is checked inside the serialized journal owner", async () => {
@@ -138,8 +148,8 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
       statusReads += 1;
       return snapshot;
     },
-    submitControl: async (command) => {
-      submitted.push(command);
+    submitControl: async (command, identity) => {
+      submitted.push({ command, identity });
       return { accepted: true, changed: true, revision: 1, status: snapshot };
     },
     renderPanel: (value) => `<!doctype html><title>${value.run.runId}</title>`,
@@ -163,6 +173,8 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
   assert.equal((await panel.text()).includes(bridge.token), false);
 
   const authenticated = { authorization: `Bearer ${bridge.token}` };
+  const controlHeaders = (id) => ({ ...authenticated, "x-workflow-control-id": id,
+    "x-workflow-control-revision": "1" });
   const current = await fetch(`${bridge.origin}/api/status`, { headers: authenticated });
   assert.equal(current.status, 200);
   assert.deepEqual(await current.json(), snapshot);
@@ -187,20 +199,20 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
 
   const pause = await fetch(`${bridge.origin}/api/control/pause`, {
     method: "POST",
-    headers: authenticated,
+    headers: controlHeaders("panel-pause"),
   });
   assert.equal(pause.status, 200);
   assert.equal((await pause.json()).revision, 1);
-  assert.deepEqual(submitted, ["PAUSE"]);
+  assert.deepEqual(submitted, [{ command: "PAUSE", identity: { id: "panel-pause", revision: 1 } }]);
 
   for (const [route, command] of [["resume", "RESUME"], ["stop", "STOP"]]) {
     const response = await fetch(`${bridge.origin}/api/control/${route}`, {
       method: "POST",
-      headers: authenticated,
+      headers: controlHeaders(`panel-${route}`),
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json()).revision, 1);
-    assert.equal(submitted.at(-1), command);
+    assert.deepEqual(submitted.at(-1), { command, identity: { id: `panel-${route}`, revision: 1 } });
   }
 
   const wrongMethod = await fetch(`${bridge.origin}/api/control/pause`, { headers: authenticated });
@@ -211,15 +223,21 @@ test("bridge is loopback-only, token-authenticated, and exposes a fixed route al
     headers: authenticated,
   });
   assert.equal(start.status, 404);
-  assert.deepEqual(submitted, ["PAUSE", "RESUME", "STOP"]);
+  assert.deepEqual(submitted.map(item => item.command), ["PAUSE", "RESUME", "STOP"]);
+
+  const noIdentity = await fetch(`${bridge.origin}/api/control/pause`, {
+    method: "POST",
+    headers: authenticated,
+  });
+  assert.equal(noIdentity.status, 400);
 
   const body = await fetch(`${bridge.origin}/api/control/stop`, {
     method: "POST",
-    headers: { ...authenticated, "content-type": "application/json" },
+    headers: { ...controlHeaders("panel-body"), "content-type": "application/json" },
     body: "{}",
   });
   assert.equal(body.status, 413);
-  assert.deepEqual(submitted, ["PAUSE", "RESUME", "STOP"]);
+  assert.deepEqual(submitted.map(item => item.command), ["PAUSE", "RESUME", "STOP"]);
   assert.ok(statusReads >= 4);
 });
 
@@ -296,6 +314,11 @@ test("renderer projects the complete Run, DAG, task, close, and diagnosis snapsh
   const html = renderRunPanel(snapshot);
 
   assert.match(html, /run-&lt;16&gt;/u);
+  assert.match(html, /data-run-id="run-&lt;16&gt;"/u);
+  assert.match(html, /data-control-revision="4"/u);
+  assert.match(html, /sessionStorage/u);
+  assert.match(html, /x-workflow-control-id/u);
+  assert.match(html, /x-workflow-control-revision/u);
   assert.match(html, /STOPPING/u);
   assert.match(html, /12\/04/u);
   assert.match(html, /#13.*→.*#16/su);

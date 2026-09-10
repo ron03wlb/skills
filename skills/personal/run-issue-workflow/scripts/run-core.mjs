@@ -1392,6 +1392,7 @@ export function reduceRun(input) {
       ...publicRun(input.run, state, maxParallel),
       controlRevision,
       controlCommand: latestControl?.command ?? null,
+      ...(latestControl?.requestId === undefined ? {} : { controlRequestId: latestControl.requestId }),
     },
     nodes,
     frontier: {
@@ -1424,20 +1425,13 @@ export function planControl(status, command, at, requestId) {
       reason: "unsupported_control",
     };
   }
-  if (status.run.controlCommand === command) {
-    return {
-      accepted: true,
-      changed: false,
-      event: null,
-      revision: status.run.controlRevision,
-    };
-  }
   const idempotentStates = {
     PAUSE: new Set(["PAUSING", "PAUSED"]),
     RESUME: new Set(["RECONCILING", "RUNNING"]),
     STOP: new Set(["STOPPING", "STOPPED"]),
   };
-  if (idempotentStates[command].has(status.run.state)) {
+  const idempotent = status.run.controlCommand === command || idempotentStates[command].has(status.run.state);
+  if (idempotent && requestId === undefined) {
     return {
       accepted: true,
       changed: false,
@@ -1463,7 +1457,7 @@ export function planControl(status, command, at, requestId) {
       "BLOCKED",
     ]),
   };
-  if (!legal[command].has(status.run.state)) {
+  if (!idempotent && !legal[command].has(status.run.state)) {
     return {
       accepted: false,
       changed: false,

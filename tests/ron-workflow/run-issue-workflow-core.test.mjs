@@ -2612,6 +2612,9 @@ test("Pause, Resume, and Stop are revisioned and idempotent with no Start contro
   });
   assert.equal(paused.run.state, "PAUSED");
   assert.equal(planControl(paused, "PAUSE", "2026-08-30T00:03:00.000Z").changed, false);
+  const identifiedPause = planControl(paused, "PAUSE", "2026-08-30T00:03:00.000Z", "explicit-pause-2");
+  assert.deepEqual(identifiedPause.event, { type: "control.revised", at: "2026-08-30T00:03:00.000Z",
+    revision: 2, command: "PAUSE", requestId: "explicit-pause-2" });
   assert.equal(planControl(paused, "RESUME", "2026-08-30T00:03:00.000Z").event.revision, 2);
   assert.equal(planControl(paused, "START", "2026-08-30T00:03:00.000Z").accepted, false);
 
@@ -3114,6 +3117,20 @@ test("the single writer appends ordered control events and atomically rebuilds d
       revision: 2,
       command: "PAUSE",
     }), /idempotent/u);
+    writer.append({
+      type: "control.revised",
+      at: "2026-08-30T00:04:00.000Z",
+      revision: 2,
+      command: "PAUSE",
+      requestId: "explicit-pause-2",
+    });
+    assert.throws(() => writer.append({
+      type: "control.revised",
+      at: "2026-08-30T00:05:00.000Z",
+      revision: 3,
+      command: "STOP",
+      requestId: "explicit-pause-2",
+    }), /request identity/u);
 
     writer.release();
     const runDirectory = join(gitCommonDir, "matt-workflow-control", "runs", "run-12");

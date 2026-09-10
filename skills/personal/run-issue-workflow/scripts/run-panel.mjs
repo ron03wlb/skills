@@ -99,5 +99,7 @@ export function renderRunPanel(status) {
 
   return template
     .replace("<!--RUN_PANEL_DIGEST-->", statusDigest(status))
+    .replace("<!--RUN_PANEL_RUN_ID-->", display(run.runId))
+    .replace("<!--RUN_PANEL_CONTROL_REVISION-->", String(run.controlRevision))
     .replace("<!--RUN_PANEL_CONTENT-->", content);
 }

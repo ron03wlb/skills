@@ -395,7 +395,8 @@ test("an unresolved reserved execution message never resends or changes owner af
   const request = { runId: "run", issueId: "I_1", attempt: 2 };
   const prompt = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify(request)}`;
   let sends = 0;
-  const options = { store, project: {}, packageRoot: "/installed", issueNumber: async () => 1, sleep: async () => {},
+  const delays = [];
+  const options = { store, project: {}, packageRoot: "/installed", issueNumber: async () => 1, sleep: async delay => delays.push(delay),
     host: { async call(name) {
       if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [{ status: "completed", items: [] }] };
       if (name.endsWith("send_message_to_thread")) { sends += 1; throw new Error("response lost"); }
@@ -405,6 +406,7 @@ test("an unresolved reserved execution message never resends or changes owner af
     await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome is unresolved/iu);
     await assert.rejects(createCodexWorkflowTasks(options).message(ref, prompt), /outcome is unresolved/iu);
     assert.equal(sends, 1, "UNKNOWN native acceptance never authorizes a second mutation");
+    assert.deepEqual(delays, [5000, 15000, 30000], "the receipt persists one fixed recovery budget across adapter re-entry");
     assert.deepEqual((await createCodexWorkflowTasks(options).read(ref, { runId: "run" })).retryRequest, { state: "RESERVED", ...request });
     const changed = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ ...request, attempt: 3 })}`;
     await assert.rejects(createCodexWorkflowTasks(options).message(ref, changed), /different unresolved request/iu);
@@ -478,13 +480,14 @@ test("isolated repair fork adopts a lost response after exact settled-owner hand
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const originalTaskRef = { threadId: "original", hostId: "local" }, repairRef = { threadId: "repair", hostId: "local" };
   const runIdentity = { runId: "run", issueId: "I_1", specId: "I_1", target: "main" };
-  let forks = 0, messages = 0, marker, active = false;
+  let forks = 0, messages = 0, marker, active = false, omitOriginalHistory = false;
   const host = { async call(name, args) {
     if (name.endsWith("send_message_to_thread")) { messages++; marker = args.prompt; return {}; }
     if (name.endsWith("fork_thread")) { forks++; assert.ok(store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" })); throw new Error("response lost"); }
     if (name.endsWith("list_threads")) return { threads: forks ? [{ id: "repair", hostId: "local", kind: "codex", cwd: root }] : [] };
     if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: root, status: { type: active && args.threadId === "original" ? "active" : "idle" } },
-      turns: [{ id: "settled-turn", status: "completed", items: marker ? [{ type: "userMessage", content: [{ type: "text", text: marker }] }] : [] }] };
+      turns: [{ id: "settled-turn", status: "completed", items: marker && !(omitOriginalHistory && args.threadId === "original")
+        ? [{ type: "userMessage", content: [{ type: "text", text: marker }] }] : [] }] };
     throw new Error(name);
   } };
   const options = { host, store, project: { path: root, hostId: "local" }, packageRoot: "/pinned", issueNumber: async () => 1, sleep: async () => {}, discoverTasks: async () => [] };
@@ -495,12 +498,42 @@ test("isolated repair fork adopts a lost response after exact settled-owner hand
     assert.deepEqual(first.previousOwner.taskRef, originalTaskRef);
     assert.equal(first.previousOwner.state, "SETTLED");
     const intent = store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" });
+    omitOriginalHistory = true;
     assert.deepEqual((await createCodexWorkflowTasks(options).ensureRecoveryTask(input)).taskRef, repairRef);
     assert.equal(forks, 1); assert.equal(messages, 1);
     assert.deepEqual(store.readHostTask({ runId: "run", issueId: "I_1", purpose: "recovery:operation" }), intent);
     active = true;
     await assert.rejects(createCodexWorkflowTasks(options).ensureRecoveryTask(input), /previous writer/u);
     assert.equal(forks, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an omitted recovery handoff outcome exhausts one durable observation budget without resend", async () => {
+  const root = mkdtempSync(join(tmpdir(), "repair-handoff-omitted-"));
+  execFileSync("git", ["init", root], { stdio: "ignore" });
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const originalTaskRef = { threadId: "original", hostId: "local" };
+  const runIdentity = { runId: "run", issueId: "I_1", specId: "I_1", target: "main" };
+  const delays = [];
+  let sends = 0;
+  const options = { store, project: { path: root, hostId: "local" }, packageRoot: "/pinned", issueNumber: async () => 1,
+    sleep: async delay => delays.push(delay), discoverTasks: async () => [], host: { async call(name, args) {
+      if (name.endsWith("read_thread")) return { thread: { id: args.threadId, hostId: "local", cwd: root, status: { type: "idle" } },
+        turns: [{ id: "settled-turn", status: "completed", items: [] }] };
+      if (name.endsWith("send_message_to_thread")) { sends += 1; throw new Error("response lost"); }
+      throw new Error(`Unexpected ${name}`);
+    } } };
+  const input = { issueId: "I_1", runIdentity, operationId: "operation", originalTaskRef, worktree: root };
+  try {
+    await assert.rejects(createCodexWorkflowTasks(options).ensureRecoveryTask(input), /message outcome is unresolved/u);
+    await assert.rejects(createCodexWorkflowTasks(options).ensureRecoveryTask(input), /message outcome is unresolved/u);
+    assert.equal(sends, 1);
+    assert.deepEqual(delays, [5000, 15000, 30000]);
+    const receiptName = readdirSync(join(root, ".git", "matt-workflow-control", "runs", "run"))
+      .find(name => name.startsWith("task-messages-"));
+    const receipt = readFileSync(join(root, ".git", "matt-workflow-control", "runs", "run", receiptName), "utf8");
+    assert.match(receipt, /"kind":"recovery-handoff"/u);
+    assert.equal(receipt.includes("Subsequent repair messages"), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -513,11 +546,13 @@ test("a lost model continuation response reconciles the same task and never rese
   const writer = store.acquireWriter("run");
   const runIdentity = { runId: "run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
   const ref = { threadId: "worker", hostId: "local" };
-  let prompt, sends = 0, active = true;
+  let prompt, sends = 0, active = true, omitHistory = false;
+  const delays = [];
   const tasks = createCodexWorkflowTasks({ store, project: { path: root }, packageRoot: "/installed", issueNumber: async () => 1,
+    sleep: async delay => delays.push(delay),
     host: { async call(name, args) {
       if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: root, status: { type: active ? "active" : "idle" } },
-        turns: [{ status: "completed", items: prompt ? [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] : [] }] };
+        turns: [{ status: "completed", items: prompt && !omitHistory ? [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] : [] }] };
       assert.equal(name, "mcp__codex_app__send_message_to_thread");
       assert.equal(args.threadId, ref.threadId); assert.equal(args.model, "gpt-6-astra"); assert.equal(args.thinking, "xhigh");
       assert.match(args.prompt, /2\/10/u); assert.match(args.prompt, new RegExp(candidate));
@@ -535,10 +570,49 @@ test("a lost model continuation response reconciles the same task and never rese
     assert.equal(sends, 0);
     active = false;
     assert.equal((await tasks.upgrade({ ref, intent, runIdentity, writer })).observed, true);
+    omitHistory = true;
     assert.equal((await tasks.upgrade({ ref, intent, runIdentity, writer })).observed, true);
     assert.equal(sends, 1);
+    assert.deepEqual(delays, [5000]);
     assert.equal(store.readEvents("run").at(-1).acceptance, "unknown", "message read-back is not independent effective-model evidence");
     assert.throws(() => writer.append(draft), /sole allowance/u);
+  } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an omitted model continuation outcome consumes one durable 5/15/30 budget without resend", async () => {
+  const root = mkdtempSync(join(tmpdir(), "model-upgrade-omitted-"));
+  const git = (...args) => execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  git("init", "-b", "topic"); git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "candidate");
+  const candidate = git("rev-parse", "HEAD");
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const writer = store.acquireWriter("run");
+  const runIdentity = { runId: "run", specId: "I_1", target: "main", classification: "SINGLE", approvedScopeHash: "approved", decompositionIdentity: null };
+  const ref = { threadId: "worker", hostId: "local" };
+  const delays = [];
+  let sends = 0;
+  const options = { store, project: { path: root }, packageRoot: "/installed", issueNumber: async () => 1,
+    sleep: async delay => delays.push(delay), host: { async call(name) {
+      if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: root, status: { type: "idle" } },
+        turns: [{ status: "completed", items: [] }] };
+      if (name.endsWith("send_message_to_thread")) { sends += 1; throw new Error("response lost"); }
+      throw new Error(name);
+    } } };
+  try {
+    writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity,
+      modelPolicy: { version: ISSUE_MODEL_POLICY_VERSION, specId: "I_1", target: "main", approvedScopeHash: "approved", authorization: "Explicit model pool and bounded escalation approval" } });
+    writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref, attempt: 1 });
+    const intent = writer.append({ type: "model.upgrade", at: "2026-09-08T00:00:00.000Z", issueId: "I_1", taskRef: ref,
+      candidate, worktree: root, topic: "topic", repairWaves: 2, model: "gpt-6-astra", thinking: "xhigh", reason: "Repeated confirmed finding",
+      requestIdentity: "sha256:" + "a".repeat(64), yieldIdentity: "sha256:" + "b".repeat(64) });
+    await assert.rejects(createCodexWorkflowTasks(options).upgrade({ ref, intent, runIdentity, writer }), /outcome unresolved/u);
+    await assert.rejects(createCodexWorkflowTasks(options).upgrade({ ref, intent, runIdentity, writer }), /outcome unresolved/u);
+    assert.equal(sends, 1);
+    assert.deepEqual(delays, [5000, 15000, 30000]);
+    const receiptName = readdirSync(join(root, ".git", "matt-workflow-control", "runs", "run"))
+      .find(name => name.startsWith("task-messages-"));
+    const receipt = readFileSync(join(root, ".git", "matt-workflow-control", "runs", "run", receiptName), "utf8");
+    assert.match(receipt, /"kind":"upgrade"/u);
+    assert.equal(receipt.trimEnd().split("\n").length, 4, "one intent and three observations exhaust the original owner");
   } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
 });
 

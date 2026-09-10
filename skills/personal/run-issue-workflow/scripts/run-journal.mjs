@@ -378,7 +378,7 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     if (event.revision !== previousRevision + 1) {
       throw new TypeError(`Expected next control revision ${previousRevision + 1}`);
     }
-    if (previousControl?.command === event.command) {
+    if (previousControl?.command === event.command && event.requestId === undefined) {
       throw new TypeError(`Repeated ${event.command} control is idempotent and must not create a revision`);
     }
     if (event.requestId !== undefined && events.some(item => item.type === "control.revised" && item.requestId === event.requestId)) {

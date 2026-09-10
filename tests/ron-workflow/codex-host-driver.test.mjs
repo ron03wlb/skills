@@ -31,6 +31,15 @@ test("workflow mutation requests expose only allowlisted durable owner reference
   const checkpoint = plain(api.checkpointState(lane));
   assert.deepEqual(checkpoint.requests[0].owner, owner);
   assert.equal(JSON.stringify(checkpoint).includes("private instructions"), false);
+  const upgrade = { runId: "run", issueId: "I_1", requestIdentity: `sha256:${"a".repeat(64)}`,
+    candidate: "b".repeat(40), repairWaves: 2, yieldIdentity: `sha256:${"c".repeat(64)}` };
+  assert.equal(api.ownerForRequest({ ...message, arguments: { threadId: "worker",
+    prompt: `private upgrade Model upgrade request: ${JSON.stringify(upgrade)}` } }).requestKind, "upgrade");
+  const handoff = { runId: "run", issueId: "I_1", operationId: "operation-1" };
+  const handoffOwner = plain(api.ownerForRequest({ ...message, arguments: { threadId: "worker",
+    prompt: `Workflow recovery ownership: ${JSON.stringify(handoff)}` } }));
+  assert.deepEqual(handoffOwner, { kind: "task-message", threadId: "worker", requestKind: "recovery-handoff", runId: "run",
+    issueId: "I_1", receiptIdentity: "run:run:issue:I_1:recovery-handoff:operation-1" });
 });
 
 test("a restored sending control reconciles its original revision instead of replaying the mutation", async () => {
@@ -64,6 +73,19 @@ test("a restored sending control reconciles its original revision instead of rep
   assert.equal(secondWrites.some(message => message?.control === "PAUSE"), false, "restored controls use read-only inspection only");
   assert.equal(secondWrites.filter(message => message?.inspectControl).length, 1);
   assert.equal(secondValues.get("workflow.host").controls[0].state, "returned");
+});
+
+test("an identityless control result cannot settle an identified pending control", async () => {
+  const lane = api.createLane({ sessionId: 42, output: frame({ type: "control-result", runId: "run", command: "PAUSE",
+    result: { accepted: true, revision: 1 } }) });
+  lane.controls.push({ message: { id: "control-1", control: "PAUSE", runId: "run", revision: 1 }, sourceId: "control-1",
+    state: "sending", result: null, nextObservationAt: Date.now() + 1_000_000, recoveryRounds: 0 });
+  const values = new Map([["workflow.host", lane]]);
+  const driver = api.createDriver({ driverId: "identityless-result", load: key => plain(values.get(key) ?? null), store: (key, value) => values.set(key, plain(value)),
+    report: () => {}, persist: async () => {}, tools: { async write_stdin() { return { output: "" }; } },
+    setTimeout: fn => setTimeout(fn, 1_000_000), clearTimeout, heartbeatMs: 1_000_000, tickMs: 1 });
+  await driver.tick();
+  assert.equal(values.get("workflow.host").controls[0].state, "sending");
 });
 
 for (const ending of ["\n", "\r\n"]) {
