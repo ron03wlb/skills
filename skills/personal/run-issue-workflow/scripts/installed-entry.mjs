@@ -124,7 +124,15 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
           const installed = selectWorkflowVersion({ cacheDirectory });
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
             await closeLane();
-            const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
+            let renewed;
+            try { renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true }); }
+            catch (error) {
+              effectiveRuntime = error.workflowRuntime ?? effectiveRuntime;
+              versionId = installed.version.id;
+              unavailableStatus = { ...status, run: { ...status.run, state: "UNAVAILABLE" },
+                workflowRuntime: effectiveRuntime, capacityUnknown: true, error: error.message };
+              throw error;
+            }
             if (typeof renewed.run !== "function") {
               effectiveRuntime = renewed.workflowRuntime ?? effectiveRuntime;
               versionId = installed.version.id;

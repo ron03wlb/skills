@@ -512,20 +512,28 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
-export const fixtureState = { reenterOnStep: false };
+export const fixtureState = { reenterOnStep: false, calls: [] };
 export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  let closed = false;
+  let done = false;
   return {
     specId,
     async run({ mode }) {
+      fixtureState.calls.push(specId + ":" + mode + ":" + closed);
+      if (done) return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
       if (mode === "step" && fixtureState.reenterOnStep) {
         fixtureState.reenterOnStep = false;
         host.installCurrent();
         return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
           diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
       }
+      if (mode === "step") {
+        done = true;
+        return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      }
       return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
     },
-    async close() {},
+    async close() { closed = true; },
   };
 }
 export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
@@ -533,6 +541,7 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     git(f.source, "add", "skills"); git(f.source, "commit", "-m", "recursive selection failure fixture");
     const beforeSelectionFailure = f.install();
     f.addCompleted(4, false, true, beforeSelectionFailure.version);
+    f.addCompleted(6, false, true, beforeSelectionFailure.version);
     const beforeSelectionComposition = await import(pathToFileURL(join(beforeSelectionFailure.root, scriptsPath, "codex-workflow.mjs")).href);
     beforeSelectionComposition.fixtureState.reenterOnStep = true;
     let selectedImportFailure;
@@ -542,13 +551,16 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
       selectedImportFailure = f.install();
     };
     const selectionFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
-      specIds: ["4"], maxWorkers: 1 });
+      specIds: ["4", "6"], maxWorkers: 1 });
     assert.equal(selectionFailure.state, "PRESERVED");
     assert.match(selectionFailure.runs[0].error, /Fixture renewed package import failed/u, JSON.stringify(selectionFailure));
     assert.ok(selectedImportFailure, "the recursive selection reaches the renewed package before import fails");
     assert.deepEqual(selectionFailure.runs[0].workflowRuntime.packageVersion, selectedImportFailure.version);
     assert.equal(selectionFailure.runs[0].workflowRuntime.packageRoot, selectedImportFailure.root);
     assert.match(selectionFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    assert.deepEqual(beforeSelectionComposition.fixtureState.calls,
+      ["I_4:snapshot:false", "I_6:snapshot:false", "I_4:step:false", "I_6:step:false", "I_6:snapshot:false"],
+      "another progressing lane must not let the next connected round re-enter the closed old runtime");
 
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
