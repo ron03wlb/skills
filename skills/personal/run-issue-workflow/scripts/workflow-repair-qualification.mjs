@@ -27,7 +27,7 @@ function qualifySettledRouting({ command, packageVersionId }) {
   const check = { command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: process.version },
     externalInputs: { kind: "none" } };
   const integrationRecord = { obligation: [{ command: check.command, configFiles: check.configFiles }], current: {
-    state: "PASS", identity: "sha256:integration", results: [{ inputs: {
+    state: "PASS", identity: `sha256:${"b".repeat(64)}`, results: [{ inputs: {
       environment: check.environment, external: {}, configuration: [],
     } }],
   } };
@@ -35,6 +35,8 @@ function qualifySettledRouting({ command, packageVersionId }) {
     authorityEvidence, candidate, targetHead: candidate, candidateReachable: true,
     integrationVerification: { state: "PASS", identity: integrationRecord.current.identity, checks: [check] },
     worktree, taskRef, directoryState: "EMPTY_UNREGISTERED",
+    capability: { state: "UNAVAILABLE", operation: null, helperOwnership: "UNAVAILABLE", respawnProtection: "UNAVAILABLE",
+      reason: "No exact host release operation is available" },
     reasonCode: "host_release_unavailable", observations: [{ code: "EBUSY", message: "qualified sharing violation" }] };
   const task = { state: "RESUMABLE", snapshot: { turns: [{ status: "completed" }] },
     closeRequest: { runId, issueId, requestIdentity }, closeResult: result };

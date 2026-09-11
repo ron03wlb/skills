@@ -3,7 +3,8 @@ import { performance } from "node:perf_hooks";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 import { createIssueExecutionBudgetController } from "./issue-execution-budget.mjs";
 import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
-import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
+import { appendDeliveryProgress, diagnoseDeliveryStall, summarizeDeliveryProgress } from "./delivery-progress.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, recoveryDigest, routeTechnicalRecovery, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
 import { validateModelPolicy } from "./issue-model-policy.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
@@ -65,6 +66,81 @@ const MUTATING_ACTION_TYPES = new Set([
   "settle_pause",
   "settle_stop",
 ]);
+
+export function persistTaskOutcomeReceipts({ writer, journal, receipts, now }) {
+  if (!Array.isArray(journal) || !Array.isArray(receipts) || typeof now !== "function") {
+    throw new TypeError("Task outcome persistence requires the current journal, receipt list, and clock");
+  }
+  const retained = new Set(journal.filter(event => event.type === "task.outcome").map(event => event.receipt.identity));
+  let appended = 0;
+  for (const receipt of receipts) {
+    if (retained.has(receipt.identity)) continue;
+    writer.append({ type: "task.outcome", at: now(), receipt });
+    retained.add(receipt.identity);
+    appended += 1;
+  }
+  return appended;
+}
+
+const canonicalInstant = value => value ? new Date(value).toISOString() : null;
+const deliveryBlocker = ({ node, actions }) => {
+  if (node.taskState !== "NONE") return { predicate: "native_task_not_settled", owner: "original-acceptance-owner" };
+  if (node.completionState !== "COMPLETE") return { predicate: "completion_evidence_not_valid", owner: "issue-execution-owner" };
+  if (!node.candidateReachable) return { predicate: "candidate_not_reachable", owner: "git-owner" };
+  const wait = actions.find(action => action.issueId === node.issueId
+    && ["wait_repository_close_lease", "wait_target_writer"].includes(action.type));
+  if (wait) return { predicate: wait.type === "wait_repository_close_lease"
+    ? "repository_close_lease_contended" : "target_writer_contended", owner: "lease-owner" };
+  if (node.trackerState !== "OPEN") return { predicate: "tracker_not_open", owner: "tracker-owner" };
+  return null;
+};
+
+export function persistDeliveryProgress({ writer, journal, facts, status, now }) {
+  let current = [...journal];
+  const record = event => {
+    const appended = appendDeliveryProgress({ writer, journal: current, event });
+    if (appended?.sequence && !current.some(item => item.sequence === appended.sequence)) current.push(appended);
+  };
+  for (const node of facts.nodes) {
+    const source = node.deliveryProgressSource;
+    if (!source) continue;
+    const observedAt = canonicalInstant(now());
+    const base = { type: "delivery.observed", issueId: node.issueId,
+      operationId: source.operationId, blockingPredicate: null };
+    const stage = (name, disposition, sourceAt, owner, evidenceIdentity, requestIdentity = null, blockingPredicate = null) => {
+      if (!sourceAt) return;
+      const exactSourceAt = canonicalInstant(sourceAt);
+      const at = Date.parse(exactSourceAt) > Date.parse(observedAt) ? exactSourceAt : observedAt;
+      record({ ...base, at, stage: name, disposition, sourceAt: exactSourceAt, owner,
+        evidenceIdentity, requestIdentity, blockingPredicate });
+    };
+    stage("COMPLETION_PUBLISHED", "OBSERVED", source.completionPublishedAt, "issue-execution-owner", source.completionEvidenceIdentity);
+    stage("NATIVE_TERMINAL_OBSERVED", "OBSERVED", source.terminalObservedAt, "native-task-owner", source.terminalEvidenceIdentity);
+    if (source.evidenceValidated) stage("EVIDENCE_VALIDATED", "OBSERVED", observedAt, "tracker-source-adapter",
+      `${source.completionEvidenceIdentity}:${source.terminalEvidenceIdentity}`);
+    const closeAction = status.legalActions.find(action => action.type === "close_issue" && action.issueId === node.issueId);
+    if (source.evidenceValidated && closeAction) {
+      stage("CLOSE_ELIGIBLE", "ELIGIBLE", observedAt, "coordinator-reducer", source.completionEvidenceIdentity);
+    } else if (source.completionPublishedAt) {
+      const blocker = deliveryBlocker({ node, actions: status.legalActions });
+      if (blocker) stage("CLOSE_INELIGIBLE", "BLOCKED", observedAt, blocker.owner,
+        source.completionEvidenceIdentity, null, blocker.predicate);
+    }
+    stage("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", source.closeAcceptedAt, "original-acceptance-owner",
+      source.closeRequestIdentity, source.closeRequestIdentity);
+    stage("REPOSITORY_CLOSE_ACQUIRED", "ACQUIRED", source.repositoryCloseAcquiredAt, "close-issue",
+      source.closeRequestIdentity, source.closeRequestIdentity);
+    stage("TARGET_WRITER_ACQUIRED", "ACQUIRED", source.targetWriterAcquiredAt, "close-issue",
+      source.closeRequestIdentity, source.closeRequestIdentity);
+    stage("CLOSE_COMPLETED", "COMPLETED", source.closeCompletedAt, source.closeCompletedOwner ?? "close-issue",
+      source.completionEvidenceIdentity, source.closeRequestIdentity);
+    const diagnosis = diagnoseDeliveryStall({ events: current, issueId: node.issueId,
+      operationId: source.operationId, now: observedAt });
+    if (diagnosis) record(diagnosis);
+    node.deliveryProgress = summarizeDeliveryProgress(current, node.issueId, source.operationId);
+  }
+  return current.length - journal.length;
+}
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTaskRef = (value) => value && isText(value.threadId) && isText(value.hostId);
@@ -657,8 +733,9 @@ export function createCoordinator({
     const monotonicStartedAt = monotonicNow();
     const failure = bindTechnicalFailure(action.failure);
     const journal = store.readEvents(current.runIdentity.runId);
-    const phase = nextRecoveryPhase(failure);
-    if (!phase) throw new Error(`Recovery requires the ${failure.diagnosis.classification} owner: ${failure.diagnosis.reason}`);
+    const route = routeTechnicalRecovery(failure);
+    const phase = route.phase;
+    if (!phase) throw new Error(`Recovery requires ${route.owner} for ${route.disposition}: ${failure.diagnosis.reason}`);
     const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === action.issueId)?.taskRef;
     if (!isTaskRef(originalTaskRef) || !sameRecoveryTask(originalTaskRef, failure.ownerTaskRef)) throw new Error("Recovery original task identity is unproved");
     let intent = journal.findLast(event => event.type === "recovery.intent" && event.failure.identity === failure.identity && event.phase === phase);
@@ -744,7 +821,7 @@ export function createCoordinator({
       monotonicStartedAt: result?.accepted || result?.initiatedHere ? monotonicStartedAt : null });
   };
 
-  const closeIssue = async ({ action, current, status, step = false }) => {
+  const closeIssue = async ({ action, current, status, writer, step = false }) => {
     let taskRef = current.taskRefs?.[action.issueId];
     if (!isTaskRef(taskRef)) {
       const existing = await tasks.findIssueLane({
@@ -779,7 +856,13 @@ export function createCoordinator({
       ...(sourceNode.maintenanceRecoveryIdentity ? { maintenanceRecoveryIdentity: sourceNode.maintenanceRecoveryIdentity } : {}),
     };
     let requestIdentity = closeRequestIdentityFor(requestEvidence);
-    const task = await tasks.read(taskRef);
+    const integrationVerification = sourceNode.integrationVerification ? Object.fromEntries(
+      ["state", "issueId", "candidate", "targetHead", "identity"]
+        .map(field => [field, sourceNode.integrationVerification[field]])) : undefined;
+    const task = await tasks.read(taskRef, {
+      runId: current.runIdentity.runId,
+      ...(integrationVerification ? { integrationVerification } : {}),
+    });
     const acceptedForLane = task?.closeRequest?.state === "ACCEPTED"
       && task.closeRequest.runId === current.runIdentity.runId
       && task.closeRequest.issueId === action.issueId;
@@ -803,6 +886,23 @@ export function createCoordinator({
       };
     }
     const accepted = acceptedForLane && task.closeRequest.requestIdentity === requestIdentity;
+    const operationId = sourceNode.deliveryProgressSource?.operationId;
+    const appendCloseStage = (stage, disposition, sourceAt) => {
+      if (!operationId || !sourceAt) return;
+      const exactSourceAt = canonicalInstant(sourceAt);
+      const observedAt = canonicalInstant(now());
+      appendDeliveryProgress({ writer, journal: store.readEvents(current.runIdentity.runId), event: {
+        type: "delivery.observed", at: Date.parse(exactSourceAt) > Date.parse(observedAt) ? exactSourceAt : observedAt,
+        issueId: action.issueId, operationId, stage, disposition, sourceAt: exactSourceAt, owner: stage === "CLOSE_DISPATCH_INTENT"
+          ? "coordinator" : "original-acceptance-owner", evidenceIdentity: requestIdentity,
+        requestIdentity, blockingPredicate: null,
+      } });
+    };
+    if (accepted) {
+      const acceptedAt = task.closeAcceptedAt ?? now();
+      appendCloseStage("CLOSE_DISPATCH_INTENT", "INTENT_RECORDED", acceptedAt);
+      appendCloseStage("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", acceptedAt);
+    }
     const continuation = accepted ? planCloseContinuation({ task, requestIdentity, requestEvidence }) : { needed: false };
     if (continuation.blocked) {
       if (sourceNode.pendingHostCleanup && typeof leaf?.recoverHostCleanup === "function") {
@@ -829,11 +929,14 @@ export function createCoordinator({
     }) };
     if (continuation.needed) await sleep([5000, 15000, 30000][continuation.attempt - 1]);
     if (!accepted || continuation.needed) {
+      const intentAt = now();
+      appendCloseStage("CLOSE_DISPATCH_INTENT", "INTENT_RECORDED", intentAt);
       const delivery = await tasks.message(
         taskRef,
         `Use $close-issue to close Issue ${action.issueId} under the unchanged read-back DAG Run Grant. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(requestEvidence)}${closeContinuationSuffix(continuation)}`,
       );
       if (delivery?.reconcileRequired && delivery.reasonCode === "issue_already_closed" && delivery.issueId === action.issueId) return { active: true };
+      if (delivery?.accepted) appendCloseStage("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", delivery.acceptedAt ?? now());
     }
     if (step) return { active: true };
     const waited = await tasks.wait([taskRef]);
@@ -1312,6 +1415,8 @@ export function createCoordinator({
             tasks,
           });
           if (runOperationIdentity) current = bindFreshRunOperation(current, runOperationIdentity);
+          if (runIdentity) persistTaskOutcomeReceipts({ writer, journal: store.readEvents(runIdentity.runId),
+            receipts: current.facts.nodes.map(node => node.taskOutcomeReceipt).filter(Boolean), now });
           if (current.runIdentity?.specId !== selectedRequest.specId) {
             return preflightConflict(current, {
               reasonCode: "spec_selection_conflict",
@@ -1503,6 +1608,8 @@ export function createCoordinator({
             issueIds: current.facts.nodes.map(node => node.issueId), nodes: current.facts.nodes });
           await refreshActionStops(current);
           lastStatus = rebuildStatus(current.facts);
+          persistDeliveryProgress({ writer, journal: store.readEvents(runIdentity.runId), facts: current.facts,
+            status: lastStatus, now });
           for (const pending of request.controlQueue?.splice(0) ?? []) {
             try {
               const decision = planControl(lastStatus, pending.command, now());
@@ -1529,6 +1636,8 @@ export function createCoordinator({
             const remainingMs = executionBudgets.remainingMs({ runId: runIdentity.runId,
               issueIds: lastStatus.frontier.active });
             const waited = await tasks.wait(activeTaskRefs, remainingMs === null ? undefined : { timeoutMs: remainingMs });
+            persistTaskOutcomeReceipts({ writer, journal: store.readEvents(runIdentity.runId),
+              receipts: waited?.observation?.receipts ?? [], now });
             if (waited?.coordinatorActive === false) return lastStatus;
             if (waited?.observation?.signal === "deadline") return lastStatus;
             continue;
@@ -1564,7 +1673,7 @@ export function createCoordinator({
                 continue;
               }
             } else if (action.type === "close_issue") {
-              const outcome = await closeIssue({ action, current, status: lastStatus, step: request.mode === "step" });
+              const outcome = await closeIssue({ action, current, status: lastStatus, writer, step: request.mode === "step" });
               if (outcome.stopped) { if (isolateActionStop(outcome.stopped, action, current)) break; return outcome.stopped; }
               if (!outcome.active) return lastStatus;
             } else if (action.type === "close_parent") {

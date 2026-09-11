@@ -38,6 +38,8 @@ Abrupt installer termination can leave its installation lock. The same command r
 
 The active driver yields between bounded ticks and sends heartbeats while one native request is pending. It forwards each request once, retains explicit Run controls, and drains terminal output if the host exits. It carries tool results without printing full task histories into the model context. Final evidence includes available command/tool counts and elapsed time; token usage and unobserved human intervention counts remain `unavailable`. Tests with substituted CLI or host responses are local component evidence only. A delivery baseline requires actual installed-entry Git, tracker and task read-back.
 
+Routine observation is compact: the existing Run journal stores a versioned allowlisted `task.outcome`, capped at 16 KiB, while encoded host responses are capped at 1 MiB. Normal active and successful completion paths omit worker output and do not fetch full history. Exact anomaly/lost-effect diagnosis is capped at 256 KiB over four reads. `NATIVE_RESPONSE_BUDGET_EXCEEDED` names the missing-evidence locator; it is not a truncated success. Five minutes without verified status or native-revision change produces one attributed diagnostic escalation, but does not stop, kill, replace, or settle an active task. Heartbeats and elapsed time are not progress; a verified revision resumes the same Run at its next unsatisfied stage.
+
 ## Read the panel
 
 The panel shows the current Run identity and state, published DAG edges, ready and active frontiers, task attempts, close evidence, diagnoses, and legal controls. It is a projection, not authority.

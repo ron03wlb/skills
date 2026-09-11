@@ -1,0 +1,204 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  appendDeliveryProgress,
+  diagnoseDeliveryStall,
+  summarizeDeliveryProgress,
+  validateDeliveryProgress,
+} from "../../skills/personal/run-issue-workflow/scripts/delivery-progress.mjs";
+import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
+
+const issueId = "I_issue";
+const operationId = `workflow-op-v1-${"a".repeat(64)}`;
+const instant = seconds => `2026-09-11T00:00:${String(seconds).padStart(2, "0")}.000Z`;
+const progress = (stage, disposition, sourceAt, overrides = {}) => ({
+  type: "delivery.observed",
+  at: instant(59),
+  issueId,
+  operationId,
+  stage,
+  disposition,
+  sourceAt,
+  owner: "exact-owner",
+  evidenceIdentity: `sha256:${"b".repeat(64)}`,
+  requestIdentity: null,
+  blockingPredicate: null,
+  ...overrides,
+});
+
+test("delivery progression keeps distinct owner stages and separate recognition and acceptance metrics", () => {
+  const events = [
+    progress("COMPLETION_PUBLISHED", "OBSERVED", instant(0)),
+    progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", instant(20)),
+    progress("EVIDENCE_VALIDATED", "OBSERVED", instant(25)),
+    progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(30)),
+    progress("CLOSE_DISPATCH_INTENT", "INTENT_RECORDED", instant(35), { requestIdentity: "close:1" }),
+    progress("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", instant(50), { requestIdentity: "close:1" }),
+    progress("REPOSITORY_CLOSE_ACQUIRED", "ACQUIRED", instant(51), { requestIdentity: "close:1" }),
+    progress("TARGET_WRITER_ACQUIRED", "ACQUIRED", instant(52), { requestIdentity: "close:1" }),
+    progress("CLOSE_COMPLETED", "COMPLETED", instant(55), { requestIdentity: "close:1" }),
+  ];
+  const summary = summarizeDeliveryProgress(events, issueId, operationId);
+  assert.equal(summary.stages.length, 9);
+  assert.deepEqual(summary.stages.map(item => item.stage), events.map(item => item.stage));
+  assert.equal(summary.publicationToTerminalRecognitionMs, 20_000);
+  assert.equal(summary.continuouslyEligibleToNativeCloseAcceptanceMs, 20_000);
+  assert.equal(summary.eligibilityInterrupted, false);
+  assert.equal(summarizeDeliveryProgress(events.map((event, index) => ({ ...event,
+    schema: "workflow-event:v1", sequence: index + 1 })), issueId, operationId).stages.length, 9);
+});
+
+test("an exact ineligibility owner interrupts only the eligibility-to-acceptance metric", () => {
+  const events = [
+    progress("COMPLETION_PUBLISHED", "OBSERVED", instant(0)),
+    progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", instant(10)),
+    progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(20)),
+    progress("CLOSE_INELIGIBLE", "BLOCKED", instant(30), {
+      owner: "lease-owner",
+      blockingPredicate: "repository_close_lease_contended",
+    }),
+    progress("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", instant(50), { requestIdentity: "close:1" }),
+  ];
+  const summary = summarizeDeliveryProgress(events, issueId, operationId);
+  assert.equal(summary.publicationToTerminalRecognitionMs, 10_000);
+  assert.equal(summary.continuouslyEligibleToNativeCloseAcceptanceMs, null);
+  assert.equal(summary.eligibilityInterrupted, true);
+  assert.equal(summary.stages[3].owner, "lease-owner");
+  assert.equal(summary.stages[3].blockingPredicate, "repository_close_lease_contended");
+});
+
+test("a genuine eligibility recovery starts a new continuous acceptance interval without poll duplicates", () => {
+  const journal = [];
+  const writer = { append(event) { const stored = { ...event, schema: "workflow-event:v1",
+    sequence: journal.length + 1 }; journal.push(stored); return stored; } };
+  const firstEligible = progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(10));
+  const blocked = progress("CLOSE_INELIGIBLE", "BLOCKED", instant(20), {
+    owner: "lease-owner", blockingPredicate: "repository_close_lease_contended",
+  });
+  const recovered = progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(40));
+  for (const event of [firstEligible, { ...firstEligible, sourceAt: instant(11) }, blocked,
+    { ...blocked, sourceAt: instant(21) }, recovered,
+    progress("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", instant(50), { requestIdentity: "close:1" })]) {
+    appendDeliveryProgress({ writer, journal, event });
+  }
+  assert.deepEqual(journal.map(item => item.stage), ["CLOSE_ELIGIBLE", "CLOSE_INELIGIBLE",
+    "CLOSE_ELIGIBLE", "NATIVE_CLOSE_ACCEPTED"]);
+  const summary = summarizeDeliveryProgress(journal, issueId, operationId);
+  assert.equal(summary.continuouslyEligibleToNativeCloseAcceptanceMs, 10_000);
+  assert.equal(summary.eligibilityInterrupted, true);
+});
+
+test("delivery observations reject malformed blocking ownership and deduplicate exact source evidence", () => {
+  assert.throws(() => validateDeliveryProgress(progress("CLOSE_INELIGIBLE", "BLOCKED", instant(10))),
+    /malformed/iu);
+  assert.throws(() => validateDeliveryProgress(progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(10), {
+    blockingPredicate: "invented_blocker",
+  })), /malformed/iu);
+  assert.throws(() => validateDeliveryProgress(progress("CLOSE_COMPLETED", "OBSERVED", instant(10))), /malformed/iu);
+  const journal = [];
+  const writer = { append(event) { const stored = { ...event, sequence: journal.length + 1 }; journal.push(stored); return stored; } };
+  const event = progress("COMPLETION_PUBLISHED", "OBSERVED", instant(0));
+  assert.equal(appendDeliveryProgress({ writer, journal, event }).sequence, 1);
+  assert.equal(appendDeliveryProgress({ writer, journal, event }).sequence, 1);
+  assert.equal(journal.length, 1);
+});
+
+test("delivery handoff and close scheduling diagnose one unchanged five-minute stall per semantic fingerprint", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const event = (stage, disposition, sourceAt, overrides = {}) => progress(stage, disposition, sourceAt,
+    { at: at(30), ...overrides });
+  const journal = [
+    event("COMPLETION_PUBLISHED", "OBSERVED", at(0)),
+    event("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(1)),
+  ];
+  const writer = { append(event) { const stored = { ...event, sequence: journal.length + 1 };
+    journal.push(stored); return stored; } };
+  assert.equal(diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(5) }), null);
+  const stalledEvidence = diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(6) });
+  assert.equal(stalledEvidence.owner, "evidence-producer");
+  assert.equal(stalledEvidence.blockingPredicate, "evidence_validation_unresolved");
+  appendDeliveryProgress({ writer, journal, event: stalledEvidence });
+  appendDeliveryProgress({ writer, journal, event: diagnoseDeliveryStall({ events: journal,
+    issueId, operationId, now: at(7) }) });
+  assert.equal(journal.filter(event => event.stage === "PROGRESS_DIAGNOSED").length, 1,
+    "an unchanged stage and fingerprint receives exactly one durable diagnosis");
+  journal.push(event("EVIDENCE_VALIDATED", "OBSERVED", at(7)));
+  const stalledScheduling = diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(12) });
+  assert.equal(stalledScheduling.owner, "coordinator-reducer");
+  assert.equal(stalledScheduling.blockingPredicate, "close_eligibility_unresolved");
+  appendDeliveryProgress({ writer, journal, event: stalledScheduling });
+  assert.equal(journal.filter(event => event.stage === "PROGRESS_DIAGNOSED").length, 2,
+    "new discriminating semantic progress permits one diagnosis for the next unresolved stage");
+});
+
+test("a settled native owner without completion publication diagnoses the evidence producer after five minutes", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const terminal = progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(0), { at: at(0), owner: "native-task-owner" });
+  assert.equal(diagnoseDeliveryStall({ events: [terminal], issueId, operationId, now: at(4) }), null);
+  const diagnosis = diagnoseDeliveryStall({ events: [terminal], issueId, operationId, now: at(5) });
+  assert.equal(diagnosis.owner, "evidence-producer");
+  assert.equal(diagnosis.blockingPredicate, "completion_publication_unresolved");
+  assert.equal(diagnosis.requestIdentity, terminal.requestIdentity);
+});
+
+test("healthy close-writer contention is recorded but never diagnosed as a progress fault", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const event = (stage, disposition, sourceAt, overrides = {}) => progress(stage, disposition, sourceAt,
+    { at: at(30), ...overrides });
+  const events = [
+    event("COMPLETION_PUBLISHED", "OBSERVED", at(0)),
+    event("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(1)),
+    event("EVIDENCE_VALIDATED", "OBSERVED", at(2)),
+    event("CLOSE_INELIGIBLE", "BLOCKED", at(3), {
+      owner: "lease-owner", blockingPredicate: "repository_close_lease_contended",
+    }),
+  ];
+  assert.equal(diagnoseDeliveryStall({ events, issueId, operationId, now: at(20) }), null);
+});
+
+test("a later completion flow does not reuse an older native settlement or close acceptance metric", () => {
+  const events = [
+    progress("COMPLETION_PUBLISHED", "OBSERVED", instant(0), { evidenceIdentity: "completion:1" }),
+    progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", instant(5), { evidenceIdentity: "terminal:1" }),
+    progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(10), { evidenceIdentity: "completion:1" }),
+    progress("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", instant(20), { requestIdentity: "close:1" }),
+    progress("COMPLETION_PUBLISHED", "OBSERVED", instant(30), { evidenceIdentity: "completion:2" }),
+    progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", instant(35), { evidenceIdentity: "terminal:2" }),
+    progress("CLOSE_ELIGIBLE", "ELIGIBLE", instant(40), { evidenceIdentity: "completion:2" }),
+    progress("NATIVE_CLOSE_ACCEPTED", "ACCEPTED", instant(55), { requestIdentity: "close:2" }),
+  ];
+  const summary = summarizeDeliveryProgress(events, issueId, operationId);
+  assert.equal(summary.publicationToTerminalRecognitionMs, 5_000);
+  assert.equal(summary.continuouslyEligibleToNativeCloseAcceptanceMs, 15_000);
+});
+
+test("the close owner exposes lease acquisition and completion timestamps while both leases remain current", () => {
+  const calls = [];
+  const lease = name => ({
+    assertCurrent() { calls.push(`assert:${name}`); },
+    release() { calls.push(`release:${name}`); },
+  });
+  const store = {
+    gitCommonDir: "C:/repo/.git",
+    acquireRepositoryCloseLease() { calls.push("acquire:repository"); return lease("repository"); },
+    acquireTargetMutationWriter() { calls.push("acquire:target"); return lease("target"); },
+  };
+  const leases = acquireCloseIssueLeases({
+    store,
+    target: "features/ron",
+    repositoryId: "github:example/repo",
+    specId: "I_spec",
+    approvedPublicationIdentity: `sha256:${"c".repeat(64)}`,
+    issueId,
+  });
+  const acquired = leases.deliveryProgress();
+  assert.match(acquired.repositoryCloseAcquiredAt, /Z$/u);
+  assert.match(acquired.targetWriterAcquiredAt, /Z$/u);
+  assert.equal(acquired.closeCompletedAt, null);
+  const completed = leases.markCompleted();
+  assert.match(completed.closeCompletedAt, /Z$/u);
+  assert.deepEqual(calls.slice(0, 4), ["acquire:repository", "acquire:target", "assert:repository", "assert:target"]);
+  leases.release();
+  assert.deepEqual(calls.slice(-2), ["release:target", "release:repository"]);
+});

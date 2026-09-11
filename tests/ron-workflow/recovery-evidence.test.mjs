@@ -7,7 +7,61 @@ import { join } from "node:path";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { validateEventSemantics } from "../../skills/personal/run-issue-workflow/scripts/run-journal.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress, readRepairWaveCount } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress, readRepairWaveCount,
+  RECOVERY_DISPOSITION_CODES, routeRecoveryDisposition, routeTechnicalRecovery } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+
+test("every recovery disposition has one non-coordinator owner and unknown inputs receive scoped diagnosis", () => {
+  assert.ok(RECOVERY_DISPOSITION_CODES.length >= 15);
+  for (const code of RECOVERY_DISPOSITION_CODES) {
+    const route = routeRecoveryDisposition(code);
+    assert.equal(route.code, code);
+    assert.notEqual(route.owner, "coordinator");
+    assert.equal(route.coordinatorRepairs, false);
+    assert.ok(["CONTINUE_SAME_RUN", "WAIT_EXISTING_OWNER", "STOP_FOR_OWNER"].includes(route.continuation));
+  }
+  assert.deepEqual(routeRecoveryDisposition("NEW_UNKNOWN_STATE"), {
+    code: "UNCLASSIFIED", owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN",
+    coordinatorRepairs: false, observedDisposition: "NEW_UNKNOWN_STATE",
+  });
+});
+
+test("technical recovery routing discriminates diagnosis, read-back, local repair, maintenance and reserved owners", () => {
+  const base = { runId: "run", issueId: "issue", operationId: "operation", candidate: "candidate", targetHead: "target",
+    worktree: "worktree", topic: "topic", owningSource: "source", command: ["node", "check.mjs"], observedResult: "exit 1" };
+  const route = diagnosis => routeTechnicalRecovery(bindTechnicalFailure({ ...base, diagnosis }));
+  assert.deepEqual(route(undefined), { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNDIAGNOSED" });
+  assert.deepEqual(route({ classification: "UNCLASSIFIED", source: "bounded receipt", reason: "no matching owner row" }),
+    { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNCLASSIFIED" });
+  for (const malformed of [
+    { classification: "NEW_UNKNOWN_STATE", source: "bounded receipt", reason: "new producer state" },
+    { classification: "ISSUE_DEFECT" },
+    null,
+  ]) {
+    const bound = bindTechnicalFailure({ ...base, diagnosis: malformed });
+    assert.equal(bound.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(bound.diagnosis.source, malformed?.source ?? "source");
+    assert.deepEqual(routeTechnicalRecovery(bound), {
+      phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNCLASSIFIED",
+    });
+  }
+  assert.deepEqual(route({ classification: "OUTCOME_UNKNOWN", source: "native", reason: "lost ACK" }),
+    { phase: "READBACK", owner: "original-command-owner", disposition: "LOST_ACK_OR_OUTCOME_UNKNOWN" });
+  assert.deepEqual(route({ classification: "ISSUE_DEFECT", source: "tests", reason: "local defect", scopeCompatible: true }),
+    { phase: "REPAIR", owner: "issue-execution-owner", disposition: "LOCAL_CODE_DEFECT" });
+  assert.deepEqual(route({ classification: "WORKFLOW_DEFECT", source: "package", reason: "producer defect", scopeCompatible: true }),
+    { phase: "MAINTENANCE", owner: "workflow-maintenance-owner", disposition: "PACKAGE_OR_WORKFLOW_DEFECT" });
+  assert.equal(route({ classification: "REQUIREMENT_CONFLICT", source: "spec", reason: "semantic conflict" }).owner, "planning-owner");
+  assert.equal(route({ classification: "CAPABILITY_UNAVAILABLE", source: "host", reason: "tool unavailable" }).owner, "capability-owner");
+  for (const diagnosis of [undefined,
+    { classification: "OUTCOME_UNKNOWN", source: "native", reason: "lost ACK" },
+    { classification: "ISSUE_DEFECT", source: "tests", reason: "local defect", scopeCompatible: true },
+    { classification: "WORKFLOW_DEFECT", source: "package", reason: "producer defect", scopeCompatible: true },
+    { classification: "ISSUE_DEFECT", source: "scope", reason: "scope changed", scopeCompatible: false }]) {
+    const selected = route(diagnosis);
+    assert.equal(selected.owner, routeRecoveryDisposition(selected.disposition).owner,
+      "technical routing must reuse the exhaustive disposition owner table");
+  }
+});
 
 test("material recovery carries original and journaled counts; maintenance has one separate scoped budget", () => {
   const failure = { issueId: "I_1", repairWaveCount: 7, diagnosis: { maintenance: { operationId: "maintenance", repairWaveCount: 2 } } };
@@ -68,7 +122,7 @@ test("native maintenance adopts one separate canonical worktree after lost setup
     if (name.endsWith("create_thread")) {
       creates++; prompt = args.prompt;
       assert.equal(args.target.projectId, "source-project"); assert.equal(args.target.environment.type, "worktree");
-      assert.ok(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1", purpose: "maintenance:maintenance-operation" }));
+      assert.ok(store.readHostTask({ runId: runIdentity.runId, issueId: scope.operationId, purpose: "maintenance:maintenance-operation" }));
       git(source, "worktree", "add", "-b", "maintenance", lane, "main");
       throw new Error("lost creation result");
     }
@@ -82,7 +136,8 @@ test("native maintenance adopts one separate canonical worktree after lost setup
     const input = { issueId: "I_1", runIdentity, failure, originalTaskRef };
     const first = await createCodexWorkflowTasks(options).ensureMaintenanceTask(input);
     assert.equal(first.taskRef.threadId, "maintenance");
-    assert.deepEqual((await createCodexWorkflowTasks(options).ensureMaintenanceTask({ ...input, failure: { ...failure, identity: "failure-2", diagnosis: { maintenance: { ...scope, repairWaveCount: 1 } } } })).taskRef, first.taskRef);
+    assert.deepEqual((await createCodexWorkflowTasks(options).ensureMaintenanceTask({ ...input, issueId: "I_2",
+      failure: { ...failure, identity: "failure-2", diagnosis: { maintenance: { ...scope, repairWaveCount: 1 } } } })).taskRef, first.taskRef);
     assert.equal(creates, 1); assert.equal(git(source, "status", "--porcelain"), ""); assert.equal(git(product, "status", "--porcelain"), "");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

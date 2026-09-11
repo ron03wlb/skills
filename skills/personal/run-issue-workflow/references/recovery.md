@@ -2,6 +2,35 @@
 
 Read the applicable branch when dispatch, tracker, environment, writer or coordinator evidence cannot progress. This reference owns Run retry budgets, outage probes, recognized remediation and diagnosis fields; it grants no target mutation or expansion beyond applicable approved scope.
 
+## Compact outcomes and progress diagnosis
+
+The task adapter publishes `workflow-task-outcome:v1` only through the existing append-only Run journal. Its exact allowlist binds Run, Issue, operation, request, task, producer revision/package, phase, disposition, candidate when observed, evidence locators/digests, pending and accepted effect identities, failure fingerprint, progress instants, and observation budgets. Receipt size is 16 KiB, each encoded host response is 1 MiB, and exceptional owner history is 256 KiB cumulatively across at most four reads. The native host driver selects only the exact user request, final answer, and delegated Codex input before serialization or cross-host forwarding. An overflow is `NATIVE_RESPONSE_BUDGET_EXCEEDED` with an exact missing-evidence locator; never serialize arbitrary worker prose, credentials, output, or raw native cursors into a receipt or event.
+
+Normal active or successfully completed work uses compact native status/settlement plus the independently validated tracker completion; it does not read full task history. Read exact bounded history only for `failed`, `needs_attention`, unknown/error, conflicting receipt identity, lost mutation acceptance, or an existing close/repair/recovery owner. Before consuming a receipt, validate schema, Run/Issue/task scope, operation/request/phase, producer package revision, candidate-bearing tracker evidence, locator digest, and native settlement independently.
+
+Only a verified semantic status change or a native revision attached to a discriminating event advances progress. After 300 seconds without one, perform one bounded discriminating diagnosis and record one attributed `NEEDS_ATTENTION` outcome for that task and phase. The same threshold records one `PROGRESS_DIAGNOSED` delivery event for an unchanged publication, evidence-validation, or close-scheduling stage/fingerprint and names that stage's exact owner and blocking predicate. A settled native terminal with no completion publication remains the same lane, never an implementation retry; its diagnosis routes the exact worktree to the evidence producer. Reconciliation consumes each current diagnosis: evidence-producer gaps enter scoped read-only recovery, while close-scheduling gaps prioritize the existing close owner and retained acceptance receipt. An unknown close disposition becomes `UNCLASSIFIED` producer diagnosis and is never stored as a close result. Healthy close-writer contention is not a fault. A heartbeat, cursor-only change, restated status, time passage, another task, or an active native call is not progress and never permits kill, replacement, duplicate dispatch, or ownership transfer. Re-entry keeps the original `lastVerifiedProgressAt`, prior escalation, six-hour execution budget, and ten-wave repair budget; a newly discriminating result resumes at the next unsatisfied stage of the same Run.
+
+Recovery routing is exhaustive and fail-closed. This table is the single authoritative owner matrix; coordinator references consume it without restating the rows.
+
+| Disposition | Owner | Continuation |
+| --- | --- | --- |
+| `UNDIAGNOSED`, `UNCLASSIFIED` | evidence producer | one scoped read-only diagnosis, then same Run |
+| `LOST_ACK_OR_OUTCOME_UNKNOWN` | original command owner | original read-back, then same Run |
+| `OUTCOME_READBACK_RESOLVED`, `LOCAL_CODE_DEFECT` | Issue execution owner | same Run |
+| `EVIDENCE_PRODUCER_DEFECT` | exact evidence producer | correct missing evidence, then same Run |
+| `MERGE_CONFLICT` | original Issue owner | existing isolated repair transfer |
+| `INTEGRATION_VERIFICATION_FAILURE` | existing transfer owner | same Run |
+| `PARTIAL_CLEANUP`, `TRACKER_CLOSE_UNKNOWN` | original close owner | remaining close stage only |
+| `ACCEPTED_EFFECT_PENDING` | original acceptance owner | wait for the existing owner |
+| `HOST_OBSERVATION_FAULT` | host probe owner | shared bounded probes |
+| `PACKAGE_OR_WORKFLOW_DEFECT` | scoped workflow maintenance owner | verified repair/install, then same Run |
+| `ENVIRONMENT_FINGERPRINT`, `ENVIRONMENT_UNKNOWN` | environment or original command owner | bounded remediation/read-back |
+| `WRITER_CONTENTION` | exact lease owner | healthy wait |
+| `REQUIREMENT_CONFLICT`, `CAPABILITY_UNAVAILABLE` | planning or capability owner | stop for named owner |
+| `AUTHORITY_CONFLICT`, `EXECUTION_BUDGET_EXHAUSTED`, `REPAIR_BUDGET_EXHAUSTED` | human | stop for named predicate |
+
+An unknown input code normalizes to `UNCLASSIFIED` and receives exactly one scoped read-only diagnosis; it never creates coordinator repair authority or triggers blanket history scanning.
+
 ## Worker and tracker recovery
 
 A transient worker or task failure permits at most three dispatch attempts per Issue. Reuse a reachable task. Create a replacement only when the prior task is proven unable to continue and append one `retry.recorded` relationship with exact inactive evidence. Technical `implementation_blocked` and failed integration bypass blind dispatch retries and enter the isolated diagnosis lifecycle. Scope conflicts, authority mismatch and contradictory evidence require their exact owning decision or read-back.

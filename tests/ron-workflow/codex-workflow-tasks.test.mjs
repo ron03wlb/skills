@@ -5,11 +5,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { createCodexMessageReceipts } from "../../skills/personal/run-issue-workflow/scripts/codex-close-receipts.mjs";
+import { createCodexCloseReceipts, createCodexMessageReceipts } from "../../skills/personal/run-issue-workflow/scripts/codex-close-receipts.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
+import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 const readOpenIssueState = async issueId => ({ issueId, state: "OPEN" });
+const closeAuthority = candidate => ({
+  trackerIdentity: "github-issue:I_1:version:1",
+  targetHead: candidate,
+  candidateCommit: candidate,
+  completionEvidenceId: "IC_done",
+  completionBodySha256: `sha256:${"c".repeat(64)}`,
+  worktreeIdentity: "registered-worktree:issue-I_1",
+});
+const integrationAuthority = (candidate, state = "PASS", identity = `sha256:${"e".repeat(64)}`) => ({
+  state, issueId: "I_1", candidate, targetHead: candidate, identity,
+});
+const hostCleanupOutcome = ({ requestIdentity, authorityEvidence, taskRef, overrides = {} }) => ({
+  schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
+  authorityEvidence, candidate: authorityEvidence.candidateCommit, targetHead: authorityEvidence.candidateCommit,
+  candidateReachable: true, integrationVerification: { state: "PASS", identity: `sha256:${"e".repeat(64)}`,
+    checks: [{ command: ["node", "--check", "one.mjs"], configFiles: [], environment: { node: "test" },
+      externalInputs: { kind: "none" } }] },
+  worktree: "C:/issue", taskRef, directoryState: "EMPTY_UNREGISTERED",
+  capability: { state: "UNAVAILABLE", operation: null, helperOwnership: "UNAVAILABLE", respawnProtection: "UNAVAILABLE",
+    reason: "No exact host release operation is available" },
+  reasonCode: "host_helper_recovery_failed", observations: [{ code: "EBUSY", message: "Exact directory remains held" }],
+  ...overrides,
+});
 
 test("close submission refreshes tracker after delayed native history and skips an Issue closed during that read", async () => {
   for (const stateAfterRead of ["CLOSED", "OPEN"]) {
@@ -38,7 +63,10 @@ test("close submission refreshes tracker after delayed native history and skips 
       if (stateAfterRead === "CLOSED") {
         assert.deepEqual(result, { reconcileRequired: true, reasonCode: "issue_already_closed", issueId: "I_1" });
         assert.equal(existsSync(join(root, ".git", "matt-workflow-control", "runs", "run")), false, "a skipped close creates no receipt or Run authority");
-      } else assert.equal(result, undefined, "missing native final still permits the remaining close for an open Issue with physical cleanup proved");
+      } else {
+        assert.equal(result.accepted, true, "missing native final still permits the remaining close for an open Issue with physical cleanup proved");
+        assert.match(result.acceptedAt, /^2026-/u);
+      }
     } finally { finishRead(); rmSync(root, { recursive: true, force: true }); }
   }
 });
@@ -67,7 +95,10 @@ test("native close acceptance survives omitted history and blocks unchanged redi
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const ref = { threadId: "worker", hostId: "local" };
   const requestIdentity = `sha256:${"a".repeat(64)}`;
-  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "PRESENT" };
+  const authorityEvidence = closeAuthority("a".repeat(40));
+  const verificationAuthority = integrationAuthority(authorityEvidence.candidateCommit);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true,
+    worktreeState: "PRESENT", authorityEvidence };
   const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
   let sends = 0, sentPrompt, turnId = "implementation", result, omitInput = false;
   const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState,
@@ -95,25 +126,23 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     assert.equal(planCloseContinuation({ task: unknown, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "close_outcome_unavailable");
     await resumed.message(ref, prompt);
     assert.equal(sends, 1, "same exact accepted native request is never sent twice");
-    const authorityEvidence = { candidateCommit: "a".repeat(40), completionEvidenceId: "IC_done", completionBodySha256: "sha256:done", worktreeIdentity: "sha256:owned" };
-    evidence.authorityEvidence = authorityEvidence;
-    result = { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
-      authorityEvidence, reasonCode: "host_helper_recovery_failed", observations: [{ code: "EBUSY", message: "Exact directory remains held" }] };
-    await resumed.read(ref);
+    result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
+    await resumed.read(ref, { integrationVerification: verificationAuthority });
     result = undefined;
-    const settled = await createCodexWorkflowTasks(options).read(ref);
+    const settled = await createCodexWorkflowTasks(options).read(ref, { integrationVerification: verificationAuthority });
     assert.equal(settled.closeResult?.state, "HOST_CLEANUP_BLOCKED", "retain the actual observed result when later native history omits it");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "host_helper_recovery_failed");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: { ...evidence, worktreeState: "ABSENT" } }).needed, true);
     omitInput = true;
     for (const change of [{ runId: "foreign-run" }, { issueId: "I_foreign" }, { requestIdentity: `sha256:${"f".repeat(64)}` }]) {
       result = { ...settled.closeResult, ...change };
-      await assert.rejects(resumed.read(ref), /outcome identity differs/u,
-        "a latest foreign native final cannot be hidden by a receipt when its input is omitted");
+      assert.deepEqual((await resumed.read(ref, { integrationVerification: verificationAuthority })).closeResult, settled.closeResult,
+        "a final without the exact owner input cannot replace the retained exact outcome");
     }
     omitInput = false;
     result = { ...settled.closeResult, issueId: "I_foreign" };
-    await assert.rejects(resumed.read(ref), /outcome identity differs/u, "a conflicting native result cannot replace retained owning evidence");
+    await assert.rejects(resumed.read(ref, { integrationVerification: verificationAuthority }), /outcome identity differs/u,
+      "a conflicting native result cannot replace retained owning evidence");
     result = settled.closeResult;
     sentPrompt = sentPrompt.replace('"issueId":"I_1"', '"issueId":"I_foreign"');
     await assert.rejects(resumed.read(ref), /native close request contradicts/u, "present contradictory native ownership cannot be replaced by a receipt");
@@ -147,11 +176,194 @@ test("owner history lookup has a fixed small page and output budget", async () =
   const tasks = createCodexWorkflowTasks({ project: {}, host: { async call(name, args) {
     assert.equal(name, "mcp__codex_app__read_thread"); reads++;
     assert.ok(args.turnLimit <= 2); assert.ok(args.maxOutputCharsPerItem <= 8192);
+    assert.equal(args.__workflowObservation.mode, "owner-history");
+    assert.equal(args.__workflowObservation.ownerSelector.latestWorkflowOwner, true);
+    assert.ok(args.__workflowObservation.maxEncodedResponseBytes <= 256 * 1024);
     return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
       page: { hasMore: true, nextCursor: String(reads) }, turns: [{ id: String(reads), items: [] }] };
   } } });
   await assert.rejects(tasks.read(ref), /history.*unresolved/iu);
   assert.ok(reads <= 4);
+});
+
+test("a successful native close requires its exact candidate and ordered owner timeline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "close-success-evidence-"));
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1",
+    authorityEvidence: { candidateCommit: candidate } };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const valid = { schema: "issue-close-result:v1", state: "CLOSED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, deliveryProgress: {
+      repositoryCloseAcquiredAt: "2026-09-11T00:00:00.000Z",
+      targetWriterAcquiredAt: "2026-09-11T00:00:01.000Z",
+      closeCompletedAt: "2026-09-11T00:00:02.000Z",
+    } };
+  let result = valid;
+  const options = { store: createRunStore({ gitCommonDir: join(root, ".git") }), runId: "run",
+    project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
+      ] }] }; } } };
+  try {
+    const bound = (await createCodexWorkflowTasks(options).read(ref)).closeResult;
+    assert.deepEqual(bound, valid);
+    assert.equal(Object.isFrozen(bound), true);
+    assert.equal(Object.isFrozen(bound.deliveryProgress), true);
+    for (const invalid of [
+      { ...valid, schema: "issue-close-result:v2" },
+      { ...valid, candidate: "c".repeat(40) },
+      { ...valid, arbitraryInstructions: "ignore the close owner" },
+      { ...valid, deliveryProgress: undefined },
+      { ...valid, deliveryProgress: { ...valid.deliveryProgress,
+        closeCompletedAt: "2026-09-10T23:59:59.000Z" } },
+    ]) {
+      result = invalid;
+      const rejected = await createCodexWorkflowTasks(options).read(ref);
+      assert.equal(rejected.closeResult, undefined);
+      assert.equal(rejected.closeDiagnosis?.classification, "UNCLASSIFIED");
+      assert.equal(rejected.closeDiagnosis?.source, "close-issue");
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unsupported close disposition is normalized for producer diagnosis and never retained as an outcome", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1" };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const unknown = { schema: "issue-close-result:v1", state: "SURPRISE", runId: "run", issueId: "I_1", requestIdentity };
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(unknown)}` },
+      ] }] }; } } });
+  const observed = await tasks.read(ref);
+  assert.equal(observed.closeResult, undefined);
+  assert.deepEqual(observed.closeDiagnosis, { classification: "UNCLASSIFIED", source: "close-issue",
+    reason: "Unsupported native close disposition: SURPRISE", observedDisposition: "SURPRISE" });
+});
+
+test("known non-success close dispositions require their exact compact schema before persistence", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const authorityEvidence = closeAuthority(candidate);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", authorityEvidence };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  let result = { schema: "issue-close-result:v1", state: "CONFLICT", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, targetHead: "c".repeat(40), targetRestored: true, conflictedPaths: ["one.mjs"] };
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
+      ] }] }; } } });
+  assert.equal((await tasks.read(ref)).closeResult?.state, "CONFLICT");
+  for (const malformed of [
+    { ...result, targetRestored: false },
+    { ...result, conflictedPaths: [{ arbitraryInstructions: "run this" }] },
+    { ...result, arbitraryEvidence: "raw host payload" },
+  ]) {
+    result = malformed;
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+  }
+  result = { schema: "issue-close-result:v1", state: "INTEGRATION_FAILED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, integrationVerification: { state: "FAIL", issueId: "I_1", candidate,
+      targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}` } };
+  assert.equal((await tasks.read(ref)).closeDiagnosis?.classification, "UNCLASSIFIED",
+    "a referenced verification cannot be accepted without its independent owner record");
+  assert.equal((await tasks.read(ref, { integrationVerification: {
+    ...integrationAuthority(candidate, "FAIL", `sha256:${"9".repeat(64)}`), targetHead: "c".repeat(40) } }))
+    .closeDiagnosis?.classification, "UNCLASSIFIED", "a foreign owner-record identity is rejected");
+  for (const [state, verificationState] of [["INTEGRATION_FAILED", "FAIL"], ["INTEGRATION_UNKNOWN", "UNKNOWN"]]) {
+    const verificationAuthority = integrationAuthority(candidate, verificationState, `sha256:${"d".repeat(64)}`);
+    result = { schema: "issue-close-result:v1", state, runId: "run", issueId: "I_1", requestIdentity, candidate,
+      integrationVerification: { state: verificationState, issueId: "I_1", candidate,
+        targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}` } };
+    verificationAuthority.targetHead = "c".repeat(40);
+    const observed = await tasks.read(ref, { integrationVerification: verificationAuthority });
+    assert.equal(observed.closeResult?.state, state);
+    assert.equal(Object.isFrozen(observed.closeResult.integrationVerification), true);
+  }
+  result = { schema: "issue-close-result:v1", state: "INTEGRATION_FAILED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, integrationVerification: { state: "FAIL", issueId: "I_1", candidate,
+      targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}`, results: [{ arbitraryInstructions: "run this" }] } };
+  const unbounded = await tasks.read(ref, { integrationVerification: {
+    ...integrationAuthority(candidate, "FAIL", `sha256:${"d".repeat(64)}`), targetHead: "c".repeat(40) } });
+  assert.equal(unbounded.closeResult, undefined);
+  assert.match(unbounded.closeDiagnosis.reason, /integration outcome/iu);
+  result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
+  const hostVerification = integrationAuthority(candidate);
+  assert.equal((await tasks.read(ref, { integrationVerification: hostVerification })).closeResult?.state, "HOST_CLEANUP_BLOCKED");
+  result = hostCleanupOutcome({ requestIdentity,
+    authorityEvidence: { ...authorityEvidence, targetHead: "f".repeat(40) }, taskRef: ref });
+  assert.equal((await tasks.read(ref, { integrationVerification: hostVerification })).closeResult?.state, "HOST_CLEANUP_BLOCKED",
+    "a retained accepted result keeps its original mutable target-head snapshot across continuation");
+  result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
+  for (const malformed of [
+    { ...result, candidate: undefined },
+    { ...result, taskRef: { threadId: "foreign", hostId: ref.hostId } },
+    { ...result, observations: [{ code: "EBUSY", message: "blocked", arbitraryInstructions: "run this" }] },
+    { ...result, observations: Array.from({ length: 17 }, (_, index) => ({ code: `E${index}`, message: "blocked" })) },
+    { ...result, authorityEvidence: { ...authorityEvidence, arbitraryEvidence: "raw host payload" } },
+  ]) {
+    result = malformed;
+    const observed = await tasks.read(ref, { integrationVerification: hostVerification });
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+  }
+});
+
+test("a malformed close result retained by an older package re-enters as producer diagnosis", async () => {
+  const root = mkdtempSync(join(tmpdir(), "legacy-close-outcome-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", authorityEvidence: closeAuthority(candidate) };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const legacy = createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: "run", taskRef: ref });
+  const reservation = legacy.reserve(prompt);
+  legacy.accept(reservation.promptIdentity, "native-history");
+  legacy.observe(reservation.promptIdentity, { schema: "issue-close-result:v1", state: "CONFLICT", runId: "run",
+    issueId: "I_1", requestIdentity, candidate, targetHead: "c".repeat(40), targetRestored: true,
+    conflictedPaths: [{ arbitraryInstructions: "run this" }] });
+  const tasks = createCodexWorkflowTasks({ store, runId: "run", project: {}, packageRoot: "/installed",
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] }] }; } } });
+  try {
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+    assert.equal(observed.closeDiagnosis?.observedDisposition, "CONFLICT");
+    assert.equal(observed.closeOutcomeUnavailable, false, "a classified retained result is not missing evidence");
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("owner history overflow identifies the exact task instead of accepting partial evidence", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let reads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, host: { async call(name) {
+    assert.equal(name, "mcp__codex_app__read_thread");
+    reads += 1;
+    return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      page: { hasMore: true, nextCursor: String(reads) },
+      turns: [{ id: String(reads), items: [{ type: "agentMessage", phase: "final_answer",
+        text: "x".repeat(140_000) }] }] };
+  } } });
+  await assert.rejects(tasks.read(ref), error => {
+    assert.equal(error.code, "NATIVE_RESPONSE_BUDGET_EXCEEDED");
+    assert.equal(error.missingEvidence.locator, "codex-host://history/local/worker");
+    return true;
+  });
+  assert.equal(reads, 2, "the aggregate history cap stops before another page is fetched");
 });
 
 test("legacy omitted close history permits only freshly proved remaining closeout", async () => {
@@ -351,8 +563,9 @@ test("a lost task creation response reuses its exact discovered lane without a s
     assert.equal(resumed.executionStartEvidence(ref), "OBSERVED");
     assert.equal(creates, 1);
     assert.equal((await resumed.read(ref)).state, "RESUMABLE");
-    assert.equal((await resumed.wait([ref])).taskSettled, true);
-    assert.equal((await resumed.wait([ref])).taskSettled, true);
+    assert.equal((await resumed.wait([ref])).taskSettled, false,
+      "an idle created lane without a completed turn is reusable but not a settled execution");
+    assert.equal((await resumed.wait([ref])).taskSettled, false);
     const retryPrompt = `Use $execute-issue to retry Issue I_1. Retry request: ${JSON.stringify({ runId: runIdentity.runId, issueId: "I_1", attempt: 2 })}`;
     assert.deepEqual(await resumed.message(ref, retryPrompt), { observed: true, initiatedHere: true });
     assert.equal(messages, 1, "native accepted-message read-back suppresses a duplicate send");
@@ -822,7 +1035,7 @@ test("a later fault after proved settlement receives a fresh bounded recovery po
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("event waits rotate batches of eight, reuse cursors and read full history only for a material terminal event", async () => {
+test("event waits rotate batches of eight, reuse cursors and settle normal completion without full history", async () => {
   const refs = Array.from({ length: 9 }, (_, index) => ({ threadId: `worker-${index + 1}`, hostId: "local" }));
   const batches = [];
   let waits = 0, reads = 0;
@@ -850,14 +1063,247 @@ test("event waits rotate batches of eight, reuse cursors and read full history o
   assert.deepEqual(batches[0].map(({ threadId }) => threadId), refs.slice(0, 8).map(({ threadId }) => threadId));
   assert.equal(batches[1][0].threadId, "worker-9", "the next bounded batch rotates fairly");
   assert.equal(batches[1][1].afterCursor, "cursor-worker-1");
-  assert.equal(reads, 1, "unchanged running polls never request full task history");
+  assert.equal(reads, 0, "normal completion and unchanged polls never request full task history");
   assert.equal(first.observation.fullHistoryReads, 0);
   assert.equal(second.observation.kind, "unchanged");
   assert.equal(third.observation.kind, "changed");
-  assert.equal(third.observation.fullHistoryReads, 1);
+  assert.equal(third.observation.fullHistoryReads, 0);
   assert.equal(third.observation.modelRoundTrips, "unavailable");
   assert.equal(third.observation.tokens, "unavailable");
   assert.ok(third.observation.returnedBytes > 0);
+});
+
+test("normal completion emits an allowlisted outcome receipt bound to Run, Issue, operation and package", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-outcome-receipt-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
+    target: "features/ron", classification: "SINGLE", decompositionIdentity: null };
+  const ref = { threadId: "worker-90", hostId: "local" };
+  const writer = store.acquireWriter(runIdentity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity });
+  const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z", issueId: "I_90", attempt: 1, taskRef: ref });
+  writer.append({ type: "execution.started", at: "2026-09-11T00:00:02.000Z", issueId: "I_90",
+    phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref });
+  writer.release();
+  let reads = 0;
+  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId: "github:ron03wlb/skills",
+    workflowVersion: { sourceCommit: "a".repeat(40), id: "b".repeat(64) }, now: () => "2026-09-11T00:04:00.000Z",
+    project: {}, packageRoot: "/installed", host: { async call(name) {
+      if (name.endsWith("read_thread")) reads += 1;
+      return { polls: [{ threadId: ref.threadId, cursor: "cursor-90", status: "completed", event: "completion",
+        finalText: "untrusted output must not enter the receipt" }] };
+    } } });
+  try {
+    const observed = await tasks.wait([ref]);
+    assert.equal(reads, 0);
+    assert.equal(observed.observation.receipts.length, 1);
+    const receipt = observed.observation.receipts[0];
+    assert.equal(receipt.runId, runIdentity.runId);
+    assert.equal(receipt.issueId, "I_90");
+    assert.match(receipt.operationId, /^workflow-op-v1-[a-f0-9]{64}$/u);
+    assert.equal(receipt.producer.packageVersion, "b".repeat(64));
+    assert.equal(JSON.stringify(receipt).includes("untrusted output"), false);
+    assert.equal(JSON.stringify(receipt).includes("cursor-90"), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("five minutes without verified task progress emits one attributed escalation without stopping active work", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-stalled-progress-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
+    target: "features/ron", classification: "SINGLE", decompositionIdentity: null };
+  const ref = { threadId: "worker-90", hostId: "local" };
+  const writer = store.acquireWriter(runIdentity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity });
+  const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z", issueId: "I_90", attempt: 1, taskRef: ref });
+  writer.append({ type: "execution.started", at: "2026-09-11T00:00:02.000Z", issueId: "I_90",
+    phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref });
+  writer.release();
+  let clockMs = 0, historyReads = 0, event = "heartbeat";
+  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId: "github:ron03wlb/skills",
+    workflowVersion: { sourceCommit: "a".repeat(40), id: "b".repeat(64) },
+    now: () => new Date(Date.parse("2026-09-11T00:00:02.000Z") + clockMs).toISOString(),
+    project: {}, packageRoot: "/installed", host: { async call(name, args) {
+      if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, cursor: "same-cursor",
+        status: "running", event }] };
+      historyReads += 1;
+      assert.equal(args.includeOutputs, true);
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] };
+    } } });
+  try {
+    const first = await tasks.wait([ref]);
+    assert.equal(first.observation.receipts[0].disposition, "RUNNING");
+    let journalWriter = store.acquireWriter(runIdentity.runId);
+    journalWriter.append({ type: "task.outcome", at: "2026-09-11T00:00:03.000Z", receipt: first.observation.receipts[0] });
+    journalWriter.release();
+    clockMs = 299_000; event = "status-pulse";
+    assert.equal((await tasks.wait([ref])).observation.receipts.length, 0, "heartbeat and elapsed time are not progress");
+    clockMs = 300_001;
+    const stalled = await tasks.wait([ref]);
+    assert.equal(stalled.observation.receipts[0].disposition, "NEEDS_ATTENTION");
+    assert.equal(stalled.observation.receipts[0].progress.lastVerifiedProgressAt, "2026-09-11T00:00:02.000Z");
+    assert.equal(stalled.observation.fullHistoryReads, 1);
+    assert.equal(stalled.taskSettled, false, "diagnosis never kills or settles the active task");
+    journalWriter = store.acquireWriter(runIdentity.runId);
+    journalWriter.append({ type: "task.outcome", at: "2026-09-11T00:05:03.000Z", receipt: stalled.observation.receipts[0] });
+    journalWriter.release();
+    clockMs = 600_002;
+    assert.equal((await tasks.wait([ref])).observation.receipts.length, 0, "the same stalled stage escalates exactly once");
+    assert.equal(historyReads, 1);
+    const resumed = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId: "github:ron03wlb/skills",
+      workflowVersion: { sourceCommit: "a".repeat(40), id: "b".repeat(64) },
+      now: () => new Date(Date.parse("2026-09-11T00:00:02.000Z") + clockMs).toISOString(),
+      project: {}, packageRoot: "/installed", host: { async call(name) {
+        if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, cursor: "same-cursor",
+          status: "running", event: "heartbeat" }] };
+        historyReads += 1;
+        throw new Error("same Run re-entry must not repeat the stalled-stage diagnosis");
+      } } });
+    assert.equal((await resumed.wait([ref])).observation.receipts.length, 0);
+    assert.equal(historyReads, 1);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("cursor-only heartbeat change does not reset the five-minute no-progress clock", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let clockMs = 0, cursor = "c1", historyReads = 0;
+  const tasks = createCodexWorkflowTasks({ noProgressLimitMs: 300_000,
+    now: () => new Date(Date.parse("2026-09-11T00:00:00.000Z") + clockMs).toISOString(),
+    project: {}, packageRoot: "/installed", host: { async call(name) {
+      if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, cursor, status: "running", event: "heartbeat" }] };
+      historyReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] };
+    } } });
+  await tasks.wait([ref]);
+  clockMs = 250_000; cursor = "c2";
+  await tasks.wait([ref]);
+  clockMs = 500_000;
+  await tasks.wait([ref]);
+  assert.equal(historyReads, 1);
+});
+
+test("a discriminating native revision resets the five-minute no-progress clock", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let clockMs = 0, cursor = "c1", event = "heartbeat", historyReads = 0;
+  const tasks = createCodexWorkflowTasks({ noProgressLimitMs: 300_000,
+    now: () => new Date(Date.parse("2026-09-11T00:00:00.000Z") + clockMs).toISOString(),
+    project: {}, packageRoot: "/installed", host: { async call(name) {
+      if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, cursor, status: "running", event }] };
+      historyReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] };
+    } } });
+  await tasks.wait([ref]);
+  clockMs = 250_000; cursor = "c2"; event = "progress";
+  await tasks.wait([ref]);
+  clockMs = 500_000; event = "heartbeat";
+  await tasks.wait([ref]);
+  assert.equal(historyReads, 0);
+});
+
+test("completion reconciliation retains the first native settlement past a later fault and binds its candidate without full history", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-compact-read-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
+    target: "features/ron", classification: "SINGLE", decompositionIdentity: null };
+  const ref = { threadId: "worker-90", hostId: "local" };
+  const repositoryId = "github:ron03wlb/skills";
+  const operationId = deriveExecuteIssueOperationIdentity({ repositoryId, specId: runIdentity.specId,
+    approvedPublicationIdentity: runIdentity.approvedScopeHash, issueId: "I_90" }).key;
+  const writer = store.acquireWriter(runIdentity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity });
+  const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z", issueId: "I_90", attempt: 1, taskRef: ref });
+  writer.append({ type: "execution.started", at: "2026-09-11T00:00:02.000Z", issueId: "I_90",
+    phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref });
+  const receipt = createTaskOutcomeReceipt({ runId: runIdentity.runId, issueId: "I_90", operationId,
+    requestIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref,
+    producer: { name: "codex-workflow-tasks", revision: "unavailable", packageVersion: "unavailable" },
+    phase: "IMPLEMENTATION", disposition: "SUCCEEDED", candidate: null,
+      evidence: [{ kind: "native-settlement", locator: "codex-task://local/worker-90?revision=sha256:" + "5".repeat(64),
+      digest: "sha256:" + "3".repeat(64) }], effects: { pending: [], accepted: [] }, failureFingerprint: null,
+    progress: { executionStartedAt: "2026-09-11T00:00:02.000Z", lastVerifiedProgressAt: "2026-09-11T00:04:00.000Z",
+      terminalObservedAt: "2026-09-11T00:04:00.000Z" }, budget: { encodedResponseBytes: 10,
+      maxEncodedResponseBytes: 1_048_576, fullHistoryReads: 0, maxFullHistoryReads: 4 }, nativeRevision: "sha256:" + "5".repeat(64) });
+  writer.append({ type: "task.outcome", at: "2026-09-11T00:04:01.000Z", receipt });
+  writer.release();
+  const laterFault = { type: "task.outcome", at: "2026-09-11T00:09:01.000Z", receipt: createTaskOutcomeReceipt({
+    runId: runIdentity.runId, issueId: "I_90", operationId, requestIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref,
+    producer: { name: "codex-workflow-tasks", revision: "unavailable", packageVersion: "unavailable" },
+    phase: "IMPLEMENTATION", disposition: "NEEDS_ATTENTION", candidate: null,
+    evidence: [{ kind: "native-attention", locator: "codex-task://local/worker-90", digest: `sha256:${"f".repeat(64)}` }],
+    effects: { pending: [], accepted: [] }, failureFingerprint: `sha256:${"f".repeat(64)}`,
+    progress: { executionStartedAt: "2026-09-11T00:00:02.000Z", lastVerifiedProgressAt: "2026-09-11T00:04:00.000Z",
+      terminalObservedAt: null }, budget: { encodedResponseBytes: 10, maxEncodedResponseBytes: 1_048_576,
+      fullHistoryReads: 1, maxFullHistoryReads: 4 }, nativeRevision: null,
+  }) };
+  const observedStore = new Proxy(store, { get(target, property) {
+    if (property === "readEvents") return selectedRunId => [...target.readEvents(selectedRunId), laterFault];
+    return Reflect.get(target, property);
+  } });
+  let compactReads = 0;
+  const tasks = createCodexWorkflowTasks({ store: observedStore, runId: runIdentity.runId, repositoryId, project: {}, packageRoot: "/installed",
+    host: { async call(name, args) {
+      assert.equal(name, "mcp__codex_app__read_thread"); assert.equal(args.includeOutputs, false); compactReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "completed" } },
+        turns: [{ id: "settled", status: "completed" }] };
+    } } });
+  try {
+    const state = await tasks.read(ref, { runId: runIdentity.runId,
+      completion: { issueId: "I_90", operationId, candidate: "a".repeat(40) } });
+    assert.equal(state.state, "RESUMABLE");
+    assert.equal(state.outcomeReceipt.candidate, "a".repeat(40));
+    assert.notEqual(state.outcomeReceipt.identity, receipt.identity);
+    assert.deepEqual(state.outcomeReceipt.evidence, receipt.evidence,
+      "candidate binding reuses the first native settlement evidence instead of a later poll");
+    assert.equal(state.outcomeReceipt.nativeRevision, receipt.nativeRevision);
+    assert.equal(state.outcomeReceipt.progress.lastVerifiedProgressAt, "2026-09-11T00:04:00.000Z");
+    assert.equal(state.outcomeReceipt.progress.terminalObservedAt, "2026-09-11T00:04:00.000Z",
+      "candidate binding retains the first observed native terminal as the no-progress anchor");
+    assert.equal(compactReads, 1);
+    const repeated = await tasks.read(ref, { runId: runIdentity.runId,
+      completion: { issueId: "I_90", operationId, candidate: "a".repeat(40) } });
+    assert.equal(repeated.outcomeReceipt.identity, state.outcomeReceipt.identity,
+      "reconciliation does not mint a newer terminal receipt for the unchanged settlement");
+    assert.equal(compactReads, 2);
+    await assert.rejects(tasks.read(ref, { runId: runIdentity.runId,
+      completion: { issueId: "I_90", operationId: "workflow-op-v1-" + "4".repeat(64), candidate: "a".repeat(40) } }),
+    /completion.*receipt.*differs/iu);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("ordinary active reconciliation uses one compact status snapshot and no task output", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let calls = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", host: { async call(name, args) {
+    calls += 1;
+    assert.equal(name, "mcp__codex_app__read_thread");
+    assert.equal(args.includeOutputs, false);
+    assert.equal(args.turnLimit, 1);
+    assert.equal(args.maxOutputCharsPerItem, 1000);
+    return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" }, cwd: "C:/lane" }, turns: [] };
+  } } });
+  const state = await tasks.read(ref, { runId: "run", observation: {
+    issueId: "I_90", operationId: "workflow-op-v1-" + "1".repeat(64),
+  } });
+  assert.equal(state.state, "RUNNING");
+  assert.equal(state.cwd, "C:/lane");
+  assert.equal(calls, 1);
+});
+
+test("an inactive task without a completed latest turn cannot become a compact success", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let compactReads = 0, historyReads = 0;
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+    waitForObservationSignal: async () => null,
+    host: { async call(name, args) {
+      if (name.endsWith("wait_threads")) throw new Error("Unsupported wait_threads");
+      if (args.includeOutputs) historyReads += 1; else compactReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [] };
+    } } });
+  const observed = await tasks.wait([ref]);
+  assert.equal(compactReads, 1);
+  assert.equal(historyReads, 1, "missing settlement metadata is diagnosed with one bounded history read");
+  assert.equal(observed.taskSettled, false);
+  assert.equal(observed.observation.fullHistoryReads, 1);
 });
 
 test("unsupported event notification falls back at 15/30/60 seconds and resets only after semantic change", async () => {
@@ -871,7 +1317,7 @@ test("unsupported event notification falls back at 15/30/60 seconds and resets o
       if (name.endsWith("read_thread")) {
         if (args.includeOutputs) fullReads += 1; else snapshots += 1;
         return { thread: { id: args.threadId, hostId: args.hostId, status: { type: state } },
-          turns: args.includeOutputs ? [{ id: "done", status: "completed", items: [] }] : [] };
+          turns: state === "idle" || args.includeOutputs ? [{ id: "done", status: "completed", items: [] }] : [] };
       }
       throw new Error(name);
     } } });
@@ -887,7 +1333,29 @@ test("unsupported event notification falls back at 15/30/60 seconds and resets o
   assert.equal(changed.observation.kind, "changed");
   assert.equal(delays.at(-1), 15000, "a material state transition resets the next fallback interval");
   assert.equal(snapshots, 6);
-  assert.equal(fullReads, 1, "only the material terminal transition fetches bounded full task history");
+  assert.equal(fullReads, 0, "normal terminal transition remains compact");
+});
+
+test("exceptional terminal and attention observations use one bounded diagnostic history read", async () => {
+  for (const observation of [
+    { status: "failed", event: "completion" },
+    { status: "needs_attention", event: "attention" },
+    { status: "unknown", error: { code: "host-unknown" } },
+  ]) {
+    const ref = { threadId: `worker-${observation.status}`, hostId: "local" };
+    let reads = 0;
+    const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", host: { async call(name, args) {
+      if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, ...observation }] };
+      assert.equal(name, "mcp__codex_app__read_thread");
+      reads += 1;
+      assert.equal(args.includeOutputs, true);
+      assert.equal(args.maxOutputCharsPerItem, 8192);
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: observation.status } }, turns: [] };
+    } } });
+    const result = await tasks.wait([ref]);
+    assert.equal(reads, 1);
+    assert.equal(result.observation.fullHistoryReads, 1);
+  }
 });
 
 test("fallback task observation yields independently for a control or execution deadline", async () => {
@@ -1048,7 +1516,8 @@ test("deadline interrupts material full-history recovery before another read_thr
     host: { async call(name, args) {
       calls.push(name);
       if (name === "mcp__codex_app__wait_threads") {
-        return { polls: refs.map(ref => ({ threadId: ref.threadId, status: "completed", event: "completion" })) };
+        return { polls: refs.map((ref, index) => ({ threadId: ref.threadId,
+          status: index === 0 ? "completed" : "failed", event: "completion" })) };
       }
       assert.equal(name, "mcp__codex_app__read_thread");
       if (args.threadId === refs[0].threadId) {
@@ -1063,15 +1532,44 @@ test("deadline interrupts material full-history recovery before another read_thr
   assert.equal(observed.observation.kind, "interrupted");
   assert.equal(observed.observation.mode, "event");
   assert.equal(observed.observation.signal, "deadline");
-  assert.equal(observed.observation.fullHistoryReads, 1, "completed reads remain counted before a later batch member is interrupted");
+  assert.equal(observed.observation.fullHistoryReads, 0, "normal completion stays compact before a later batch member is interrupted");
   assert.deepEqual(recoveryWindows, [5000]);
-  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread", "mcp__codex_app__read_thread"]);
+  assert.deepEqual(calls, ["mcp__codex_app__wait_threads", "mcp__codex_app__read_thread"]);
+});
+
+test("encoded native response overflow returns an attributable journal receipt and never a truncated success", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-response-overflow-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
+    target: "features/ron", classification: "SINGLE", decompositionIdentity: null };
+  const ref = { threadId: "worker", hostId: "local" };
+  const writer = store.acquireWriter(runIdentity.runId);
+  writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity });
+  const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z", issueId: "I_90", attempt: 1, taskRef: ref });
+  writer.append({ type: "execution.started", at: "2026-09-11T00:00:02.000Z", issueId: "I_90",
+    phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref });
+  writer.release();
+  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId: "github:ron03wlb/skills",
+    now: () => "2026-09-11T00:05:00.000Z", project: {}, packageRoot: "/installed", host: {
+    async call() { return { content: "x".repeat(1024 * 1024) }; },
+  } });
+  try {
+    const observed = await tasks.wait([ref]);
+    assert.equal(observed.taskSettled, false);
+    assert.equal(observed.observation.fullHistoryReads, 0);
+    assert.equal(observed.observation.receipts[0].disposition, "RESPONSE_BUDGET_EXCEEDED");
+    assert.equal(observed.observation.receipts[0].evidence[0].locator, "codex-host://response/wait_threads");
+    assert.ok(observed.observation.receipts[0].budget.encodedResponseBytes
+      > observed.observation.receipts[0].budget.maxEncodedResponseBytes);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("production composition binds the Run fault store and task observation signals", () => {
   const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-workflow.mjs", import.meta.url), "utf8");
   const coordinator = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs", import.meta.url), "utf8");
   assert.match(source, /runId:\s*effectiveRunIdentity\.runId/u);
+  assert.match(source, /repositoryId:\s*`github:\$\{configuration\.repository\}`/u);
+  assert.match(source, /workflowVersion/u);
   assert.match(source, /readObservationSignal:\s*observationSignal/u);
   assert.match(source, /executionDeadlineAt/u);
   assert.match(coordinator, /observation\?\.signal === "deadline"/u);

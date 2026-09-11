@@ -173,6 +173,8 @@ test("installed packages bind a newly authorized model policy and contain its ex
     assert.deepEqual(first.workflowRuntime.packageVersion, f.retained.version);
     assert.equal(first.workflowRuntime.packageRoot, f.retained.root);
     assert.match(first.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    assert.deepEqual(f.store.readEvents(runIdentity.runId).map(({ type }) => type), ["grant.recorded"],
+      "a historical completion without an exact task dispatch cannot manufacture delivery progression");
     assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy);
     await f.entry({ specId: "1" });
     assert.deepEqual(f.store.readEvents(runIdentity.runId)[0].modelPolicy, policy, "terminal re-entry preserves membership without repeating the input");
@@ -247,7 +249,15 @@ test("a mixed installed batch observes the existing active worker while retainin
     const result = await f.entry({ specIds: ["1", "2"], maxWorkers: 1 });
     assert.equal(result.state, "SUCCEEDED", JSON.stringify(result));
     assert.ok(observations >= 4);
-    assert.deepEqual([completed, active].map(({ runIdentity }) => f.store.readEvents(runIdentity.runId)), before);
+    const after = [completed, active].map(({ runIdentity }) => f.store.readEvents(runIdentity.runId));
+    assert.deepEqual(after[0], before[0], "the already completed member remains unchanged");
+    assert.deepEqual(after[1].slice(0, before[1].length), before[1], "the active member preserves its original Run prefix");
+    const appended = after[1].slice(before[1].length);
+    assert.deepEqual(appended.map(({ type }) => type), ["task.outcome", "delivery.observed", "delivery.observed",
+      "delivery.observed", "delivery.observed"]);
+    assert.equal(appended[0].receipt.disposition, "SUCCEEDED");
+    assert.deepEqual(appended.slice(1).map(({ stage }) => stage), ["COMPLETION_PUBLISHED", "NATIVE_TERMINAL_OBSERVED",
+      "EVIDENCE_VALIDATED", "CLOSE_INELIGIBLE"]);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message|wait_threads/u.test(name)));
   } finally { f.close(); }
 });
@@ -296,8 +306,13 @@ test("a prior-format incomplete Run adopts recovery semantics without changing i
     assert.equal(result.state, "SUCCEEDED", JSON.stringify(result));
     const events = f.store.readEvents(runIdentity.runId);
     assert.deepEqual(events.slice(0, prefix.length), prefix);
-    assert.deepEqual(events.slice(prefix.length).map(event => event.type), ["runtime.observed"]);
-    assert.deepEqual(events.at(-1).workflowVersion, current.version);
+    const appended = events.slice(prefix.length);
+    assert.deepEqual(appended.map(({ type }) => type), ["runtime.observed", "task.outcome", "task.outcome",
+      "delivery.observed", "delivery.observed", "delivery.observed", "delivery.observed"]);
+    assert.equal(appended.filter(({ type }) => type === "task.outcome").at(-1).receipt.disposition, "SUCCEEDED");
+    assert.deepEqual(appended.filter(({ type }) => type === "delivery.observed").map(({ stage }) => stage),
+      ["COMPLETION_PUBLISHED", "NATIVE_TERMINAL_OBSERVED", "EVIDENCE_VALIDATED", "CLOSE_INELIGIBLE"]);
+    assert.deepEqual(appended[0].workflowVersion, current.version);
     assert.deepEqual(f.store.readHostTask({ runId: runIdentity.runId, issueId: "I_1" }), originalIntent);
     assert.equal(f.store.listRunIds().length, 1);
     assert.ok(f.calls.every(({ name }) => !/create_thread|send_message/u.test(name)));

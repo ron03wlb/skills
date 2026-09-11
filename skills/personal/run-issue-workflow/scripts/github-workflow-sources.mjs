@@ -286,7 +286,26 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const completed = lifecycle.findLast(item => item.record.kind === "implementation_complete");
       const closeOnly = latest?.record.kind === "implementation_blocked" && ["target_dirty", "merge_conflict", "partial_close"].includes(latest.record.reasonCode);
       const completion = latest?.record.kind === "implementation_complete" || closeOnly || latest?.record.failure && completed ? completed : null;
-      const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], { runId: selectedIdentity.runId }) : null;
+      const compactOperationId = latest?.record.operationIdentity?.key ?? deriveExecuteIssueOperationIdentity({ repositoryId,
+        specId: authority.specId, approvedPublicationIdentity: authority.approvedScopeHash, issueId: issue.node_id }).key;
+      const compactCompletion = latest?.record.kind === "implementation_complete" ? {
+        issueId: issue.node_id,
+        operationId: compactOperationId,
+        candidate: latest.record.candidate,
+      } : undefined;
+      const compactIntegrationRecord = compactCompletion ? createIntegrationVerification({ gitCommonDir,
+        operationId: compactOperationId, issueId: issue.node_id, candidate: compactCompletion.candidate }).read() : null;
+      const compactIntegrationVerification = compactIntegrationRecord?.current ? Object.fromEntries(
+        ["state", "issueId", "candidate", "targetHead", "identity"]
+          .map(field => [field, compactIntegrationRecord.current[field]])) : undefined;
+      const compactObservation = !latest || ["implementation_progress", "implementation_repair_progress"].includes(latest.record.kind)
+        ? { issueId: issue.node_id, operationId: compactOperationId } : undefined;
+      let task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], {
+        runId: selectedIdentity.runId,
+        ...(compactCompletion ? { completion: compactCompletion } : {}),
+        ...(compactObservation ? { observation: compactObservation } : {}),
+        ...(compactIntegrationVerification ? { integrationVerification: compactIntegrationVerification } : {}),
+      }) : null;
       const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
       const recoveryIntent = journal.findLast(event => event.type === "recovery.intent" && event.issueId === issue.node_id);
       const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);
@@ -304,6 +323,13 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: completion ? "COMPLETE" : latest?.record.kind === "implementation_blocked" ? "BLOCKED" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
+      const operationDelivery = journal.filter(event => event.type === "delivery.observed"
+        && event.issueId === issue.node_id && event.operationId === compactOperationId);
+      const latestDeliveryDiagnosis = operationDelivery.findLast(event => event.stage === "PROGRESS_DIAGNOSED");
+      const activeDeliveryDiagnosis = latestDeliveryDiagnosis && !operationDelivery.some(event => event.sequence > latestDeliveryDiagnosis.sequence
+        && event.stage !== "PROGRESS_DIAGNOSED") ? latestDeliveryDiagnosis : null;
+      if (activeDeliveryDiagnosis) node.deliveryDiagnosis = activeDeliveryDiagnosis;
+      if (task?.outcomeReceipt) node.taskOutcomeReceipt = task.outcomeReceipt;
       if (task?.modelYield && !completion && task.state === "RESUMABLE") {
         const intent = store.readHostTask({ runId: selectedIdentity.runId, issueId: issue.node_id });
         const policy = journal.find(event => event.type === "grant.recorded")?.modelPolicy;
@@ -347,7 +373,25 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       if (repairing) { node.taskState = "EXECUTING"; if (!recoveryWriting) node.completionState = "NONE"; }
       if (acceptedRepair && task.state === "RESUMABLE" && task.snapshot?.turns?.[0]?.status === "completed") throw new Error("Conflict repair settled without renewed completion; inspect the original lane's semantic or verification blocker");
       if (task?.state === "UNKNOWN") throw new Error(`Issue #${issue.number} task state is unknown`);
-      if (task?.state === "RESUMABLE" && !latest && !modelYields[issue.node_id]) node.taskState = "TRANSIENT_FAILURE";
+      if (task?.state === "RESUMABLE" && !latest && !modelYields[issue.node_id]) {
+        if (task.outcomeReceipt?.disposition === "SUCCEEDED") {
+          node.taskState = "EXECUTING"; // The original lane is settled; only its missing publication owner may advance it.
+          node.deliveryProgressSource = {
+            operationId: compactOperationId,
+            completionPublishedAt: null,
+            completionEvidenceIdentity: null,
+            terminalObservedAt: task.outcomeReceipt.progress.terminalObservedAt,
+            terminalEvidenceIdentity: task.outcomeReceipt.identity,
+            evidenceValidated: false,
+            closeAcceptedAt: null,
+            closeRequestIdentity: null,
+            repositoryCloseAcquiredAt: null,
+            targetWriterAcquiredAt: null,
+            closeCompletedAt: null,
+            closeCompletedOwner: null,
+          };
+        } else node.taskState = "TRANSIENT_FAILURE";
+      }
       if (completion) {
         const record = completion.record;
         let integrationRecord = null;
@@ -415,6 +459,20 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             if (node.integrationVerification.state !== "PASS" && (issue.state === "closed" || node.worktreeState === "ABSENT")) throw new Error("Cleanup or closure contradicts the unresolved integration obligation; retain the closed-Issue owner boundary");
           }
         }
+        if (["INTEGRATION_FAILED", "INTEGRATION_UNKNOWN", "HOST_CLEANUP_BLOCKED"].includes(task?.closeResult?.state)) {
+          const reported = task.closeResult.integrationVerification;
+          const current = integrationRecord?.current;
+          const expectedState = task.closeResult.state === "INTEGRATION_FAILED" ? "FAIL"
+            : task.closeResult.state === "INTEGRATION_UNKNOWN" ? "UNKNOWN" : "PASS";
+          const matches = current?.state === expectedState && current.issueId === issue.node_id
+            && current.candidate === record.candidate && current.identity === reported?.identity
+            && (task.closeResult.state === "HOST_CLEANUP_BLOCKED" || current.targetHead === reported?.targetHead);
+          if (!matches) task = { ...task, closeResult: undefined, closeDiagnosis: {
+            classification: "UNCLASSIFIED", source: "close-issue",
+            reason: "Native close result references missing, stale, or foreign integration evidence",
+            observedDisposition: task.closeResult.state,
+          } };
+        }
         if (record.recovery) {
           const transfer = journal.find(event => event.type === "recovery.task" && event.requestIdentity === record.recovery.requestIdentity);
           const intent = transfer && journal.find(event => event.type === "recovery.intent" && event.requestIdentity === transfer.requestIdentity);
@@ -467,6 +525,35 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       }
       let failure = latest?.record.kind === "implementation_blocked" ? latest.record.failure : null;
       if (!failure && latest?.record.kind === "implementation_blocked" && recoveryIntent?.failure.blockedEvidenceIdentity === latest.identity) failure = recoveryIntent.failure;
+      const producerDiagnosis = task?.closeDiagnosis ?? (["completion_publication_unresolved", "evidence_validation_unresolved"]
+        .includes(activeDeliveryDiagnosis?.blockingPredicate) ? {
+          classification: "UNCLASSIFIED",
+          source: activeDeliveryDiagnosis.owner,
+          reason: `Delivery evidence is unchanged after the bounded diagnosis: ${activeDeliveryDiagnosis.blockingPredicate}`,
+        } : null);
+      if (!failure && producerDiagnosis && originalTaskRef && task?.cwd) {
+        const record = completion?.record;
+        const registered = worktrees().filter(item => item.worktree === worktreePath(task.cwd));
+        if (record && worktreePath(task.cwd) !== worktreePath(record.worktree)) {
+          throw new Error("Diagnosed evidence producer differs from the completion worktree owner");
+        }
+        if (!record && (registered.length !== 1
+          || realpathSync.native(resolve(task.cwd, command("git", ["-C", task.cwd, "rev-parse", "--git-common-dir"]))) !== gitCommonDir)) {
+          throw new Error("Diagnosed evidence producer has no exact owned worktree");
+        }
+        const candidate = record?.candidate ?? registered[0].HEAD;
+        const topic = record?.topic ?? registered[0].branch?.replace(/^refs\/heads\//u, "") ?? "DETACHED";
+        failure = bindTechnicalFailure({ runId: selectedIdentity.runId, issueId: issue.node_id,
+          operationId: compactOperationId, candidate, targetHead: target.head, worktree: task.cwd, topic,
+          owningSource: task?.closeDiagnosis ? "skills/engineering/close-issue/SKILL.md" : "skills/engineering/execute-issue/SKILL.md",
+          command: task?.closeDiagnosis ? ["close-issue", String(issue.number)] : ["execute-issue", String(issue.number), "publish", "implementation_complete"],
+          observedResult: producerDiagnosis.reason, blockedEvidenceIdentity: task?.closeDiagnosis?.observedDisposition
+            ?? activeDeliveryDiagnosis?.evidenceIdentity ?? null,
+          completionIdentity: completion?.identity ?? null, completionBodySha256: completion?.bodySha256 ?? null,
+          ownerTaskRef: originalTaskRef, repairWaveCount: repairCount(compactOperationId, record),
+          diagnosis: producerDiagnosis });
+        node.worktreeState = "PRESENT";
+      }
       if (!failure && latest?.record.kind === "implementation_blocked" && (!completion || !closeOnly) && originalTaskRef && task?.cwd) {
         const registered = worktrees().filter(item => item.worktree === worktreePath(task.cwd));
         if (registered.length !== 1 || realpathSync.native(resolve(task.cwd, command("git", ["-C", task.cwd, "rev-parse", "--git-common-dir"]))) !== gitCommonDir) throw new Error("Blocked execution has no exact owned worktree for diagnosis");
@@ -542,12 +629,37 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           }
         }
         if (failure) node.recovery = failure;
+        if (failure && producerDiagnosis && task?.state === "RESUMABLE") node.taskState = "NONE";
         delete node.closeConflict;
         const pending = failure && recoveryIntent?.failure.identity === failure.identity && (recoveryTask?.state === "RUNNING" || !recoveryTransfer && task?.state === "RUNNING");
         if (pending) {
           node.recoveryActive = true; node.taskState = "EXECUTING";
           taskRefs[issue.node_id] = recoveryTransfer?.taskRef ?? originalTaskRef;
         }
+      }
+      if (completion && originalTaskRef) {
+        const receipt = task?.outcomeReceipt;
+        const terminalReceipt = receipt?.disposition === "SUCCEEDED"
+          && receipt.candidate === completion.record.candidate ? receipt : null;
+        if (task?.closeResult?.state === "CLOSED"
+          && task.closeRequest?.evidence?.authorityEvidence?.candidateCommit !== completion.record.candidate) {
+          throw new Error("Successful close outcome request is no longer current for the completion candidate");
+        }
+        const closeTimeline = task?.closeResult?.state === "CLOSED" ? task.closeResult.deliveryProgress : undefined;
+        node.deliveryProgressSource = {
+          operationId: compactOperationId,
+          completionPublishedAt: completion.createdAt,
+          completionEvidenceIdentity: completion.identity,
+          terminalObservedAt: terminalReceipt?.progress.terminalObservedAt ?? null,
+          terminalEvidenceIdentity: terminalReceipt?.identity ?? null,
+          evidenceValidated: Boolean(terminalReceipt),
+          closeAcceptedAt: task?.closeAcceptedAt ?? null,
+          closeRequestIdentity: task?.closeRequest?.requestIdentity ?? null,
+          repositoryCloseAcquiredAt: closeTimeline?.repositoryCloseAcquiredAt ?? null,
+          targetWriterAcquiredAt: closeTimeline?.targetWriterAcquiredAt ?? null,
+          closeCompletedAt: closeTimeline?.closeCompletedAt ?? null,
+          closeCompletedOwner: closeTimeline ? "close-issue" : null,
+        };
       }
       nodes.push(node);
       } catch (error) {

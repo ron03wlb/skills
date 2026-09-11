@@ -165,6 +165,25 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const issueGit = (...args) => execFileSync("git", ["-C", lane, ...args], { encoding: "utf8" }).trim();
     issueGit("add", "change.sql"); issueGit("commit", "-m", "prerequisite candidate");
     const execution = deriveExecuteIssueOperationIdentity({ repositoryId: "github:example/repo", specId: "I_1", issueId: "I_1", approvedPublicationIdentity: authority.approvedScopeHash });
+    const settledRef = { threadId: "task", hostId: "local" };
+    const terminalReceipt = { disposition: "SUCCEEDED", candidate: null, identity: "sha256:native-terminal",
+      progress: { terminalObservedAt: "2026-09-11T00:00:00.000Z" } };
+    const settledOwner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: {},
+      tasks: { read: async () => ({ state: "RESUMABLE", cwd: lane, outcomeReceipt: terminalReceipt,
+        snapshot: { turns: [{ status: "completed" }] } }) } });
+    const settledJournal = [{ type: "dispatch.recorded", issueId: "I_1", taskRef: settledRef }];
+    const publicationPending = await settledOwner.sources.reconciliation.read({ tracker: snapshot, journal: settledJournal, request: {} });
+    assert.equal(publicationPending.facts.nodes[0].taskState, "EXECUTING", "settlement without publication retains the original lane instead of retrying implementation");
+    assert.equal(publicationPending.facts.nodes[0].deliveryProgressSource.completionPublishedAt, null);
+    const diagnosisEvent = { type: "delivery.observed", sequence: 2, at: "2026-09-11T00:05:00.000Z", issueId: "I_1",
+      operationId: execution.key, stage: "PROGRESS_DIAGNOSED", disposition: "DIAGNOSED", sourceAt: "2026-09-11T00:05:00.000Z",
+      owner: "evidence-producer", evidenceIdentity: "sha256:publication-stall", requestIdentity: null,
+      blockingPredicate: "completion_publication_unresolved" };
+    const diagnosedPublication = await settledOwner.sources.reconciliation.read({ tracker: snapshot,
+      journal: [...settledJournal, diagnosisEvent], request: {} });
+    assert.equal(diagnosedPublication.facts.nodes[0].taskState, "NONE", "producer diagnosis releases capacity only to the recovery owner");
+    assert.equal(diagnosedPublication.facts.nodes[0].recovery.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(diagnosedPublication.facts.nodes[0].recovery.ownerTaskRef.threadId, settledRef.threadId);
     const finding = { identity: "F1", axis: "Spec", governingSource: "AC-1", summary: "Confirmed contract defect", classification: "confirmed", inScope: true };
     const waves = [];
     for (const number of [1, 2]) {
@@ -318,6 +337,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
               checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
                 environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
             worktree: lane, taskRef: ref, directoryState: "EMPTY_UNREGISTERED",
+            capability: { state: "UNAVAILABLE", operation: null, helperOwnership: "UNAVAILABLE", respawnProtection: "UNAVAILABLE",
+              reason: "No exact host release operation is available" },
             reasonCode: "host_release_unavailable",
             observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }
@@ -334,6 +355,16 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       readIssueState: issueId => liveOwners.readIssueState(issueId), sleep: async () => {} });
     const liveOwners = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: runStore, tasks: nativeTasks });
     const beforeClose = await refresh();
+    const refreshLiveOwners = async () => {
+      fixture.comments[0].body = renderWorkflowRecord(publication);
+      fixture.comments[1].body = renderWorkflowRecord(handoff);
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      return liveOwners.sources.reconciliation.read({
+        tracker: await liveOwners.sources.tracker.read({ specId: "1" }),
+        journal: runStore.readEvents(beforeClose.runIdentity.runId),
+        request: {},
+      });
+    };
     const writer = runStore.acquireWriter(beforeClose.runIdentity.runId);
     writer.append({ type: "grant.recorded", at: "2026-09-06T00:00:00.000Z", runIdentity: beforeClose.runIdentity, maxParallel: 3 });
     writer.append({ type: "dispatch.recorded", at: "2026-09-06T00:00:00.000Z", issueId: "I_1", attempt: 1, taskRef: ref }); writer.release();
@@ -353,6 +384,19 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const partial = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(partial.nodes[0].close.candidateReachable, true);
     assert.equal(partial.nodes[0].close.worktreeState, "PRESENT");
+    const integrationOwner = createIntegrationVerification({ gitCommonDir: join(root, ".git"), operationId: execution.key,
+      issueId: "I_1", candidate: packet.candidate });
+    const acceptedVerificationIdentity = integrationVerification.identity;
+    await integrationOwner.verify({ targetHead: packet.candidate,
+      checks: [{ ...integrationCheck, environment: { runtime: "foreign-current-input" } }],
+      assertCurrent: () => {}, repository: root });
+    const foreignVerification = await refreshLiveOwners();
+    assert.equal(foreignVerification.facts.nodes[0].recovery.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(foreignVerification.facts.nodes[0].recovery.diagnosis.reason,
+      "Native host-cleanup outcome is malformed or differs from its exact close owner");
+    integrationVerification = await integrationOwner.verify({ targetHead: packet.candidate, checks: [integrationCheck],
+      assertCurrent: () => {}, repository: root });
+    assert.equal(integrationVerification.identity, acceptedVerificationIdentity, "restoring exact inputs restores the accepted owner identity");
     const pendingCleanup = await refresh();
     assert.equal(pendingCleanup.facts.nodes[0].completionState, "COMPLETE");
     assert.deepEqual(pendingCleanup.facts.contradictions, []);
@@ -367,18 +411,23 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     rmSync(lane); symlinkSync(`${root}-missing`, lane, "junction");
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u, "a dangling link is not physical absence");
     rmSync(lane); mkdirSync(lane);
+    const finalCloseOwner = await refreshLiveOwners();
+    assert.ok(finalCloseOwner.facts.nodes[0].pendingHostCleanup, JSON.stringify(finalCloseOwner.facts.nodes[0]));
     const recovered = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(recovered.run.state, "RUNNING", JSON.stringify(recovered));
     assert.equal(recovered.nodes[0].close.completionState, "COMPLETE");
-    assert.equal(recovered.nodes[0].close.worktreeState, "ABSENT");
+    assert.equal(hostCleanupRecoveries, 1, JSON.stringify({ recovered, events: runStore.readEvents(beforeClose.runIdentity.runId) }));
+    assert.equal(recovered.nodes[0].close.worktreeState, "ABSENT", JSON.stringify(recovered));
     assert.equal(fixture.state, "open");
     assert.equal(nativeMessages, 1, "a known host limitation does not spend three more cleanup attempts");
-    assert.equal(hostCleanupRecoveries, 1, "the existing close owner receives one bounded recovery call");
     assert.equal(git("rev-parse", "HEAD"), packet.candidate);
     assert.equal(runStore.readTargetMutationWriterLock("main"), null);
     assert.equal(runStore.observeRepositoryCloseLease().state, "ABSENT");
     const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
+    assert.equal(runStore.readEvents(beforeClose.runIdentity.runId)
+      .some(event => event.type === "delivery.observed" && event.stage === "CLOSE_COMPLETED"), false,
+    "tracker closed_at cannot fabricate the original close owner's completion evidence after a lost native result");
     assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");
     assert.equal(nativeMessages, 2, "one original action plus one bounded continuation; lost replies cause no duplicate sends");
     assert.equal(hostCleanupRecoveries, 1, "tracker continuation does not repeat host recovery");

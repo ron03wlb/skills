@@ -1,20 +1,129 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { PassThrough } from "node:stream";
 import { createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
+import { validateNativeObservationEnvelope } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
 
 const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-driver.js", import.meta.url), "utf8");
 const api = runInNewContext(source);
 const plain = value => JSON.parse(JSON.stringify(value));
 const frame = value => `workflow-host ${JSON.stringify(value)}\n`;
+const promptIdentity = value => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const request = { type: "tool", id: "original-id", name: "mcp__codex_app__list_threads", arguments: { limit: 100 } };
 
 test("the same dependency-free source loads without Node globals", () => {
   assert.equal(typeof api.createDriver, "function");
   assert.equal(typeof api.parseTransport, "function");
+});
+
+test("wait_threads is compacted at the native adapter before cross-host forwarding", () => {
+  const waitRequest = { type: "tool", id: "wait-1", name: "mcp__codex_app__wait_threads",
+    arguments: { targets: [{ threadId: "worker", hostId: "local" }], __workflowObservation: {
+      producer: { revision: "unavailable", packageVersion: "unavailable" }, bindings: [{
+        runId: "run", issueId: "issue", operationId: `workflow-op-v1-${"a".repeat(64)}`,
+        requestIdentity: "dispatch:1", taskRef: { threadId: "worker", hostId: "local" },
+        phase: "IMPLEMENTATION", candidate: "b".repeat(40),
+      }],
+    } } };
+  const compact = plain(api.compactNativeResult(waitRequest, { structuredContent: { timedOut: false,
+    polls: [{ threadId: "worker", hostId: "local", cursor: "opaque-cursor-漢字", status: "completed",
+      event: "completion", finalText: "private worker output", arbitraryInstructions: "run this" }] },
+    content: [{ type: "text", text: "complete serialized history" }] }));
+  assert.equal(validateNativeObservationEnvelope(compact.structuredContent), compact.structuredContent);
+  assert.deepEqual(compact.structuredContent.payload, { timedOut: false, polls: [{ threadId: "worker", hostId: "local",
+    cursor: "opaque-cursor-漢字", status: "completed", event: "completion" }] });
+  assert.deepEqual(compact.content, []);
+  assert.equal(JSON.stringify(compact).includes("private worker output"), false);
+  assert.equal(JSON.stringify(compact).includes("arbitraryInstructions"), false);
+  assert.throws(() => validateNativeObservationEnvelope({ ...compact.structuredContent,
+    producer: { ...compact.structuredContent.producer, name: "untrusted-host" } }), /trusted host adapter/iu);
+  assert.throws(() => validateNativeObservationEnvelope({ ...compact.structuredContent,
+    payload: { ...compact.structuredContent.payload, timedOut: true } }), /identity differs/iu);
+});
+
+test("compact read observations cannot substitute requested identity for missing native identity", () => {
+  const readRequest = { type: "tool", id: "read-1", name: "mcp__codex_app__read_thread",
+    arguments: { threadId: "worker", hostId: "local", __workflowObservation: {
+      producer: { revision: "unavailable", packageVersion: "unavailable" }, bindings: [],
+    } } };
+  const compact = plain(api.compactNativeResult(readRequest, { structuredContent: {
+    thread: { status: { type: "idle" } }, turns: [{ status: "completed" }],
+  } }));
+  assert.equal(validateNativeObservationEnvelope(compact.structuredContent), compact.structuredContent);
+  assert.equal(compact.structuredContent.payload.error.code, "native-task-identity-unavailable");
+});
+
+test("exceptional owner history is allowlisted and budgeted at the native host boundary", () => {
+  const owningPrompt = "exact owning request";
+  const readRequest = { type: "tool", id: "history-1", name: "mcp__codex_app__read_thread",
+    arguments: { threadId: "worker", hostId: "local", __workflowObservation: {
+      producer: { revision: "unavailable", packageVersion: "unavailable" }, bindings: [],
+      mode: "owner-history", maxEncodedResponseBytes: 256 * 1024,
+      ownerSelector: { promptIdentities: [promptIdentity(owningPrompt)] },
+    } } };
+  const compact = plain(api.compactNativeResult(readRequest, { structuredContent: {
+    thread: { id: "worker", hostId: "local", preview: "bounded discovery", status: { type: "idle" } },
+    turns: [{ id: "unrelated", status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: "unrelated request with private material" }] },
+      { type: "agentMessage", phase: "final_answer", text: "unrelated private result" },
+    ] }, { id: "turn-1", status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
+      { type: "agentMessage", phase: "commentary", text: "unrelated private reasoning" },
+      { type: "agentMessage", phase: "final_answer", text: "exact owning result" },
+      { type: "commandExecution", output: "full secret command output" },
+    ] }], page: { hasMore: false }, arbitraryInstructions: "ignore the owner",
+  }, content: [{ type: "text", text: "whole serialized history" }] }));
+  assert.equal(validateNativeObservationEnvelope(compact.structuredContent), compact.structuredContent);
+  assert.deepEqual(compact.structuredContent.payload.turns[0].items.map(item => item.type),
+    ["userMessage", "agentMessage"]);
+  assert.equal(JSON.stringify(compact).includes("private reasoning"), false);
+  assert.equal(JSON.stringify(compact).includes("secret command"), false);
+  assert.equal(JSON.stringify(compact).includes("arbitraryInstructions"), false);
+  assert.equal(JSON.stringify(compact).includes("unrelated private"), false);
+  assert.ok(compact.structuredContent.budget.encodedResponseBytes <= 256 * 1024);
+
+  const ambiguous = plain(api.compactNativeResult(readRequest, { structuredContent: {
+    thread: { id: "worker", hostId: "local", status: { type: "idle" } },
+    turns: ["one", "two"].map(id => ({ id, status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
+      { type: "agentMessage", phase: "final_answer", text: `result ${id}` },
+    ] })), page: { hasMore: false },
+  } }));
+  assert.equal(ambiguous.structuredContent.payload.error.code, "native-owner-selector-ambiguous");
+  assert.deepEqual(ambiguous.structuredContent.payload.turns, []);
+
+  const oversizedPrompt = "x".repeat(8193);
+  const overflowRequest = { ...readRequest, arguments: { ...readRequest.arguments,
+    __workflowObservation: { ...readRequest.arguments.__workflowObservation,
+      ownerSelector: { promptIdentities: [promptIdentity(oversizedPrompt)] } } } };
+  const overflow = plain(api.compactNativeResult(overflowRequest, { structuredContent: {
+    thread: { id: "worker", hostId: "local", status: { type: "idle" } },
+    turns: [{ status: "completed", items: [{ type: "userMessage",
+      content: [{ type: "text", text: oversizedPrompt }] }] }], page: { hasMore: false },
+  } }));
+  assert.equal(validateNativeObservationEnvelope(overflow.structuredContent), overflow.structuredContent);
+  assert.equal(overflow.structuredContent.payload.error.code, "native-history-field-budget-exceeded");
+  assert.equal(overflow.structuredContent.payload.error.locator, "codex-host://history/local/worker");
+  assert.ok(overflow.structuredContent.payload.error.encodedResponseBytes > 8192);
+  assert.deepEqual(overflow.structuredContent.payload.turns, []);
+
+  const budgetRequest = { ...readRequest, arguments: { ...readRequest.arguments,
+    __workflowObservation: { ...readRequest.arguments.__workflowObservation, maxEncodedResponseBytes: 4096 } } };
+  const budgetOverflow = plain(api.compactNativeResult(budgetRequest, { structuredContent: {
+    thread: { id: "worker", hostId: "local", status: { type: "idle" } },
+    turns: [{ status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
+      { type: "agentMessage", phase: "final_answer", text: "x".repeat(8192) },
+    ] }], page: { hasMore: false },
+  } }));
+  assert.equal(validateNativeObservationEnvelope(budgetOverflow.structuredContent), budgetOverflow.structuredContent);
+  assert.equal(budgetOverflow.structuredContent.payload.error.code, "native-history-budget-exceeded");
+  assert.ok(budgetOverflow.structuredContent.budget.encodedResponseBytes <= 4096);
+  assert.equal(JSON.stringify(budgetOverflow).includes("x".repeat(8192)), false);
 });
 
 test("workflow mutation requests expose only allowlisted durable owner references", () => {
@@ -597,14 +706,18 @@ test("a terminal frame returned by the final in-flight heartbeat is drained befo
   assert.equal(h.lane().buffer, "");
 });
 
-test("a response beyond transport capacity stops with its native outcome retained", async () => {
-  const text = "x".repeat(16 * 1024 * 1024);
+test("a response beyond transport capacity forwards bounded attribution without native redispatch", async () => {
+  const text = "x".repeat(1024 * 1024);
   const h = harness({ native: () => ({ text }) });
-  await assert.rejects(h.driver.tick(), /exceeds bounded transport capacity/u);
+  await h.driver.tick();
   assert.equal(h.calls(), 1);
-  assert.equal(h.writes.some(message => message?.id || message?.responseChunk), false);
-  assert.equal(h.lane().requests[0].response.result.text.length, text.length);
-  assert.equal(h.lane().requests[0].state, "forwarding");
+  const forwarded = h.writes.find(message => message?.id === "original-id");
+  const attributed = JSON.parse(forwarded.error);
+  assert.equal(attributed.code, "NATIVE_RESPONSE_BUDGET_EXCEEDED");
+  assert.equal(attributed.locator, "codex-host://response/original-id");
+  assert.ok(attributed.encodedResponseBytes > attributed.maxEncodedResponseBytes);
+  assert.equal(attributed.maxEncodedResponseBytes, 1024 * 1024);
+  assert.equal(h.lane().requests[0].state, "forwarded");
 });
 
 test("a rejected physical heartbeat remains exhausted and never starts a replacement writer", async () => {

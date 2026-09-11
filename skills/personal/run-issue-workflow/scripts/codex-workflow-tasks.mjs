@@ -9,12 +9,35 @@ import { createCodexCloseReceipts, createCodexMessageReceipts } from "./codex-cl
 import { completedCloseCleanup } from "./close-continuation.mjs";
 import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
 import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
+import { deriveExecuteIssueOperationIdentity } from "./workflow-operation-identity.mjs";
+import {
+  MAX_HISTORY_READS,
+  MAX_HISTORY_RESPONSE_BYTES,
+  MAX_HOST_ENCODED_RESPONSE_BYTES,
+  MAX_TASK_OUTCOME_RECEIPT_BYTES,
+  createTaskOutcomeReceipt,
+  encodedBytes,
+  responseBudgetError,
+  validateNativeObservationEnvelope,
+  validateTaskOutcomeReceipt,
+} from "./task-outcome-receipt.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
-  if (result?.structuredContent) return result.structuredContent;
+  if (result?.structuredContent) {
+    if (result.structuredContent.schema === "codex-native-observation:v1") {
+      const envelope = validateNativeObservationEnvelope(result.structuredContent);
+      return { ...envelope.payload, nativeObservationEnvelope: envelope };
+    }
+    return result.structuredContent;
+  }
   const body = result?.content?.find(({ type }) => type === "text")?.text;
-  return body === undefined ? result : JSON.parse(body);
+  const parsed = body === undefined ? result : JSON.parse(body);
+  if (parsed?.schema === "codex-native-observation:v1") {
+    const envelope = validateNativeObservationEnvelope(parsed);
+    return { ...envelope.payload, nativeObservationEnvelope: envelope };
+  }
+  return parsed;
 }
 const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (items ?? []).flatMap((item) =>
   item.type === "userMessage" ? item.content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []
@@ -23,8 +46,12 @@ const ownerHistory = snapshot => ({ ...snapshot, turns: (snapshot.turns ?? []).m
   items: (turn.items ?? []).filter(item => item.type === "userMessage" || item.type === "agentMessage" && item.phase === "final_answer"
     || item.type === "functionCallOutput" && delegatedInput(item) !== null),
 })) });
+const MIN_HISTORY_ENVELOPE_BYTES = 4 * 1024;
+const historyProvesSettlement = snapshot => snapshot?.turns?.[0]?.status === "completed"
+  || (snapshot?.turns?.[0]?.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer");
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 const promptIdentityFor = prompt => `sha256:${createHash("sha256").update(JSON.stringify(prompt)).digest("hex")}`;
+const promptOwner = prompt => ({ promptIdentities: [promptIdentityFor(prompt)] });
 const uncertainNativeResult = result => [result?.type, result?.status].some(value => ["error", "failed", "response-accepted"].includes(value));
 const closeRequestFrom = prompt => {
   if (!prompt) return undefined;
@@ -35,9 +62,125 @@ const closeRequestFrom = prompt => {
   return { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence,
     ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
 };
-const assertCloseOutcomeIdentity = (result, request) => {
-  if (result.runId !== request.runId || result.issueId !== request.issueId
+const CLOSE_OUTCOME_STATES = new Set(["CLOSED", "CONFLICT", "INTEGRATION_FAILED", "INTEGRATION_UNKNOWN", "HOST_CLEANUP_BLOCKED"]);
+const CLOSE_BASE_FIELDS = ["schema", "state", "runId", "issueId", "requestIdentity"];
+const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const exactFields = (value, fields) => record(value) && Object.keys(value).length === fields.length
+  && fields.every(field => Object.hasOwn(value, field));
+const bounded = (value, maximum = 1024) => typeof value === "string" && value.length > 0 && value.length <= maximum;
+const candidateSha = value => typeof value === "string" && /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(value);
+const deepFreeze = value => {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value)) deepFreeze(nested);
+  }
+  return value;
+};
+const bindSettlementCandidate = (receipt, candidate) => {
+  const { schema: ignoredSchema, identity: ignoredIdentity, ...input } = receipt;
+  return createTaskOutcomeReceipt({ ...input, candidate });
+};
+const bindCloseOutcome = (result, request, ownerTaskRef, verificationAuthority) => {
+  if (!record(result) || !bounded(result.state, 128) || result.runId !== request.runId || result.issueId !== request.issueId
     || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
+  const malformed = reason => ({ diagnosis: Object.freeze({
+    classification: "UNCLASSIFIED", source: "close-issue",
+    reason,
+    observedDisposition: result.state.slice(0, 128),
+  }) });
+  if (result.schema !== "issue-close-result:v1") return malformed(`Unsupported native close outcome schema: ${String(result.schema).slice(0, 128)}`);
+  if (!CLOSE_OUTCOME_STATES.has(result.state)) return malformed(`Unsupported native close disposition: ${result.state.slice(0, 128)}`);
+  if (encodedBytes(result) > MAX_TASK_OUTCOME_RECEIPT_BYTES) return malformed("Native close outcome exceeds its compact result byte budget");
+  const expectedCandidate = request.evidence?.authorityEvidence?.candidateCommit ?? null;
+  if (result.state === "CONFLICT") {
+    const fields = [...CLOSE_BASE_FIELDS, "candidate", "targetHead", "targetRestored", "conflictedPaths"];
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !candidateSha(result.targetHead) || result.targetRestored !== true || !Array.isArray(result.conflictedPaths)
+      || !result.conflictedPaths.length || result.conflictedPaths.length > 128
+      || new Set(result.conflictedPaths).size !== result.conflictedPaths.length
+      || !result.conflictedPaths.every(path => bounded(path) && !/^(?:[A-Za-z]:|[/\\])/u.test(path)
+        && !/(?:^|[/\\])\.\.(?:$|[/\\])/u.test(path))) {
+      return malformed("Native conflict outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
+  if (["INTEGRATION_FAILED", "INTEGRATION_UNKNOWN"].includes(result.state)) {
+    const fields = [...CLOSE_BASE_FIELDS, "candidate", "integrationVerification"];
+    const verification = result.integrationVerification;
+    const expectedState = result.state === "INTEGRATION_FAILED" ? "FAIL" : "UNKNOWN";
+    const verificationFields = ["state", "issueId", "candidate", "targetHead", "identity"];
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !exactFields(verification, verificationFields) || verification.state !== expectedState
+      || verification.issueId !== request.issueId || verification.candidate !== expectedCandidate
+      || !candidateSha(verification.targetHead) || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity)
+      || !exactFields(verificationAuthority, verificationFields)
+      || verificationFields.some(field => verification[field] !== verificationAuthority[field])) {
+      return malformed("Native integration outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
+  if (result.state === "HOST_CLEANUP_BLOCKED") {
+    const fields = [...CLOSE_BASE_FIELDS, "authorityEvidence", "candidate", "targetHead", "candidateReachable",
+      "integrationVerification", "worktree", "taskRef", "directoryState", "capability", "reasonCode", "observations"];
+    const verification = result.integrationVerification;
+    const capability = result.capability;
+    const authority = result.authorityEvidence;
+    const authorityFields = ["trackerIdentity", "targetHead", "candidateCommit", "completionEvidenceId",
+      "completionBodySha256", "worktreeIdentity"];
+    const fixedAuthorityFields = authorityFields.filter(field => field !== "targetHead");
+    const validCheck = check => exactFields(check, ["command", "configFiles", "environment", "externalInputs"])
+      && Array.isArray(check.command) && check.command.length > 0 && check.command.length <= 64
+      && check.command.every(item => typeof item === "string" && item.length <= 1024)
+      && Array.isArray(check.configFiles) && check.configFiles.length <= 64 && check.configFiles.every(item => bounded(item))
+      && record(check.environment) && Object.keys(check.environment).length > 0 && Object.keys(check.environment).length <= 64
+      && Object.entries(check.environment).every(([key, value]) => bounded(key, 128)
+        && (["string", "number", "boolean"].includes(typeof value)
+          && (typeof value !== "string" || value.length <= 1024)))
+      && exactFields(check.externalInputs, ["kind"]) && check.externalInputs.kind === "none";
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !candidateSha(result.targetHead)
+      || result.candidateReachable !== true || !record(request.evidence?.authorityEvidence)
+      || !exactFields(authority, authorityFields) || authority.candidateCommit !== expectedCandidate
+      || !candidateSha(authority.targetHead) || !authorityFields.every(field => bounded(authority[field], 8192))
+      || !exactFields(request.evidence.authorityEvidence, authorityFields)
+      || !fixedAuthorityFields.every(field => authority[field] === request.evidence.authorityEvidence[field])
+      || !exactFields(verification, ["state", "identity", "checks"]) || verification.state !== "PASS"
+      || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity) || !Array.isArray(verification.checks)
+      || verification.checks.length > 16
+      || !exactFields(verificationAuthority, ["state", "issueId", "candidate", "targetHead", "identity"])
+      || verificationAuthority.state !== "PASS" || verificationAuthority.issueId !== request.issueId
+      || verificationAuthority.candidate !== result.candidate || verificationAuthority.identity !== verification.identity
+      || !verification.checks.every(validCheck) || !bounded(result.worktree, 8192)
+      || !exactFields(result.taskRef, ["threadId", "hostId"]) || !bounded(result.taskRef.threadId) || !bounded(result.taskRef.hostId)
+      || result.taskRef.threadId !== ownerTaskRef?.threadId || result.taskRef.hostId !== ownerTaskRef?.hostId
+      || result.directoryState !== "EMPTY_UNREGISTERED"
+      || !exactFields(capability, ["state", "operation", "helperOwnership", "respawnProtection", "reason"])
+      || capability.state !== "UNAVAILABLE" || capability.operation !== null || capability.helperOwnership !== "UNAVAILABLE"
+      || capability.respawnProtection !== "UNAVAILABLE" || !bounded(capability.reason)
+      || !["host_release_unavailable", "host_task_ownership_unproven", "host_cleanup_ownership_unproven",
+        "host_cleanup_policy_rejected", "host_helper_recovery_failed"].includes(result.reasonCode)
+      || !Array.isArray(result.observations) || !result.observations.length || result.observations.length > 16
+      || !result.observations.every(item => exactFields(item, ["code", "message"])
+        && bounded(item.code, 128) && bounded(item.message, 4096))) {
+      return malformed("Native host-cleanup outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
+  const timeline = result.deliveryProgress;
+  const timelineFields = ["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"];
+  const resultFields = ["schema", "state", "runId", "issueId", "requestIdentity", "candidate", "deliveryProgress"];
+  const canonicalInstant = value => typeof value === "string" && !Number.isNaN(Date.parse(value))
+    && new Date(value).toISOString() === value;
+  if (Object.keys(result).length !== resultFields.length || resultFields.some(field => !Object.hasOwn(result, field))
+    || result.candidate !== expectedCandidate || result.candidate !== null && !candidateSha(result.candidate)
+    || timeline === null || typeof timeline !== "object" || Array.isArray(timeline)
+    || Object.keys(timeline).length !== timelineFields.length
+    || timelineFields.some(field => !Object.hasOwn(timeline, field) || !canonicalInstant(timeline[field]))
+    || Date.parse(timeline.repositoryCloseAcquiredAt) > Date.parse(timeline.targetWriterAcquiredAt)
+    || Date.parse(timeline.targetWriterAcquiredAt) > Date.parse(timeline.closeCompletedAt)) {
+    return malformed("Native successful close outcome lacks its exact candidate and ordered owner timeline");
+  }
+  return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
 };
 const taskRequestFrom = prompt => {
   if (!prompt) return undefined;
@@ -94,10 +237,13 @@ const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runt
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout,
   discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null, waitForObservationSignal,
-  monotonicNow = () => performance.now() }) {
+  monotonicNow = () => performance.now(), now = () => new Date().toISOString(), repositoryId, workflowVersion,
+  noProgressLimitMs = 300_000 }) {
+  if (!Number.isFinite(noProgressLimitMs) || noProgressLimitMs < 1) throw new TypeError("No-progress limit must be positive finite milliseconds");
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
+  const taskCandidates = new Map();
   const transientFaults = new Map();
   const taskObservations = new Map();
   const executionStartEvidence = new Map();
@@ -106,6 +252,46 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   let eventWaitSupported = true;
   let hostCallCount = 0;
   let hostReturnedBytes = 0;
+  const sameTaskRef = (left, right) => left?.threadId === right?.threadId && left?.hostId === right?.hostId;
+  const taskContext = ref => {
+    if (!store?.readEvents || !runId || !repositoryId) return null;
+    const journal = store.readEvents(runId);
+    const grant = journal.find(event => event.type === "grant.recorded");
+    const dispatch = journal.findLast(event => event.type === "dispatch.recorded" && sameTaskRef(event.taskRef, ref));
+    if (!grant || !dispatch) return null;
+    const start = journal.findLast(event => event.type === "execution.started" && event.issueId === dispatch.issueId
+      && sameTaskRef(event.taskRef, ref));
+    return {
+      issueId: dispatch.issueId,
+      operationId: deriveExecuteIssueOperationIdentity({ repositoryId, specId: grant.runIdentity.specId,
+        approvedPublicationIdentity: grant.runIdentity.approvedScopeHash, issueId: dispatch.issueId }).key,
+      requestIdentity: start?.phaseIdentity ?? `dispatch:${dispatch.sequence}`,
+      phase: start?.phase ?? "IMPLEMENTATION",
+      executionStartedAt: start?.at ?? dispatch.at,
+    };
+  };
+  const observationBinding = ref => {
+    const context = taskContext(ref);
+    return context ? { runId, issueId: context.issueId, operationId: context.operationId,
+      requestIdentity: context.requestIdentity, taskRef: ref, phase: context.phase,
+      candidate: taskCandidates.get(ref.threadId) ?? null } : null;
+  };
+  const observationRequest = (refs, options = {}) => ({ producer: {
+    revision: workflowVersion?.sourceCommit ?? "unavailable",
+    packageVersion: workflowVersion?.id ?? "unavailable",
+  }, bindings: refs.map(observationBinding).filter(Boolean), ...options });
+  const nativeEnvelopeFor = (result, ref) => {
+    const envelope = result?.nativeObservationEnvelope;
+    if (!envelope) return null; // Direct unit adapters predate the installed host seam.
+    const expected = observationBinding(ref);
+    const binding = envelope.bindings.find(item => sameTaskRef(item.taskRef, ref));
+    if (!expected || !binding || JSON.stringify(binding) !== JSON.stringify(expected)
+      || envelope.producer.revision !== (workflowVersion?.sourceCommit ?? "unavailable")
+      || envelope.producer.packageVersion !== (workflowVersion?.id ?? "unavailable")) {
+      throw new Error("Native observation receipt differs from its Run, Issue, operation, task, candidate, or package binding");
+    }
+    return envelope;
+  };
   const waitSignal = waitForObservationSignal ?? (async ({ timeoutMs }) => {
     const expiresAt = Date.now() + timeoutMs;
     for (;;) {
@@ -130,7 +316,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
-    return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
+    return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref, now });
   };
   const messageReceiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
@@ -195,8 +381,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           ? { ...args, timeoutMs: Math.min(args.timeoutMs, Math.ceil(budgetRemaining(observationBudget))) }
           : args;
         hostCallCount += 1;
-        const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, effectiveArgs, owner));
-        hostReturnedBytes += JSON.stringify(result)?.length ?? 0;
+        const nativeResult = await host.call(`mcp__codex_app__${name}`, effectiveArgs, owner);
+        const nativeBytes = encodedBytes(nativeResult);
+        if (nativeBytes > MAX_HOST_ENCODED_RESPONSE_BYTES) {
+          const locator = name === "read_thread"
+            ? `codex-host://response/${encodeURIComponent(args.hostId ?? "unknown")}/${encodeURIComponent(args.threadId ?? "unknown")}`
+            : `codex-host://response/${name}`;
+          throw responseBudgetError({ operation: name, locator, encodedResponseBytes: nativeBytes });
+        }
+        const result = unwrapCodexResult(nativeResult);
+        hostReturnedBytes += encodedBytes(result);
         if (fault) recordFault({ ...fault, state: "settled", receiptRefs: fault.receiptRefs });
         if (observationBudget !== null && name === "wait_threads" && result?.timedOut) {
           observationBudget.simulatedElapsedMs += effectiveArgs.timeoutMs;
@@ -208,6 +402,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         }
         return result;
       } catch (error) {
+        let hostBudget;
+        try { hostBudget = JSON.parse(error.message); } catch { hostBudget = null; }
+        if (hostBudget?.code === "NATIVE_RESPONSE_BUDGET_EXCEEDED") {
+          throw responseBudgetError({ operation: name, locator: hostBudget.locator,
+            encodedResponseBytes: hostBudget.encodedResponseBytes,
+            maxEncodedResponseBytes: hostBudget.maxEncodedResponseBytes });
+        }
         const category = readOnly ? faultCategory(error) : null;
         if (!category) throw error;
         const faultId = faultIdentity(name, args, category);
@@ -232,20 +433,44 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true, observationBudget = null } = {}) => {
-    let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
-      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
+  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true,
+    observationBudget = null, ownerSelector = { latestWorkflowOwner: true } } = {}) => {
+    const readPage = async (arguments_) => {
+      const result = ownerHistory(await call("read_thread", arguments_, { interruptible, retryReadOnly, observationBudget }));
+      if (["native-history-budget-exceeded", "native-history-field-budget-exceeded"].includes(result.error?.code)) throw responseBudgetError({
+        operation: "read_thread-history", locator: result.error.locator,
+        encodedResponseBytes: result.error.encodedResponseBytes,
+        maxEncodedResponseBytes: result.error.maxEncodedResponseBytes,
+      });
+      if (result.error) throw new Error(`Native owner history is unavailable: ${result.error.code}`);
+      return result;
+    };
+    let snapshot = await readPage({ ...ref, turnLimit: latestOnly ? 1 : 2,
+      includeOutputs: true, maxOutputCharsPerItem: 8192,
+      __workflowObservation: observationRequest([ref], { mode: "owner-history",
+        maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES, ownerSelector }) });
+    let aggregateBytes = snapshot.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(snapshot);
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
+      if (aggregateBytes > MAX_HISTORY_RESPONSE_BYTES) throw responseBudgetError({ operation: "read_thread-history",
+        locator: `codex-host://history/${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}`,
+        encodedResponseBytes: aggregateBytes, maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES });
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
       if (predicate(snapshot) || !snapshot.page?.hasMore) return snapshot;
       const cursor = snapshot.page.nextCursor;
-      if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
+      if (!cursor || cursorsSeen.has(cursor) || page >= MAX_HISTORY_READS - 1) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
-      const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
-        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
+      const remainingBytes = MAX_HISTORY_RESPONSE_BYTES - aggregateBytes;
+      if (remainingBytes < MIN_HISTORY_ENVELOPE_BYTES) throw responseBudgetError({ operation: "read_thread-history",
+        locator: `codex-host://history/${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}`,
+        encodedResponseBytes: aggregateBytes, maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES });
+      const older = await readPage({ ...ref, cursor, turnLimit: 2,
+        includeOutputs: true, maxOutputCharsPerItem: 8192,
+        __workflowObservation: observationRequest([ref], { mode: "owner-history",
+          maxEncodedResponseBytes: remainingBytes, ownerSelector }) });
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
+      aggregateBytes += older.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(older);
     }
   };
   const reconcileReservedMessage = async ({ ref, receipts, promptIdentity, prompt }) => {
@@ -257,7 +482,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       await sleep(observation.delayMs);
       let snapshot;
       try {
-        snapshot = await readHistory(ref, value => userTexts(value).includes(prompt), { retryReadOnly: false });
+        snapshot = await readHistory(ref, value => userTexts(value).includes(prompt), {
+          retryReadOnly: false, ownerSelector: promptOwner(prompt),
+        });
       } catch (error) {
         if (!faultCategory(error)) throw error;
         continue;
@@ -285,8 +512,61 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     let receipt = receipts?.read();
     const messageReceipts = messageReceiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let messageReceipt = messageReceipts?.read();
-    const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
-      { latestOnly: Boolean(receipt || messageReceipt), interruptible, observationBudget });
+    const compactEvidence = ownership.completion ?? ownership.observation;
+    if (ownership.completion?.candidate) taskCandidates.set(ref.threadId, ownership.completion.candidate);
+    if (compactEvidence && !receipt && !messageReceipt) {
+      const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false,
+        maxOutputCharsPerItem: 1000, __workflowObservation: observationRequest([ref]) }, { interruptible, observationBudget });
+      if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) {
+        throw new Error("Compact task snapshot identity differs");
+      }
+      const nativeEnvelope = nativeEnvelopeFor(snapshot, ref);
+      const type = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
+      const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
+      const compactCompleted = type === "completed" || ["idle", "notloaded"].includes(type) && latestTurnStatus === "completed";
+      const journal = store?.readEvents?.(ownership.runId ?? runId);
+      const latestStart = journal?.findLast(event => event.type === "execution.started"
+        && event.issueId === compactEvidence.issueId && sameTaskRef(event.taskRef, ref));
+      const retainedOutcomes = journal?.filter(event => event.type === "task.outcome"
+        && sameTaskRef(event.receipt.taskRef, ref)
+        && (!latestStart || event.receipt.phase === latestStart.phase
+          && event.receipt.requestIdentity === latestStart.phaseIdentity)) ?? [];
+      for (const retained of retainedOutcomes) {
+        validateTaskOutcomeReceipt(retained.receipt);
+        const expected = compactEvidence;
+        if (retained.receipt.runId !== (ownership.runId ?? runId) || retained.receipt.issueId !== expected.issueId
+          || retained.receipt.operationId !== expected.operationId || !sameTaskRef(retained.receipt.taskRef, ref)) {
+          throw new Error("Completion or observation settlement receipt differs from its Run, Issue, operation, or task");
+        }
+        if (ownership.completion && retained.receipt.candidate !== null
+          && retained.receipt.candidate !== ownership.completion.candidate) {
+          throw new Error("Native settlement receipt candidate differs from the completion publication");
+        }
+      }
+      const outcome = retainedOutcomes.findLast(event => event.receipt.disposition === "SUCCEEDED")
+        ?? retainedOutcomes.at(-1) ?? null;
+      if (["active", "running"].includes(type) && !snapshot.error) {
+        const current = outcomeReceipt({ ref, observation: { status: type, event: "compact-read" }, disposition: "RUNNING",
+          evidenceKind: "native-progress", observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
+        return { state: "RUNNING", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd };
+      }
+      if (compactCompleted && !snapshot.error) {
+        const retained = outcome?.receipt?.disposition === "SUCCEEDED" ? outcome.receipt : null;
+        const candidateCurrent = !ownership.completion || retained?.candidate === ownership.completion.candidate;
+        const current = retained && candidateCurrent ? retained
+          : retained && ownership.completion ? bindSettlementCandidate(retained, ownership.completion.candidate)
+            : outcomeReceipt({ ref, observation: { status: type, event: "completion" }, disposition: "SUCCEEDED",
+              evidenceKind: ownership.completion ? "tracker-completion" : "native-settlement",
+              observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
+        return { state: "RESUMABLE", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd,
+          inactiveEvidence: current?.evidence.map(item => item.locator)
+            ?? [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
+      }
+    }
+    const selectedReceipt = messageReceipt ?? receipt;
+    const snapshot = await readHistory(ref, value => Boolean(selectedReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
+      { latestOnly: Boolean(selectedReceipt), interruptible, observationBudget,
+        ownerSelector: selectedReceipt ? { promptIdentities: [selectedReceipt.promptIdentity] } : { latestWorkflowOwner: true } });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const nativePrompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -294,6 +574,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       receipts.accept(receipt.promptIdentity, "native-history"); receipt = receipts.read();
     }
     const closeRequest = closeRequestFrom(receipt?.accepted ? receipt.prompt : nativePrompt);
+    const closeAcceptedAt = receipt?.acceptedAt ?? null;
     const currentNativePrompt = userTexts({ turns: snapshot.turns.slice(0, 1) }).find(text => text.includes("Close request identity:"));
     if (receipt?.accepted && currentNativePrompt
       && modelEvidenceDigest(closeRequestFrom(currentNativePrompt)) !== modelEvidenceDigest(closeRequest)) {
@@ -328,11 +609,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const finals = (snapshot.turns ?? []).flatMap(turn => (turn.items ?? []).filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.text));
     const closeResultMatch = finals.map(final => final?.match(/^Workflow close result: (\{.+\})$/mu)).find(Boolean);
     let closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    let closeDiagnosis;
     if (receipt?.accepted) {
-      // Omitted input cannot hide a present contradiction in the current turn.
-      // Matching identity alone still cannot prove that turn owns this prompt.
-      const currentMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
-      if (currentMatch) assertCloseOutcomeIdentity(JSON.parse(currentMatch[1]), closeRequest);
       // A same-identity continuation may have an older outcome in another turn.
       // Only the turn containing this exact accepted prompt can add its result.
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] }).includes(receipt.prompt));
@@ -340,17 +618,38 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        assertCloseOutcomeIdentity(closeResult, closeRequest);
-        receipts.observe(receipt.promptIdentity, closeResult);
+        const bound = bindCloseOutcome(closeResult, closeRequest, ref, ownership.integrationVerification);
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+        if (closeResult) receipts.observe(receipt.promptIdentity, closeResult);
       }
-      else closeResult = receipt.outcome?.result;
-    }
+      else if (receipt.outcome?.result) {
+        const bound = bindCloseOutcome(receipt.outcome.result, closeRequest, ref, ownership.integrationVerification);
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+      }
+    } else if (!receipt && closeResult) {
+      const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] })
+        .some(text => text.includes("Close request identity:"))
+        && (turn.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer"
+          && /^Workflow close result: (\{.+\})$/mu.test(item.text)));
+      const owningPrompt = owningTurn ? userTexts({ turns: [owningTurn] })
+        .find(text => text.includes("Close request identity:")) : undefined;
+      const owningMatch = owningTurn?.items.findLast(item => item.type === "agentMessage" && item.phase === "final_answer")
+        ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
+      closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
+      if (closeResult) {
+        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt), ref, ownership.integrationVerification);
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+      }
+    } else if (receipt) closeResult = undefined;
     const recoveryResultMatch = finals.map(final => final?.match(/^Workflow recovery result: (\{.+\})$/mu)).find(Boolean);
     const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult,
-      closeOutcomeUnavailable: Boolean(receipt && !closeResult), snapshot, cwd: snapshot.thread.cwd };
+      closeRequest, closeAcceptedAt, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult, closeDiagnosis,
+      closeOutcomeUnavailable: Boolean(receipt && !closeResult && !closeDiagnosis), snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });
@@ -361,7 +660,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const ref = prepared.taskRef;
       if (!ref?.threadId || ref.hostId !== project.hostId) throw new Error("Prepared task identity is unproven");
       const marker = `Workflow prerequisite lane: ${JSON.stringify({ issueId, specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash })}`;
-      const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)));
+      const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)),
+        { ownerSelector: { textMarkers: [marker] } });
       const cwd = snapshot.thread.cwd;
       const common = path => realpathSync.native(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       if (cwd !== prepared.worktree || common(cwd) !== common(project.path)
@@ -378,7 +678,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const common = (cwd) => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const hint of await discoverTasks({ prompt: intent.prompt, since })) {
         const ref = { threadId: hint.threadId, hostId: hint.hostId };
-        const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt));
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt),
+          { ownerSelector: promptOwner(intent.prompt) });
         const cwd = snapshot.thread.cwd;
         if (cwd !== hint.cwd || common(cwd) !== common(project.path) || !userTexts(snapshot).includes(intent.prompt)) {
           throw new Error("Native discovered task ownership is unproven");
@@ -396,7 +697,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       // This intent creates a worktree. A task in the saved checkout cannot own it.
       if (project.path && task.cwd === project.path) continue;
       const ref = { threadId: task.id, hostId: task.hostId };
-      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt));
+      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt),
+        { ownerSelector: { ...promptOwner(intent.prompt), previewPrefix: `${key}\n` } });
       if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
     }
     if (found.length === 0) throw new Error("TASK_CREATION_UNRESOLVED: preserve the recorded intent and inspect the host; do not create another task");
@@ -483,6 +785,78 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
     throw new Error("TASK_SETUP_PENDING: retain the accepted creation intent and resume after host setup");
   };
+  const safeObservation = observation => ({
+    status: observation.status,
+    event: observation.event ?? null,
+    cursor: observation.cursor ?? null,
+    error: observation.error?.code ?? (observation.error ? "native-observation-error" : null),
+  });
+  const observationDigest = observation => `sha256:${createHash("sha256")
+    .update(JSON.stringify(safeObservation(observation))).digest("hex")}`;
+  const nativeRevision = observation => observation.cursor
+    ? `sha256:${createHash("sha256").update(String(observation.cursor)).digest("hex")}` : null;
+  const meaningfulNativeRevision = observation => {
+    const event = String(observation.event ?? "").toLowerCase();
+    return event && !["heartbeat", "status", "status-pulse", "unchanged", "poll", "timeout"].includes(event)
+      ? nativeRevision(observation) : null;
+  };
+  const progressStatus = status => ["active", "running"].includes(String(status).toLowerCase())
+    ? "running" : String(status).toLowerCase();
+  const progressDigest = ({ status, revision }) => `sha256:${createHash("sha256")
+    .update(JSON.stringify({ status, revision })).digest("hex")}`;
+  const outcomeReceipt = ({ ref, observation, disposition, evidenceKind, historyReads = 0,
+    observedAt = now(), lastVerifiedProgressAt = observedAt, evidenceLocator, evidenceDigest: suppliedEvidenceDigest,
+    failureFingerprint: suppliedFailureFingerprint, encodedResponseBytes, maxEncodedResponseBytes, nativeEnvelope }) => {
+    const context = taskContext(ref);
+    if (!context) return null;
+    const boundedObservation = safeObservation(observation);
+    const evidenceDigest = suppliedEvidenceDigest ?? nativeEnvelope?.identity ?? observationDigest(observation);
+    const revision = meaningfulNativeRevision(observation)
+      ?? (["SUCCEEDED", "FAILED"].includes(disposition) ? nativeRevision(observation) : null);
+    const closeReceipt = receiptsFor(ref)?.read();
+    const messageReceipt = messageReceiptsFor(ref)?.read();
+    const effects = [closeReceipt, messageReceipt].filter(Boolean).reduce((result, receipt) => {
+      const identity = receipt.promptIdentity ?? receipt.requestIdentity;
+      if (identity) result[receipt.accepted ? "accepted" : "pending"].push(identity);
+      return result;
+    }, { pending: [], accepted: [] });
+    return createTaskOutcomeReceipt({
+      runId,
+      issueId: context.issueId,
+      operationId: context.operationId,
+      requestIdentity: context.requestIdentity,
+      taskRef: ref,
+      producer: {
+        name: "codex-workflow-tasks",
+        revision: workflowVersion?.sourceCommit ?? "unavailable",
+        packageVersion: workflowVersion?.id ?? "unavailable",
+      },
+      phase: context.phase,
+      disposition,
+      candidate: taskCandidates.get(ref.threadId) ?? null,
+      evidence: [{
+        kind: evidenceKind,
+        locator: evidenceLocator ?? `codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}${revision ? `?revision=${revision}` : ""}`,
+        digest: evidenceDigest,
+      }],
+      effects,
+      failureFingerprint: ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED", "UNCLASSIFIED"].includes(disposition)
+        ? suppliedFailureFingerprint ?? evidenceDigest : null,
+      progress: {
+        executionStartedAt: context.executionStartedAt,
+        lastVerifiedProgressAt,
+        terminalObservedAt: disposition === "SUCCEEDED" || disposition === "FAILED" ? observedAt : null,
+      },
+      budget: {
+        encodedResponseBytes: encodedResponseBytes ?? nativeEnvelope?.budget.encodedResponseBytes ?? encodedBytes(boundedObservation),
+        maxEncodedResponseBytes: maxEncodedResponseBytes ?? nativeEnvelope?.budget.maxEncodedResponseBytes ?? MAX_HOST_ENCODED_RESPONSE_BYTES,
+        fullHistoryReads: historyReads,
+        maxFullHistoryReads: MAX_HISTORY_READS,
+      },
+      nativeRevision: revision,
+    });
+  };
+  const needsEffectReadBack = ref => Boolean(receiptsFor(ref)?.read() || messageReceiptsFor(ref)?.read());
   return {
     findIssueLane, create, read,
     executionStartEvidence(ref) { return executionStartEvidence.get(ref?.threadId) ?? "OBSERVED"; },
@@ -501,16 +875,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const maintenanceProject = matching[0];
       const purpose = `maintenance:${scope.operationId}`;
       const { repairWaveCount, ...scopeAuthority } = scope;
-      const prompt = `Workflow maintenance ownership: ${JSON.stringify({ runId: runIdentity.runId, issueId, scope: scopeAuthority })}\nRead-only setup: preserve this isolated maintenance worktree and wait for the exact scoped maintenance request. Do not edit, commit, install or touch the product checkout during setup. ${workflowSourceBoundary(packageRoot)}`;
+      const maintenanceOwnerId = scope.operationId;
+      const prompt = `Workflow maintenance ownership: ${JSON.stringify({ runId: runIdentity.runId, operationId: maintenanceOwnerId, scope: scopeAuthority })}\nRead-only setup: preserve this isolated maintenance worktree and wait for the exact scoped maintenance request. Do not edit, commit, install or touch the product checkout during setup. ${workflowSourceBoundary(packageRoot)}`;
       if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
-      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose, prompt });
+      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId: maintenanceOwnerId, purpose, prompt });
       if (reservation.intent.prompt !== prompt) throw new Error("Existing maintenance operation has different failure/scope evidence; reconcile its owner instead of recreating it");
       let taskRef;
       if (reservation.created) {
         try {
           const request = { title: "Workflow maintenance", prompt, target: { type: "project", projectId: maintenanceProject.id ?? maintenanceProject.projectId,
             environment: { type: "worktree", startingState: { type: "branch", branchName: scope.target } } } };
-          const created = await call("create_thread", request, { owner: { kind: "task-create", runId: runIdentity.runId, issueId,
+          const created = await call("create_thread", request, { owner: { kind: "task-create", runId: runIdentity.runId, issueId: maintenanceOwnerId,
             receiptIdentity: modelEvidenceDigest({ purpose, request }) } });
           if (created.threadId && created.hostId) taskRef = { threadId: created.threadId, hostId: created.hostId };
         } catch { /* The persisted maintenance intent owns discovery after uncertainty. */ }
@@ -523,7 +898,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const matches = [];
       const common = cwd => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const ref of new Map(hints.map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
-        const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+          { ownerSelector: promptOwner(prompt) });
         if (userTexts(snapshot).includes(prompt) && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(scope.sourceRepository)
           && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(failure.worktree)
           && common(snapshot.thread.cwd) === common(scope.sourceRepository)) matches.push(ref);
@@ -558,7 +934,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         handoffReceipt = handoffReceipts.read(handoffIdentity);
       }
       if (!handoffReceipt) {
-        const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
+        const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt),
+          { ownerSelector: promptOwner(prompt) });
         if (userTexts(history).includes(prompt)) {
           handoffReceipt = handoffReceipts.reserve({ kind: "recovery-handoff", request: handoffRequest, promptIdentity: handoffIdentity });
           handoffReceipts.accept(handoffIdentity, "native-history");
@@ -585,7 +962,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (project.hostId === "local") hints.push(...await discoverTasks({ prompt, since: reservation.intent.createdAt }));
         const matches = [];
         for (const ref of new Map(hints.filter(ref => ref.threadId !== originalTaskRef.threadId).map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
-          const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+            { ownerSelector: promptOwner(prompt) });
           if (snapshot.thread.cwd === worktree && userTexts(snapshot).includes(prompt)) matches.push(ref);
         }
         if (matches.length > 1) throw new Error("Recovery task ownership is ambiguous; preserve all matches");
@@ -609,7 +987,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (!taskRef) return { pending: true, reason: "RECOVERY_TASK_SETUP_UNRESOLVED", waitingRef: originalTaskRef };
       }
       if (taskRef.threadId === originalTaskRef.threadId) throw new Error("Repair requires a separate task");
-      const snapshot = await readHistory(taskRef, value => userTexts(value).includes(prompt));
+      const snapshot = await readHistory(taskRef, value => userTexts(value).includes(prompt),
+        { ownerSelector: promptOwner(prompt) });
       if (snapshot.thread.cwd !== worktree || !userTexts(snapshot).includes(prompt)) throw new Error("Recovery fork does not preserve the exact ownership handoff");
       await settledOwner();
       return { taskRef, previousOwner };
@@ -633,7 +1012,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         }
         throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
       }
-      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+        { ownerSelector: promptOwner(prompt) });
       if (userTexts(snapshot).includes(prompt)) {
         messageReceipts.reserve({ kind: "upgrade", request: marker, promptIdentity });
         messageReceipts.accept(promptIdentity, "native-history");
@@ -695,12 +1075,15 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         throw new Error("Task message outcome is unresolved; preserve the reserved request");
       }
       const stored = receipts?.read();
-      if (stored?.prompt === frozenPrompt && stored.accepted) return close ? undefined : { observed: true };
-      const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
+      if (stored?.prompt === frozenPrompt && stored.accepted) return close
+        ? { accepted: true, acceptedAt: stored.acceptedAt } : { observed: true };
+      const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), {
+        latestOnly: Boolean(stored), ownerSelector: promptOwner(stored?.prompt ?? frozenPrompt),
+      });
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
         if (messageReceipts) { const intent = messageReceipts.reserve(taskRequest); messageReceipts.accept(intent.promptIdentity, "native-history"); }
-        return close ? undefined : { observed: true };
+        return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt } : { observed: true };
       }
       // Native history and continuation waits may outlive the tracker snapshot
       // that selected this action. Only suppress delivery here; the coordinator
@@ -747,15 +1130,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) throw new Error("Native close acceptance is unproven");
             receipts?.accept(reservation.promptIdentity, "native-response");
           }
-          return close ? undefined : { accepted: true };
+          return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt } : { accepted: true };
         }
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
           await sleep(delay);
-          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt),
+            { ownerSelector: promptOwner(frozenPrompt) });
           if (userTexts(snapshot).includes(frozenPrompt)) {
             receipts?.accept(reservation.promptIdentity, "native-history");
-            return close ? undefined : { observed: true, initiatedHere: true };
+            return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt, observed: true }
+              : { observed: true, initiatedHere: true };
           }
           if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
@@ -788,6 +1173,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const batchKey = batch.map(({ threadId, hostId }) => `${hostId}:${threadId}`).join("|");
       const callsBefore = hostCallCount, bytesBefore = hostReturnedBytes;
       let fullHistoryReads = 0;
+      const changed = [];
+      const receipts = [];
       const interrupted = (mode, signal) => ({ coordinatorActive: !host.disconnected, taskSettled: false,
         observation: { kind: "interrupted", mode, signal: signal.control ? "control" : "deadline", batchSize: batch.length,
           fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
@@ -800,21 +1187,74 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           throw error;
         }
       };
+      const observeRunningProgress = async ({ ref, observation, semantic, previous, nativeEnvelope }) => {
+        const observedAt = now();
+        const signature = progressDigest({ status: progressStatus(observation.status), revision: meaningfulNativeRevision(observation) });
+        const context = taskContext(ref);
+        const retained = previous ? null : store?.readEvents?.(runId).findLast(event => event.type === "task.outcome"
+          && sameTaskRef(event.receipt.taskRef, ref) && (!context || event.receipt.requestIdentity === context.requestIdentity));
+        const priorSignature = previous?.progressSignature ?? (retained ? progressDigest({
+          status: progressStatus(observation.status), revision: retained.receipt.nativeRevision,
+        }) : null);
+        const lastVerifiedProgressAt = previous?.lastVerifiedProgressAt ?? retained?.receipt.progress.lastVerifiedProgressAt;
+        const alreadyEscalated = previous?.stallEscalated === true || retained?.receipt.disposition === "NEEDS_ATTENTION";
+        if (!priorSignature || priorSignature !== signature) {
+          taskObservations.set(ref.threadId, { semantic, settled: false, closeRequestIdentity: previous?.closeRequestIdentity,
+            progressSignature: signature, lastVerifiedProgressAt: observedAt, stallEscalated: false });
+          const receipt = outcomeReceipt({ ref, observation, disposition: "RUNNING", evidenceKind: "native-progress", observedAt, nativeEnvelope });
+          if (receipt) receipts.push(receipt);
+          return null;
+        }
+        const elapsedMs = Date.parse(observedAt) - Date.parse(lastVerifiedProgressAt);
+        if (!alreadyEscalated && Number.isFinite(elapsedMs) && elapsedMs >= noProgressLimitMs) {
+          const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
+          if (stateAttempt.interruption) return stateAttempt.interruption;
+          fullHistoryReads += 1;
+          taskObservations.set(ref.threadId, { semantic, settled: false,
+            closeRequestIdentity: stateAttempt.value.closeRequest?.requestIdentity ?? previous?.closeRequestIdentity,
+            progressSignature: signature, lastVerifiedProgressAt, stallEscalated: true });
+          if (!changed.some(item => item.threadId === ref.threadId)) changed.push({ threadId: ref.threadId, state: "stalled" });
+          const receipt = outcomeReceipt({ ref, observation, disposition: "NEEDS_ATTENTION", evidenceKind: "native-attention",
+            historyReads: 1, observedAt, lastVerifiedProgressAt, nativeEnvelope });
+          if (receipt) receipts.push(receipt);
+          return null;
+        }
+        taskObservations.set(ref.threadId, { semantic, settled: false, closeRequestIdentity: previous?.closeRequestIdentity,
+          progressSignature: signature, lastVerifiedProgressAt, stallEscalated: alreadyEscalated });
+        return null;
+      };
       if (eventWaitSupported) {
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000) },
+          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000),
+            __workflowObservation: observationRequest(batch) },
             { interruptible: true, observationBudget });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
+          if (error.code === "NATIVE_RESPONSE_BUDGET_EXCEEDED") {
+            const overflowReceipts = batch.map(ref => outcomeReceipt({ ref,
+              observation: { status: "unknown", event: "response-budget-exceeded", error: true },
+              disposition: "RESPONSE_BUDGET_EXCEEDED", evidenceKind: "missing-evidence",
+              evidenceLocator: error.missingEvidence.locator, evidenceDigest: error.missingEvidence.digest,
+              failureFingerprint: error.failureFingerprint, encodedResponseBytes: error.encodedResponseBytes,
+              maxEncodedResponseBytes: error.maxEncodedResponseBytes })).filter(Boolean);
+            for (const ref of batch) taskObservations.set(ref.threadId, {
+              semantic: JSON.stringify({ status: "unknown", terminal: false, attention: true, error: true }),
+              settled: false, stallEscalated: true,
+            });
+            return { coordinatorActive: !host.disconnected, taskSettled: false,
+              observation: { kind: "changed", mode, batchSize: batch.length,
+                changed: batch.map(({ threadId }) => ({ threadId, state: "response-budget-exceeded" })),
+                receipts: overflowReceipts, fullHistoryReads, returnedBytes: error.encodedResponseBytes,
+                nativeCalls: hostCallCount - callsBefore, modelRoundTrips: "unavailable", tokens: "unavailable" } };
+          }
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
           eventWaitSupported = false;
         }
         const after = await readObservationSignal();
         if (after?.control || after?.deadline) return interrupted(mode, after);
       }
-      const changed = [];
       if (!eventWaitSupported) {
         mode = "fallback";
         const round = fallbackRounds.get(batchKey) ?? 0;
@@ -827,25 +1267,51 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
           const snapshotAttempt = await observeCall(() => call("read_thread", { ...ref, turnLimit: 1,
-            includeOutputs: false, maxOutputCharsPerItem: 1000 }, { interruptible: true, observationBudget }));
+            includeOutputs: false, maxOutputCharsPerItem: 1000, __workflowObservation: observationRequest([ref]) },
+          { interruptible: true, observationBudget }));
           if (snapshotAttempt.interruption) return snapshotAttempt.interruption;
           const snapshot = snapshotAttempt.value;
           if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
+          const nativeEnvelope = nativeEnvelopeFor(snapshot, ref);
           const status = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
-          const terminal = ["idle", "notloaded", "completed", "failed", "error"].includes(status);
+          const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
+          const compactCompleted = status === "completed" || ["idle", "notloaded"].includes(status) && latestTurnStatus === "completed";
+          const terminal = compactCompleted || ["failed", "error"].includes(status);
           const attention = status === "needs_attention";
-          const anomaly = status === "unknown";
-          const semantic = JSON.stringify({ status, terminal, attention });
+          const anomaly = status === "unknown" || ["idle", "notloaded"].includes(status) && !compactCompleted;
+          const exceptional = anomaly || attention || ["failed", "error"].includes(status) || terminal && needsEffectReadBack(ref);
+          const semantic = JSON.stringify({ status, terminal, attention, latestTurnStatus });
           const previous = taskObservations.get(ref.threadId);
           if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: status });
-          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+          if (exceptional && (previous?.semantic !== semantic || previous?.settled !== true)) {
             const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
-            taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
+            const diagnosedSuccess = !attention && !["failed", "error"].includes(status)
+              && (terminal && !anomaly || historyProvesSettlement(state.snapshot));
+            taskObservations.set(ref.threadId, { semantic, settled: diagnosedSuccess,
               closeRequestIdentity: state.closeRequest?.requestIdentity });
-          } else taskObservations.set(ref.threadId, { semantic, settled: previous?.settled === true,
-            closeRequestIdentity: previous?.closeRequestIdentity });
+            const receipt = outcomeReceipt({ ref, observation: { status },
+              disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
+                : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
+              evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1, nativeEnvelope });
+            if (receipt) receipts.push(receipt);
+          } else if (exceptional) {
+            taskObservations.set(ref.threadId, previous);
+          } else if (!terminal) {
+            const interruption = await observeRunningProgress({ ref, observation: { status }, semantic, previous, nativeEnvelope });
+            if (interruption) return interruption;
+          } else {
+            const settled = terminal || previous?.settled === true;
+            taskObservations.set(ref.threadId, { semantic, settled,
+              closeRequestIdentity: previous?.closeRequestIdentity });
+            if (terminal && previous?.settled !== true) {
+              const receipt = outcomeReceipt({ ref, observation: { status, event: "completion" }, disposition: "SUCCEEDED",
+                evidenceKind: "native-settlement", nativeEnvelope });
+              if (receipt) receipts.push(receipt);
+            }
+          }
         }
         fallbackRounds.set(batchKey, changed.length ? 0 : Math.min(round + 1, 2));
       } else {
@@ -855,26 +1321,48 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const threadId = target.thread?.id ?? target.threadId;
           const ref = refsById.get(threadId);
           if (!ref) continue;
+          const nativeEnvelope = nativeEnvelopeFor(result, ref);
           if (target.cursor) cursors.set(threadId, target.cursor);
           const status = String(target.thread?.status?.type ?? target.status?.type ?? target.status ?? target.state ?? "unknown").toLowerCase();
           const terminal = Boolean(target.finalText || target.final || target.event === "completion"
-            || ["idle", "notloaded", "completed", "failed", "error"].includes(status));
+            || ["completed", "failed", "error"].includes(status));
           const attention = Boolean(target.needsAttention || target.event === "attention" || status === "needs_attention");
-          const anomaly = status === "unknown" || Boolean(target.error);
+          const anomaly = status === "unknown" || Boolean(target.error)
+            || ["idle", "notloaded"].includes(status) && !terminal;
+          const exceptional = anomaly || attention || ["failed", "error"].includes(status) || terminal && needsEffectReadBack(ref);
           const semantic = JSON.stringify({ status, terminal, attention, error: Boolean(target.error) });
           const previous = taskObservations.get(threadId);
           if (terminal || attention || previous !== undefined && previous.semantic !== semantic) {
             changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
           }
-          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+          if (exceptional && (previous?.semantic !== semantic || previous?.settled !== true)) {
             const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
-            taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",
+            const diagnosedSuccess = !attention && !["failed", "error"].includes(status)
+              && (terminal && !anomaly || historyProvesSettlement(state.snapshot));
+            taskObservations.set(threadId, { semantic, settled: diagnosedSuccess,
               closeRequestIdentity: state.closeRequest?.requestIdentity });
+            const receipt = outcomeReceipt({ ref, observation: { ...target, status },
+              disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
+                : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
+              evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1, nativeEnvelope });
+            if (receipt) receipts.push(receipt);
+          } else if (exceptional) {
+            taskObservations.set(threadId, previous);
+          } else if (!terminal) {
+            const interruption = await observeRunningProgress({ ref, observation: { ...target, status }, semantic, previous, nativeEnvelope });
+            if (interruption) return interruption;
           } else {
-            taskObservations.set(threadId, { semantic, settled: previous?.settled === true,
+            const settled = terminal || previous?.settled === true;
+            taskObservations.set(threadId, { semantic, settled,
               closeRequestIdentity: previous?.closeRequestIdentity });
+            if (terminal && previous?.settled !== true) {
+              const receipt = outcomeReceipt({ ref, observation: { ...target, status }, disposition: "SUCCEEDED",
+                evidenceKind: "native-settlement", nativeEnvelope });
+              if (receipt) receipts.push(receipt);
+            }
           }
         }
       }
@@ -883,7 +1371,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       return { coordinatorActive: !host.disconnected, taskSettled: cached.every(value => value?.settled === true),
         ...(closeRequestIdentity ? { closeRequestIdentity } : {}),
         observation: { kind: changed.length ? "changed" : "unchanged", mode, batchSize: batch.length,
-          changed, fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+          changed, receipts, fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
           modelRoundTrips: "unavailable", tokens: "unavailable" } };
     },
   };

@@ -1102,7 +1102,9 @@ export function reduceRun(input) {
     .map(({ issueId }) => issueId);
   const closeable = nodes
     .filter(({ state }) => ["IMPLEMENTATION_COMPLETE", "CLOSING"].includes(state))
-    .map(({ issueId }) => issueId);
+    .map(({ issueId }) => issueId)
+    .sort((left, right) => Number(Boolean(byId.get(right).deliveryDiagnosis))
+      - Number(Boolean(byId.get(left).deliveryDiagnosis)) || compareIds(left, right));
   const allSucceeded = nodes.length > 0 && nodes.every(({ state }) => state === "SUCCEEDED");
   const deliverySucceeded = allSucceeded && (
     input.run.classification === "SINGLE" || input.run.parentTrackerState === "CLOSED"
