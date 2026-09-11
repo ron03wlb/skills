@@ -317,6 +317,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         trackerState: issue.state.toUpperCase(), taskState: task?.state === "RUNNING" ? "EXECUTING" : task?.state === "RESUMABLE" ? "NONE" : task ? "UNKNOWN" : "NONE",
         completionState: completion ? "COMPLETE" : latest?.record.kind === "implementation_blocked" ? "BLOCKED" : "NONE",
         candidateReachable: false, worktreeState: "ABSENT" };
+      if (task?.outcomeReceipt) node.taskOutcomeReceipt = task.outcomeReceipt;
       if (task?.modelYield && !completion && task.state === "RESUMABLE") {
         const intent = store.readHostTask({ runId: selectedIdentity.runId, issueId: issue.node_id });
         const policy = journal.find(event => event.type === "grant.recorded")?.modelPolicy;
@@ -561,6 +562,31 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           node.recoveryActive = true; node.taskState = "EXECUTING";
           taskRefs[issue.node_id] = recoveryTransfer?.taskRef ?? originalTaskRef;
         }
+      }
+      if (completion) {
+        const receipt = task?.outcomeReceipt;
+        const terminalReceipt = receipt?.disposition === "SUCCEEDED"
+          && receipt.candidate === completion.record.candidate ? receipt : null;
+        const closeTimeline = task?.closeResult?.deliveryProgress;
+        if (closeTimeline !== undefined && (task.closeResult.schema !== "issue-close-result:v1"
+          || task.closeResult.state !== "CLOSED" || !["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"]
+            .every(field => typeof closeTimeline?.[field] === "string"))) {
+          throw new Error("Close delivery progression is malformed or lacks its successful close owner");
+        }
+        node.deliveryProgressSource = {
+          operationId: compactOperationId,
+          completionPublishedAt: completion.createdAt,
+          completionEvidenceIdentity: completion.identity,
+          terminalObservedAt: terminalReceipt?.progress.terminalObservedAt ?? null,
+          terminalEvidenceIdentity: terminalReceipt?.identity ?? null,
+          evidenceValidated: Boolean(terminalReceipt),
+          closeAcceptedAt: task?.closeAcceptedAt ?? null,
+          closeRequestIdentity: task?.closeRequest?.requestIdentity ?? null,
+          repositoryCloseAcquiredAt: closeTimeline?.repositoryCloseAcquiredAt ?? null,
+          targetWriterAcquiredAt: closeTimeline?.targetWriterAcquiredAt ?? null,
+          closeCompletedAt: closeTimeline?.closeCompletedAt ?? issue.closed_at ?? null,
+          closeCompletedOwner: closeTimeline ? "close-issue" : "tracker-source-adapter",
+        };
       }
       nodes.push(node);
       } catch (error) {

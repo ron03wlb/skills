@@ -42,7 +42,7 @@ const recoveryDelaysMs = [5000, 15000, 30000];
 
 // Evidence only, scoped to the existing Run and native task. This is neither a
 // Grant nor task state; current native status and close authority remain required.
-export function createCodexCloseReceipts({ gitCommonDir, runId, taskRef }) {
+export function createCodexCloseReceipts({ gitCommonDir, runId, taskRef, now = () => new Date().toISOString() }) {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(runId) || runId === "." || runId === ".."
     || !taskRef?.threadId || !taskRef.hostId) throw new Error("Close receipt ownership is unproven");
   const identity = { runId, taskRef: { threadId: taskRef.threadId, hostId: taskRef.hostId } };
@@ -67,7 +67,7 @@ export function createCodexCloseReceipts({ gitCommonDir, runId, taskRef }) {
     const descriptor = openSync(path, "a", 0o600);
     try {
       const bytes = Buffer.from(JSON.stringify({ schema: "codex-close-message:v1", sequence: previous.length + 1,
-        owner: identity, ...record }) + "\n", "utf8");
+        owner: identity, at: now(), ...record }) + "\n", "utf8");
       let offset = 0;
       while (offset < bytes.length) {
         const written = writeSync(descriptor, bytes, offset, bytes.length - offset);
@@ -82,13 +82,15 @@ export function createCodexCloseReceipts({ gitCommonDir, runId, taskRef }) {
     const intent = records.findLast(record => record.phase === "intent")?.value;
     if (!intent) return null;
     if (intent.promptIdentity !== digest(intent.prompt)) throw new Error("Close receipt prompt identity differs");
-    const accepted = records.findLast(record => record.phase === "accepted" && record.value.promptIdentity === intent.promptIdentity)?.value;
-    const outcome = records.findLast(record => record.phase === "outcome" && record.value.promptIdentity === intent.promptIdentity)?.value;
+    const acceptedRecord = records.findLast(record => record.phase === "accepted" && record.value.promptIdentity === intent.promptIdentity);
+    const outcomeRecord = records.findLast(record => record.phase === "outcome" && record.value.promptIdentity === intent.promptIdentity);
+    const accepted = acceptedRecord?.value;
+    const outcome = outcomeRecord?.value;
     if (accepted && (accepted.threadId !== taskRef.threadId || !["native-response", "native-history"].includes(accepted.source))) {
       throw new Error("Close receipt native acceptance differs");
     }
     if (outcome && !accepted) throw new Error("Close outcome has no accepted owner");
-    return { ...intent, accepted, outcome };
+    return { ...intent, accepted, acceptedAt: acceptedRecord?.at ?? null, outcome, outcomeAt: outcomeRecord?.at ?? null };
   };
   return {
     read,

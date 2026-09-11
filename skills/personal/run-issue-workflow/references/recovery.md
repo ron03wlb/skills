@@ -8,9 +8,28 @@ The task adapter publishes `workflow-task-outcome:v1` only through the existing 
 
 Normal active or successfully completed work uses compact native status/settlement plus the independently validated tracker completion; it does not read full task history. Read exact bounded history only for `failed`, `needs_attention`, unknown/error, conflicting receipt identity, lost mutation acceptance, or an existing close/repair/recovery owner. Before consuming a receipt, validate schema, Run/Issue/task scope, operation/request/phase, producer package revision, candidate-bearing tracker evidence, locator digest, and native settlement independently.
 
-Only verified status or opaque native-revision change advances progress. After 300 seconds without one, perform one bounded discriminating diagnosis and record one attributed `NEEDS_ATTENTION` outcome for that task and phase. A heartbeat, time passage, another task, or an active native call is not progress and never permits kill, replacement, duplicate dispatch, or ownership transfer. Re-entry keeps the original `lastVerifiedProgressAt`, prior escalation, six-hour execution budget, and ten-wave repair budget; a verified revision resumes at the next unsatisfied stage of the same Run.
+Only a verified semantic status change or a native revision attached to a discriminating event advances progress. After 300 seconds without one, perform one bounded discriminating diagnosis and record one attributed `NEEDS_ATTENTION` outcome for that task and phase. A heartbeat, cursor-only change, restated status, time passage, another task, or an active native call is not progress and never permits kill, replacement, duplicate dispatch, or ownership transfer. Re-entry keeps the original `lastVerifiedProgressAt`, prior escalation, six-hour execution budget, and ten-wave repair budget; a newly discriminating result resumes at the next unsatisfied stage of the same Run.
 
-Recovery routing is exhaustive and fail-closed. Local code defects belong to the Issue execution owner; producer evidence defects to that producer; lost acknowledgements to the original command owner; merge conflicts to the original Issue owner; integration verification to the existing transfer; partial cleanup/tracker close to the original close owner; accepted effects to their acceptance owner; host faults to bounded probes; package/workflow defects to one exact scoped maintenance owner; contention to the exact lease owner; and requirement, capability, authority, or exhausted-budget stops to their named human/planning/capability owner. The coordinator dispatches and observes these owners; it never repairs product or workflow source itself. Any unclassified disposition stops as a contract error.
+Recovery routing is exhaustive and fail-closed. This table is the single authoritative owner matrix; coordinator references consume it without restating the rows.
+
+| Disposition | Owner | Continuation |
+| --- | --- | --- |
+| `UNDIAGNOSED`, `UNCLASSIFIED` | evidence producer | one scoped read-only diagnosis, then same Run |
+| `LOST_ACK_OR_OUTCOME_UNKNOWN` | original command owner | original read-back, then same Run |
+| `OUTCOME_READBACK_RESOLVED`, `LOCAL_CODE_DEFECT` | Issue execution owner | same Run |
+| `EVIDENCE_PRODUCER_DEFECT` | exact evidence producer | correct missing evidence, then same Run |
+| `MERGE_CONFLICT` | original Issue owner | existing isolated repair transfer |
+| `INTEGRATION_VERIFICATION_FAILURE` | existing transfer owner | same Run |
+| `PARTIAL_CLEANUP`, `TRACKER_CLOSE_UNKNOWN` | original close owner | remaining close stage only |
+| `ACCEPTED_EFFECT_PENDING` | original acceptance owner | wait for the existing owner |
+| `HOST_OBSERVATION_FAULT` | host probe owner | shared bounded probes |
+| `PACKAGE_OR_WORKFLOW_DEFECT` | scoped workflow maintenance owner | verified repair/install, then same Run |
+| `ENVIRONMENT_FINGERPRINT`, `ENVIRONMENT_UNKNOWN` | environment or original command owner | bounded remediation/read-back |
+| `WRITER_CONTENTION` | exact lease owner | healthy wait |
+| `REQUIREMENT_CONFLICT`, `CAPABILITY_UNAVAILABLE` | planning or capability owner | stop for named owner |
+| `AUTHORITY_CONFLICT`, `EXECUTION_BUDGET_EXHAUSTED`, `REPAIR_BUDGET_EXHAUSTED` | human | stop for named predicate |
+
+An unknown input code normalizes to `UNCLASSIFIED` and receives exactly one scoped read-only diagnosis; it never creates coordinator repair authority or triggers blanket history scanning.
 
 ## Worker and tracker recovery
 

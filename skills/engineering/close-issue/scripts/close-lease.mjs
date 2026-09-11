@@ -40,6 +40,7 @@ export function acquireCloseIssueLeases(input) {
   });
   const exactOperationId = operationIdentity.key;
   const repositoryLease = store.acquireRepositoryCloseLease({ operationId: exactOperationId });
+  const repositoryCloseAcquiredAt = new Date().toISOString();
   let targetWriter;
 
   try {
@@ -58,9 +59,12 @@ export function acquireCloseIssueLeases(input) {
     }
     throw acquisitionError;
   }
+  const targetWriterAcquiredAt = new Date().toISOString();
 
   let targetReleased = false;
   let repositoryReleased = false;
+  let closeCompletedAt = null;
+  const deliveryProgress = () => Object.freeze({ repositoryCloseAcquiredAt, targetWriterAcquiredAt, closeCompletedAt });
   return Object.freeze({
     operationId: exactOperationId,
     operationIdentity,
@@ -71,6 +75,17 @@ export function acquireCloseIssueLeases(input) {
       repositoryLease.assertCurrent();
       targetWriter.assertCurrent();
       return true;
+    },
+    deliveryProgress() {
+      return deliveryProgress();
+    },
+    markCompleted() {
+      if (closeCompletedAt) return deliveryProgress();
+      if (targetReleased || repositoryReleased) throw new Error("CLOSE_ISSUE_LEASES_RELEASED");
+      repositoryLease.assertCurrent();
+      targetWriter.assertCurrent();
+      closeCompletedAt = new Date().toISOString();
+      return deliveryProgress();
     },
     release() {
       if (!targetReleased) {

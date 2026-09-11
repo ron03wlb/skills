@@ -54,7 +54,7 @@ test("coordinator persists each exact task outcome once in the existing Run jour
     const receipt = createTaskOutcomeReceipt({
       runId: identity.runId, issueId: "15", operationId: "workflow-op-v1-" + "a".repeat(64),
       requestIdentity: `dispatch:${dispatch.sequence}`, taskRef,
-      producer: { name: "codex-host", revision: "unavailable", packageVersion: "unavailable" },
+      producer: { name: "codex-workflow-tasks", revision: "unavailable", packageVersion: "unavailable" },
       phase: "IMPLEMENTATION", disposition: "SUCCEEDED", candidate: null,
       evidence: [{ kind: "native-settlement", locator: "codex-task://local/thread-15?revision=sha256:" + "c".repeat(64),
         digest: "sha256:" + "b".repeat(64) }],

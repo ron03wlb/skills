@@ -10,7 +10,7 @@ import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workfl
 import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, validateMaintenanceResult, validateVerificationResolution, readMaintenanceProgress, readRepairWaveCount,
   RECOVERY_DISPOSITION_CODES, routeRecoveryDisposition, routeTechnicalRecovery } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 
-test("every known recovery disposition has one non-coordinator owner and unknown states fail closed", () => {
+test("every recovery disposition has one non-coordinator owner and unknown inputs receive scoped diagnosis", () => {
   assert.ok(RECOVERY_DISPOSITION_CODES.length >= 15);
   for (const code of RECOVERY_DISPOSITION_CODES) {
     const route = routeRecoveryDisposition(code);
@@ -19,7 +19,10 @@ test("every known recovery disposition has one non-coordinator owner and unknown
     assert.equal(route.coordinatorRepairs, false);
     assert.ok(["CONTINUE_SAME_RUN", "WAIT_EXISTING_OWNER", "STOP_FOR_OWNER"].includes(route.continuation));
   }
-  assert.throws(() => routeRecoveryDisposition("NEW_UNKNOWN_STATE"), /unclassified recovery disposition/iu);
+  assert.deepEqual(routeRecoveryDisposition("NEW_UNKNOWN_STATE"), {
+    code: "UNCLASSIFIED", owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN",
+    coordinatorRepairs: false, observedDisposition: "NEW_UNKNOWN_STATE",
+  });
 });
 
 test("technical recovery routing discriminates diagnosis, read-back, local repair, maintenance and reserved owners", () => {
@@ -27,6 +30,8 @@ test("technical recovery routing discriminates diagnosis, read-back, local repai
     worktree: "worktree", topic: "topic", owningSource: "source", command: ["node", "check.mjs"], observedResult: "exit 1" };
   const route = diagnosis => routeTechnicalRecovery(bindTechnicalFailure({ ...base, diagnosis }));
   assert.deepEqual(route(undefined), { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNDIAGNOSED" });
+  assert.deepEqual(route({ classification: "UNCLASSIFIED", source: "bounded receipt", reason: "no matching owner row" }),
+    { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNCLASSIFIED" });
   assert.deepEqual(route({ classification: "OUTCOME_UNKNOWN", source: "native", reason: "lost ACK" }),
     { phase: "READBACK", owner: "original-command-owner", disposition: "LOST_ACK_OR_OUTCOME_UNKNOWN" });
   assert.deepEqual(route({ classification: "ISSUE_DEFECT", source: "tests", reason: "local defect", scopeCompatible: true }),
@@ -105,7 +110,7 @@ test("native maintenance adopts one separate canonical worktree after lost setup
     if (name.endsWith("create_thread")) {
       creates++; prompt = args.prompt;
       assert.equal(args.target.projectId, "source-project"); assert.equal(args.target.environment.type, "worktree");
-      assert.ok(store.readHostTask({ runId: runIdentity.runId, issueId: "I_1", purpose: "maintenance:maintenance-operation" }));
+      assert.ok(store.readHostTask({ runId: runIdentity.runId, issueId: scope.operationId, purpose: "maintenance:maintenance-operation" }));
       git(source, "worktree", "add", "-b", "maintenance", lane, "main");
       throw new Error("lost creation result");
     }
@@ -119,7 +124,8 @@ test("native maintenance adopts one separate canonical worktree after lost setup
     const input = { issueId: "I_1", runIdentity, failure, originalTaskRef };
     const first = await createCodexWorkflowTasks(options).ensureMaintenanceTask(input);
     assert.equal(first.taskRef.threadId, "maintenance");
-    assert.deepEqual((await createCodexWorkflowTasks(options).ensureMaintenanceTask({ ...input, failure: { ...failure, identity: "failure-2", diagnosis: { maintenance: { ...scope, repairWaveCount: 1 } } } })).taskRef, first.taskRef);
+    assert.deepEqual((await createCodexWorkflowTasks(options).ensureMaintenanceTask({ ...input, issueId: "I_2",
+      failure: { ...failure, identity: "failure-2", diagnosis: { maintenance: { ...scope, repairWaveCount: 1 } } } })).taskRef, first.taskRef);
     assert.equal(creates, 1); assert.equal(git(source, "status", "--porcelain"), ""); assert.equal(git(product, "status", "--porcelain"), "");
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

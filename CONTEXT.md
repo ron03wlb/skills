@@ -76,6 +76,18 @@ _Avoid_: Dirty-doc commit, lifecycle authorization, execution checkpoint
 The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, **Issue target branch**, worktree, topic branch, attempt baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. Target-branch movement alone does not supersede it; a later successful explicit attempt publishes the new current note.
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
 
+**Native task observation receipt**:
+The immutable producer-owned account of one bounded native task observation, binding its request, task, and workflow scope before it crosses the host boundary. It is settlement evidence, not task authority by itself.
+_Avoid_: Raw task history, host summary, journal-owned task state
+
+**Task outcome receipt**:
+The immutable workflow-adapter account that classifies one validated **Native task observation receipt** for a specific Run, Issue operation, and execution phase. It carries attributable evidence and effect state without replacing the native task or tracker owners.
+_Avoid_: Worker DONE claim, synthetic task state, full-history transcript
+
+**Delivery progression**:
+The independently observable sequence from completion publication through native settlement, evidence validation, close eligibility, close acceptance, lease ownership, and final closure. Each stage retains its own time and disposition so unchanged polls cannot manufacture progress or hide a blocker.
+_Avoid_: Aggregate completion timestamp, inferred close latency, Run heartbeat
+
 **Issue contribution**:
 The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
 _Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping

@@ -6,10 +6,11 @@ const canonical = value => Array.isArray(value) ? value.map(canonical) : value &
 export const recoveryDigest = value => `sha256:${createHash("sha256").update(JSON.stringify(canonical(value))).digest("hex")}`;
 const text = value => typeof value === "string" && value.length > 0;
 export const sameRecoveryTask = (a, b) => text(a?.threadId) && a.threadId === b?.threadId && a.hostId === b?.hostId;
-export const RECOVERY_CLASSES = Object.freeze(["UNDIAGNOSED", "ISSUE_DEFECT", "ENVIRONMENT", "WORKFLOW_DEFECT", "REQUIREMENT_CONFLICT", "CAPABILITY_UNAVAILABLE", "OUTCOME_UNKNOWN"]);
+export const RECOVERY_CLASSES = Object.freeze(["UNDIAGNOSED", "UNCLASSIFIED", "ISSUE_DEFECT", "ENVIRONMENT", "WORKFLOW_DEFECT", "REQUIREMENT_CONFLICT", "CAPABILITY_UNAVAILABLE", "OUTCOME_UNKNOWN"]);
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT = "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
 const dispositionRoutes = Object.freeze({
   UNDIAGNOSED: { owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN" },
+  UNCLASSIFIED: { owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN" },
   LOST_ACK_OR_OUTCOME_UNKNOWN: { owner: "original-command-owner", continuation: "CONTINUE_SAME_RUN" },
   OUTCOME_READBACK_RESOLVED: { owner: "issue-execution-owner", continuation: "CONTINUE_SAME_RUN" },
   LOCAL_CODE_DEFECT: { owner: "issue-execution-owner", continuation: "CONTINUE_SAME_RUN" },
@@ -33,9 +34,9 @@ const dispositionRoutes = Object.freeze({
 export const RECOVERY_DISPOSITION_CODES = Object.freeze(Object.keys(dispositionRoutes));
 
 export function routeRecoveryDisposition(code) {
-  const route = dispositionRoutes[code];
-  if (!route) throw new Error(`Unclassified recovery disposition: ${String(code)}`);
-  return Object.freeze({ code, ...route, coordinatorRepairs: false });
+  const normalized = Object.hasOwn(dispositionRoutes, code) ? code : "UNCLASSIFIED";
+  return Object.freeze({ code: normalized, ...dispositionRoutes[normalized], coordinatorRepairs: false,
+    ...(normalized === "UNCLASSIFIED" ? { observedDisposition: String(code) } : {}) });
 }
 const technicalRoute = (phase, disposition) => {
   const route = routeRecoveryDisposition(disposition);
@@ -94,6 +95,7 @@ export function routeTechnicalRecovery(failure) {
   }
   const classification = failure.diagnosis?.classification ?? "UNDIAGNOSED";
   if (classification === "UNDIAGNOSED") return technicalRoute("DIAGNOSE", "UNDIAGNOSED");
+  if (classification === "UNCLASSIFIED") return technicalRoute("DIAGNOSE", "UNCLASSIFIED");
   if (classification === "OUTCOME_UNKNOWN" && !failure.diagnosis.readBackAttempted) {
     return technicalRoute("READBACK", "LOST_ACK_OR_OUTCOME_UNKNOWN");
   }

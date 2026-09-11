@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 export const TASK_OUTCOME_RECEIPT_SCHEMA = "workflow-task-outcome:v1";
+export const NATIVE_OBSERVATION_SCHEMA = "codex-native-observation:v1";
 export const MAX_TASK_OUTCOME_RECEIPT_BYTES = 16 * 1024;
 export const MAX_HOST_ENCODED_RESPONSE_BYTES = 1024 * 1024;
 export const MAX_HISTORY_RESPONSE_BYTES = 256 * 1024;
@@ -13,6 +14,13 @@ const receiptFields = new Set([
 ]);
 const inputFields = new Set([...receiptFields].filter(field => !["schema", "identity"].includes(field)));
 const producerFields = new Set(["name", "revision", "packageVersion"]);
+const nativeObservationFields = new Set([
+  "schema", "identity", "requestIdentity", "producer", "observedAt", "bindings", "payload", "budget",
+]);
+const nativeBudgetFields = new Set(["encodedResponseBytes", "maxEncodedResponseBytes"]);
+const nativeBindingFields = new Set([
+  "runId", "issueId", "operationId", "requestIdentity", "taskRef", "phase", "candidate",
+]);
 const taskRefFields = new Set(["threadId", "hostId"]);
 const evidenceFields = new Set(["kind", "locator", "digest"]);
 const effectsFields = new Set(["pending", "accepted"]);
@@ -22,7 +30,7 @@ const budgetFields = new Set([
 ]);
 const dispositions = new Set([
   "RUNNING", "SUCCEEDED", "FAILED", "NEEDS_ATTENTION", "UNKNOWN",
-  "RESPONSE_BUDGET_EXCEEDED", "CONFLICT",
+  "RESPONSE_BUDGET_EXCEEDED", "CONFLICT", "UNCLASSIFIED",
 ]);
 const evidenceKinds = new Set([
   "native-progress", "native-settlement", "native-attention", "native-failure", "missing-evidence", "tracker-completion",
@@ -40,6 +48,11 @@ const assertExact = (value, fields, label) => {
   const missing = [...fields].find(field => !Object.hasOwn(value, field));
   if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
   if (missing) throw new TypeError(`${label} is missing field ${missing}`);
+};
+const assertAllowed = (value, fields, label) => {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  const unknown = Object.keys(value).find(field => !fields.has(field));
+  if (unknown) throw new TypeError(`${label} contains unknown field ${unknown}`);
 };
 const requireText = (value, label, maximum = 512) => {
   if (typeof value !== "string" || value.length === 0 || value.length > maximum) {
@@ -61,6 +74,95 @@ const digest = value => `sha256:${createHash("sha256").update(JSON.stringify(can
 
 export const encodedBytes = value => Buffer.byteLength(JSON.stringify(value), "utf8");
 
+export function validateNativeObservationEnvelope(envelope) {
+  assertExact(envelope, nativeObservationFields, "native observation envelope");
+  if (envelope.schema !== NATIVE_OBSERVATION_SCHEMA || !sha256.test(envelope.identity)) {
+    throw new TypeError("Native observation schema or identity is invalid");
+  }
+  requireText(envelope.requestIdentity, "native observation requestIdentity");
+  assertExact(envelope.producer, producerFields, "native observation producer");
+  if (envelope.producer.name !== "codex-host-driver"
+    || !revision.test(envelope.producer.revision) || !revision.test(envelope.producer.packageVersion)) {
+    throw new TypeError("Native observation producer is not the trusted host adapter");
+  }
+  requireInstantOrNull(envelope.observedAt, "native observation observedAt");
+  if (envelope.observedAt === null) throw new TypeError("Native observation requires its producer time");
+  if (!Array.isArray(envelope.bindings) || envelope.bindings.length > 8) {
+    throw new TypeError("Native observation bindings must be a bounded list");
+  }
+  for (const binding of envelope.bindings) {
+    assertExact(binding, nativeBindingFields, "native observation binding");
+    for (const field of ["runId", "issueId", "operationId", "requestIdentity", "phase"]) {
+      requireText(binding[field], `native observation binding ${field}`);
+    }
+    if (!operationIdentity.test(binding.operationId)) throw new TypeError("Native observation operationId is invalid");
+    assertExact(binding.taskRef, taskRefFields, "native observation taskRef");
+    requireText(binding.taskRef.threadId, "native observation threadId");
+    requireText(binding.taskRef.hostId, "native observation hostId");
+    if (binding.candidate !== null && !candidate.test(binding.candidate)) throw new TypeError("Native observation candidate is invalid");
+  }
+  assertAllowed(envelope.payload, new Set(["timedOut", "polls", "results", "threads", "thread", "turns", "error"]), "native observation payload");
+  if (Object.hasOwn(envelope.payload, "timedOut") && typeof envelope.payload.timedOut !== "boolean") {
+    throw new TypeError("Native observation timedOut must be boolean");
+  }
+  const entries = ["polls", "results", "threads"].flatMap(field => {
+    const value = envelope.payload[field];
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > 8) throw new TypeError(`Native observation ${field} must be bounded`);
+    return value;
+  });
+  if (envelope.payload.thread) entries.push({ thread: envelope.payload.thread,
+    ...(envelope.payload.turns?.[0] ? { state: envelope.payload.turns[0].status } : {}),
+    ...(envelope.payload.error ? { error: envelope.payload.error } : {}) });
+  for (const entry of entries) {
+    assertAllowed(entry, new Set(["thread", "threadId", "hostId", "cursor", "status", "state", "event", "needsAttention", "error"]), "native observation entry");
+    for (const field of ["threadId", "hostId", "cursor", "state", "event"]) {
+      if (entry[field] !== undefined) requireText(entry[field], `native observation ${field}`, 8192);
+    }
+    if (entry.status !== undefined) {
+      if (typeof entry.status === "string") requireText(entry.status, "native observation status", 8192);
+      else {
+        assertAllowed(entry.status, new Set(["type"]), "native observation status");
+        requireText(entry.status.type, "native observation status.type", 8192);
+      }
+    }
+    if (entry.thread !== undefined) {
+      assertAllowed(entry.thread, new Set(["id", "hostId", "status", "cwd"]), "native observation thread");
+      for (const field of ["id", "hostId", "cwd"]) {
+        if (entry.thread[field] !== undefined) requireText(entry.thread[field], `native observation thread.${field}`, 8192);
+      }
+      if (entry.thread.status !== undefined) {
+        assertAllowed(entry.thread.status, new Set(["type"]), "native observation thread status");
+        requireText(entry.thread.status.type, "native observation thread status type", 8192);
+      }
+    }
+    if (entry.needsAttention !== undefined && typeof entry.needsAttention !== "boolean") throw new TypeError("Native observation needsAttention must be boolean");
+    if (entry.error !== undefined) {
+      assertAllowed(entry.error, new Set(["code"]), "native observation error");
+      requireText(entry.error.code, "native observation error code", 8192);
+    }
+  }
+  if (envelope.payload.turns !== undefined && (!Array.isArray(envelope.payload.turns)
+    || envelope.payload.turns.length > 1 || envelope.payload.turns.some(turn => !isRecord(turn)
+      || Object.keys(turn).some(field => !new Set(["id", "status"]).has(field))
+      || turn.id !== undefined && (typeof turn.id !== "string" || turn.id.length > 8192)
+      || typeof turn.status !== "string" || turn.status.length === 0 || turn.status.length > 8192))) {
+    throw new TypeError("Native observation turns must be a bounded status-only list");
+  }
+  assertExact(envelope.budget, nativeBudgetFields, "native observation budget");
+  for (const field of nativeBudgetFields) requireNonNegative(envelope.budget[field], `native observation budget.${field}`);
+  if (envelope.budget.encodedResponseBytes > envelope.budget.maxEncodedResponseBytes
+    || envelope.budget.maxEncodedResponseBytes !== MAX_HOST_ENCODED_RESPONSE_BYTES) {
+    throw new TypeError("Native observation exceeds its encoded response budget");
+  }
+  const { identity, ...identityInput } = envelope;
+  if (digest(identityInput) !== identity) throw new TypeError("Native observation identity differs from its exact body");
+  if (encodedBytes(envelope) !== envelope.budget.encodedResponseBytes) {
+    throw new TypeError("Native observation encoded byte count differs from its exact body");
+  }
+  return envelope;
+}
+
 export function validateTaskOutcomeReceipt(receipt) {
   assertExact(receipt, receiptFields, "task outcome receipt");
   if (receipt.schema !== TASK_OUTCOME_RECEIPT_SCHEMA || !sha256.test(receipt.identity)) {
@@ -74,7 +176,7 @@ export function validateTaskOutcomeReceipt(receipt) {
   requireText(receipt.taskRef.threadId, "task outcome threadId");
   requireText(receipt.taskRef.hostId, "task outcome hostId");
   assertExact(receipt.producer, producerFields, "task outcome producer");
-  requireText(receipt.producer.name, "task outcome producer name", 64);
+  if (receipt.producer.name !== "codex-workflow-tasks") throw new TypeError("Task outcome producer is not the trusted workflow adapter");
   if (!revision.test(receipt.producer.revision) || !revision.test(receipt.producer.packageVersion)) {
     throw new TypeError("Task outcome producer revision and package version must be exact digests or unavailable");
   }
@@ -90,6 +192,9 @@ export function validateTaskOutcomeReceipt(receipt) {
     if (!/^(?:codex-task|codex-host|github-issue):\/\//u.test(item.locator) || !sha256.test(item.digest)) {
       throw new TypeError("Task outcome evidence requires a safe locator and digest");
     }
+  }
+  if (receipt.evidence.some(item => item.kind === "tracker-completion") && receipt.candidate === null) {
+    throw new TypeError("Tracker completion outcome requires its exact candidate");
   }
   assertExact(receipt.effects, effectsFields, "task outcome effects");
   for (const field of effectsFields) {
@@ -107,7 +212,7 @@ export function validateTaskOutcomeReceipt(receipt) {
   assertExact(receipt.progress, progressFields, "task outcome progress");
   for (const field of progressFields) requireInstantOrNull(receipt.progress[field], `task outcome progress.${field}`);
   const terminal = ["SUCCEEDED", "FAILED"].includes(receipt.disposition);
-  const failed = ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED"].includes(receipt.disposition);
+  const failed = ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED", "UNCLASSIFIED"].includes(receipt.disposition);
   if (terminal !== (receipt.progress.terminalObservedAt !== null)
     || failed !== (receipt.failureFingerprint !== null)) {
     throw new TypeError("Task outcome disposition differs from its terminal or failure evidence");

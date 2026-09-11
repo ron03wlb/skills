@@ -17,14 +17,26 @@ import {
   createTaskOutcomeReceipt,
   encodedBytes,
   responseBudgetError,
+  validateNativeObservationEnvelope,
   validateTaskOutcomeReceipt,
 } from "./task-outcome-receipt.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
-  if (result?.structuredContent) return result.structuredContent;
+  if (result?.structuredContent) {
+    if (result.structuredContent.schema === "codex-native-observation:v1") {
+      const envelope = validateNativeObservationEnvelope(result.structuredContent);
+      return { ...envelope.payload, nativeObservationEnvelope: envelope };
+    }
+    return result.structuredContent;
+  }
   const body = result?.content?.find(({ type }) => type === "text")?.text;
-  return body === undefined ? result : JSON.parse(body);
+  const parsed = body === undefined ? result : JSON.parse(body);
+  if (parsed?.schema === "codex-native-observation:v1") {
+    const envelope = validateNativeObservationEnvelope(parsed);
+    return { ...envelope.payload, nativeObservationEnvelope: envelope };
+  }
+  return parsed;
 }
 const userTexts = (snapshot) => (snapshot.turns ?? []).flatMap(({ items }) => (items ?? []).flatMap((item) =>
   item.type === "userMessage" ? item.content?.filter(({ type }) => type === "text").map(({ text }) => text) ?? []
@@ -112,6 +124,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
+  const taskCandidates = new Map();
   const transientFaults = new Map();
   const taskObservations = new Map();
   const executionStartEvidence = new Map();
@@ -138,6 +151,28 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       executionStartedAt: start?.at ?? dispatch.at,
     };
   };
+  const observationBinding = ref => {
+    const context = taskContext(ref);
+    return context ? { runId, issueId: context.issueId, operationId: context.operationId,
+      requestIdentity: context.requestIdentity, taskRef: ref, phase: context.phase,
+      candidate: taskCandidates.get(ref.threadId) ?? null } : null;
+  };
+  const observationRequest = refs => ({ producer: {
+    revision: workflowVersion?.sourceCommit ?? "unavailable",
+    packageVersion: workflowVersion?.id ?? "unavailable",
+  }, bindings: refs.map(observationBinding).filter(Boolean) });
+  const nativeEnvelopeFor = (result, ref) => {
+    const envelope = result?.nativeObservationEnvelope;
+    if (!envelope) return null; // Direct unit adapters predate the installed host seam.
+    const expected = observationBinding(ref);
+    const binding = envelope.bindings.find(item => sameTaskRef(item.taskRef, ref));
+    if (!expected || !binding || JSON.stringify(binding) !== JSON.stringify(expected)
+      || envelope.producer.revision !== (workflowVersion?.sourceCommit ?? "unavailable")
+      || envelope.producer.packageVersion !== (workflowVersion?.id ?? "unavailable")) {
+      throw new Error("Native observation receipt differs from its Run, Issue, operation, task, candidate, or package binding");
+    }
+    return envelope;
+  };
   const waitSignal = waitForObservationSignal ?? (async ({ timeoutMs }) => {
     const expiresAt = Date.now() + timeoutMs;
     for (;;) {
@@ -162,7 +197,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const receiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
     taskRuns.set(ref.threadId, selectedRunId);
-    return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref });
+    return createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: selectedRunId, taskRef: ref, now });
   };
   const messageReceiptsFor = (ref, selectedRunId = taskRuns.get(ref.threadId) ?? runId) => {
     if (!selectedRunId || !store?.gitCommonDir) return null;
@@ -248,6 +283,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         }
         return result;
       } catch (error) {
+        let hostBudget;
+        try { hostBudget = JSON.parse(error.message); } catch { hostBudget = null; }
+        if (hostBudget?.code === "NATIVE_RESPONSE_BUDGET_EXCEEDED") {
+          throw responseBudgetError({ operation: name, locator: hostBudget.locator,
+            encodedResponseBytes: hostBudget.encodedResponseBytes,
+            maxEncodedResponseBytes: hostBudget.maxEncodedResponseBytes });
+        }
         const category = readOnly ? faultCategory(error) : null;
         if (!category) throw error;
         const faultId = faultIdentity(name, args, category);
@@ -331,7 +373,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const messageReceipts = messageReceiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let messageReceipt = messageReceipts?.read();
     const compactEvidence = ownership.completion ?? ownership.observation;
+    if (ownership.completion?.candidate) taskCandidates.set(ref.threadId, ownership.completion.candidate);
     if (compactEvidence && !receipt && !messageReceipt) {
+      const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false,
+        maxOutputCharsPerItem: 1000, __workflowObservation: observationRequest([ref]) }, { interruptible, observationBudget });
+      if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) {
+        throw new Error("Compact task snapshot identity differs");
+      }
+      const nativeEnvelope = nativeEnvelopeFor(snapshot, ref);
+      const type = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
+      const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
+      const compactCompleted = type === "completed" || ["idle", "notloaded"].includes(type) && latestTurnStatus === "completed";
       const journal = store?.readEvents?.(ownership.runId ?? runId);
       const latestStart = journal?.findLast(event => event.type === "execution.started"
         && event.issueId === compactEvidence.issueId && sameTaskRef(event.taskRef, ref));
@@ -346,28 +398,23 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           || outcome.receipt.operationId !== expected.operationId || !sameTaskRef(outcome.receipt.taskRef, ref)) {
           throw new Error("Completion or observation settlement receipt differs from its Run, Issue, operation, or task");
         }
-        if (outcome.receipt.disposition === "SUCCEEDED") {
-          return { state: "RESUMABLE", outcomeReceipt: outcome.receipt,
-            inactiveEvidence: outcome.receipt.evidence.map(item => item.locator),
-            snapshot: { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [] } };
+        if (ownership.completion && outcome.receipt.candidate !== null
+          && outcome.receipt.candidate !== ownership.completion.candidate) {
+          throw new Error("Native settlement receipt candidate differs from the completion publication");
         }
-        if (outcome.receipt.disposition === "RUNNING") {
-          return { state: "RUNNING", outcomeReceipt: outcome.receipt,
-            snapshot: { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] } };
-        }
-      } else {
-        const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false,
-          maxOutputCharsPerItem: 1000 }, { interruptible, observationBudget });
-        if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) {
-          throw new Error("Compact task snapshot identity differs");
-        }
-        const type = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
-        const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
-        if (["active", "running"].includes(type)) return { state: "RUNNING", snapshot, cwd: snapshot.thread.cwd };
-        if (type === "completed" || ["idle", "notloaded"].includes(type) && latestTurnStatus === "completed") {
-          return { state: "RESUMABLE", snapshot, cwd: snapshot.thread.cwd,
-            inactiveEvidence: [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
-        }
+      }
+      if (["active", "running"].includes(type) && !snapshot.error) {
+        const current = outcomeReceipt({ ref, observation: { status: type, event: "compact-read" }, disposition: "RUNNING",
+          evidenceKind: "native-progress", observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
+        return { state: "RUNNING", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd };
+      }
+      if (compactCompleted && !snapshot.error) {
+        const current = outcomeReceipt({ ref, observation: { status: type, event: "completion" }, disposition: "SUCCEEDED",
+          evidenceKind: ownership.completion ? "tracker-completion" : "native-settlement",
+          observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
+        return { state: "RESUMABLE", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd,
+          inactiveEvidence: current?.evidence.map(item => item.locator)
+            ?? [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
       }
     }
     const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
@@ -379,6 +426,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       receipts.accept(receipt.promptIdentity, "native-history"); receipt = receipts.read();
     }
     const closeRequest = closeRequestFrom(receipt?.accepted ? receipt.prompt : nativePrompt);
+    const closeAcceptedAt = receipt?.acceptedAt ?? null;
     const currentNativePrompt = userTexts({ turns: snapshot.turns.slice(0, 1) }).find(text => text.includes("Close request identity:"));
     if (receipt?.accepted && currentNativePrompt
       && modelEvidenceDigest(closeRequestFrom(currentNativePrompt)) !== modelEvidenceDigest(closeRequest)) {
@@ -434,7 +482,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult,
+      closeRequest, closeAcceptedAt, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult,
       closeOutcomeUnavailable: Boolean(receipt && !closeResult), snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
@@ -572,22 +620,30 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     status: observation.status,
     event: observation.event ?? null,
     cursor: observation.cursor ?? null,
-    error: Boolean(observation.error),
+    error: observation.error?.code ?? (observation.error ? "native-observation-error" : null),
   });
   const observationDigest = observation => `sha256:${createHash("sha256")
     .update(JSON.stringify(safeObservation(observation))).digest("hex")}`;
   const nativeRevision = observation => observation.cursor
     ? `sha256:${createHash("sha256").update(String(observation.cursor)).digest("hex")}` : null;
+  const meaningfulNativeRevision = observation => {
+    const event = String(observation.event ?? "").toLowerCase();
+    return event && !["heartbeat", "status", "status-pulse", "unchanged", "poll", "timeout"].includes(event)
+      ? nativeRevision(observation) : null;
+  };
+  const progressStatus = status => ["active", "running"].includes(String(status).toLowerCase())
+    ? "running" : String(status).toLowerCase();
   const progressDigest = ({ status, revision }) => `sha256:${createHash("sha256")
     .update(JSON.stringify({ status, revision })).digest("hex")}`;
   const outcomeReceipt = ({ ref, observation, disposition, evidenceKind, historyReads = 0,
     observedAt = now(), lastVerifiedProgressAt = observedAt, evidenceLocator, evidenceDigest: suppliedEvidenceDigest,
-    failureFingerprint: suppliedFailureFingerprint, encodedResponseBytes, maxEncodedResponseBytes }) => {
+    failureFingerprint: suppliedFailureFingerprint, encodedResponseBytes, maxEncodedResponseBytes, nativeEnvelope }) => {
     const context = taskContext(ref);
     if (!context) return null;
     const boundedObservation = safeObservation(observation);
-    const evidenceDigest = suppliedEvidenceDigest ?? observationDigest(observation);
-    const revision = nativeRevision(observation);
+    const evidenceDigest = suppliedEvidenceDigest ?? nativeEnvelope?.identity ?? observationDigest(observation);
+    const revision = meaningfulNativeRevision(observation)
+      ?? (["SUCCEEDED", "FAILED"].includes(disposition) ? nativeRevision(observation) : null);
     const closeReceipt = receiptsFor(ref)?.read();
     const messageReceipt = messageReceiptsFor(ref)?.read();
     const effects = [closeReceipt, messageReceipt].filter(Boolean).reduce((result, receipt) => {
@@ -602,20 +658,20 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       requestIdentity: context.requestIdentity,
       taskRef: ref,
       producer: {
-        name: "codex-host",
+        name: "codex-workflow-tasks",
         revision: workflowVersion?.sourceCommit ?? "unavailable",
         packageVersion: workflowVersion?.id ?? "unavailable",
       },
       phase: context.phase,
       disposition,
-      candidate: null,
+      candidate: taskCandidates.get(ref.threadId) ?? null,
       evidence: [{
         kind: evidenceKind,
         locator: evidenceLocator ?? `codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}${revision ? `?revision=${revision}` : ""}`,
         digest: evidenceDigest,
       }],
       effects,
-      failureFingerprint: ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED"].includes(disposition)
+      failureFingerprint: ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED", "UNCLASSIFIED"].includes(disposition)
         ? suppliedFailureFingerprint ?? evidenceDigest : null,
       progress: {
         executionStartedAt: context.executionStartedAt,
@@ -623,8 +679,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         terminalObservedAt: disposition === "SUCCEEDED" || disposition === "FAILED" ? observedAt : null,
       },
       budget: {
-        encodedResponseBytes: encodedResponseBytes ?? encodedBytes(boundedObservation),
-        maxEncodedResponseBytes: maxEncodedResponseBytes ?? MAX_HOST_ENCODED_RESPONSE_BYTES,
+        encodedResponseBytes: encodedResponseBytes ?? nativeEnvelope?.budget.encodedResponseBytes ?? encodedBytes(boundedObservation),
+        maxEncodedResponseBytes: maxEncodedResponseBytes ?? nativeEnvelope?.budget.maxEncodedResponseBytes ?? MAX_HOST_ENCODED_RESPONSE_BYTES,
         fullHistoryReads: historyReads,
         maxFullHistoryReads: MAX_HISTORY_READS,
       },
@@ -650,16 +706,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const maintenanceProject = matching[0];
       const purpose = `maintenance:${scope.operationId}`;
       const { repairWaveCount, ...scopeAuthority } = scope;
-      const prompt = `Workflow maintenance ownership: ${JSON.stringify({ runId: runIdentity.runId, issueId, scope: scopeAuthority })}\nRead-only setup: preserve this isolated maintenance worktree and wait for the exact scoped maintenance request. Do not edit, commit, install or touch the product checkout during setup. ${workflowSourceBoundary(packageRoot)}`;
+      const maintenanceOwnerId = scope.operationId;
+      const prompt = `Workflow maintenance ownership: ${JSON.stringify({ runId: runIdentity.runId, operationId: maintenanceOwnerId, scope: scopeAuthority })}\nRead-only setup: preserve this isolated maintenance worktree and wait for the exact scoped maintenance request. Do not edit, commit, install or touch the product checkout during setup. ${workflowSourceBoundary(packageRoot)}`;
       if (host.disconnected) throw new Error("CODEX_HOST_DISCONNECTED");
-      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId, purpose, prompt });
+      const reservation = store.reserveHostTask({ runId: runIdentity.runId, issueId: maintenanceOwnerId, purpose, prompt });
       if (reservation.intent.prompt !== prompt) throw new Error("Existing maintenance operation has different failure/scope evidence; reconcile its owner instead of recreating it");
       let taskRef;
       if (reservation.created) {
         try {
           const request = { title: "Workflow maintenance", prompt, target: { type: "project", projectId: maintenanceProject.id ?? maintenanceProject.projectId,
             environment: { type: "worktree", startingState: { type: "branch", branchName: scope.target } } } };
-          const created = await call("create_thread", request, { owner: { kind: "task-create", runId: runIdentity.runId, issueId,
+          const created = await call("create_thread", request, { owner: { kind: "task-create", runId: runIdentity.runId, issueId: maintenanceOwnerId,
             receiptIdentity: modelEvidenceDigest({ purpose, request }) } });
           if (created.threadId && created.hostId) taskRef = { threadId: created.threadId, hostId: created.hostId };
         } catch { /* The persisted maintenance intent owns discovery after uncertainty. */ }
@@ -844,12 +901,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         throw new Error("Task message outcome is unresolved; preserve the reserved request");
       }
       const stored = receipts?.read();
-      if (stored?.prompt === frozenPrompt && stored.accepted) return close ? undefined : { observed: true };
+      if (stored?.prompt === frozenPrompt && stored.accepted) return close
+        ? { accepted: true, acceptedAt: stored.acceptedAt } : { observed: true };
       const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
         if (messageReceipts) { const intent = messageReceipts.reserve(taskRequest); messageReceipts.accept(intent.promptIdentity, "native-history"); }
-        return close ? undefined : { observed: true };
+        return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt } : { observed: true };
       }
       // Native history and continuation waits may outlive the tracker snapshot
       // that selected this action. Only suppress delivery here; the coordinator
@@ -896,7 +954,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               || accepted.hostId !== undefined && accepted.hostId !== ref.hostId) throw new Error("Native close acceptance is unproven");
             receipts?.accept(reservation.promptIdentity, "native-response");
           }
-          return close ? undefined : { accepted: true };
+          return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt } : { accepted: true };
         }
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
@@ -904,7 +962,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
           if (userTexts(snapshot).includes(frozenPrompt)) {
             receipts?.accept(reservation.promptIdentity, "native-history");
-            return close ? undefined : { observed: true, initiatedHere: true };
+            return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt, observed: true }
+              : { observed: true, initiatedHere: true };
           }
           if (close) throw new Error("Close message outcome is unresolved; preserve the reserved request", { cause: error });
           if (snapshot.thread.status?.type !== "idle") throw new Error("Message outcome is unresolved; preserve the running task", { cause: error });
@@ -951,21 +1010,21 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           throw error;
         }
       };
-      const observeRunningProgress = async ({ ref, observation, semantic, previous }) => {
+      const observeRunningProgress = async ({ ref, observation, semantic, previous, nativeEnvelope }) => {
         const observedAt = now();
-        const signature = progressDigest({ status: observation.status, revision: nativeRevision(observation) });
+        const signature = progressDigest({ status: progressStatus(observation.status), revision: meaningfulNativeRevision(observation) });
         const context = taskContext(ref);
         const retained = previous ? null : store?.readEvents?.(runId).findLast(event => event.type === "task.outcome"
           && sameTaskRef(event.receipt.taskRef, ref) && (!context || event.receipt.requestIdentity === context.requestIdentity));
         const priorSignature = previous?.progressSignature ?? (retained ? progressDigest({
-          status: observation.status, revision: retained.receipt.nativeRevision,
+          status: progressStatus(observation.status), revision: retained.receipt.nativeRevision,
         }) : null);
         const lastVerifiedProgressAt = previous?.lastVerifiedProgressAt ?? retained?.receipt.progress.lastVerifiedProgressAt;
         const alreadyEscalated = previous?.stallEscalated === true || retained?.receipt.disposition === "NEEDS_ATTENTION";
         if (!priorSignature || priorSignature !== signature) {
           taskObservations.set(ref.threadId, { semantic, settled: false, closeRequestIdentity: previous?.closeRequestIdentity,
             progressSignature: signature, lastVerifiedProgressAt: observedAt, stallEscalated: false });
-          const receipt = outcomeReceipt({ ref, observation, disposition: "RUNNING", evidenceKind: "native-progress", observedAt });
+          const receipt = outcomeReceipt({ ref, observation, disposition: "RUNNING", evidenceKind: "native-progress", observedAt, nativeEnvelope });
           if (receipt) receipts.push(receipt);
           return null;
         }
@@ -979,7 +1038,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             progressSignature: signature, lastVerifiedProgressAt, stallEscalated: true });
           if (!changed.some(item => item.threadId === ref.threadId)) changed.push({ threadId: ref.threadId, state: "stalled" });
           const receipt = outcomeReceipt({ ref, observation, disposition: "NEEDS_ATTENTION", evidenceKind: "native-attention",
-            historyReads: 1, observedAt, lastVerifiedProgressAt });
+            historyReads: 1, observedAt, lastVerifiedProgressAt, nativeEnvelope });
           if (receipt) receipts.push(receipt);
           return null;
         }
@@ -991,7 +1050,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
         try {
-          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000) },
+          result = await call("wait_threads", { targets, timeoutMs: Math.min(15000, boundedTimeoutMs ?? 15000),
+            __workflowObservation: observationRequest(batch) },
             { interruptible: true, observationBudget });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
@@ -1030,10 +1090,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (signaled?.control || signaled?.deadline) return interrupted(mode, signaled);
         for (const ref of batch) {
           const snapshotAttempt = await observeCall(() => call("read_thread", { ...ref, turnLimit: 1,
-            includeOutputs: false, maxOutputCharsPerItem: 1000 }, { interruptible: true, observationBudget }));
+            includeOutputs: false, maxOutputCharsPerItem: 1000, __workflowObservation: observationRequest([ref]) },
+          { interruptible: true, observationBudget }));
           if (snapshotAttempt.interruption) return snapshotAttempt.interruption;
           const snapshot = snapshotAttempt.value;
           if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
+          const nativeEnvelope = nativeEnvelopeFor(snapshot, ref);
           const status = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
           const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
           const compactCompleted = status === "completed" || ["idle", "notloaded"].includes(status) && latestTurnStatus === "completed";
@@ -1056,12 +1118,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
                 : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
               evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
-                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1 });
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1, nativeEnvelope });
             if (receipt) receipts.push(receipt);
           } else if (exceptional) {
             taskObservations.set(ref.threadId, previous);
           } else if (!terminal) {
-            const interruption = await observeRunningProgress({ ref, observation: { status }, semantic, previous });
+            const interruption = await observeRunningProgress({ ref, observation: { status }, semantic, previous, nativeEnvelope });
             if (interruption) return interruption;
           } else {
             const settled = terminal || previous?.settled === true;
@@ -1069,7 +1131,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               closeRequestIdentity: previous?.closeRequestIdentity });
             if (terminal && previous?.settled !== true) {
               const receipt = outcomeReceipt({ ref, observation: { status, event: "completion" }, disposition: "SUCCEEDED",
-                evidenceKind: "native-settlement" });
+                evidenceKind: "native-settlement", nativeEnvelope });
               if (receipt) receipts.push(receipt);
             }
           }
@@ -1082,6 +1144,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const threadId = target.thread?.id ?? target.threadId;
           const ref = refsById.get(threadId);
           if (!ref) continue;
+          const nativeEnvelope = nativeEnvelopeFor(result, ref);
           if (target.cursor) cursors.set(threadId, target.cursor);
           const status = String(target.thread?.status?.type ?? target.status?.type ?? target.status ?? target.state ?? "unknown").toLowerCase();
           const terminal = Boolean(target.finalText || target.final || target.event === "completion"
@@ -1107,12 +1170,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
                 : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
               evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
-                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1 });
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1, nativeEnvelope });
             if (receipt) receipts.push(receipt);
           } else if (exceptional) {
             taskObservations.set(threadId, previous);
           } else if (!terminal) {
-            const interruption = await observeRunningProgress({ ref, observation: { ...target, status }, semantic, previous });
+            const interruption = await observeRunningProgress({ ref, observation: { ...target, status }, semantic, previous, nativeEnvelope });
             if (interruption) return interruption;
           } else {
             const settled = terminal || previous?.settled === true;
@@ -1120,7 +1183,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
               closeRequestIdentity: previous?.closeRequestIdentity });
             if (terminal && previous?.settled !== true) {
               const receipt = outcomeReceipt({ ref, observation: { ...target, status }, disposition: "SUCCEEDED",
-                evidenceKind: "native-settlement" });
+                evidenceKind: "native-settlement", nativeEnvelope });
               if (receipt) receipts.push(receipt);
             }
           }

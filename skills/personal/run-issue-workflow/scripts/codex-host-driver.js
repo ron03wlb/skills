@@ -10,6 +10,7 @@
   const types = new Set(["tool", "status", "result", "error", "input-error", "control-result", "response-accepted", "request-state"]);
   const prefix = "workflow-host ";
   const maxEncodedResponseBytes = 1024 * 1024;
+  const nativeObservationSchema = "codex-native-observation:v1";
   const decoration = /^(?:\x1b\[(?:\?(?:25|9001|1004)[lh]|[012]?J|H|[0-9;]*m|[0-9]+;[0-9]+H)|\x1b\]0;[^\x07]*\x07)+/u;
   const copy = value => JSON.parse(JSON.stringify(value));
   const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -21,8 +22,68 @@
     }
     return bytes;
   };
+  const utf8 = value => {
+    const bytes = [];
+    for (const character of value) {
+      const point = character.codePointAt(0);
+      if (point <= 0x7f) bytes.push(point);
+      else if (point <= 0x7ff) bytes.push(0xc0 | point >>> 6, 0x80 | point & 0x3f);
+      else if (point <= 0xffff) bytes.push(0xe0 | point >>> 12, 0x80 | point >>> 6 & 0x3f, 0x80 | point & 0x3f);
+      else bytes.push(0xf0 | point >>> 18, 0x80 | point >>> 12 & 0x3f, 0x80 | point >>> 6 & 0x3f, 0x80 | point & 0x3f);
+    }
+    return bytes;
+  };
+  const sha256Hex = value => {
+    const bytes = utf8(value), bitLength = bytes.length * 8;
+    bytes.push(0x80);
+    while (bytes.length % 64 !== 56) bytes.push(0);
+    const high = Math.floor(bitLength / 0x100000000), low = bitLength >>> 0;
+    for (let shift = 24; shift >= 0; shift -= 8) bytes.push(high >>> shift & 0xff);
+    for (let shift = 24; shift >= 0; shift -= 8) bytes.push(low >>> shift & 0xff);
+    const k = [0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+      0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+      0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+      0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+      0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+      0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+      0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+      0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+    const h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+    const rotate = (word, bits) => word >>> bits | word << 32 - bits;
+    for (let offset = 0; offset < bytes.length; offset += 64) {
+      const w = new Array(64);
+      for (let i = 0; i < 16; i += 1) w[i] = (bytes[offset + i * 4] << 24 | bytes[offset + i * 4 + 1] << 16
+        | bytes[offset + i * 4 + 2] << 8 | bytes[offset + i * 4 + 3]) >>> 0;
+      for (let i = 16; i < 64; i += 1) {
+        const s0 = rotate(w[i - 15], 7) ^ rotate(w[i - 15], 18) ^ w[i - 15] >>> 3;
+        const s1 = rotate(w[i - 2], 17) ^ rotate(w[i - 2], 19) ^ w[i - 2] >>> 10;
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+      }
+      let [a,b,c,d,e,f,g,hh] = h;
+      for (let i = 0; i < 64; i += 1) {
+        const s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25), choice = e & f ^ ~e & g;
+        const t1 = (hh + s1 + choice + k[i] + w[i]) >>> 0;
+        const s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22), majority = a & b ^ a & c ^ b & c;
+        const t2 = (s0 + majority) >>> 0;
+        hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      [a,b,c,d,e,f,g,hh].forEach((word, index) => { h[index] = (h[index] + word) >>> 0; });
+    }
+    return h.map(word => word.toString(16).padStart(8, "0")).join("");
+  };
+  const canonical = value => Array.isArray(value) ? value.map(canonical) : record(value)
+    ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+  const safeObservationBinding = value => {
+    if (!record(value) || Object.keys(value).some(key => !["runId", "issueId", "operationId", "requestIdentity", "taskRef", "phase", "candidate"].includes(key))
+      || !["runId", "issueId", "operationId", "requestIdentity", "phase"].every(key => boundedText(value[key]))
+      || !/^workflow-op-v1-[a-f0-9]{64}$/u.test(value.operationId)
+      || !record(value.taskRef) || Object.keys(value.taskRef).some(key => !["threadId", "hostId"].includes(key))
+      || !boundedText(value.taskRef.threadId) || !boundedText(value.taskRef.hostId)
+      || value.candidate !== null && (typeof value.candidate !== "string" || !/^[a-f0-9]{40,64}$/u.test(value.candidate))) return null;
+    return copy(value);
+  };
   const boundedText = value => typeof value === "string" && value.length <= 8192 ? value : undefined;
-  const compactWaitEntry = value => {
+  const compactWaitEntry = (value, expected) => {
     if (!record(value)) return null;
     const thread = record(value.thread) ? {
       ...(boundedText(value.thread.id) ? { id: value.thread.id } : {}),
@@ -32,7 +93,14 @@
     const status = record(value.status)
       ? boundedText(value.status.type) ? { type: value.status.type } : undefined
       : boundedText(value.status);
-    const error = value.error ? { code: boundedText(value.error?.code) ?? "native-observation-error" } : undefined;
+    const oversized = [value.thread?.id, value.thread?.hostId, value.thread?.status?.type, value.threadId,
+      value.hostId, value.cursor, value.status?.type, value.status, value.state, value.event, value.error?.code]
+      .some(item => typeof item === "string" && boundedText(item) === undefined);
+    const conflict = boundedText(value.thread?.id ?? value.threadId) && expected?.threadId
+      && (value.thread?.id ?? value.threadId) !== expected.threadId;
+    const error = oversized ? { code: "native-field-budget-exceeded" }
+      : conflict ? { code: "native-task-identity-conflict" }
+        : value.error ? { code: boundedText(value.error?.code) ?? "native-observation-error" } : undefined;
     return {
       ...(thread && Object.keys(thread).length ? { thread } : {}),
       ...(boundedText(value.threadId) ? { threadId: value.threadId } : {}),
@@ -52,7 +120,8 @@
     const result = {};
     if (typeof payload.timedOut === "boolean") result.timedOut = payload.timedOut;
     for (const field of ["polls", "results", "threads"]) {
-      if (Array.isArray(payload[field])) result[field] = payload[field].slice(0, 8).map(compactWaitEntry).filter(Boolean);
+      if (Array.isArray(payload[field])) result[field] = payload[field].slice(0, 8)
+        .map((entry, index) => compactWaitEntry(entry, request.arguments?.targets?.[index])).filter(Boolean);
     }
     if (!["polls", "results", "threads"].some(field => Array.isArray(result[field]))) {
       result.polls = (request.arguments?.targets ?? []).map(target => ({ threadId: target.threadId,
@@ -60,10 +129,46 @@
     }
     return result;
   };
+  const compactReadPayload = (payload, request, nativeFailed = false) => {
+    const thread = record(payload?.thread) ? payload.thread : {};
+    const identityUnavailable = !boundedText(thread.id) || !boundedText(thread.hostId);
+    const identityConflict = boundedText(thread.id) && thread.id !== request.arguments.threadId
+      || boundedText(thread.hostId) && thread.hostId !== request.arguments.hostId;
+    const oversized = [thread.id, thread.hostId, thread.status?.type, thread.cwd,
+      payload?.turns?.[0]?.id, payload?.turns?.[0]?.status].some(item => typeof item === "string" && boundedText(item) === undefined);
+    return {
+      thread: { id: request.arguments.threadId, hostId: request.arguments.hostId,
+        status: { type: boundedText(thread.status?.type) ?? "unknown" },
+        ...(boundedText(thread.cwd) ? { cwd: thread.cwd } : {}) },
+      turns: Array.isArray(payload?.turns) && payload.turns.length ? [{
+        ...(boundedText(payload.turns[0]?.id) ? { id: payload.turns[0].id } : {}),
+        status: boundedText(payload.turns[0]?.status) ?? "unknown",
+      }] : [],
+      ...((identityUnavailable || identityConflict || oversized || nativeFailed) ? { error: { code: nativeFailed
+        ? "native-observation-error" : oversized ? "native-field-budget-exceeded"
+          : identityUnavailable ? "native-task-identity-unavailable" : "native-task-identity-conflict" } } : {}),
+    };
+  };
+  const nativeObservationEnvelope = (request, payload) => {
+    const supplied = request.arguments?.__workflowObservation;
+    const producer = record(supplied?.producer) ? supplied.producer : {};
+    const bindings = Array.isArray(supplied?.bindings) ? supplied.bindings.slice(0, 8).map(safeObservationBinding).filter(Boolean) : [];
+    const body = { schema: nativeObservationSchema, requestIdentity: request.id,
+      producer: { name: "codex-host-driver", revision: boundedText(producer.revision) ?? "unavailable",
+        packageVersion: boundedText(producer.packageVersion) ?? "unavailable" },
+      observedAt: new Date().toISOString(), bindings: copy(bindings), payload,
+      budget: { encodedResponseBytes: 0, maxEncodedResponseBytes } };
+    let envelope;
+    for (;;) {
+      envelope = { ...body, identity: `sha256:${sha256Hex(JSON.stringify(canonical(body)))}` };
+      const bytes = utf8Bytes(JSON.stringify(envelope));
+      if (bytes === body.budget.encodedResponseBytes) break;
+      body.budget.encodedResponseBytes = bytes;
+    }
+    return envelope;
+  };
   const compactNativeResult = (request, result) => {
-    if (request.name !== "mcp__codex_app__wait_threads") return result;
-    if (result?.isError) return { isError: true,
-      content: [{ type: "text", text: "wait_threads native call failed; inspect its original host owner" }] };
+    if (!request.arguments?.__workflowObservation) return result;
     let payload = result?.structuredContent;
     if (!record(payload)) {
       const body = result?.content?.find?.(item => item?.type === "text")?.text;
@@ -71,10 +176,14 @@
         try { payload = JSON.parse(body); } catch { payload = null; }
       } else payload = result;
     }
-    const compact = compactWaitPayload(payload, request);
+    const compact = request.name === "mcp__codex_app__wait_threads"
+      ? result?.isError ? compactWaitPayload(null, request) : compactWaitPayload(payload, request)
+      : request.name === "mcp__codex_app__read_thread" ? compactReadPayload(payload, request, result?.isError === true) : null;
+    if (!compact) return result;
+    const envelope = nativeObservationEnvelope(request, compact);
     return result?.structuredContent || Array.isArray(result?.content)
-      ? { ...result, content: [], structuredContent: compact }
-      : compact;
+      ? { content: [], structuredContent: envelope }
+      : envelope;
   };
 
   function parseTransport(input, ended = false) {
@@ -523,18 +632,14 @@
     };
     const write = async (message, kind) => {
       if (!lane.active) return false;
-      const body = JSON.stringify(message);
       const requestId = requestIdFor(message);
       const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
+      let body = JSON.stringify(message);
       const encodedResponseBytes = kind === "response" ? utf8Bytes(body) : 0;
       if (kind === "response" && encodedResponseBytes > maxEncodedResponseBytes) {
-        const error = new Error(`Native response exceeds bounded transport capacity (${encodedResponseBytes}/${maxEncodedResponseBytes} encoded bytes); preserve its original outcome at codex-host://response/${requestId ?? "session"}`);
-        error.code = "NATIVE_RESPONSE_BUDGET_EXCEEDED";
-        error.requestId = requestId;
-        error.encodedResponseBytes = encodedResponseBytes;
-        error.maxEncodedResponseBytes = maxEncodedResponseBytes;
-        error.missingEvidence = `codex-host://response/${requestId ?? "session"}`;
-        throw error;
+        message = { id: requestId, error: JSON.stringify({ code: "NATIVE_RESPONSE_BUDGET_EXCEEDED",
+          locator: `codex-host://response/${requestId ?? "session"}`, encodedResponseBytes, maxEncodedResponseBytes }) };
+        body = JSON.stringify(message);
       }
       const exhaustedFault = !activeWrite ? findFault(transportFaultIdentity) : null;
       if (exhaustedFault?.state === "exhausted") {
@@ -643,8 +748,9 @@
         await transition(request, "returned");
         return;
       }
-      const args = message.name === "mcp__codex_app__list_threads" && message.arguments.limit > 50
-        ? { ...message.arguments, limit: 50 } : message.arguments;
+      const { __workflowObservation: _workflowObservation, ...forwardedArguments } = message.arguments;
+      const args = message.name === "mcp__codex_app__list_threads" && forwardedArguments.limit > 50
+        ? { ...forwardedArguments, limit: 50 } : forwardedArguments;
       await transition(request, "dispatched");
       // Persist the actual return immediately, even if a concurrent transport write is pending.
       const pending = Promise.resolve().then(() => tools[message.name](args)).then(

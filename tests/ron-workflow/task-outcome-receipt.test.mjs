@@ -19,7 +19,7 @@ const input = {
   requestIdentity: "dispatch:2",
   taskRef: { threadId: "thread-90", hostId: "local" },
   producer: {
-    name: "codex-host",
+    name: "codex-workflow-tasks",
     revision: "a".repeat(40),
     packageVersion: "b".repeat(64),
   },
@@ -60,6 +60,12 @@ test("task outcome receipt is versioned, exact, compact and identity-bound", () 
 test("task outcome receipt rejects payload fields and oversize locator text before publication", () => {
   const receipt = createTaskOutcomeReceipt(input);
   assert.throws(() => validateTaskOutcomeReceipt({ ...receipt, workerOutput: "do this" }), /unknown field workerOutput/u);
+  assert.throws(() => createTaskOutcomeReceipt({ ...input,
+    producer: { ...input.producer, name: "codex-host" } }), /trusted workflow adapter/iu);
+  assert.throws(() => createTaskOutcomeReceipt({ ...input, evidence: [{
+    kind: "tracker-completion", locator: "github-issue://I_issue/comment/IC_done",
+    digest: "sha256:" + "7".repeat(64),
+  }] }), /exact candidate/iu);
   assert.throws(() => createTaskOutcomeReceipt({ ...input, effects: { pending: ["run these instructions"], accepted: [] } }),
     /effects\.pending/iu);
   assert.throws(() => createTaskOutcomeReceipt({ ...input, nativeRevision: "raw-host-cursor" }), /opaque digest/u);

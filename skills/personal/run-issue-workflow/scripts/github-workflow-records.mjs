@@ -24,7 +24,8 @@ export function readWorkflowRecords(comments) {
     let record;
     try { record = JSON.parse(blocks[0][1]); } catch { throw new Error("Malformed workflow record JSON"); }
     if (!kinds.has(record?.kind) || !comment.node_id) throw new Error("Malformed workflow record identity or kind");
-    return [{ identity: comment.node_id, bodySha256: bodyDigest(comment.body), record }];
+    return [{ identity: comment.node_id, bodySha256: bodyDigest(comment.body),
+      createdAt: comment.created_at ?? null, record }];
   });
 }
 

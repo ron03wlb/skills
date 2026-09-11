@@ -2,6 +2,7 @@ import { validateCloseWaitEvidence } from "./run-target-writer-wait.mjs";
 import { validateRecoveryIntent, sameRecoveryTask, nextRepairWave, nextMaintenanceWave } from "./recovery-evidence.mjs";
 import { validateModelPolicy, validateModelSetting } from "./issue-model-policy.mjs";
 import { validateTaskOutcomeReceipt } from "./task-outcome-receipt.mjs";
+import { validateDeliveryProgress } from "./delivery-progress.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;
@@ -31,6 +32,7 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "execution.uncertain",
   "execution.exhausted",
   "task.outcome",
+  "delivery.observed",
   "retry.recorded",
   "remediation.recorded",
   "repository-close-wait.started",
@@ -68,6 +70,8 @@ const eventFields = new Map([
   ["execution.uncertain", new Set(["type", "at", "issueId", "startSequence", "reason"])],
   ["execution.exhausted", new Set(["type", "at", "issueId", "consumedMs"])],
   ["task.outcome", new Set(["type", "at", "receipt"])],
+  ["delivery.observed", new Set(["type", "at", "issueId", "operationId", "stage", "disposition", "sourceAt",
+    "owner", "evidenceIdentity", "requestIdentity", "blockingPredicate"])],
   ["retry.recorded", new Set([
     "type", "at", "issueId", "attempt", "reason", "priorTaskRef", "replacement",
   ])],
@@ -287,6 +291,9 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       break;
     case "task.outcome":
       validateTaskOutcomeReceipt(event.receipt);
+      break;
+    case "delivery.observed":
+      validateDeliveryProgress(event);
       break;
     case "retry.recorded":
       requireText(event.issueId, "retry issueId");
@@ -552,6 +559,9 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     const previousProgress = previous?.receipt.progress;
     const currentProgress = event.receipt.progress;
     const terminalDispositions = new Set(["SUCCEEDED", "FAILED"]);
+    const terminalCandidateEnrichment = previous && terminalDispositions.has(previous.receipt.disposition)
+      && event.receipt.disposition === previous.receipt.disposition
+      && previous.receipt.candidate === null && event.receipt.candidate !== null;
     const accepted = new Set(event.receipt.effects.accepted);
     const pending = new Set(event.receipt.effects.pending);
     const effectRegressed = previous && (previous.receipt.effects.accepted.some(identity => !accepted.has(identity))
@@ -570,11 +580,33 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       || previous && (Date.parse(event.at) < Date.parse(previous.at)
         || currentProgress.executionStartedAt !== previousProgress.executionStartedAt
         || progressRegressed
-        || terminalDispositions.has(previous.receipt.disposition)
+        || terminalDispositions.has(previous.receipt.disposition) && !terminalCandidateEnrichment
         || previous.receipt.candidate !== null && event.receipt.candidate !== previous.receipt.candidate
         || effectRegressed || staleRunning)
       || events.some(item => item.type === "task.outcome" && item.receipt.identity === event.receipt.identity)) {
       throw new TypeError("Task outcome receipt differs from its Run, Issue, task, phase, package, prior identity, or monotonic settlement");
+    }
+  }
+  if (event.type === "delivery.observed") {
+    const grant = events.find(item => item.type === "grant.recorded");
+    const dispatch = events.find(item => item.type === "dispatch.recorded" && item.issueId === event.issueId);
+    const sameOperation = events.filter(item => item.type === "delivery.observed"
+      && item.issueId === event.issueId && item.operationId === event.operationId);
+    const eligibilityTransition = ["CLOSE_ELIGIBLE", "CLOSE_INELIGIBLE"].includes(event.stage);
+    const priorEligibility = sameOperation.filter(item =>
+      ["CLOSE_ELIGIBLE", "CLOSE_INELIGIBLE"].includes(item.stage)).at(-1);
+    const duplicate = eligibilityTransition ? priorEligibility?.stage === event.stage
+      && priorEligibility.evidenceIdentity === event.evidenceIdentity
+      && priorEligibility.requestIdentity === event.requestIdentity
+      && priorEligibility.blockingPredicate === event.blockingPredicate
+      : sameOperation.some(item => item.stage === event.stage && item.evidenceIdentity === event.evidenceIdentity
+        && item.requestIdentity === event.requestIdentity && item.blockingPredicate === event.blockingPredicate);
+    const terminal = events.find(item => item.type === "task.outcome" && item.receipt.issueId === event.issueId
+      && item.receipt.operationId === event.operationId && ["SUCCEEDED", "FAILED"].includes(item.receipt.disposition));
+    const needsTerminal = ["NATIVE_TERMINAL_OBSERVED", "EVIDENCE_VALIDATED", "CLOSE_ELIGIBLE"].includes(event.stage);
+    if (!grant || !dispatch || duplicate || needsTerminal && !terminal
+      || Date.parse(event.sourceAt) > Date.parse(event.at)) {
+      throw new TypeError("Delivery progress lacks its Grant, unique source evidence, or observed prerequisite");
     }
   }
   if (event.type === "retry.recorded") {

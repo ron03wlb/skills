@@ -10,6 +10,7 @@ import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
 import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 const readOpenIssueState = async issueId => ({ issueId, state: "OPEN" });
 
 test("close submission refreshes tracker after delayed native history and skips an Issue closed during that read", async () => {
@@ -39,7 +40,10 @@ test("close submission refreshes tracker after delayed native history and skips 
       if (stateAfterRead === "CLOSED") {
         assert.deepEqual(result, { reconcileRequired: true, reasonCode: "issue_already_closed", issueId: "I_1" });
         assert.equal(existsSync(join(root, ".git", "matt-workflow-control", "runs", "run")), false, "a skipped close creates no receipt or Run authority");
-      } else assert.equal(result, undefined, "missing native final still permits the remaining close for an open Issue with physical cleanup proved");
+      } else {
+        assert.equal(result.accepted, true, "missing native final still permits the remaining close for an open Issue with physical cleanup proved");
+        assert.match(result.acceptedAt, /^2026-/u);
+      }
     } finally { finishRead(); rmSync(root, { recursive: true, force: true }); }
   }
 });
@@ -972,7 +976,7 @@ test("five minutes without verified task progress emits one attributed escalatio
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test("verified cursor change resets the five-minute no-progress clock", async () => {
+test("cursor-only heartbeat change does not reset the five-minute no-progress clock", async () => {
   const ref = { threadId: "worker", hostId: "local" };
   let clockMs = 0, cursor = "c1", historyReads = 0;
   const tasks = createCodexWorkflowTasks({ noProgressLimitMs: 300_000,
@@ -987,16 +991,36 @@ test("verified cursor change resets the five-minute no-progress clock", async ()
   await tasks.wait([ref]);
   clockMs = 500_000;
   await tasks.wait([ref]);
+  assert.equal(historyReads, 1);
+});
+
+test("a discriminating native revision resets the five-minute no-progress clock", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  let clockMs = 0, cursor = "c1", event = "heartbeat", historyReads = 0;
+  const tasks = createCodexWorkflowTasks({ noProgressLimitMs: 300_000,
+    now: () => new Date(Date.parse("2026-09-11T00:00:00.000Z") + clockMs).toISOString(),
+    project: {}, packageRoot: "/installed", host: { async call(name) {
+      if (name.endsWith("wait_threads")) return { polls: [{ threadId: ref.threadId, cursor, status: "running", event }] };
+      historyReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] };
+    } } });
+  await tasks.wait([ref]);
+  clockMs = 250_000; cursor = "c2"; event = "progress";
+  await tasks.wait([ref]);
+  clockMs = 500_000; event = "heartbeat";
+  await tasks.wait([ref]);
   assert.equal(historyReads, 0);
 });
 
-test("completion reconciliation validates the journaled native settlement without full task history", async () => {
+test("completion reconciliation re-observes native settlement and emits a candidate-bound receipt without full history", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-compact-read-"));
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
     target: "features/ron", classification: "SINGLE", decompositionIdentity: null };
   const ref = { threadId: "worker-90", hostId: "local" };
-  const operationId = "workflow-op-v1-" + "2".repeat(64);
+  const repositoryId = "github:ron03wlb/skills";
+  const operationId = deriveExecuteIssueOperationIdentity({ repositoryId, specId: runIdentity.specId,
+    approvedPublicationIdentity: runIdentity.approvedScopeHash, issueId: "I_90" }).key;
   const writer = store.acquireWriter(runIdentity.runId);
   writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity });
   const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z", issueId: "I_90", attempt: 1, taskRef: ref });
@@ -1004,7 +1028,7 @@ test("completion reconciliation validates the journaled native settlement withou
     phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref });
   const receipt = createTaskOutcomeReceipt({ runId: runIdentity.runId, issueId: "I_90", operationId,
     requestIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref,
-    producer: { name: "codex-host", revision: "unavailable", packageVersion: "unavailable" },
+    producer: { name: "codex-workflow-tasks", revision: "unavailable", packageVersion: "unavailable" },
     phase: "IMPLEMENTATION", disposition: "SUCCEEDED", candidate: null,
       evidence: [{ kind: "native-settlement", locator: "codex-task://local/worker-90?revision=sha256:" + "5".repeat(64),
       digest: "sha256:" + "3".repeat(64) }], effects: { pending: [], accepted: [] }, failureFingerprint: null,
@@ -1013,13 +1037,20 @@ test("completion reconciliation validates the journaled native settlement withou
       maxEncodedResponseBytes: 1_048_576, fullHistoryReads: 0, maxFullHistoryReads: 4 }, nativeRevision: "sha256:" + "5".repeat(64) });
   writer.append({ type: "task.outcome", at: "2026-09-11T00:04:01.000Z", receipt });
   writer.release();
-  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, project: {}, packageRoot: "/installed",
-    host: { async call() { throw new Error("journaled normal completion must not read native history"); } } });
+  let compactReads = 0;
+  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId, project: {}, packageRoot: "/installed",
+    host: { async call(name, args) {
+      assert.equal(name, "mcp__codex_app__read_thread"); assert.equal(args.includeOutputs, false); compactReads += 1;
+      return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "completed" } },
+        turns: [{ id: "settled", status: "completed" }] };
+    } } });
   try {
     const state = await tasks.read(ref, { runId: runIdentity.runId,
       completion: { issueId: "I_90", operationId, candidate: "a".repeat(40) } });
     assert.equal(state.state, "RESUMABLE");
-    assert.equal(state.outcomeReceipt.identity, receipt.identity);
+    assert.equal(state.outcomeReceipt.candidate, "a".repeat(40));
+    assert.notEqual(state.outcomeReceipt.identity, receipt.identity);
+    assert.equal(compactReads, 1);
     await assert.rejects(tasks.read(ref, { runId: runIdentity.runId,
       completion: { issueId: "I_90", operationId: "workflow-op-v1-" + "4".repeat(64), candidate: "a".repeat(40) } }),
     /completion.*receipt.*differs/iu);
