@@ -508,6 +508,47 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     assert.deepEqual(stepReentryFailure.runs[0].workflowRuntime.packageVersion, installedDuringStepReentry.version);
     assert.equal(stepReentryFailure.runs[0].workflowRuntime.packageRoot, installedDuringStepReentry.root);
     assert.match(stepReentryFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenterOnStep: false };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  return {
+    specId,
+    async run({ mode }) {
+      if (mode === "step" && fixtureState.reenterOnStep) {
+        fixtureState.reenterOnStep = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "recursive selection failure fixture");
+    const beforeSelectionFailure = f.install();
+    f.addCompleted(4, false, true, beforeSelectionFailure.version);
+    const beforeSelectionComposition = await import(pathToFileURL(join(beforeSelectionFailure.root, scriptsPath, "codex-workflow.mjs")).href);
+    beforeSelectionComposition.fixtureState.reenterOnStep = true;
+    let selectedImportFailure;
+    f.host.installCurrent = () => {
+      writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), 'throw new Error("Fixture renewed package import failed");\n');
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed package import failure fixture");
+      selectedImportFailure = f.install();
+    };
+    const selectionFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
+      specIds: ["4"], maxWorkers: 1 });
+    assert.equal(selectionFailure.state, "PRESERVED");
+    assert.match(selectionFailure.runs[0].error, /Fixture renewed package import failed/u, JSON.stringify(selectionFailure));
+    assert.ok(selectedImportFailure, "the recursive selection reaches the renewed package before import fails");
+    assert.deepEqual(selectionFailure.runs[0].workflowRuntime.packageVersion, selectedImportFailure.version);
+    assert.equal(selectionFailure.runs[0].workflowRuntime.packageRoot, selectedImportFailure.root);
+    assert.match(selectionFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
   } finally { f.close(); }
 });
 

@@ -9,7 +9,8 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
   let cursor = 0;
   const observe = async lane => {
     try { statuses.set(lane.specId, await lane.run({ mode: "snapshot" })); }
-    catch (error) { statuses.set(lane.specId, { ...statuses.get(lane.specId), workflowRuntime: lane.workflowRuntime,
+    catch (error) { statuses.set(lane.specId, { ...statuses.get(lane.specId),
+      workflowRuntime: error.workflowRuntime ?? lane.workflowRuntime ?? statuses.get(lane.specId)?.workflowRuntime,
       capacityUnknown: true, run: { state: "UNAVAILABLE", specId: lane.specId }, error: error.message }); }
   };
   while (connected()) {
@@ -30,7 +31,7 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
         progressed = true;
       } catch (error) {
         // Unknown task creation outcomes are reconciled on the next observation, never repeated here.
-        statuses.set(lane.specId, { ...status, workflowRuntime: lane.workflowRuntime ?? status.workflowRuntime,
+        statuses.set(lane.specId, { ...status, workflowRuntime: error.workflowRuntime ?? lane.workflowRuntime ?? status.workflowRuntime,
           capacityUnknown: true, run: { ...status.run, state: "UNAVAILABLE" }, error: error.message });
       }
     }
