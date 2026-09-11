@@ -340,21 +340,31 @@ test("selected batch close failures retain runtime evidence and finish lane clea
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const closes = [];
+export const calls = [];
 export const fixtureState = { reenter: false };
 export async function prepareCodexWorkflow({ specId, host }) {
+  let closed = false;
+  let done = false;
   return {
     specId,
-    async run() {
-      if (fixtureState.reenter) {
+    async run({ mode }) {
+      calls.push(specId + ":" + mode + ":" + closed);
+      if (done) return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      if (mode === "step" && fixtureState.reenter && specId === "I_1") {
         fixtureState.reenter = false;
         host.installCurrent();
         return { run: { state: "EXECUTING", specId, runId: "fixture-reentry-run" },
           diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
       }
-      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      if (mode === "step") {
+        done = true;
+        return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      }
+      return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
     },
     async close() {
       closes.push(specId);
+      closed = true;
       if (specId === "I_1") throw new Error("Fixture selected lane close failed");
     },
   };
@@ -443,6 +453,7 @@ await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-clos
     );
 
     composition.closes.splice(0);
+    composition.calls.splice(0);
     composition.fixtureState.reenter = true;
     let installedDuringReentry;
     f.host.installCurrent = () => {
@@ -451,12 +462,15 @@ await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-clos
       installedDuringReentry = f.install();
     };
     const reentryFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
-      specIds: ["1"], maxWorkers: 1 });
+      specIds: ["1", "2"], maxWorkers: 1 });
     assert.equal(reentryFailure.state, "PRESERVED");
     assert.match(reentryFailure.runs[0].error, /Fixture selected lane close failed/u);
     assertRuntime(reentryFailure.runs[0]);
     assert.ok(installedDuringReentry, "the lane reaches its runtime re-entry close boundary");
-    assert.deepEqual(composition.closes, ["I_1"], "final batch cleanup cannot repeat an uncertain re-entry close effect");
+    assert.deepEqual(composition.calls,
+      ["I_1:snapshot:false", "I_2:snapshot:false", "I_1:step:false", "I_2:step:false", "I_2:snapshot:false"],
+      "another progressing lane must not let the next connected round overwrite a close rejection");
+    assert.deepEqual(composition.closes, ["I_1", "I_2"], "final batch cleanup cannot repeat an uncertain re-entry close effect");
 
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
