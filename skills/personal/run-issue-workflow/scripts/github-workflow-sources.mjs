@@ -637,7 +637,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           taskRefs[issue.node_id] = recoveryTransfer?.taskRef ?? originalTaskRef;
         }
       }
-      if (completion) {
+      if (completion && originalTaskRef) {
         const receipt = task?.outcomeReceipt;
         const terminalReceipt = receipt?.disposition === "SUCCEEDED"
           && receipt.candidate === completion.record.candidate ? receipt : null;
