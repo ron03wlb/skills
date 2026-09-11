@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 import { createIssueExecutionBudgetController } from "./issue-execution-budget.mjs";
 import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
-import { bindTechnicalFailure, nextRecoveryPhase, nextRepairWave, nextMaintenanceWave, recoveryDigest, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
+import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, recoveryDigest, routeTechnicalRecovery, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
 import { validateModelPolicy } from "./issue-model-policy.mjs";
 
 import { DEFAULT_MAX_PARALLEL, validateWorkflowVersion, sameWorkflowVersion } from "./run-journal.mjs";
@@ -65,6 +65,21 @@ const MUTATING_ACTION_TYPES = new Set([
   "settle_pause",
   "settle_stop",
 ]);
+
+export function persistTaskOutcomeReceipts({ writer, journal, receipts, now }) {
+  if (!Array.isArray(journal) || !Array.isArray(receipts) || typeof now !== "function") {
+    throw new TypeError("Task outcome persistence requires the current journal, receipt list, and clock");
+  }
+  const retained = new Set(journal.filter(event => event.type === "task.outcome").map(event => event.receipt.identity));
+  let appended = 0;
+  for (const receipt of receipts) {
+    if (retained.has(receipt.identity)) continue;
+    writer.append({ type: "task.outcome", at: now(), receipt });
+    retained.add(receipt.identity);
+    appended += 1;
+  }
+  return appended;
+}
 
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isTaskRef = (value) => value && isText(value.threadId) && isText(value.hostId);
@@ -657,8 +672,9 @@ export function createCoordinator({
     const monotonicStartedAt = monotonicNow();
     const failure = bindTechnicalFailure(action.failure);
     const journal = store.readEvents(current.runIdentity.runId);
-    const phase = nextRecoveryPhase(failure);
-    if (!phase) throw new Error(`Recovery requires the ${failure.diagnosis.classification} owner: ${failure.diagnosis.reason}`);
+    const route = routeTechnicalRecovery(failure);
+    const phase = route.phase;
+    if (!phase) throw new Error(`Recovery requires ${route.owner} for ${route.disposition}: ${failure.diagnosis.reason}`);
     const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === action.issueId)?.taskRef;
     if (!isTaskRef(originalTaskRef) || !sameRecoveryTask(originalTaskRef, failure.ownerTaskRef)) throw new Error("Recovery original task identity is unproved");
     let intent = journal.findLast(event => event.type === "recovery.intent" && event.failure.identity === failure.identity && event.phase === phase);
@@ -1529,6 +1545,8 @@ export function createCoordinator({
             const remainingMs = executionBudgets.remainingMs({ runId: runIdentity.runId,
               issueIds: lastStatus.frontier.active });
             const waited = await tasks.wait(activeTaskRefs, remainingMs === null ? undefined : { timeoutMs: remainingMs });
+            persistTaskOutcomeReceipts({ writer, journal: store.readEvents(runIdentity.runId),
+              receipts: waited?.observation?.receipts ?? [], now });
             if (waited?.coordinatorActive === false) return lastStatus;
             if (waited?.observation?.signal === "deadline") return lastStatus;
             continue;

@@ -1,0 +1,25 @@
+# Issue 90 compact recovery and continuation
+
+**Goal:** Deliver Issue 90's compact producer-to-coordinator evidence, deterministic recovery ownership, progress-based diagnosis, and independent same-Run continuation without weakening existing authority or closeout rules.
+**Why planning is required:** The change alters public workflow contracts and crosses tracker, native Codex host, Git ownership, recovery, scheduling, and evidence boundaries.
+**Acceptance:** Satisfy AC-1 through AC-10 from Issue 90 against target `features/ron`; preserve the six-hour execution and ten-wave repair budgets, accepted-effect ownership, successful integration, repository-close then target-writer ordering, and maxWorkers 1-3. Normal completion performs no full-history read, every encoded native response and compact receipt has an explicit total byte bound, and exceptional evidence reads are exact and bounded. Stop on changed scope/authority, contradictory ownership, unclassified evidence without a scoped diagnosis, unavailable required capability, or exhausted budget. Keep all source and plan changes in the Issue worktree; do not install, integrate, remove the worktree, push, deploy, or close the Issue.
+
+### Outcome 1: Compact, verifiable producer and native outcomes
+- Work: Add one versioned allowlisted outcome representation at the existing tracker/native adapter seams, binding Run, Issue, operation, request, task, package, phase/disposition, candidate/evidence locators and digests, effects, failure fingerprint, meaningful-progress timestamps, and cumulative budgets. Enforce a total encoded response limit in `codex-host-driver.js` and the task adapter; return attributable unsupported/missing-evidence metadata on overflow. Persist only compact identity/progress through the existing Run journal, retaining complete logs and review evidence at their current owners. Covers AC-1, AC-6, AC-9.
+- Risks/open questions: Native result shapes differ across event wait and fallback reads; receipt validation must fail closed without treating worker prose or arbitrary payloads as authority.
+- Verify: `node --test tests/ron-workflow/codex-host-driver.test.mjs tests/ron-workflow/codex-workflow-tasks.test.mjs tests/ron-workflow/github-workflow-sources.test.mjs`
+
+### Outcome 2: Exhaustive owner routing and progress-based diagnosis
+- Work: Extend the existing recovery evidence and coordinator seams with explicit known dispositions plus `UNCLASSIFIED`, exact producer correction and lost-ACK read-back, one matching maintenance owner, and a durable 300-second no-meaningful-progress escalation per stage/fingerprint. Heartbeats, repeated receipts, new tasks, and elapsed time are not progress; discriminating evidence, narrower reproduction, verified repair, or a completed unsatisfied stage are. Preserve active healthy verification and original pending effects. Covers AC-2, AC-3, AC-4, AC-6, AC-9.
+- Risks/open questions: Escalation must change the next diagnostic method without cancelling a live native call, duplicating probes, or creating a second writer.
+- Verify: `node --test tests/ron-workflow/recovery-evidence.test.mjs tests/ron-workflow/technical-recovery-lifecycle.test.mjs tests/ron-workflow/run-issue-workflow-recovery.test.mjs tests/ron-workflow/run-issue-workflow-coordinator.test.mjs`
+
+### Outcome 3: Resume the original Run independently from compact evidence
+- Work: Validate native settlement separately from completion receipts, remove ordinary full-history dependency, preserve partial close/integration state, and record completion publication, terminal recognition, evidence validation, close eligibility, dispatch intent/native acceptance, lease acquisition, and completion as distinct attributable timestamps/dispositions. Schedule each eligible Issue without a whole-frontier barrier while preserving shared-writer gates and parent-last behavior. Covers AC-1, AC-5, AC-7, AC-8, AC-9, AC-10.
+- Risks/open questions: Mutable target/tracker/worktree/lease predicates remain fresh close-owner inputs and must not be frozen into the compact producer receipt.
+- Verify: `node --test tests/ron-workflow/integration-verification.test.mjs tests/ron-workflow/close-conflict-recovery.test.mjs tests/ron-workflow/run-issue-workflow-batch.test.mjs tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs`
+
+### Outcome 4: Contract, documentation, and complete verification
+- Work: Update affected English `run-issue-workflow`, `execute-issue`, and `close-issue` owner instructions and public docs. Keep `workflowArtifacts` limited to this required plan. Run syntax checks, focused suites, configured checks, the repository full suite, exact-range diff validation, and independent Standards and Spec review; repair every confirmed in-scope finding within the cumulative budget.
+- Risks/open questions: Component tests do not establish Issue 91's later installed timing qualification; do not claim installed latency or unattended reliability here.
+- Verify: `node --test tests/ron-workflow/*.test.mjs`

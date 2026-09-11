@@ -9,6 +9,16 @@ import { createCodexCloseReceipts, createCodexMessageReceipts } from "./codex-cl
 import { completedCloseCleanup } from "./close-continuation.mjs";
 import { modelEvidenceDigest, validateModelDecision, validateModelPolicy, astraSetting, confirmedModelUnavailable, creationUnavailable } from "./issue-model-policy.mjs";
 import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
+import { deriveExecuteIssueOperationIdentity } from "./workflow-operation-identity.mjs";
+import {
+  MAX_HISTORY_READS,
+  MAX_HISTORY_RESPONSE_BYTES,
+  MAX_HOST_ENCODED_RESPONSE_BYTES,
+  createTaskOutcomeReceipt,
+  encodedBytes,
+  responseBudgetError,
+  validateTaskOutcomeReceipt,
+} from "./task-outcome-receipt.mjs";
 
 export function unwrapCodexResult(result) {
   if (result?.isError) throw Object.assign(new Error(result.content?.find(({ type }) => type === "text")?.text ?? "Codex host tool failed"), { nativeResult: result });
@@ -23,6 +33,8 @@ const ownerHistory = snapshot => ({ ...snapshot, turns: (snapshot.turns ?? []).m
   items: (turn.items ?? []).filter(item => item.type === "userMessage" || item.type === "agentMessage" && item.phase === "final_answer"
     || item.type === "functionCallOutput" && delegatedInput(item) !== null),
 })) });
+const historyProvesSettlement = snapshot => snapshot?.turns?.[0]?.status === "completed"
+  || (snapshot?.turns?.[0]?.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer");
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 const promptIdentityFor = prompt => `sha256:${createHash("sha256").update(JSON.stringify(prompt)).digest("hex")}`;
 const uncertainNativeResult = result => [result?.type, result?.status].some(value => ["error", "failed", "response-accepted"].includes(value));
@@ -94,7 +106,9 @@ const workflowSourceBoundary = packageRoot => `Matt/Ron workflow owners and runt
 
 export function createCodexWorkflowTasks({ host, store, project, packageRoot, issueNumber, readIssueState, runId, sleep = setTimeout,
   discoverTasks = discoverLocalCodexTasks, readObservationSignal = async () => null, waitForObservationSignal,
-  monotonicNow = () => performance.now() }) {
+  monotonicNow = () => performance.now(), now = () => new Date().toISOString(), repositoryId, workflowVersion,
+  noProgressLimitMs = 300_000 }) {
+  if (!Number.isFinite(noProgressLimitMs) || noProgressLimitMs < 1) throw new TypeError("No-progress limit must be positive finite milliseconds");
   const refs = new Map();
   const cursors = new Map();
   const taskRuns = new Map();
@@ -106,6 +120,24 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   let eventWaitSupported = true;
   let hostCallCount = 0;
   let hostReturnedBytes = 0;
+  const sameTaskRef = (left, right) => left?.threadId === right?.threadId && left?.hostId === right?.hostId;
+  const taskContext = ref => {
+    if (!store?.readEvents || !runId || !repositoryId) return null;
+    const journal = store.readEvents(runId);
+    const grant = journal.find(event => event.type === "grant.recorded");
+    const dispatch = journal.findLast(event => event.type === "dispatch.recorded" && sameTaskRef(event.taskRef, ref));
+    if (!grant || !dispatch) return null;
+    const start = journal.findLast(event => event.type === "execution.started" && event.issueId === dispatch.issueId
+      && sameTaskRef(event.taskRef, ref));
+    return {
+      issueId: dispatch.issueId,
+      operationId: deriveExecuteIssueOperationIdentity({ repositoryId, specId: grant.runIdentity.specId,
+        approvedPublicationIdentity: grant.runIdentity.approvedScopeHash, issueId: dispatch.issueId }).key,
+      requestIdentity: start?.phaseIdentity ?? `dispatch:${dispatch.sequence}`,
+      phase: start?.phase ?? "IMPLEMENTATION",
+      executionStartedAt: start?.at ?? dispatch.at,
+    };
+  };
   const waitSignal = waitForObservationSignal ?? (async ({ timeoutMs }) => {
     const expiresAt = Date.now() + timeoutMs;
     for (;;) {
@@ -195,8 +227,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           ? { ...args, timeoutMs: Math.min(args.timeoutMs, Math.ceil(budgetRemaining(observationBudget))) }
           : args;
         hostCallCount += 1;
-        const result = unwrapCodexResult(await host.call(`mcp__codex_app__${name}`, effectiveArgs, owner));
-        hostReturnedBytes += JSON.stringify(result)?.length ?? 0;
+        const nativeResult = await host.call(`mcp__codex_app__${name}`, effectiveArgs, owner);
+        const nativeBytes = encodedBytes(nativeResult);
+        if (nativeBytes > MAX_HOST_ENCODED_RESPONSE_BYTES) {
+          const locator = name === "read_thread"
+            ? `codex-host://response/${encodeURIComponent(args.hostId ?? "unknown")}/${encodeURIComponent(args.threadId ?? "unknown")}`
+            : `codex-host://response/${name}`;
+          throw responseBudgetError({ operation: name, locator, encodedResponseBytes: nativeBytes });
+        }
+        const result = unwrapCodexResult(nativeResult);
+        hostReturnedBytes += encodedBytes(result);
         if (fault) recordFault({ ...fault, state: "settled", receiptRefs: fault.receiptRefs });
         if (observationBudget !== null && name === "wait_threads" && result?.timedOut) {
           observationBudget.simulatedElapsedMs += effectiveArgs.timeoutMs;
@@ -235,17 +275,22 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
   const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true, observationBudget = null } = {}) => {
     let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
       includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
+    let aggregateBytes = encodedBytes(snapshot);
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
+      if (aggregateBytes > MAX_HISTORY_RESPONSE_BYTES) throw responseBudgetError({ operation: "read_thread-history",
+        locator: `codex-host://history/${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}`,
+        encodedResponseBytes: aggregateBytes, maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES });
       if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
       if (predicate(snapshot) || !snapshot.page?.hasMore) return snapshot;
       const cursor = snapshot.page.nextCursor;
-      if (!cursor || cursorsSeen.has(cursor) || page >= 3) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
+      if (!cursor || cursorsSeen.has(cursor) || page >= MAX_HISTORY_READS - 1) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
       const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
         includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
+      aggregateBytes = encodedBytes(snapshot);
     }
   };
   const reconcileReservedMessage = async ({ ref, receipts, promptIdentity, prompt }) => {
@@ -285,6 +330,46 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     let receipt = receipts?.read();
     const messageReceipts = messageReceiptsFor(ref, ownership.runId ?? taskRuns.get(ref.threadId) ?? runId);
     let messageReceipt = messageReceipts?.read();
+    const compactEvidence = ownership.completion ?? ownership.observation;
+    if (compactEvidence && !receipt && !messageReceipt) {
+      const journal = store?.readEvents?.(ownership.runId ?? runId);
+      const latestStart = journal?.findLast(event => event.type === "execution.started"
+        && event.issueId === compactEvidence.issueId && sameTaskRef(event.taskRef, ref));
+      const retainedOutcome = journal?.findLast(event => event.type === "task.outcome"
+        && sameTaskRef(event.receipt.taskRef, ref));
+      const outcome = retainedOutcome && (!latestStart || retainedOutcome.receipt.phase === latestStart.phase
+        && retainedOutcome.receipt.requestIdentity === latestStart.phaseIdentity) ? retainedOutcome : null;
+      if (outcome) {
+        validateTaskOutcomeReceipt(outcome.receipt);
+        const expected = compactEvidence;
+        if (outcome.receipt.runId !== (ownership.runId ?? runId) || outcome.receipt.issueId !== expected.issueId
+          || outcome.receipt.operationId !== expected.operationId || !sameTaskRef(outcome.receipt.taskRef, ref)) {
+          throw new Error("Completion or observation settlement receipt differs from its Run, Issue, operation, or task");
+        }
+        if (outcome.receipt.disposition === "SUCCEEDED") {
+          return { state: "RESUMABLE", outcomeReceipt: outcome.receipt,
+            inactiveEvidence: outcome.receipt.evidence.map(item => item.locator),
+            snapshot: { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } }, turns: [] } };
+        }
+        if (outcome.receipt.disposition === "RUNNING") {
+          return { state: "RUNNING", outcomeReceipt: outcome.receipt,
+            snapshot: { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "active" } }, turns: [] } };
+        }
+      } else {
+        const snapshot = await call("read_thread", { ...ref, turnLimit: 1, includeOutputs: false,
+          maxOutputCharsPerItem: 1000 }, { interruptible, observationBudget });
+        if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) {
+          throw new Error("Compact task snapshot identity differs");
+        }
+        const type = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
+        const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
+        if (["active", "running"].includes(type)) return { state: "RUNNING", snapshot, cwd: snapshot.thread.cwd };
+        if (type === "completed" || ["idle", "notloaded"].includes(type) && latestTurnStatus === "completed") {
+          return { state: "RESUMABLE", snapshot, cwd: snapshot.thread.cwd,
+            inactiveEvidence: [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
+        }
+      }
+    }
     const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
       { latestOnly: Boolean(receipt || messageReceipt), interruptible, observationBudget });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
@@ -483,6 +568,70 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
     throw new Error("TASK_SETUP_PENDING: retain the accepted creation intent and resume after host setup");
   };
+  const safeObservation = observation => ({
+    status: observation.status,
+    event: observation.event ?? null,
+    cursor: observation.cursor ?? null,
+    error: Boolean(observation.error),
+  });
+  const observationDigest = observation => `sha256:${createHash("sha256")
+    .update(JSON.stringify(safeObservation(observation))).digest("hex")}`;
+  const nativeRevision = observation => observation.cursor
+    ? `sha256:${createHash("sha256").update(String(observation.cursor)).digest("hex")}` : null;
+  const progressDigest = ({ status, revision }) => `sha256:${createHash("sha256")
+    .update(JSON.stringify({ status, revision })).digest("hex")}`;
+  const outcomeReceipt = ({ ref, observation, disposition, evidenceKind, historyReads = 0,
+    observedAt = now(), lastVerifiedProgressAt = observedAt, evidenceLocator, evidenceDigest: suppliedEvidenceDigest,
+    failureFingerprint: suppliedFailureFingerprint, encodedResponseBytes, maxEncodedResponseBytes }) => {
+    const context = taskContext(ref);
+    if (!context) return null;
+    const boundedObservation = safeObservation(observation);
+    const evidenceDigest = suppliedEvidenceDigest ?? observationDigest(observation);
+    const revision = nativeRevision(observation);
+    const closeReceipt = receiptsFor(ref)?.read();
+    const messageReceipt = messageReceiptsFor(ref)?.read();
+    const effects = [closeReceipt, messageReceipt].filter(Boolean).reduce((result, receipt) => {
+      const identity = receipt.promptIdentity ?? receipt.requestIdentity;
+      if (identity) result[receipt.accepted ? "accepted" : "pending"].push(identity);
+      return result;
+    }, { pending: [], accepted: [] });
+    return createTaskOutcomeReceipt({
+      runId,
+      issueId: context.issueId,
+      operationId: context.operationId,
+      requestIdentity: context.requestIdentity,
+      taskRef: ref,
+      producer: {
+        name: "codex-host",
+        revision: workflowVersion?.sourceCommit ?? "unavailable",
+        packageVersion: workflowVersion?.id ?? "unavailable",
+      },
+      phase: context.phase,
+      disposition,
+      candidate: null,
+      evidence: [{
+        kind: evidenceKind,
+        locator: evidenceLocator ?? `codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}${revision ? `?revision=${revision}` : ""}`,
+        digest: evidenceDigest,
+      }],
+      effects,
+      failureFingerprint: ["FAILED", "NEEDS_ATTENTION", "UNKNOWN", "RESPONSE_BUDGET_EXCEEDED"].includes(disposition)
+        ? suppliedFailureFingerprint ?? evidenceDigest : null,
+      progress: {
+        executionStartedAt: context.executionStartedAt,
+        lastVerifiedProgressAt,
+        terminalObservedAt: disposition === "SUCCEEDED" || disposition === "FAILED" ? observedAt : null,
+      },
+      budget: {
+        encodedResponseBytes: encodedResponseBytes ?? encodedBytes(boundedObservation),
+        maxEncodedResponseBytes: maxEncodedResponseBytes ?? MAX_HOST_ENCODED_RESPONSE_BYTES,
+        fullHistoryReads: historyReads,
+        maxFullHistoryReads: MAX_HISTORY_READS,
+      },
+      nativeRevision: revision,
+    });
+  };
+  const needsEffectReadBack = ref => Boolean(receiptsFor(ref)?.read() || messageReceiptsFor(ref)?.read());
   return {
     findIssueLane, create, read,
     executionStartEvidence(ref) { return executionStartEvidence.get(ref?.threadId) ?? "OBSERVED"; },
@@ -788,6 +937,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const batchKey = batch.map(({ threadId, hostId }) => `${hostId}:${threadId}`).join("|");
       const callsBefore = hostCallCount, bytesBefore = hostReturnedBytes;
       let fullHistoryReads = 0;
+      const changed = [];
+      const receipts = [];
       const interrupted = (mode, signal) => ({ coordinatorActive: !host.disconnected, taskSettled: false,
         observation: { kind: "interrupted", mode, signal: signal.control ? "control" : "deadline", batchSize: batch.length,
           fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
@@ -800,6 +951,42 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           throw error;
         }
       };
+      const observeRunningProgress = async ({ ref, observation, semantic, previous }) => {
+        const observedAt = now();
+        const signature = progressDigest({ status: observation.status, revision: nativeRevision(observation) });
+        const context = taskContext(ref);
+        const retained = previous ? null : store?.readEvents?.(runId).findLast(event => event.type === "task.outcome"
+          && sameTaskRef(event.receipt.taskRef, ref) && (!context || event.receipt.requestIdentity === context.requestIdentity));
+        const priorSignature = previous?.progressSignature ?? (retained ? progressDigest({
+          status: observation.status, revision: retained.receipt.nativeRevision,
+        }) : null);
+        const lastVerifiedProgressAt = previous?.lastVerifiedProgressAt ?? retained?.receipt.progress.lastVerifiedProgressAt;
+        const alreadyEscalated = previous?.stallEscalated === true || retained?.receipt.disposition === "NEEDS_ATTENTION";
+        if (!priorSignature || priorSignature !== signature) {
+          taskObservations.set(ref.threadId, { semantic, settled: false, closeRequestIdentity: previous?.closeRequestIdentity,
+            progressSignature: signature, lastVerifiedProgressAt: observedAt, stallEscalated: false });
+          const receipt = outcomeReceipt({ ref, observation, disposition: "RUNNING", evidenceKind: "native-progress", observedAt });
+          if (receipt) receipts.push(receipt);
+          return null;
+        }
+        const elapsedMs = Date.parse(observedAt) - Date.parse(lastVerifiedProgressAt);
+        if (!alreadyEscalated && Number.isFinite(elapsedMs) && elapsedMs >= noProgressLimitMs) {
+          const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
+          if (stateAttempt.interruption) return stateAttempt.interruption;
+          fullHistoryReads += 1;
+          taskObservations.set(ref.threadId, { semantic, settled: false,
+            closeRequestIdentity: stateAttempt.value.closeRequest?.requestIdentity ?? previous?.closeRequestIdentity,
+            progressSignature: signature, lastVerifiedProgressAt, stallEscalated: true });
+          if (!changed.some(item => item.threadId === ref.threadId)) changed.push({ threadId: ref.threadId, state: "stalled" });
+          const receipt = outcomeReceipt({ ref, observation, disposition: "NEEDS_ATTENTION", evidenceKind: "native-attention",
+            historyReads: 1, observedAt, lastVerifiedProgressAt });
+          if (receipt) receipts.push(receipt);
+          return null;
+        }
+        taskObservations.set(ref.threadId, { semantic, settled: false, closeRequestIdentity: previous?.closeRequestIdentity,
+          progressSignature: signature, lastVerifiedProgressAt, stallEscalated: alreadyEscalated });
+        return null;
+      };
       if (eventWaitSupported) {
         const before = await readObservationSignal();
         if (before?.control || before?.deadline) return interrupted(mode, before);
@@ -808,13 +995,29 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             { interruptible: true, observationBudget });
         } catch (error) {
           if (error.observationSignal) return interrupted(mode, error.observationSignal);
+          if (error.code === "NATIVE_RESPONSE_BUDGET_EXCEEDED") {
+            const overflowReceipts = batch.map(ref => outcomeReceipt({ ref,
+              observation: { status: "unknown", event: "response-budget-exceeded", error: true },
+              disposition: "RESPONSE_BUDGET_EXCEEDED", evidenceKind: "missing-evidence",
+              evidenceLocator: error.missingEvidence.locator, evidenceDigest: error.missingEvidence.digest,
+              failureFingerprint: error.failureFingerprint, encodedResponseBytes: error.encodedResponseBytes,
+              maxEncodedResponseBytes: error.maxEncodedResponseBytes })).filter(Boolean);
+            for (const ref of batch) taskObservations.set(ref.threadId, {
+              semantic: JSON.stringify({ status: "unknown", terminal: false, attention: true, error: true }),
+              settled: false, stallEscalated: true,
+            });
+            return { coordinatorActive: !host.disconnected, taskSettled: false,
+              observation: { kind: "changed", mode, batchSize: batch.length,
+                changed: batch.map(({ threadId }) => ({ threadId, state: "response-budget-exceeded" })),
+                receipts: overflowReceipts, fullHistoryReads, returnedBytes: error.encodedResponseBytes,
+                nativeCalls: hostCallCount - callsBefore, modelRoundTrips: "unavailable", tokens: "unavailable" } };
+          }
           if (!/unsupported.*wait_threads|wait_threads.*(?:unsupported|not available)/iu.test(error.message)) throw error;
           eventWaitSupported = false;
         }
         const after = await readObservationSignal();
         if (after?.control || after?.deadline) return interrupted(mode, after);
       }
-      const changed = [];
       if (!eventWaitSupported) {
         mode = "fallback";
         const round = fallbackRounds.get(batchKey) ?? 0;
@@ -832,20 +1035,44 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           const snapshot = snapshotAttempt.value;
           if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task snapshot identity differs");
           const status = String(snapshot.thread.status?.type ?? "unknown").toLowerCase();
-          const terminal = ["idle", "notloaded", "completed", "failed", "error"].includes(status);
+          const latestTurnStatus = String(snapshot.turns?.[0]?.status ?? "unknown").toLowerCase();
+          const compactCompleted = status === "completed" || ["idle", "notloaded"].includes(status) && latestTurnStatus === "completed";
+          const terminal = compactCompleted || ["failed", "error"].includes(status);
           const attention = status === "needs_attention";
-          const anomaly = status === "unknown";
-          const semantic = JSON.stringify({ status, terminal, attention });
+          const anomaly = status === "unknown" || ["idle", "notloaded"].includes(status) && !compactCompleted;
+          const exceptional = anomaly || attention || ["failed", "error"].includes(status) || terminal && needsEffectReadBack(ref);
+          const semantic = JSON.stringify({ status, terminal, attention, latestTurnStatus });
           const previous = taskObservations.get(ref.threadId);
           if (previous !== undefined && previous.semantic !== semantic) changed.push({ threadId: ref.threadId, state: status });
-          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+          if (exceptional && (previous?.semantic !== semantic || previous?.settled !== true)) {
             const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
-            taskObservations.set(ref.threadId, { semantic, settled: state.state === "RESUMABLE",
+            const diagnosedSuccess = !attention && !["failed", "error"].includes(status)
+              && (terminal && !anomaly || historyProvesSettlement(state.snapshot));
+            taskObservations.set(ref.threadId, { semantic, settled: diagnosedSuccess,
               closeRequestIdentity: state.closeRequest?.requestIdentity });
-          } else taskObservations.set(ref.threadId, { semantic, settled: previous?.settled === true,
-            closeRequestIdentity: previous?.closeRequestIdentity });
+            const receipt = outcomeReceipt({ ref, observation: { status },
+              disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
+                : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
+              evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1 });
+            if (receipt) receipts.push(receipt);
+          } else if (exceptional) {
+            taskObservations.set(ref.threadId, previous);
+          } else if (!terminal) {
+            const interruption = await observeRunningProgress({ ref, observation: { status }, semantic, previous });
+            if (interruption) return interruption;
+          } else {
+            const settled = terminal || previous?.settled === true;
+            taskObservations.set(ref.threadId, { semantic, settled,
+              closeRequestIdentity: previous?.closeRequestIdentity });
+            if (terminal && previous?.settled !== true) {
+              const receipt = outcomeReceipt({ ref, observation: { status, event: "completion" }, disposition: "SUCCEEDED",
+                evidenceKind: "native-settlement" });
+              if (receipt) receipts.push(receipt);
+            }
+          }
         }
         fallbackRounds.set(batchKey, changed.length ? 0 : Math.min(round + 1, 2));
       } else {
@@ -858,23 +1085,44 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
           if (target.cursor) cursors.set(threadId, target.cursor);
           const status = String(target.thread?.status?.type ?? target.status?.type ?? target.status ?? target.state ?? "unknown").toLowerCase();
           const terminal = Boolean(target.finalText || target.final || target.event === "completion"
-            || ["idle", "notloaded", "completed", "failed", "error"].includes(status));
+            || ["completed", "failed", "error"].includes(status));
           const attention = Boolean(target.needsAttention || target.event === "attention" || status === "needs_attention");
-          const anomaly = status === "unknown" || Boolean(target.error);
+          const anomaly = status === "unknown" || Boolean(target.error)
+            || ["idle", "notloaded"].includes(status) && !terminal;
+          const exceptional = anomaly || attention || ["failed", "error"].includes(status) || terminal && needsEffectReadBack(ref);
           const semantic = JSON.stringify({ status, terminal, attention, error: Boolean(target.error) });
           const previous = taskObservations.get(threadId);
           if (terminal || attention || previous !== undefined && previous.semantic !== semantic) {
             changed.push({ threadId, state: terminal ? "terminal" : attention ? "attention" : status });
           }
-          if (anomaly || (terminal || attention) && (previous?.semantic !== semantic || previous?.settled !== true)) {
+          if (exceptional && (previous?.semantic !== semantic || previous?.settled !== true)) {
             const stateAttempt = await observeCall(() => read(ref, {}, { interruptible: true, observationBudget }));
             if (stateAttempt.interruption) return stateAttempt.interruption;
             const state = stateAttempt.value; fullHistoryReads += 1;
-            taskObservations.set(threadId, { semantic, settled: state.state === "RESUMABLE",
+            const diagnosedSuccess = !attention && !["failed", "error"].includes(status)
+              && (terminal && !anomaly || historyProvesSettlement(state.snapshot));
+            taskObservations.set(threadId, { semantic, settled: diagnosedSuccess,
               closeRequestIdentity: state.closeRequest?.requestIdentity });
+            const receipt = outcomeReceipt({ ref, observation: { ...target, status },
+              disposition: attention ? "NEEDS_ATTENTION" : ["failed", "error"].includes(status) ? "FAILED"
+                : diagnosedSuccess ? "SUCCEEDED" : anomaly ? "UNKNOWN" : "CONFLICT",
+              evidenceKind: attention ? "native-attention" : ["failed", "error"].includes(status) ? "native-failure"
+                : diagnosedSuccess ? "native-settlement" : "missing-evidence", historyReads: 1 });
+            if (receipt) receipts.push(receipt);
+          } else if (exceptional) {
+            taskObservations.set(threadId, previous);
+          } else if (!terminal) {
+            const interruption = await observeRunningProgress({ ref, observation: { ...target, status }, semantic, previous });
+            if (interruption) return interruption;
           } else {
-            taskObservations.set(threadId, { semantic, settled: previous?.settled === true,
+            const settled = terminal || previous?.settled === true;
+            taskObservations.set(threadId, { semantic, settled,
               closeRequestIdentity: previous?.closeRequestIdentity });
+            if (terminal && previous?.settled !== true) {
+              const receipt = outcomeReceipt({ ref, observation: { ...target, status }, disposition: "SUCCEEDED",
+                evidenceKind: "native-settlement" });
+              if (receipt) receipts.push(receipt);
+            }
           }
         }
       }
@@ -883,7 +1131,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       return { coordinatorActive: !host.disconnected, taskSettled: cached.every(value => value?.settled === true),
         ...(closeRequestIdentity ? { closeRequestIdentity } : {}),
         observation: { kind: changed.length ? "changed" : "unchanged", mode, batchSize: batch.length,
-          changed, fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
+          changed, receipts, fullHistoryReads, returnedBytes: hostReturnedBytes - bytesBefore, nativeCalls: hostCallCount - callsBefore,
           modelRoundTrips: "unavailable", tokens: "unavailable" } };
     },
   };

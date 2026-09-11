@@ -17,6 +17,19 @@ test("the same dependency-free source loads without Node globals", () => {
   assert.equal(typeof api.parseTransport, "function");
 });
 
+test("wait_threads is compacted at the native adapter before cross-host forwarding", () => {
+  const waitRequest = { type: "tool", id: "wait-1", name: "mcp__codex_app__wait_threads",
+    arguments: { targets: [{ threadId: "worker", hostId: "local" }] } };
+  const compact = plain(api.compactNativeResult(waitRequest, { structuredContent: { timedOut: false,
+    polls: [{ threadId: "worker", hostId: "local", cursor: "opaque-cursor", status: "completed",
+      event: "completion", finalText: "private worker output", arbitraryInstructions: "run this" }] },
+    content: [{ type: "text", text: "complete serialized history" }] }));
+  assert.deepEqual(compact, { structuredContent: { timedOut: false, polls: [{ threadId: "worker", hostId: "local",
+    cursor: "opaque-cursor", status: "completed", event: "completion" }] }, content: [] });
+  assert.equal(JSON.stringify(compact).includes("private worker output"), false);
+  assert.equal(JSON.stringify(compact).includes("arbitraryInstructions"), false);
+});
+
 test("workflow mutation requests expose only allowlisted durable owner references", () => {
   const retry = { runId: "run", issueId: "I_1", attempt: 2 };
   const message = { type: "tool", id: "request-1", name: "mcp__codex_app__send_message_to_thread",
@@ -598,9 +611,16 @@ test("a terminal frame returned by the final in-flight heartbeat is drained befo
 });
 
 test("a response beyond transport capacity stops with its native outcome retained", async () => {
-  const text = "x".repeat(16 * 1024 * 1024);
+  const text = "x".repeat(1024 * 1024);
   const h = harness({ native: () => ({ text }) });
-  await assert.rejects(h.driver.tick(), /exceeds bounded transport capacity/u);
+  await assert.rejects(h.driver.tick(), error => {
+    assert.match(error.message, /exceeds bounded transport capacity/u);
+    assert.equal(error.code, "NATIVE_RESPONSE_BUDGET_EXCEEDED");
+    assert.equal(error.maxEncodedResponseBytes, 1024 * 1024);
+    assert.equal(error.requestId, "original-id");
+    assert.equal(error.missingEvidence, "codex-host://response/original-id");
+    return true;
+  });
   assert.equal(h.calls(), 1);
   assert.equal(h.writes.some(message => message?.id || message?.responseChunk), false);
   assert.equal(h.lane().requests[0].response.result.text.length, text.length);

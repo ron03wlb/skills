@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   closeRequestIdentityFor,
   createCoordinator as createCoordinatorRuntime,
+  persistTaskOutcomeReceipts,
   WINDOWS_GRADLE_LOOPBACK_FINGERPRINT,
 } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
 import { runBatch } from "../../skills/personal/run-issue-workflow/scripts/run-batch.mjs";
@@ -18,6 +19,7 @@ import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 import { bindTechnicalFailure } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
+import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-coordinator-"));
@@ -38,6 +40,37 @@ const identity = {
   classification: "SINGLE",
   decompositionIdentity: null,
 };
+
+test("coordinator persists each exact task outcome once in the existing Run journal", () => {
+  const { root, store } = createStoreFixture();
+  const taskRef = { threadId: "thread-15", hostId: "local" };
+  const writer = store.acquireWriter(identity.runId);
+  try {
+    writer.append({ type: "grant.recorded", at: "2026-09-11T00:00:00.000Z", runIdentity: identity });
+    const dispatch = writer.append({ type: "dispatch.recorded", at: "2026-09-11T00:00:01.000Z",
+      issueId: "15", attempt: 1, taskRef });
+    writer.append({ type: "execution.started", at: "2026-09-11T00:00:02.000Z", issueId: "15",
+      phase: "IMPLEMENTATION", phaseIdentity: `dispatch:${dispatch.sequence}`, taskRef });
+    const receipt = createTaskOutcomeReceipt({
+      runId: identity.runId, issueId: "15", operationId: "workflow-op-v1-" + "a".repeat(64),
+      requestIdentity: `dispatch:${dispatch.sequence}`, taskRef,
+      producer: { name: "codex-host", revision: "unavailable", packageVersion: "unavailable" },
+      phase: "IMPLEMENTATION", disposition: "SUCCEEDED", candidate: null,
+      evidence: [{ kind: "native-settlement", locator: "codex-task://local/thread-15?revision=sha256:" + "c".repeat(64),
+        digest: "sha256:" + "b".repeat(64) }],
+      effects: { pending: [], accepted: [] }, failureFingerprint: null,
+      progress: { executionStartedAt: "2026-09-11T00:00:02.000Z",
+        lastVerifiedProgressAt: "2026-09-11T00:04:00.000Z", terminalObservedAt: "2026-09-11T00:04:00.000Z" },
+      budget: { encodedResponseBytes: 123, maxEncodedResponseBytes: 1_048_576,
+        fullHistoryReads: 0, maxFullHistoryReads: 4 }, nativeRevision: "sha256:" + "c".repeat(64),
+    });
+    assert.equal(persistTaskOutcomeReceipts({ writer, journal: store.readEvents(identity.runId),
+      receipts: [receipt, receipt], now: () => "2026-09-11T00:04:01.000Z" }), 1);
+    assert.equal(persistTaskOutcomeReceipts({ writer, journal: store.readEvents(identity.runId),
+      receipts: [receipt], now: () => "2026-09-11T00:04:02.000Z" }), 0);
+    assert.equal(store.readEvents(identity.runId).filter(event => event.type === "task.outcome").length, 1);
+  } finally { writer.release(); rmSync(root, { recursive: true, force: true }); }
+});
 
 test("close request authority remains stable across same-Run control revisions", () => {
   const evidence = {

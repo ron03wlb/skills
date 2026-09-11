@@ -115,6 +115,7 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
         ? { deadline: new Date(executionDeadlineAt).toISOString() } : {}) };
   };
   tasks = createCodexWorkflowTasks({ host, store, project, packageRoot, runId: effectiveRunIdentity.runId,
+    repositoryId: `github:${configuration.repository}`, workflowVersion,
     issueNumber: owners.issueNumber, readIssueState: owners.readIssueState, readObservationSignal: observationSignal });
   const runtime = createWorkflowRuntime({ store, tasks, workflowVersion, compatibleRecordedVersion, authoritySources: owners.sources,
     controls: host.controls,

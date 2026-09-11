@@ -286,7 +286,20 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       const completed = lifecycle.findLast(item => item.record.kind === "implementation_complete");
       const closeOnly = latest?.record.kind === "implementation_blocked" && ["target_dirty", "merge_conflict", "partial_close"].includes(latest.record.reasonCode);
       const completion = latest?.record.kind === "implementation_complete" || closeOnly || latest?.record.failure && completed ? completed : null;
-      const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], { runId: selectedIdentity.runId }) : null;
+      const compactOperationId = latest?.record.operationIdentity?.key ?? deriveExecuteIssueOperationIdentity({ repositoryId,
+        specId: authority.specId, approvedPublicationIdentity: authority.approvedScopeHash, issueId: issue.node_id }).key;
+      const compactCompletion = latest?.record.kind === "implementation_complete" ? {
+        issueId: issue.node_id,
+        operationId: compactOperationId,
+        candidate: latest.record.candidate,
+      } : undefined;
+      const compactObservation = !latest || ["implementation_progress", "implementation_repair_progress"].includes(latest.record.kind)
+        ? { issueId: issue.node_id, operationId: compactOperationId } : undefined;
+      const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], {
+        runId: selectedIdentity.runId,
+        ...(compactCompletion ? { completion: compactCompletion } : {}),
+        ...(compactObservation ? { observation: compactObservation } : {}),
+      }) : null;
       const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
       const recoveryIntent = journal.findLast(event => event.type === "recovery.intent" && event.issueId === issue.node_id);
       const recoveryTransfer = recoveryIntent && journal.find(event => event.type === "recovery.task" && event.requestIdentity === recoveryIntent.requestIdentity);

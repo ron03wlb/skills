@@ -8,6 +8,39 @@ const text = value => typeof value === "string" && value.length > 0;
 export const sameRecoveryTask = (a, b) => text(a?.threadId) && a.threadId === b?.threadId && a.hostId === b?.hostId;
 export const RECOVERY_CLASSES = Object.freeze(["UNDIAGNOSED", "ISSUE_DEFECT", "ENVIRONMENT", "WORKFLOW_DEFECT", "REQUIREMENT_CONFLICT", "CAPABILITY_UNAVAILABLE", "OUTCOME_UNKNOWN"]);
 export const WINDOWS_GRADLE_LOOPBACK_FINGERPRINT = "windows:Selector.open():java.io.IOException: Unable to establish loopback connection";
+const dispositionRoutes = Object.freeze({
+  UNDIAGNOSED: { owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN" },
+  LOST_ACK_OR_OUTCOME_UNKNOWN: { owner: "original-command-owner", continuation: "CONTINUE_SAME_RUN" },
+  OUTCOME_READBACK_RESOLVED: { owner: "issue-execution-owner", continuation: "CONTINUE_SAME_RUN" },
+  LOCAL_CODE_DEFECT: { owner: "issue-execution-owner", continuation: "CONTINUE_SAME_RUN" },
+  EVIDENCE_PRODUCER_DEFECT: { owner: "evidence-producer", continuation: "CONTINUE_SAME_RUN" },
+  MERGE_CONFLICT: { owner: "original-issue-owner", continuation: "CONTINUE_SAME_RUN" },
+  INTEGRATION_VERIFICATION_FAILURE: { owner: "existing-transfer-owner", continuation: "CONTINUE_SAME_RUN" },
+  PARTIAL_CLEANUP: { owner: "original-close-owner", continuation: "CONTINUE_SAME_RUN" },
+  TRACKER_CLOSE_UNKNOWN: { owner: "original-close-owner", continuation: "CONTINUE_SAME_RUN" },
+  ACCEPTED_EFFECT_PENDING: { owner: "original-acceptance-owner", continuation: "WAIT_EXISTING_OWNER" },
+  HOST_OBSERVATION_FAULT: { owner: "host-probe-owner", continuation: "WAIT_EXISTING_OWNER" },
+  PACKAGE_OR_WORKFLOW_DEFECT: { owner: "workflow-maintenance-owner", continuation: "CONTINUE_SAME_RUN" },
+  REQUIREMENT_CONFLICT: { owner: "planning-owner", continuation: "STOP_FOR_OWNER" },
+  CAPABILITY_UNAVAILABLE: { owner: "capability-owner", continuation: "STOP_FOR_OWNER" },
+  ENVIRONMENT_FINGERPRINT: { owner: "environment-adapter", continuation: "CONTINUE_SAME_RUN" },
+  ENVIRONMENT_UNKNOWN: { owner: "original-command-owner", continuation: "CONTINUE_SAME_RUN" },
+  WRITER_CONTENTION: { owner: "lease-owner", continuation: "WAIT_EXISTING_OWNER" },
+  AUTHORITY_CONFLICT: { owner: "human", continuation: "STOP_FOR_OWNER" },
+  EXECUTION_BUDGET_EXHAUSTED: { owner: "human", continuation: "STOP_FOR_OWNER" },
+  REPAIR_BUDGET_EXHAUSTED: { owner: "human", continuation: "STOP_FOR_OWNER" },
+});
+export const RECOVERY_DISPOSITION_CODES = Object.freeze(Object.keys(dispositionRoutes));
+
+export function routeRecoveryDisposition(code) {
+  const route = dispositionRoutes[code];
+  if (!route) throw new Error(`Unclassified recovery disposition: ${String(code)}`);
+  return Object.freeze({ code, ...route, coordinatorRepairs: false });
+}
+const technicalRoute = (phase, disposition) => {
+  const route = routeRecoveryDisposition(disposition);
+  return { phase, owner: route.owner, disposition };
+};
 
 export function bindTechnicalFailure(facts) {
   for (const field of ["runId", "issueId", "operationId", "candidate", "targetHead", "worktree", "topic", "owningSource", "observedResult"]) {
@@ -53,22 +86,42 @@ export function readRepairProgress({ records, issueId, operationId, count }) {
   return previous === undefined ? count ?? null : Math.max(count ?? 0, previous);
 }
 
-export function nextRecoveryPhase(failure) {
+export function routeTechnicalRecovery(failure) {
   bindTechnicalFailure(failure);
   if (failure.diagnosis?.executionReady) {
     validateExecutionResolution({ failure, resolution: failure.diagnosis.executionReady });
-    return "CONTINUE";
+    return technicalRoute("CONTINUE", "OUTCOME_READBACK_RESOLVED");
   }
   const classification = failure.diagnosis?.classification ?? "UNDIAGNOSED";
-  if (classification === "UNDIAGNOSED") return "DIAGNOSE";
-  if (classification === "OUTCOME_UNKNOWN" && !failure.diagnosis.readBackAttempted) return "READBACK";
-  if (classification === "ENVIRONMENT") {
-    if (failure.diagnosis.fingerprint === WINDOWS_GRADLE_LOOPBACK_FINGERPRINT && !failure.diagnosis.remediationAttempted) return "ENVIRONMENT";
-    if (!failure.diagnosis.readBackAttempted && !failure.diagnosis.remediationAttempted) return "READBACK";
+  if (classification === "UNDIAGNOSED") return technicalRoute("DIAGNOSE", "UNDIAGNOSED");
+  if (classification === "OUTCOME_UNKNOWN" && !failure.diagnosis.readBackAttempted) {
+    return technicalRoute("READBACK", "LOST_ACK_OR_OUTCOME_UNKNOWN");
   }
-  if (classification === "ISSUE_DEFECT" && failure.diagnosis.scopeCompatible === true) return "REPAIR";
-  if (classification === "WORKFLOW_DEFECT" && failure.diagnosis.scopeCompatible === true) return "MAINTENANCE";
-  return null;
+  if (classification === "ENVIRONMENT") {
+    if (failure.diagnosis.fingerprint === WINDOWS_GRADLE_LOOPBACK_FINGERPRINT && !failure.diagnosis.remediationAttempted) {
+      return technicalRoute("ENVIRONMENT", "ENVIRONMENT_FINGERPRINT");
+    }
+    if (!failure.diagnosis.readBackAttempted && !failure.diagnosis.remediationAttempted) {
+      return technicalRoute("READBACK", "ENVIRONMENT_UNKNOWN");
+    }
+  }
+  if (classification === "ISSUE_DEFECT" && failure.diagnosis.scopeCompatible === true) {
+    return technicalRoute("REPAIR", "LOCAL_CODE_DEFECT");
+  }
+  if (classification === "WORKFLOW_DEFECT" && failure.diagnosis.scopeCompatible === true) {
+    return technicalRoute("MAINTENANCE", "PACKAGE_OR_WORKFLOW_DEFECT");
+  }
+  if (classification === "REQUIREMENT_CONFLICT" || classification === "ISSUE_DEFECT") {
+    return technicalRoute(null, "REQUIREMENT_CONFLICT");
+  }
+  if (classification === "CAPABILITY_UNAVAILABLE") return technicalRoute(null, "CAPABILITY_UNAVAILABLE");
+  if (classification === "WORKFLOW_DEFECT") return technicalRoute(null, "EVIDENCE_PRODUCER_DEFECT");
+  if (classification === "OUTCOME_UNKNOWN") return technicalRoute(null, "LOST_ACK_OR_OUTCOME_UNKNOWN");
+  return technicalRoute(null, "ENVIRONMENT_UNKNOWN");
+}
+
+export function nextRecoveryPhase(failure) {
+  return routeTechnicalRecovery(failure).phase;
 }
 
 export function validateExecutionResolution({ failure, resolution }) {

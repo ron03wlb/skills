@@ -9,9 +9,73 @@
   ]);
   const types = new Set(["tool", "status", "result", "error", "input-error", "control-result", "response-accepted", "request-state"]);
   const prefix = "workflow-host ";
+  const maxEncodedResponseBytes = 1024 * 1024;
   const decoration = /^(?:\x1b\[(?:\?(?:25|9001|1004)[lh]|[012]?J|H|[0-9;]*m|[0-9]+;[0-9]+H)|\x1b\]0;[^\x07]*\x07)+/u;
   const copy = value => JSON.parse(JSON.stringify(value));
   const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const utf8Bytes = value => {
+    let bytes = 0;
+    for (const character of value) {
+      const point = character.codePointAt(0);
+      bytes += point <= 0x7f ? 1 : point <= 0x7ff ? 2 : point <= 0xffff ? 3 : 4;
+    }
+    return bytes;
+  };
+  const boundedText = value => typeof value === "string" && value.length <= 8192 ? value : undefined;
+  const compactWaitEntry = value => {
+    if (!record(value)) return null;
+    const thread = record(value.thread) ? {
+      ...(boundedText(value.thread.id) ? { id: value.thread.id } : {}),
+      ...(boundedText(value.thread.hostId) ? { hostId: value.thread.hostId } : {}),
+      ...(boundedText(value.thread.status?.type) ? { status: { type: value.thread.status.type } } : {}),
+    } : undefined;
+    const status = record(value.status)
+      ? boundedText(value.status.type) ? { type: value.status.type } : undefined
+      : boundedText(value.status);
+    const error = value.error ? { code: boundedText(value.error?.code) ?? "native-observation-error" } : undefined;
+    return {
+      ...(thread && Object.keys(thread).length ? { thread } : {}),
+      ...(boundedText(value.threadId) ? { threadId: value.threadId } : {}),
+      ...(boundedText(value.hostId) ? { hostId: value.hostId } : {}),
+      ...(boundedText(value.cursor) ? { cursor: value.cursor } : {}),
+      ...(status ? { status } : {}),
+      ...(boundedText(value.state) ? { state: value.state } : {}),
+      ...(boundedText(value.event) ? { event: value.event } : {}),
+      ...(typeof value.needsAttention === "boolean" ? { needsAttention: value.needsAttention } : {}),
+      ...(error ? { error } : {}),
+    };
+  };
+  const compactWaitPayload = (payload, request) => {
+    if (!record(payload)) return { timedOut: false, polls: (request.arguments?.targets ?? []).map(target => ({
+      threadId: target.threadId, hostId: target.hostId, status: "unknown", error: { code: "unstructured-native-result" },
+    })) };
+    const result = {};
+    if (typeof payload.timedOut === "boolean") result.timedOut = payload.timedOut;
+    for (const field of ["polls", "results", "threads"]) {
+      if (Array.isArray(payload[field])) result[field] = payload[field].slice(0, 8).map(compactWaitEntry).filter(Boolean);
+    }
+    if (!["polls", "results", "threads"].some(field => Array.isArray(result[field]))) {
+      result.polls = (request.arguments?.targets ?? []).map(target => ({ threadId: target.threadId,
+        hostId: target.hostId, status: "unknown", error: { code: "missing-native-observation" } }));
+    }
+    return result;
+  };
+  const compactNativeResult = (request, result) => {
+    if (request.name !== "mcp__codex_app__wait_threads") return result;
+    if (result?.isError) return { isError: true,
+      content: [{ type: "text", text: "wait_threads native call failed; inspect its original host owner" }] };
+    let payload = result?.structuredContent;
+    if (!record(payload)) {
+      const body = result?.content?.find?.(item => item?.type === "text")?.text;
+      if (typeof body === "string") {
+        try { payload = JSON.parse(body); } catch { payload = null; }
+      } else payload = result;
+    }
+    const compact = compactWaitPayload(payload, request);
+    return result?.structuredContent || Array.isArray(result?.content)
+      ? { ...result, content: [], structuredContent: compact }
+      : compact;
+  };
 
   function parseTransport(input, ended = false) {
     const frames = [];
@@ -460,9 +524,17 @@
     const write = async (message, kind) => {
       if (!lane.active) return false;
       const body = JSON.stringify(message);
-      const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${requestIdFor(message) ?? "session"}`;
-      if (kind === "response" && body.length > 16 * 1024 * 1024) {
-        throw new Error("Native response exceeds bounded transport capacity; preserve its original outcome");
+      const requestId = requestIdFor(message);
+      const transportFaultIdentity = `transport:${lane.sessionId}:${kind}:${requestId ?? "session"}`;
+      const encodedResponseBytes = kind === "response" ? utf8Bytes(body) : 0;
+      if (kind === "response" && encodedResponseBytes > maxEncodedResponseBytes) {
+        const error = new Error(`Native response exceeds bounded transport capacity (${encodedResponseBytes}/${maxEncodedResponseBytes} encoded bytes); preserve its original outcome at codex-host://response/${requestId ?? "session"}`);
+        error.code = "NATIVE_RESPONSE_BUDGET_EXCEEDED";
+        error.requestId = requestId;
+        error.encodedResponseBytes = encodedResponseBytes;
+        error.maxEncodedResponseBytes = maxEncodedResponseBytes;
+        error.missingEvidence = `codex-host://response/${requestId ?? "session"}`;
+        throw error;
       }
       const exhaustedFault = !activeWrite ? findFault(transportFaultIdentity) : null;
       if (exhaustedFault?.state === "exhausted") {
@@ -576,7 +648,8 @@
       await transition(request, "dispatched");
       // Persist the actual return immediately, even if a concurrent transport write is pending.
       const pending = Promise.resolve().then(() => tools[message.name](args)).then(
-        result => ({ id: request.id, result }), error => ({ id: request.id, error: String(error.message ?? error) }),
+        result => ({ id: request.id, result: compactNativeResult(message, result) }),
+        error => ({ id: request.id, error: String(error.message ?? error) }),
       ).then(async response => {
         const current = lane.requests.find(item => item.id === request.id);
         clearFault(`native:${lane.sessionId}:call:${request.id}`);
@@ -706,5 +779,5 @@
       },
     };
   }
-  return Object.freeze({ allowed, parseTransport, createLane, createDriver, checkpointState, restoreCheckpoint, createCheckpointWriter, createControlReader, ownerForRequest });
+  return Object.freeze({ allowed, parseTransport, createLane, createDriver, checkpointState, restoreCheckpoint, createCheckpointWriter, createControlReader, ownerForRequest, compactNativeResult });
 })()

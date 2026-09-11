@@ -1,10 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { maintainLeaseHealth, readLeaseHealth, readLeaseHealthEvidence } from "../../skills/personal/run-issue-workflow/scripts/lease-health.mjs";
 import { sameCloseWaitAuthority } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
+
+test("operator and recovery contracts publish compact normal outcomes and one five-minute diagnostic escalation", () => {
+  const skill = readFileSync(new URL("../../skills/personal/run-issue-workflow/SKILL.md", import.meta.url), "utf8");
+  const recovery = readFileSync(new URL("../../skills/personal/run-issue-workflow/references/recovery.md", import.meta.url), "utf8");
+  const lifecycle = readFileSync(new URL("../../skills/personal/run-issue-workflow/references/coordinator-lifecycle.md", import.meta.url), "utf8");
+  for (const source of [skill, recovery, lifecycle]) {
+    assert.match(source, /workflow-task-outcome:v1|`task\.outcome`/u);
+    assert.match(source, /300 seconds|Five minutes/u);
+    assert.match(source, /does not read full task history|do not read full history|never reads full task history/u);
+  }
+  for (const source of [recovery, lifecycle]) assert.match(source, /coordinator[^.]*never repair/iu);
+  assert.match(recovery, /16 KiB/u);
+  assert.match(recovery, /1 MiB/u);
+  assert.match(recovery, /256 KiB/u);
+  assert.match(recovery, /at most four reads/u);
+});
 
 test("normal target and close progress retain wait authority while candidate and scope changes do not", () => {
   const before = {
