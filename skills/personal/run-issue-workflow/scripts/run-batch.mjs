@@ -9,7 +9,9 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
   let cursor = 0;
   const observe = async lane => {
     try { statuses.set(lane.specId, await lane.run({ mode: "snapshot" })); }
-    catch (error) { statuses.set(lane.specId, { ...statuses.get(lane.specId), capacityUnknown: true, run: { state: "UNAVAILABLE", specId: lane.specId }, error: error.message }); }
+    catch (error) { statuses.set(lane.specId, { ...statuses.get(lane.specId),
+      workflowRuntime: error.workflowRuntime ?? lane.workflowRuntime ?? statuses.get(lane.specId)?.workflowRuntime,
+      capacityUnknown: true, run: { state: "UNAVAILABLE", specId: lane.specId }, error: error.message }); }
   };
   while (connected()) {
     // Never allocate from yesterday's projection, including after process interruption.
@@ -29,7 +31,8 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
         progressed = true;
       } catch (error) {
         // Unknown task creation outcomes are reconciled on the next observation, never repeated here.
-        statuses.set(lane.specId, { ...status, capacityUnknown: true, run: { ...status.run, state: "UNAVAILABLE" }, error: error.message });
+        statuses.set(lane.specId, { ...status, workflowRuntime: error.workflowRuntime ?? lane.workflowRuntime ?? status.workflowRuntime,
+          capacityUnknown: true, run: { ...status.run, state: "UNAVAILABLE" }, error: error.message });
       }
     }
     cursor = (cursor + 1) % lanes.length;
@@ -38,7 +41,8 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
     await sleep(progressed ? 250 : 1000);
   }
   const runs = lanes.map(lane => statuses.get(lane.specId) ?? {
-    run: { specId: lane.specId, state: "UNAVAILABLE" }, capacityUnknown: true, nodes: [], legalActions: [],
+    run: { specId: lane.specId, state: "UNAVAILABLE" }, workflowRuntime: lane.workflowRuntime,
+    capacityUnknown: true, nodes: [], legalActions: [],
     reason: "Host disconnected before this selected Spec could be observed; preserve its existing Run and tasks.",
   });
   return { state: runs.every(status => status.run.state === "SUCCEEDED") ? "SUCCEEDED" : "PRESERVED", runs };

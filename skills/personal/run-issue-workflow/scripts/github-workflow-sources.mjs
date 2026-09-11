@@ -21,6 +21,45 @@ const one = (values, label) => {
   return values[0];
 };
 const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
+const automaticHostCleanupReasons = new Set(["host_release_unavailable", "host_task_ownership_unproven"]);
+const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
+
+export const isAutomaticHostCleanupReason = reasonCode => automaticHostCleanupReasons.has(reasonCode);
+
+export function createAutomaticHostCleanupPacket({ result, taskCwd, originalTaskRef, integrationRecord,
+  record, target, targetName, issueId, specId }) {
+  const failure = result?.observations?.[0];
+  const originalTaskMatches = originalTaskRef?.threadId === result?.taskRef?.threadId
+    && originalTaskRef?.hostId === result?.taskRef?.hostId;
+  const integrationChecks = integrationRecord?.current?.results?.map((attempt, index) => {
+    const obligation = integrationRecord.obligation?.[index], inputs = attempt.inputs;
+    if (!Array.isArray(obligation?.command) || !obligation.command.length || !obligation.command.every(value => typeof value === "string")
+      || !Array.isArray(obligation.configFiles) || !obligation.configFiles.every(value => typeof value === "string")
+      || !inputs?.environment || typeof inputs.environment !== "object" || Array.isArray(inputs.environment)
+      || !Object.keys(inputs.environment).length || !isDeepStrictEqual(inputs.external, {})
+      || !Array.isArray(inputs.configuration) || inputs.configuration.length !== obligation.configFiles.length
+      || inputs.configuration.some((item, configIndex) => item?.file !== obligation.configFiles[configIndex]
+        || !/^[a-f0-9]{64}$/u.test(item.digest))) return null;
+    return { command: obligation.command, configFiles: obligation.configFiles, environment: inputs.environment,
+      externalInputs: { kind: "none" } };
+  });
+  const integrationMatches = integrationRecord?.current?.state === "PASS" && Array.isArray(integrationChecks)
+    && !integrationChecks.includes(null)
+    && result?.integrationVerification?.state === "PASS" && Array.isArray(result.integrationVerification.checks)
+    && isDeepStrictEqual(result.integrationVerification.checks, integrationChecks)
+    && result.integrationVerification.identity === integrationRecord.current.identity;
+  const resultMatches = result?.candidate === record.candidate && result.targetHead === target.head && result.candidateReachable === true
+    && worktreePath(result.worktree) === worktreePath(record.worktree) && worktreePath(taskCwd) === worktreePath(record.worktree)
+    && result.directoryState === "EMPTY_UNREGISTERED" && originalTaskMatches && isAutomaticHostCleanupReason(result.reasonCode)
+    && ["EBUSY", "EPERM", "EACCES"].includes(failure?.code)
+    && typeof failure.message === "string" && failure.message.length > 0;
+  if (!resultMatches || !integrationMatches) return null;
+  return {
+    completion: { issueId, specId, target: targetName, targetWorktree: target.worktree,
+      topic: record.topic, worktree: record.worktree, candidate: record.candidate },
+    taskRef: originalTaskRef, failure: { code: failure.code, message: failure.message }, integrationChecks,
+  };
+}
 
 export function createGitHubWorkflowSources({ repository, repositoryName, store, tasks, workflowVersion, installationCacheDirectory }) {
   if (!/^[\w.-]+\/[\w.-]+$/u.test(repositoryName)) throw new Error("Static GitHub repository identity is required");
@@ -69,7 +108,6 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
     }
     return { issueId: issue.node_id, state: issue.state.toUpperCase() };
   };
-  const worktreePath = path => existsSync(path) ? realpathSync.native(path) : resolve(path);
   const worktrees = () => git("worktree", "list", "--porcelain", "-z").split("\0\0").filter(Boolean).map((block) => {
     const fields = Object.fromEntries(block.split("\0").filter(Boolean).map((line) => {
       const split = line.indexOf(" "); return split < 0 ? [line, true] : [line.slice(0, split), line.slice(split + 1)];
@@ -312,6 +350,7 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
       if (task?.state === "RESUMABLE" && !latest && !modelYields[issue.node_id]) node.taskState = "TRANSIENT_FAILURE";
       if (completion) {
         const record = completion.record;
+        let integrationRecord = null;
         readRepairWaveCount(record); // Reject conflicting legacy/current spellings without altering historical receipt bytes.
         if (record.issueId !== issue.node_id || record.specId !== authority.specId || record.target !== authority.target
           || record.standards !== "clean" || record.spec !== "clean" || record.worktreeState !== "clean"
@@ -361,8 +400,11 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         node.closeAuthorityEvidence = { trackerIdentity: `${issue.node_id}:${bodyDigest(issue.body)}`, targetHead: target.head,
           candidateCommit: record.candidate, completionEvidenceId: completion.identity, completionBodySha256: completion.bodySha256,
           worktreeIdentity: bodyDigest(JSON.stringify({ gitCommonDir, path: record.worktree, topic: record.topic })) };
-        if (record.operationIdentity?.key) {
-          const integration = createIntegrationVerification({ gitCommonDir, operationId: record.operationIdentity.key, issueId: issue.node_id, candidate: record.candidate }).read();
+        const integrationOperationId = record.operationIdentity?.key ?? deriveExecuteIssueOperationIdentity({ repositoryId,
+          specId: authority.specId, approvedPublicationIdentity: authority.approvedScopeHash, issueId: issue.node_id }).key;
+        if (integrationOperationId) {
+          const integration = createIntegrationVerification({ gitCommonDir, operationId: integrationOperationId, issueId: issue.node_id, candidate: record.candidate }).read();
+          integrationRecord = integration;
           if (integration) {
             node.integrationVerification = integration.current ?? { state: "UNKNOWN", issueId: issue.node_id, candidate: record.candidate,
               targetHead: target.head, identity: bodyDigest(JSON.stringify(integration)), results: integration.attempts };
@@ -385,8 +427,18 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           const cleanup = planCloseContinuation({ task, requestIdentity: task.closeRequest?.requestIdentity,
             requestEvidence: { runIdentity: selectedIdentity, issueId: issue.node_id, candidateReachable: node.candidateReachable,
               worktreeState: node.worktreeState, authorityEvidence: node.closeAuthorityEvidence } });
-          if (cleanup.blocked) contradictions.push({ code: "host_cleanup_blocked", reasonCode: cleanup.blocked.reasonCode,
-            affectedNodes: [issue.node_id], evidence: cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`) });
+          if (cleanup.blocked) {
+            const pending = createAutomaticHostCleanupPacket({ result: task.closeResult, taskCwd: task.cwd,
+              originalTaskRef, integrationRecord, record, target, targetName: authority.target,
+              issueId: issue.node_id, specId: authority.specId });
+            if (pending) {
+              node.pendingHostCleanup = pending;
+            } else {
+              contradictions.push({ code: "host_cleanup_blocked", reasonCode: cleanup.blocked.reasonCode,
+                affectedNodes: [issue.node_id], evidence: [...cleanup.blocked.evidence.map(item => `${item.code}: ${item.message}`),
+                  "Automatic close-owner recovery requires exact task, completion, directory, OS failure and executable integration PASS evidence."] });
+            }
+          }
         }
       }
       const verificationProof = issue.state !== "closed" && completion && acceptedRecovery && ["READBACK", "ENVIRONMENT"].includes(recoveryIntent.phase)

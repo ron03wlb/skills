@@ -16,7 +16,7 @@ After merge or reachable re-entry, invoke `verifyIntegratedCandidate` with both 
 
 A failed check preserves the merged commit, original completion and exact worktree and blocks cleanup/closure. An unchanged explicit failure is not executed again. Lost/unknown results require owning-source diagnosis; target movement, missing responses, skipped commands and ancestry never prove PASS. Changed relevant inputs receive their own evidence, while removing a required check from the same candidate's obligation is rejected. Before cleanup and again before tracker closure, prove all required checks PASS for the current clean combination. Target dirt stops.
 
-Return verification identity and failed command/result. The coordinator final line may encode `Workflow close result: <JSON>` with `schema: issue-close-result:v1`, `state: INTEGRATION_FAILED|INTEGRATION_UNKNOWN`, the accepted request/Run/Issue identities and `integrationVerification`. Durable obligations survive dialogue/direct entry. The coordinator selects isolated recovery under existing scope, without fabricating conflict history.
+Return verification identity and failed command/result. Coordinator emits `Workflow close result: <JSON>` with `issue-close-result:v1`, `INTEGRATION_FAILED|INTEGRATION_UNKNOWN`, identities and `integrationVerification`. Later `HOST_CLEANUP_BLOCKED` retains that identity and exact `{command,configFiles,environment,externalInputs}` descriptors. Automatic cleanup requires persisted PASS plus `externalInputs: { kind: "none" }`; external-input checks stay with the close owner. Obligations survive re-entry.
 
 ## 2. Remove exact Issue worktree
 

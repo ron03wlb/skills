@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, rmdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { openWindowsCleanupSession } from "../../skills/engineering/close-issue/scripts/windows-cleanup-session.mjs";
 import { recoverPendingHostCleanup } from "../../skills/engineering/close-issue/scripts/pending-host-cleanup.mjs";
@@ -82,6 +83,39 @@ test("a frozen launcher exiting with its released child is observed through its 
   } finally { await session?.close(); await fixture?.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
 
+test("the Windows inspection timeout is bounded per frozen-helper protocol step", { skip: process.platform !== "win32", timeout: 60000 }, async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "helper-step-timeout-"))), target = join(root, "issue"); mkdirSync(target);
+  let fixture, session;
+  try {
+    fixture = await hostFixture(root, target, false, 2);
+    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 20000 });
+    const started = Date.now();
+    const release = await session.release(() => {}, async () => delay(12000));
+    assert.equal(release.state, "RELEASED", JSON.stringify(release));
+    assert.ok(Date.now() - started >= 24000, "the full finite batch outlives one step timeout");
+    assert.equal(release.outcomes.length, 2);
+    assert.doesNotThrow(() => process.kill(fixture.host.pid, 0));
+    assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
+    rmdirSync(target);
+  } finally { await session?.close(); await fixture?.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a stalled frozen-helper step times out before any later process effect", { skip: process.platform !== "win32", timeout: 60000 }, async () => {
+  const root = realpathSync.native(mkdtempSync(join(tmpdir(), "helper-stalled-step-"))), target = join(root, "issue"); mkdirSync(target);
+  let fixture, session;
+  try {
+    fixture = await hostFixture(root, target, false, 2);
+    session = await openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, inspectionTimeoutMs: 20000 });
+    const release = await session.release(() => {}, async () => delay(24000));
+    assert.equal(release.state, "UNKNOWN", JSON.stringify(release));
+    assert.match(release.reason, /inspection expired/u);
+    assert.deepEqual(release.outcomes, []);
+    for (const pid of fixture.ownedPids) assert.doesNotThrow(() => process.kill(pid, 0));
+    assert.doesNotThrow(() => process.kill(fixture.host.pid, 0));
+    assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
+  } finally { await session?.close(); await fixture?.dispose(); rmSync(root, { recursive: true, force: true }); }
+});
+
 // Real Git ownership is checked on both sides of every yielding task read; Windows
 // process startup makes these end-to-end checks much slower than the native probe.
 test("real Windows current-directory recovery releases only the exact helper and preserves its host and unrelated helper", { skip: process.platform !== "win32", timeout: 600000 }, async () => {
@@ -94,7 +128,7 @@ test("real Windows current-directory recovery releases only the exact helper and
     git("-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "baseline");
     git("branch", "issue"); mkdirSync(worktree);
     const candidate = git("rev-parse", "HEAD");
-    fixture = await hostFixture(root, worktree);
+    fixture = await hostFixture(root, worktree, false, 2);
     let failure;
     assert.throws(() => rmdirSync(worktree), error => { failure = { code: error.code, message: error.message }; return ["EBUSY", "EPERM", "EACCES"].includes(error.code); });
     const store = createRunStore({ gitCommonDir: join(repository, ".git") });
@@ -129,12 +163,47 @@ test("real Windows current-directory recovery releases only the exact helper and
       }, async close() {} }) });
     assert.equal(auditFailure.state, "HOST_CLEANUP_BLOCKED");
     assert.ok(auditFailure.observations.some(item => item.message === JSON.stringify(partial)), "Known effects survive result-audit failure");
+    // Persist one exact completed effect, then lose the inspector response. The
+    // next invocation may continue only the original remaining reservation.
+    const interrupted = await recoverPendingHostCleanup({ ...input, openSession: async options => {
+      const session = await input.openSession(options), release = session.release.bind(session);
+      return { ...session, async release(onProgress, beforeRelease) {
+        let completed = 0;
+        return release(async outcome => {
+          await onProgress(outcome);
+          if (++completed === 1) throw new Error("Fixture interrupted after durable progress");
+        }, beforeRelease);
+      } };
+    } });
+    assert.equal(interrupted.reasonCode, "host_helper_recovery_failed", JSON.stringify(interrupted));
+    assert.ok(interrupted.observations.some(item => item.code === "WINDOWS_HELPERS_UNKNOWN"));
+    const exitedPid = JSON.parse(interrupted.observations.find(item => item.code === "WINDOWS_HELPERS_UNKNOWN").message).outcomes[0].Pid;
+    const remainingPid = fixture.ownedPids.find(pid => pid !== exitedPid);
+    assert.throws(() => process.kill(exitedPid, 0));
+    assert.doesNotThrow(() => process.kill(remainingPid, 0));
+    assert.ok(existsSync(worktree));
+    const records = join(repository, ".git", "workflow-host");
+    const interruptedRecord = readdirSync(records).find(name => {
+      if (!/^helper-recovery-[a-f0-9]+\.json$/u.test(name)) return false;
+      return JSON.parse(readFileSync(join(records, name), "utf8")).processes?.length === 2;
+    });
+    assert.ok(interruptedRecord, "the interrupted exact reservation is durable");
+    const interruptedResult = join(records, `${interruptedRecord}.result`), exactResult = readFileSync(interruptedResult, "utf8");
+    writeFileSync(interruptedResult, JSON.stringify({ state: "UNKNOWN", reason: "tampered", outcomes: [] }));
+    const mismatched = await recoverPendingHostCleanup({ ...input, openSession: () => assert.fail("Mismatched audit must stop before process discovery") });
+    assert.ok(mismatched.observations.some(item => item.code === "RECOVERY_ALREADY_ATTEMPTED"));
+    assert.doesNotThrow(() => process.kill(remainingPid, 0));
+    writeFileSync(interruptedResult, exactResult);
+    rmSync(interruptedResult); // Model abrupt owner loss after flushed progress but before result publication.
     const recovered = await recoverPendingHostCleanup(input);
     assert.equal(recovered.state, "HOST_CLEANUP_RECOVERED", JSON.stringify(recovered));
     assert.equal(recovered.directoryState, "ABSENT");
-    assert.equal(recovered.processes.length, 1);
-    assert.equal(recovered.processes[0].Pid, fixture.ownedPid);
-    assert.ok(reads >= 6, "ownership is refreshed across every yielding boundary");
+    assert.equal(recovered.processes.length, 2);
+    assert.deepEqual(recovered.processes.map(item => item.Pid).sort(), fixture.ownedPids.sort());
+    assert.ok(recovered.observations.some(item => item.code === "WINDOWS_HELPERS_UNKNOWN"
+      && /before publishing its durable result/u.test(item.message)), "the unpublished interrupted result boundary is retained");
+    assert.ok(recovered.observations.some(item => item.code === "WINDOWS_HELPERS_RELEASED"), "the one resume result is retained");
+    assert.ok(reads >= 10, "ownership is refreshed across every yielding boundary");
     assert.equal(existsSync(worktree), false);
     assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
     assert.doesNotThrow(() => process.kill(fixture.host.pid, 0));
@@ -178,6 +247,11 @@ test("new directory ownership between helper stops preserves partial effects and
     assert.doesNotThrow(() => process.kill(recorded[1].Pid, 0));
     assert.doesNotThrow(() => process.kill(newcomer.child.pid, 0));
     assert.doesNotThrow(() => process.kill(fixture.unrelatedPid, 0));
+    const expected = session.proof.processes.filter(item => item.Pid === recorded[1].Pid);
+    await assert.rejects(openWindowsCleanupSession({ worktree: target, cwd: root, env: fixture.env, expectedProcesses: expected }),
+      /not an exact member of the interrupted reservation/u);
+    assert.doesNotThrow(() => process.kill(recorded[1].Pid, 0));
+    assert.doesNotThrow(() => process.kill(newcomer.child.pid, 0));
   } finally { await session?.close(); await newcomer?.dispose(); await fixture?.dispose(); rmSync(root, { recursive: true, force: true }); }
 });
 

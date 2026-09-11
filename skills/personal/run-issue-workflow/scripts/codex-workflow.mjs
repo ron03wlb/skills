@@ -11,9 +11,61 @@ import { createWorkflowRuntime } from "./run-workflow.mjs";
 import { validateJournal } from "./run-journal.mjs";
 import { recoveryDigest } from "./recovery-evidence.mjs";
 import { bodyDigest } from "./github-workflow-records.mjs";
-import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
+import { deriveExecuteIssueOperationIdentity, deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
+import { recoverPendingHostCleanup } from "../../../engineering/close-issue/scripts/pending-host-cleanup.mjs";
+import { verifyIntegratedCandidate } from "../../../engineering/close-issue/scripts/merge-candidate.mjs";
 
 export const supportsCompletedRunReentry = true;
+
+export function readCodexHostIntegrationEnvironment(declared) {
+  if (!declared || typeof declared !== "object" || Array.isArray(declared) || !Object.keys(declared).length) {
+    throw new TypeError("Declared integration environment is required");
+  }
+  return { schema: "codex-host-integration-environment:v1", declared: structuredClone(declared),
+    host: { runtime: process.version, platform: process.platform, arch: process.arch,
+      executable: realpathSync.native(process.execPath) } };
+}
+
+export function createCodexHostCleanupOwner({ store, tasks, repositoryId,
+  readCurrentIntegrationEnvironment = readCodexHostIntegrationEnvironment }) {
+  if (!store || typeof tasks?.read !== "function" || typeof repositoryId !== "string" || !repositoryId) {
+    throw new TypeError("Codex host cleanup owner requires its store, task reader and repository identity");
+  }
+  if (typeof readCurrentIntegrationEnvironment !== "function") throw new TypeError("Current integration environment reader is required");
+  return async ({ issueId, runIdentity, pending }) => {
+    if (!runIdentity || !pending?.completion || !Array.isArray(pending.integrationChecks)) {
+      throw new Error("Automatic host cleanup requires its exact integration obligation");
+    }
+    const completion = pending.completion;
+    if (issueId !== completion.issueId) throw new Error("Automatic host cleanup Issue identity differs from its completion");
+    const integrationCheckDescriptors = pending.integrationChecks.map(check => {
+      if (!check || JSON.stringify(Object.keys(check).sort()) !== JSON.stringify(["command", "configFiles", "environment", "externalInputs"].sort())
+        || !Array.isArray(check.command) || !check.command.length || !check.command.every(value => typeof value === "string")
+        || !Array.isArray(check.configFiles) || !check.configFiles.every(value => typeof value === "string")
+        || !check.environment || typeof check.environment !== "object" || Array.isArray(check.environment)
+        || !Object.keys(check.environment).length || JSON.stringify(check.externalInputs) !== JSON.stringify({ kind: "none" })) {
+        throw new Error("Automatic host cleanup received a malformed integration check");
+      }
+      return structuredClone(check);
+    });
+    const readIntegrationChecks = () => integrationCheckDescriptors.map(check => {
+      const environment = readCurrentIntegrationEnvironment(structuredClone(check.environment));
+      if (!environment || typeof environment !== "object" || Array.isArray(environment) || !Object.keys(environment).length) {
+        throw new Error("Automatic host cleanup could not read its current integration environment");
+      }
+      return { command: check.command, configFiles: check.configFiles, environment, readExternalInputs: async () => ({}) };
+    });
+    return recoverPendingHostCleanup({
+      leaseInput: { store, target: runIdentity.target, repositoryId, specId: runIdentity.specId,
+        approvedPublicationIdentity: runIdentity.approvedScopeHash, issueId: completion.issueId },
+      completion, taskRef: pending.taskRef, failure: pending.failure,
+      readTask: async taskRef => (await tasks.read(taskRef, { runId: runIdentity.runId })).snapshot,
+      verifyIntegration: leases => verifyIntegratedCandidate({ leases, targetWorktree: completion.targetWorktree,
+        candidate: completion.candidate, issueId: completion.issueId,
+        operationId: deriveExecuteIssueOperationIdentity(leases.operationIdentity).key, checks: readIntegrationChecks() }),
+    });
+  };
+}
 
 export function assessRecoveryCompatibility({ journal, taskIntents }) {
   try {
@@ -69,7 +121,8 @@ export async function prepareCodexWorkflow({ repository, specId, runIdentity, wo
     browser: { open: (url) => host.call("mcp__codex_app__open_in_codex", { target: { type: "browser", url } }) },
     cleanup: { listRuns: owners.readCleanupRuns },
     now: () => new Date().toISOString(), sleep: (ms) => setTimeout(ms),
-    leaf: { async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
+    leaf: { recoverHostCleanup: createCodexHostCleanupOwner({ store, tasks, repositoryId: `github:${configuration.repository}` }),
+      async closeParent({ issueId, runIdentity: identity, requestIdentity, requestEvidence, step }) {
       const dispatch = store.readEvents(identity.runId).findLast(({ type }) => type === "dispatch.recorded");
       if (!dispatch) throw new Error("Parent close requires the existing Run task");
       const task = await tasks.read(dispatch.taskRef, { runId: identity.runId });

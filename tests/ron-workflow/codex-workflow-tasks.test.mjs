@@ -917,6 +917,7 @@ test("task observation never waits past the Issue execution budget boundary", as
   const ref = { threadId: "worker", hostId: "local" };
   let observedTimeout;
   const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed",
+    monotonicNow: () => 0,
     host: { async call(name, args) {
       assert.equal(name, "mcp__codex_app__wait_threads");
       observedTimeout = args.timeoutMs;

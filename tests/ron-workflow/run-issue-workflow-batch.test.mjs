@@ -27,14 +27,29 @@ test("completed members do no work while active lanes serialize closeout", async
 });
 
 test("disconnect before the first observation preserves every selected Spec without claiming success", async () => {
+  const workflowRuntime = { packageVersion: { id: "reviewed-package" }, packageRoot: "reviewed-root",
+    manifestSha256: `sha256:${"a".repeat(64)}` };
   const result = await runBatch({
-    lanes: ["a", "b"].map(specId => ({ specId, async run() { assert.fail("Disconnected entry must not observe or dispatch"); } })),
+    lanes: ["a", "b"].map(specId => ({ specId, workflowRuntime,
+      async run() { assert.fail("Disconnected entry must not observe or dispatch"); } })),
     connected: () => false,
     sleep: async () => assert.fail("Disconnected entry must not wait"),
   });
   assert.equal(result.state, "PRESERVED");
   assert.deepEqual(result.runs.map(status => [status.run.specId, status.run.state]), [["a", "UNAVAILABLE"], ["b", "UNAVAILABLE"]]);
   assert.ok(result.runs.every(status => status.capacityUnknown && status.legalActions.length === 0));
+  assert.ok(result.runs.every(status => status.workflowRuntime === workflowRuntime));
+});
+
+test("a failed first observation preserves the selected lane's effective runtime evidence", async () => {
+  const workflowRuntime = { packageVersion: { id: "reviewed-package" }, packageRoot: "reviewed-root",
+    manifestSha256: `sha256:${"b".repeat(64)}` };
+  const result = await runBatch({ lanes: [{ specId: "failed", workflowRuntime,
+    async run() { throw new Error("fixture observation failed"); } }], sleep: async () => {} });
+  assert.equal(result.state, "PRESERVED");
+  assert.equal(result.runs[0].run.state, "UNAVAILABLE");
+  assert.equal(result.runs[0].error, "fixture observation failed");
+  assert.equal(result.runs[0].workflowRuntime, workflowRuntime);
 });
 
 test("selected Specs take turns, share worker capacity, and keep blocked and close-only lanes independent", async () => {

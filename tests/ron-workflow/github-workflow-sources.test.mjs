@@ -8,13 +8,21 @@ import test from "node:test";
 import { createCoordinator } from "../../skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
+import { createGitHubWorkflowSources, isAutomaticHostCleanupReason } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
 import { renderWorkflowRecord, readWorkflowRecords, bodyDigest } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 import { bindProducerCheckpointOperationIdentity, deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 import { modelEvidenceDigest } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { reduceRunReadyHandoff } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
-import { createVerificationCache } from "../../skills/engineering/execute-issue/scripts/verification-cache.mjs";
+import { createIntegrationVerification, createVerificationCache } from "../../skills/engineering/execute-issue/scripts/verification-cache.mjs";
+
+test("automatic host cleanup accepts only the settled recoverable ownership reasons", () => {
+  assert.equal(isAutomaticHostCleanupReason("host_release_unavailable"), true);
+  assert.equal(isAutomaticHostCleanupReason("host_task_ownership_unproven"), true);
+  assert.equal(isAutomaticHostCleanupReason("host_cleanup_policy_rejected"), false);
+  assert.equal(isAutomaticHostCleanupReason("host_helper_recovery_failed"), false);
+  assert.equal(isAutomaticHostCleanupReason("host_cleanup_ownership_unproven"), false);
+});
 
 test("the GitHub source joins CLI tracker read-back to the real Git checkpoint and target", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "github-source-")));
@@ -286,6 +294,9 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     let nativePrompt = "Implementation fixture completed";
     let nativeFinal = "";
     let nativeMessages = 0;
+    let integrationVerification;
+    const integrationCheck = { command: [process.execPath, "-e", ""], configFiles: [], environment: { runtime: process.version },
+      readExternalInputs: async () => ({}) };
     const host = { async call(name, args) {
       if (name.endsWith("read_thread")) return { thread: { id: ref.threadId, hostId: ref.hostId, cwd: lane, status: { type: "idle" } },
         turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: nativePrompt }] },
@@ -294,13 +305,21 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
         nativeMessages++; nativePrompt = args.prompt;
         if (nativeMessages === 1) {
           git("merge", "--ff-only", packet.candidate);
+          integrationVerification = await createIntegrationVerification({ gitCommonDir: join(root, ".git"), operationId: execution.key,
+            issueId: "I_1", candidate: packet.candidate }).verify({ targetHead: packet.candidate, checks: [integrationCheck], assertCurrent: () => {}, repository: root });
           git("worktree", "remove", lane);
           mkdirSync(lane); // Reproduce Windows partial removal: registration gone, empty directory remains.
           const request = JSON.parse(nativePrompt.match(/Current close request evidence: (\{.+\})/u)[1]);
           nativeFinal = `Workflow close result: ${JSON.stringify({ schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED",
             runId: request.runIdentity.runId, issueId: request.issueId,
             requestIdentity: nativePrompt.match(/Close request identity: (sha256:[a-f0-9]+)/u)[1], authorityEvidence: request.authorityEvidence,
-            reasonCode: "host_release_unavailable", observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
+            candidate: packet.candidate, targetHead: packet.candidate, candidateReachable: true,
+            integrationVerification: { state: integrationVerification.state, identity: integrationVerification.identity,
+              checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
+                environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
+            worktree: lane, taskRef: ref, directoryState: "EMPTY_UNREGISTERED",
+            reasonCode: "host_release_unavailable",
+            observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }
         else if (nativeMessages === 2) {
           assert.match(nativePrompt, /Close continuation: .*"attempt":1/u);
@@ -318,8 +337,19 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const writer = runStore.acquireWriter(beforeClose.runIdentity.runId);
     writer.append({ type: "grant.recorded", at: "2026-09-06T00:00:00.000Z", runIdentity: beforeClose.runIdentity, maxParallel: 3 });
     writer.append({ type: "dispatch.recorded", at: "2026-09-06T00:00:00.000Z", issueId: "I_1", attempt: 1, taskRef: ref }); writer.release();
+    let hostCleanupRecoveries = 0;
     const coordinatorOptions = { store: runStore, tasks: nativeTasks, tracker: liveOwners.sources.tracker,
-      reconcile: args => liveOwners.sources.reconciliation.read(args), handoff: { read: async ({ current }) => current.runReadyAuthority }, now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {} };
+      reconcile: args => liveOwners.sources.reconciliation.read(args), handoff: { read: async ({ current }) => current.runReadyAuthority }, now: () => "2026-09-06T00:00:00.000Z", sleep: async () => {},
+      leaf: { async recoverHostCleanup({ pending }) {
+        hostCleanupRecoveries++;
+        assert.equal(pending.completion.candidate, packet.candidate);
+        assert.deepEqual(pending.taskRef, ref);
+        assert.deepEqual(pending.failure, { code: "EBUSY", message: "Exact task helpers retain the empty directory" });
+        assert.deepEqual(pending.integrationChecks, [{ command: integrationCheck.command,
+          configFiles: integrationCheck.configFiles, environment: integrationCheck.environment, externalInputs: { kind: "none" } }]);
+        rmdirSync(lane);
+        return { state: "HOST_CLEANUP_RECOVERED", directoryState: "ABSENT", observations: [] };
+      } } };
     const partial = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(partial.nodes[0].close.candidateReachable, true);
     assert.equal(partial.nodes[0].close.worktreeState, "PRESENT");
@@ -337,21 +367,21 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     rmSync(lane); symlinkSync(`${root}-missing`, lane, "junction");
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u, "a dangling link is not physical absence");
     rmSync(lane); mkdirSync(lane);
-    const blocked = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
-    assert.equal(blocked.run.state, "BLOCKED", JSON.stringify(blocked));
-    assert.equal(blocked.diagnoses[0].reasonCode, "host_release_unavailable");
-    assert.equal(blocked.diagnoses[0].nextOwner, "close-issue");
-    assert.equal(blocked.nodes[0].close.completionState, "COMPLETE");
+    const recovered = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
+    assert.equal(recovered.run.state, "RUNNING", JSON.stringify(recovered));
+    assert.equal(recovered.nodes[0].close.completionState, "COMPLETE");
+    assert.equal(recovered.nodes[0].close.worktreeState, "ABSENT");
     assert.equal(fixture.state, "open");
     assert.equal(nativeMessages, 1, "a known host limitation does not spend three more cleanup attempts");
+    assert.equal(hostCleanupRecoveries, 1, "the existing close owner receives one bounded recovery call");
     assert.equal(git("rev-parse", "HEAD"), packet.candidate);
     assert.equal(runStore.readTargetMutationWriterLock("main"), null);
     assert.equal(runStore.observeRepositoryCloseLease().state, "ABSENT");
-    rmdirSync(lane); // An owning-source physical change, not a cached success or implementation replay.
     const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
     assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");
     assert.equal(nativeMessages, 2, "one original action plus one bounded continuation; lost replies cause no duplicate sends");
+    assert.equal(hostCleanupRecoveries, 1, "tracker continuation does not repeat host recovery");
     assert.equal(runStore.readEvents(beforeClose.runIdentity.runId).filter(event => event.type === "dispatch.recorded").length, 1);
     fixture.body += " changed scope"; writeFileSync(fixturePath, JSON.stringify(fixture));
     await assert.rejects(owner.sources.tracker.read({ specId: "1" }), /Current approved Spec publication/u);
