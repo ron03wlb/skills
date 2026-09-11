@@ -31,7 +31,7 @@ A complete, read-back Issue decomposition gains one Decomposition publication re
 
 `to-tickets` consumes the published Planning Seal without rerunning upstream planning or creating a successor. Changes to behavior, acceptance, target, or exclusions return to `to-spec`; child publication never silently expands or edits the parent.
 
-For GitLab, setup records `Blocking representation: body` for new configuration unless an operator has manually proven and declared `native`. Every child always carries the canonical `## Blocked by` section and `decomposition:v1` keeps the same logical directed edges.
+For GitLab, setup records `Blocking representation: body` for new configuration unless an operator has manually proven and declared `native`. Every child always carries the canonical `## Blocked by` section, and `decomposition:v1` keeps the same logical directed edges. Each child also carries canonical `## Parent`; the installed concrete adapter never substitutes `relates_to` for unavailable native Issue hierarchy.
 
 | Configuration or state | Portable guarantee |
 | --- | --- |
@@ -42,7 +42,7 @@ For GitLab, setup records `Blocking representation: body` for new configuration 
 
 
 
-The installed Codex GitHub path includes exact child body digests and the verified ready frontier in the structured Decomposition record. Downstream code can detect contract changes and consume the producer handoff without repeating generation or semantic validation.
+The installed Codex GitHub and GitLab paths keep the exact mapping, blocker edges, and child body digests in the structured Decomposition record. The later ready-state receipt and composite handoff retain the verified frontier. GitLab availability is read through the personal coordinator's `gitlab-to-tickets-entry.mjs inspect` action; a missing executable package is `MISSING`, while a missing `Blocking representation` declaration is `UNKNOWN`. Downstream code can detect contract changes and consume the producer handoff without repeating generation or semantic validation.
 
 Before child readiness and the final handoff, the planning owner resolves approved operation scope against the exact child mapping and prepares declared SQL through [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue). The prepared task/worktree becomes that same child’s execution lane. Existing approvals are reused; only concrete missing scope is asked once, and no SQL adds no SQL question.
 

@@ -21,7 +21,7 @@ Infer the repo from `git remote -v` — `glab` does this automatically when run 
 
 New GitLab tracker configuration declares `Blocking representation: body` without a setup question or mutation probe. It makes the canonical child `## Blocked by` body section the blocker representation for `to-tickets`; a manually proven native implementation may explicitly declare `native` instead. An existing GitLab configuration without this field is `UNKNOWN`: stop before child, relation, label, or parent-record mutation and request one explicit `body` or `native` repair.
 
-Discovery never tests native capability by creating a relation. A generic HTTP 400 never changes the configured representation; declared-native relation write or read-back failure remains a Recoverable blocker. This `to-tickets` setting does not alter parent/sub-issue handling or the separate `/wayfinder` conventions below.
+Discovery never tests native capability by creating a relation. A generic HTTP 400 never changes the configured representation; declared-native relation write or read-back failure remains a Recoverable blocker. This setting controls blockers only. Without proven native GitLab Issue hierarchy, parent evidence is the canonical child `## Parent` plus the parent `decomposition:v1` mapping and exact body digest; the adapter publishes no parent link and never substitutes `relates_to`. This fixed fallback adds no separate parent setting or mutation probe and does not alter the `/wayfinder` conventions below.
 
 ## Merge requests as a triage surface
 
@@ -45,7 +45,9 @@ Run `glab issue view <number> --comments`.
 
 ## Setup diagnostics
 
-For tracker-only `to-spec@v2`, use the separately installed personal coordinator's `references/gitlab-producer-adapters.md` and `scripts/gitlab-producer-entry.mjs`. Its explicitly authorized `configure` action binds `docs/agents/gitlab-producer.json`; setup diagnostics may only call `inspect`. A tracker template or interface document alone does not prove that the concrete producer is available. This binding does not configure an automatic GitLab Run host.
+For tracker-only `to-spec@v2`, use the separately installed personal coordinator's `references/gitlab-producer-adapters.md` and `scripts/gitlab-producer-entry.mjs`. Its explicitly authorized `configure` action binds `docs/agents/gitlab-producer.json`; setup diagnostics may only call `inspect`.
+
+For tracker-only `to-tickets@v2`, the same installed package must also contain `references/gitlab-to-tickets-adapters.md`, `scripts/gitlab-to-tickets-entry.mjs`, and `scripts/gitlab-to-tickets-adapters.mjs`. Its read-only `inspect` action reuses `docs/agents/gitlab-producer.json` and reads the exact `Blocking representation` declaration above. A missing executable is a package-installation repair; a missing declaration is repository configuration `UNKNOWN`. Setup never calls `invoke`, installs the package, or infers native support. A tracker template or interface document alone does not prove that either concrete producer is available, and neither binding configures an automatic GitLab Run host.
 
 `setup-matt-pocock-skills` may use one project-scoped, read-only `glab issue view --output json` or `glab issue list --output json` call to confirm that this configured tracker is reachable. When `triage` is installed, also run `glab label list --output json`, compare exact names with every configured label in `docs/agents/triage-labels.md`, and report a missing label as `MISSING` without creating it. The result is diagnostic only: it never authorizes publication, execution, integration, aggregate verification, or push, and it must not create or edit an Issue, label, or note.
 

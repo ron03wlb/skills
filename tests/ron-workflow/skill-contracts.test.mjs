@@ -915,7 +915,7 @@ test("to-tickets reconciles one Issue decomposition before tracker mutation", ()
   assert.equal(discovery !== -1 && mutation > discovery, true, "identity discovery must finish before publication mutation");
   assert.match(tickets, /## 5\. Reconcile and Publish Executable Issues/u);
   assert.match(tickets, /zero matches.*create exactly one.*one matching Issue.*reuse.*more than one.*stop without mutation/isu);
-  assert.match(tickets, /body.*parent.*target.*Planning Seal.*executable contract.*native parent.*blocking relation.*all.*agree/isu);
+  assert.match(tickets, /body parent.*target.*Planning Seal.*executable contract.*native blocking relation.*must all agree.*proven native hierarchy.*native parent evidence/isu);
   assert.match(tickets, /conflict.*stop without mutation.*never automatically repair/isu);
   assert.match(tickets, /owned blocker graph.*acyclic.*before any mutation/isu);
   assert.match(tickets, /External blocker.*readable.*never creates, edits, closes, or assumes ownership/isu);
@@ -930,6 +930,7 @@ test("to-tickets keeps GitLab blocker representation portable and fail-closed", 
   const interfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
   const gitlab = read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md");
   const docs = read("docs/engineering/to-tickets.md");
+  const hierarchyDecision = read("docs/adr/0073-use-body-parent-evidence-without-gitlab-issue-hierarchy.md");
   const childContract = tickets.match(/<child-contract>(.*?)<\/child-contract>/su)?.[1] ?? "";
 
   assert.match(gitlab, /^Blocking representation: body$/mu);
@@ -937,7 +938,9 @@ test("to-tickets keeps GitLab blocker representation portable and fail-closed", 
   assert.match(gitlab, /existing GitLab configuration.*without this field.*`UNKNOWN`.*before child.*relation.*label.*parent-record mutation.*explicit `body` or `native` repair/isu);
   assert.match(gitlab, /generic HTTP 400.*never changes.*declared-native.*Recoverable blocker/isu);
   assert.match(interfaces, /discoverChildren.*`blockingRepresentation`.*exactly `body` or `native`.*missing.*`UNKNOWN`/isu);
-  assert.match(interfaces, /publishChild.*canonical `## Blocked by`.*publishRelation.*native parent.*blocking relation in `native` representation.*never.*body-mode blocker publisher/isu);
+  assert.match(interfaces, /publishChild.*canonical `## Blocked by`.*publishRelation.*native parent relation when proven available.*blocking relation in `native` representation.*GitLab.*never calls it for parent evidence.*canonical child `## Parent`.*`decomposition:v1`.*exact body digest.*never substitutes `relates_to`.*never.*body-mode blocker publisher/isu);
+  assert.match(interfaces, /updateChild.*approved unfinished child.*exact old body\/version.*previous completed Decomposition.*absent execution-lane evidence.*preserves Issue identity and relationships/isu);
+  assert.match(interfaces, /handoff\.read.*immutable composite handoff.*later child lifecycle changes.*do not rewrite or invalidate.*frozen receipt/isu);
   assert.match(interfaces, /Ordinary child read-back.*canonical body blocker edges.*stable tracker-identity order.*`native`.*native blocking relation evidence/isu);
   assert.match(tickets, /canonical child body.*`## Blocked by`.*`body` or `native`.*`blocked` label.*`relates_to`.*`ready-for-agent`.*published logical graph/isu);
   assert.match(childContract, /Render one stable Issue reference per bullet in canonical tracker-identity order.*With no blocker, render exactly:\s+None\./isu);
@@ -951,6 +954,13 @@ test("to-tickets keeps GitLab blocker representation portable and fail-closed", 
   assert.match(docs, /\| `body` \|.*no native blocking relation/iu);
   assert.match(docs, /\| `native` \|.*native mode verifies/iu);
   assert.match(docs, /\| Missing setting \|.*`UNKNOWN`.*explicit repair.*HTTP 400.*never picks a mode.*\| Prior partial native failure \|.*Verified recovery.*configured body.*evidence is consistent.*publication fails closed/isu);
+  assert.match(docs, /canonical `## Parent`.*never substitutes `relates_to`.*native Issue hierarchy/isu);
+  assert.match(hierarchyDecision, /^status: accepted$/mu);
+  assert.match(hierarchyDecision, /canonical child `## Parent`.*parent `decomposition:v1` mapping.*exact body digest.*complete parent evidence/isu);
+  assert.match(hierarchyDecision, /never substitutes `relates_to`.*neither hierarchy nor execution dependency/isu);
+  assert.match(hierarchyDecision, /no `parentRepresentation`.*capability mutation probe.*producer profile.*checkpoint stage.*recovery branch/isu);
+  assert.match(tickets, /GitLab binding without proven native Issue hierarchy.*canonical child `## Parent`.*parent `decomposition:v1` mapping.*exact body digest.*complete parent evidence.*no native parent relation.*never substitutes `relates_to`/isu);
+  assert.match(gitlab, /setting controls blockers only.*canonical child `## Parent`.*parent `decomposition:v1` mapping.*exact body digest.*no parent link.*never substitutes `relates_to`/isu);
 });
 
 test("to-tickets publishes one recoverable decomposition record and the exact ready frontier", () => {
@@ -3189,6 +3199,8 @@ test("installed route diagnostics expose owning seams without setup authority", 
     "triage labels",
     "operation-scoped producer store",
     "producer handoff",
+    "concrete GitLab Spec producer",
+    "concrete GitLab Decomposition producer",
     "target reader",
     "shared target writer",
     "deterministic operation identity",
@@ -3211,6 +3223,19 @@ test("installed route diagnostics expose owning seams without setup authority", 
 
   assert.match(read("skills/engineering/to-spec/SKILL.md"), /references\/spec-publication-interfaces\.md/u);
   assert.match(read("skills/engineering/to-tickets/SKILL.md"), /references\/decomposition-publication-interfaces\.md/u);
+  const gitlabDecompositionBinding = "skills/personal/run-issue-workflow/references/gitlab-to-tickets-adapters.md";
+  assert.equal(existsSync(gitlabDecompositionBinding), true);
+  assert.match(read(gitlabDecompositionBinding), /read-only inspection.*`inspect`.*`UNKNOWN`/isu);
+  assert.match(read(gitlabDecompositionBinding), /`to-tickets@v2`.*`invoke`/isu);
+  assert.match(read(gitlabDecompositionBinding), /`is_blocked_by`.*never changes representation automatically/isu);
+  assert.match(read(gitlabDecompositionBinding), /complete explicit External blocker set.*preflight.*`ABSENT`.*`PRESENT`.*`UNKNOWN`/isu);
+  assert.match(read(gitlabDecompositionBinding), /selected ready label.*operation identity.*cannot change during a transaction/isu);
+  assert.match(read(gitlabDecompositionBinding), /`child-update`.*exact old body\/version.*absent execution-lane evidence/isu);
+  assert.match(read(gitlabDecompositionBinding), /unchanged closed child.*six-field `adoptedCompletions`.*previous Spec publication.*completed Decomposition transaction and handoff.*latest exact completion note.*integrated candidate.*absent registered worktree\/topic.*absent old Run ownership/isu);
+  assert.equal(existsSync("skills/personal/run-issue-workflow/scripts/gitlab-to-tickets-entry.mjs"), true);
+  assert.equal(existsSync("skills/personal/run-issue-workflow/scripts/gitlab-to-tickets-adapters.mjs"), true);
+  assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md"),
+    /tracker-only `to-tickets@v2`.*gitlab-to-tickets-entry\.mjs.*read-only `inspect`.*`Blocking representation`.*package-installation repair.*configuration `UNKNOWN`.*never calls `invoke`/isu);
   assert.match(read("skills/personal/run-issue-workflow/SKILL.md"), /run-authority-adapters\.mjs.*run-workflow\.mjs/isu);
   assert.match(read("skills/engineering/verify-target-before-push/SKILL.md"), /references\/aggregate-verification-interfaces\.md/u);
   assert.match(read("skills/engineering/push-target/SKILL.md"), /references\/push-delivery-interfaces\.md/u);
