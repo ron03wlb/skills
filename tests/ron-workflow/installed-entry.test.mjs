@@ -477,14 +477,20 @@ export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
 export const fixtureState = { reenterOnStep: false };
 export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  let done = false;
   return {
     specId,
     async run({ mode }) {
-      if (mode === "step" && fixtureState.reenterOnStep) {
+      if (done) return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      if (mode === "step" && fixtureState.reenterOnStep && specId === "I_3") {
         fixtureState.reenterOnStep = false;
         host.installCurrent();
         return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
           diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      if (mode === "step") {
+        done = true;
+        return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
       }
       return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
     },
@@ -496,6 +502,7 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     git(f.source, "add", "skills"); git(f.source, "commit", "-m", "step runtime re-entry fixture");
     const beforeStepReentry = f.install();
     f.addCompleted(3, false, true, beforeStepReentry.version);
+    f.addCompleted(7, false, true, beforeStepReentry.version);
     const beforeStepComposition = await import(pathToFileURL(join(beforeStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
     beforeStepComposition.fixtureState.reenterOnStep = true;
     let installedDuringStepReentry;
@@ -503,9 +510,17 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
       writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { calls: [], throwOnce: true };
 export async function prepareCodexWorkflow({ specId }) {
   return { specId,
-    async run() { throw new Error("Fixture renewed selected execution failed"); },
+    async run() {
+      fixtureState.calls.push(specId);
+      if (fixtureState.throwOnce) {
+        fixtureState.throwOnce = false;
+        throw new Error("Fixture renewed selected execution failed");
+      }
+      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+    },
     async close() {},
   };
 }
@@ -515,13 +530,85 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
       installedDuringStepReentry = f.install();
     };
     const stepReentryFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
-      specIds: ["3"], maxWorkers: 1 });
+      specIds: ["3", "7"], maxWorkers: 1 });
     assert.equal(stepReentryFailure.state, "PRESERVED");
     assert.match(stepReentryFailure.runs[0].error, /Fixture renewed selected execution failed/u, JSON.stringify(stepReentryFailure));
     assert.ok(installedDuringStepReentry, "the step reaches the renewed selected runtime");
     assert.deepEqual(stepReentryFailure.runs[0].workflowRuntime.packageVersion, installedDuringStepReentry.version);
     assert.equal(stepReentryFailure.runs[0].workflowRuntime.packageRoot, installedDuringStepReentry.root);
     assert.match(stepReentryFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    const stepReentryComposition = await import(pathToFileURL(join(installedDuringStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
+    assert.deepEqual(stepReentryComposition.fixtureState.calls, ["I_3"],
+      "another progressing lane must not let the next connected round retry a renewed runtime throw");
+
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenterOnStep: false };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  let done = false;
+  return {
+    specId,
+    async run({ mode }) {
+      if (done) return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      if (mode === "step" && fixtureState.reenterOnStep && specId === "I_8") {
+        fixtureState.reenterOnStep = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      if (mode === "step") {
+        done = true;
+        return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+      }
+      return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed unavailable status source fixture");
+    const beforeRenewedUnavailable = f.install();
+    f.addCompleted(8, false, true, beforeRenewedUnavailable.version);
+    f.addCompleted(9, false, true, beforeRenewedUnavailable.version);
+    const beforeRenewedUnavailableComposition = await import(pathToFileURL(join(beforeRenewedUnavailable.root, scriptsPath, "codex-workflow.mjs")).href);
+    beforeRenewedUnavailableComposition.fixtureState.reenterOnStep = true;
+    let selectedRenewedUnavailable;
+    f.host.installCurrent = () => {
+      writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { calls: [], unavailableOnce: true };
+export async function prepareCodexWorkflow({ specId }) {
+  return { specId,
+    async run() {
+      fixtureState.calls.push(specId);
+      if (fixtureState.unavailableOnce) {
+        fixtureState.unavailableOnce = false;
+        return { run: { state: "UNAVAILABLE", specId }, nodes: [], legalActions: [],
+          capacityUnknown: true, reason: "Fixture renewed execution unavailable" };
+      }
+      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed unavailable status selected fixture");
+      selectedRenewedUnavailable = f.install();
+    };
+    const renewedUnavailable = await runInstalledEntry({ repository: f.repository, host: f.host,
+      specIds: ["8", "9"], maxWorkers: 1 });
+    assert.equal(renewedUnavailable.state, "PRESERVED");
+    assert.equal(renewedUnavailable.runs[0].run.state, "UNAVAILABLE");
+    assert.match(renewedUnavailable.runs[0].reason, /Fixture renewed execution unavailable/u);
+    assert.deepEqual(renewedUnavailable.runs[0].workflowRuntime.packageVersion, selectedRenewedUnavailable.version);
+    assert.equal(renewedUnavailable.runs[0].workflowRuntime.packageRoot, selectedRenewedUnavailable.root);
+    const renewedUnavailableComposition = await import(pathToFileURL(join(selectedRenewedUnavailable.root, scriptsPath, "codex-workflow.mjs")).href);
+    assert.deepEqual(renewedUnavailableComposition.fixtureState.calls, ["I_8"],
+      "another progressing lane must not let the next connected round overwrite renewed UNAVAILABLE");
 
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;

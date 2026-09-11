@@ -148,8 +148,19 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
             }
             lane = renewed; versionId = installed.version.id;
             effectiveRuntime = renewed.workflowRuntime;
-            const renewedStatus = await lane.run({ ...request, mode: "snapshot" });
-            return { ...renewedStatus, workflowRuntime: effectiveRuntime }; // Reconcile before the next shared-capacity allocation.
+            let renewedStatus;
+            try { renewedStatus = await lane.run({ ...request, mode: "snapshot" }); }
+            catch (error) {
+              effectiveRuntime = error.workflowRuntime ?? effectiveRuntime;
+              unavailableStatus = { ...status, run: { ...status.run, state: "UNAVAILABLE" },
+                workflowRuntime: effectiveRuntime, capacityUnknown: true, error: error.message };
+              throw error;
+            }
+            const effectiveStatus = { ...renewedStatus, workflowRuntime: effectiveRuntime };
+            if (renewedStatus.run?.state === "UNAVAILABLE") unavailableStatus = {
+              ...effectiveStatus, capacityUnknown: true,
+            };
+            return unavailableStatus ?? effectiveStatus; // Reconcile before the next shared-capacity allocation.
           }
         }
         return { ...status, workflowRuntime: effectiveRuntime };
