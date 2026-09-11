@@ -3,7 +3,7 @@ import { performance } from "node:perf_hooks";
 import { planCloseContinuation, closeContinuationSuffix } from "./close-continuation.mjs";
 import { createIssueExecutionBudgetController } from "./issue-execution-budget.mjs";
 import { BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS, createBoundedObservationFault } from "./run-store.mjs";
-import { appendDeliveryProgress, summarizeDeliveryProgress } from "./delivery-progress.mjs";
+import { appendDeliveryProgress, diagnoseDeliveryStall, summarizeDeliveryProgress } from "./delivery-progress.mjs";
 import { bindTechnicalFailure, nextRepairWave, nextMaintenanceWave, recoveryDigest, routeTechnicalRecovery, sameRecoveryTask, WINDOWS_GRADLE_LOOPBACK_FINGERPRINT } from "./recovery-evidence.mjs";
 import { validateModelPolicy } from "./issue-model-policy.mjs";
 
@@ -134,6 +134,9 @@ export function persistDeliveryProgress({ writer, journal, facts, status, now })
       source.closeRequestIdentity, source.closeRequestIdentity);
     stage("CLOSE_COMPLETED", "COMPLETED", source.closeCompletedAt, source.closeCompletedOwner ?? "close-issue",
       source.completionEvidenceIdentity, source.closeRequestIdentity);
+    const diagnosis = diagnoseDeliveryStall({ events: current, issueId: node.issueId,
+      operationId: source.operationId, now: observedAt });
+    if (diagnosis) record(diagnosis);
     node.deliveryProgress = summarizeDeliveryProgress(current, node.issueId, source.operationId);
   }
   return current.length - journal.length;

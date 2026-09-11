@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   appendDeliveryProgress,
+  diagnoseDeliveryStall,
   summarizeDeliveryProgress,
   validateDeliveryProgress,
 } from "../../skills/personal/run-issue-workflow/scripts/delivery-progress.mjs";
@@ -101,6 +102,49 @@ test("delivery observations reject malformed blocking ownership and deduplicate 
   assert.equal(appendDeliveryProgress({ writer, journal, event }).sequence, 1);
   assert.equal(appendDeliveryProgress({ writer, journal, event }).sequence, 1);
   assert.equal(journal.length, 1);
+});
+
+test("delivery handoff and close scheduling diagnose one unchanged five-minute stall per semantic fingerprint", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const event = (stage, disposition, sourceAt, overrides = {}) => progress(stage, disposition, sourceAt,
+    { at: at(30), ...overrides });
+  const journal = [
+    event("COMPLETION_PUBLISHED", "OBSERVED", at(0)),
+    event("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(1)),
+  ];
+  const writer = { append(event) { const stored = { ...event, sequence: journal.length + 1 };
+    journal.push(stored); return stored; } };
+  assert.equal(diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(5) }), null);
+  const stalledEvidence = diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(6) });
+  assert.equal(stalledEvidence.owner, "evidence-producer");
+  assert.equal(stalledEvidence.blockingPredicate, "evidence_validation_unresolved");
+  appendDeliveryProgress({ writer, journal, event: stalledEvidence });
+  appendDeliveryProgress({ writer, journal, event: diagnoseDeliveryStall({ events: journal,
+    issueId, operationId, now: at(7) }) });
+  assert.equal(journal.filter(event => event.stage === "PROGRESS_DIAGNOSED").length, 1,
+    "an unchanged stage and fingerprint receives exactly one durable diagnosis");
+  journal.push(event("EVIDENCE_VALIDATED", "OBSERVED", at(7)));
+  const stalledScheduling = diagnoseDeliveryStall({ events: journal, issueId, operationId, now: at(12) });
+  assert.equal(stalledScheduling.owner, "coordinator-reducer");
+  assert.equal(stalledScheduling.blockingPredicate, "close_eligibility_unresolved");
+  appendDeliveryProgress({ writer, journal, event: stalledScheduling });
+  assert.equal(journal.filter(event => event.stage === "PROGRESS_DIAGNOSED").length, 2,
+    "new discriminating semantic progress permits one diagnosis for the next unresolved stage");
+});
+
+test("healthy close-writer contention is recorded but never diagnosed as a progress fault", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const event = (stage, disposition, sourceAt, overrides = {}) => progress(stage, disposition, sourceAt,
+    { at: at(30), ...overrides });
+  const events = [
+    event("COMPLETION_PUBLISHED", "OBSERVED", at(0)),
+    event("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(1)),
+    event("EVIDENCE_VALIDATED", "OBSERVED", at(2)),
+    event("CLOSE_INELIGIBLE", "BLOCKED", at(3), {
+      owner: "lease-owner", blockingPredicate: "repository_close_lease_contended",
+    }),
+  ];
+  assert.equal(diagnoseDeliveryStall({ events, issueId, operationId, now: at(20) }), null);
 });
 
 test("a later completion flow does not reuse an older native settlement or close acceptance metric", () => {

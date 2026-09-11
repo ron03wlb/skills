@@ -51,9 +51,18 @@ export function bindTechnicalFailure(facts) {
   const { diagnosis, identity, repairWaveCount, ...basis } = facts;
   const expected = recoveryDigest(basis);
   if (identity !== undefined && identity !== expected) throw new Error("Technical failure fingerprint differs");
-  if (diagnosis && (!RECOVERY_CLASSES.includes(diagnosis.classification) || !text(diagnosis.reason)
-    || !text(diagnosis.source))) throw new Error("Technical failure diagnosis lacks owning source and observed evidence");
-  return { ...basis, repairWaveCount: repairWaveCount ?? null, identity: expected, ...(diagnosis ? { diagnosis } : {}) };
+  const hasDiagnosis = diagnosis !== undefined;
+  const validDiagnosis = diagnosis !== null && typeof diagnosis === "object" && !Array.isArray(diagnosis)
+    && RECOVERY_CLASSES.includes(diagnosis.classification) && text(diagnosis.reason) && text(diagnosis.source);
+  const boundedDiagnosis = !hasDiagnosis ? null : validDiagnosis ? diagnosis : {
+    classification: "UNCLASSIFIED",
+    source: text(diagnosis?.source) ? diagnosis.source : facts.owningSource,
+    reason: text(diagnosis?.reason) ? diagnosis.reason : "Malformed or unclassified diagnosis evidence",
+    observedClassification: typeof diagnosis?.classification === "string" && diagnosis.classification.length <= 128
+      ? diagnosis.classification : "malformed",
+  };
+  return { ...basis, repairWaveCount: repairWaveCount ?? null, identity: expected,
+    ...(boundedDiagnosis ? { diagnosis: boundedDiagnosis } : {}) };
 }
 
 export function readRepairWaveCount(record) {
@@ -88,7 +97,7 @@ export function readRepairProgress({ records, issueId, operationId, count }) {
 }
 
 export function routeTechnicalRecovery(failure) {
-  bindTechnicalFailure(failure);
+  failure = bindTechnicalFailure(failure);
   if (failure.diagnosis?.executionReady) {
     validateExecutionResolution({ failure, resolution: failure.diagnosis.executionReady });
     return technicalRoute("CONTINUE", "OUTCOME_READBACK_RESOLVED");

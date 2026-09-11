@@ -10,6 +10,8 @@
   const types = new Set(["tool", "status", "result", "error", "input-error", "control-result", "response-accepted", "request-state"]);
   const prefix = "workflow-host ";
   const maxEncodedResponseBytes = 1024 * 1024;
+  const maxHistoryResponseBytes = 256 * 1024;
+  const minHistoryEnvelopeBytes = 4 * 1024;
   const nativeObservationSchema = "codex-native-observation:v1";
   const decoration = /^(?:\x1b\[(?:\?(?:25|9001|1004)[lh]|[012]?J|H|[0-9;]*m|[0-9]+;[0-9]+H)|\x1b\]0;[^\x07]*\x07)+/u;
   const copy = value => JSON.parse(JSON.stringify(value));
@@ -149,7 +151,63 @@
           : identityUnavailable ? "native-task-identity-unavailable" : "native-task-identity-conflict" } } : {}),
     };
   };
-  const nativeObservationEnvelope = (request, payload) => {
+  const compactOwnerItem = item => {
+    if (!record(item)) return null;
+    if (item.type === "userMessage") {
+      const content = Array.isArray(item.content) ? item.content.filter(part => part?.type === "text") : [];
+      if (content.length > 8 || content.some(part => !boundedText(part.text))) {
+        return { error: "native-history-field-budget-exceeded" };
+      }
+      return { value: { type: "userMessage", content: content.map(part => ({ type: "text", text: part.text })) } };
+    }
+    if (item.type === "agentMessage" && item.phase === "final_answer") {
+      return boundedText(item.text) ? { value: { type: "agentMessage", phase: "final_answer", text: item.text } }
+        : { error: "native-history-field-budget-exceeded" };
+    }
+    if (item.type === "functionCallOutput" && item.namespace === "codex_app"
+      && ["create_thread", "send_message_to_thread"].includes(item.name)) {
+      const output = typeof item.output === "string" ? item.output
+        : item.output?.truncated === false ? item.output.text : null;
+      return boundedText(output) ? { value: { type: "functionCallOutput", namespace: "codex_app", name: item.name,
+        output: { text: output, truncated: false } } } : { error: "native-history-field-budget-exceeded" };
+    }
+    return null;
+  };
+  const compactOwnerHistoryPayload = (payload, request, maximum, nativeFailed = false) => {
+    const base = compactReadPayload(payload, request, nativeFailed);
+    if (base.error) return base;
+    const overflow = () => ({ ...base, turns: [], error: {
+      code: "native-history-field-budget-exceeded",
+      locator: `codex-host://history/${encodeURIComponent(request.arguments.hostId)}/${encodeURIComponent(request.arguments.threadId)}`,
+      encodedResponseBytes: utf8Bytes(JSON.stringify(payload) ?? ""), maxEncodedResponseBytes: maximum,
+    } });
+    if (Array.isArray(payload?.turns) && payload.turns.length > 2) {
+      return overflow();
+    }
+    const turns = [];
+    for (const turn of Array.isArray(payload?.turns) ? payload.turns : []) {
+      if (typeof turn?.id === "string" && !boundedText(turn.id)
+        || typeof turn?.status === "string" && !boundedText(turn.status)) return overflow();
+      const selected = [];
+      for (const item of Array.isArray(turn?.items) ? turn.items : []) {
+        const compact = compactOwnerItem(item);
+        if (compact?.error) return overflow();
+        if (compact?.value && selected.push(compact.value) > 32) return overflow();
+      }
+      turns.push({ ...(boundedText(turn?.id) ? { id: turn.id } : {}),
+        status: boundedText(turn?.status) ?? "unknown", items: selected });
+    }
+    if (typeof payload?.thread?.preview === "string" && !boundedText(payload.thread.preview)
+      || typeof payload?.page?.nextCursor === "string" && !boundedText(payload.page.nextCursor)
+      || payload?.page?.hasMore === true && !boundedText(payload.page.nextCursor)) {
+      return overflow();
+    }
+    const page = record(payload?.page) ? { hasMore: payload.page.hasMore === true,
+      ...(boundedText(payload.page.nextCursor) ? { nextCursor: payload.page.nextCursor } : {}) } : undefined;
+    return { ...base, ...(boundedText(payload?.thread?.preview) ? { thread: { ...base.thread,
+      preview: payload.thread.preview } } : {}), turns, ...(page ? { page } : {}) };
+  };
+  const nativeObservationEnvelope = (request, payload, maximum = maxEncodedResponseBytes) => {
     const supplied = request.arguments?.__workflowObservation;
     const producer = record(supplied?.producer) ? supplied.producer : {};
     const bindings = Array.isArray(supplied?.bindings) ? supplied.bindings.slice(0, 8).map(safeObservationBinding).filter(Boolean) : [];
@@ -157,13 +215,27 @@
       producer: { name: "codex-host-driver", revision: boundedText(producer.revision) ?? "unavailable",
         packageVersion: boundedText(producer.packageVersion) ?? "unavailable" },
       observedAt: new Date().toISOString(), bindings: copy(bindings), payload,
-      budget: { encodedResponseBytes: 0, maxEncodedResponseBytes } };
+      budget: { encodedResponseBytes: 0, maxEncodedResponseBytes: maximum } };
     let envelope;
     for (;;) {
       envelope = { ...body, identity: `sha256:${sha256Hex(JSON.stringify(canonical(body)))}` };
       const bytes = utf8Bytes(JSON.stringify(envelope));
       if (bytes === body.budget.encodedResponseBytes) break;
       body.budget.encodedResponseBytes = bytes;
+    }
+    if (utf8Bytes(JSON.stringify(envelope)) <= maximum) return envelope;
+    const overflowBytes = utf8Bytes(JSON.stringify(envelope));
+    const failurePayload = { thread: { id: request.arguments.threadId, hostId: request.arguments.hostId,
+      status: { type: "unknown" } }, turns: [], error: { code: "native-history-budget-exceeded",
+      locator: `codex-host://history/${encodeURIComponent(request.arguments.hostId)}/${encodeURIComponent(request.arguments.threadId)}`,
+      encodedResponseBytes: overflowBytes, maxEncodedResponseBytes: maximum } };
+    const failureBody = { ...body, payload: failurePayload, budget: { encodedResponseBytes: 0,
+      maxEncodedResponseBytes: maximum } };
+    for (;;) {
+      envelope = { ...failureBody, identity: `sha256:${sha256Hex(JSON.stringify(canonical(failureBody)))}` };
+      const bytes = utf8Bytes(JSON.stringify(envelope));
+      if (bytes === failureBody.budget.encodedResponseBytes) break;
+      failureBody.budget.encodedResponseBytes = bytes;
     }
     return envelope;
   };
@@ -176,11 +248,17 @@
         try { payload = JSON.parse(body); } catch { payload = null; }
       } else payload = result;
     }
+    const ownerHistory = request.arguments.__workflowObservation?.mode === "owner-history";
+    const requestedMaximum = request.arguments.__workflowObservation?.maxEncodedResponseBytes;
+    const maximum = ownerHistory && Number.isSafeInteger(requestedMaximum) && requestedMaximum > 0
+      ? Math.min(maxHistoryResponseBytes, Math.max(minHistoryEnvelopeBytes, requestedMaximum)) : maxEncodedResponseBytes;
     const compact = request.name === "mcp__codex_app__wait_threads"
       ? result?.isError ? compactWaitPayload(null, request) : compactWaitPayload(payload, request)
-      : request.name === "mcp__codex_app__read_thread" ? compactReadPayload(payload, request, result?.isError === true) : null;
+      : request.name === "mcp__codex_app__read_thread" ? ownerHistory
+        ? compactOwnerHistoryPayload(payload, request, maximum, result?.isError === true)
+        : compactReadPayload(payload, request, result?.isError === true) : null;
     if (!compact) return result;
-    const envelope = nativeObservationEnvelope(request, compact);
+    const envelope = nativeObservationEnvelope(request, compact, maximum);
     return result?.structuredContent || Array.isArray(result?.content)
       ? { content: [], structuredContent: envelope }
       : envelope;

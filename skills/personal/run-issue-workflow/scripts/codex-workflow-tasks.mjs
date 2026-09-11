@@ -45,6 +45,7 @@ const ownerHistory = snapshot => ({ ...snapshot, turns: (snapshot.turns ?? []).m
   items: (turn.items ?? []).filter(item => item.type === "userMessage" || item.type === "agentMessage" && item.phase === "final_answer"
     || item.type === "functionCallOutput" && delegatedInput(item) !== null),
 })) });
+const MIN_HISTORY_ENVELOPE_BYTES = 4 * 1024;
 const historyProvesSettlement = snapshot => snapshot?.turns?.[0]?.status === "completed"
   || (snapshot?.turns?.[0]?.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer");
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
@@ -60,8 +61,23 @@ const closeRequestFrom = prompt => {
     ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
 };
 const assertCloseOutcomeIdentity = (result, request) => {
-  if (result.runId !== request.runId || result.issueId !== request.issueId
+  if (result?.schema !== "issue-close-result:v1" || typeof result.state !== "string" || !result.state
+    || result.runId !== request.runId || result.issueId !== request.issueId
     || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
+  if (result.state !== "CLOSED") return;
+  const expectedCandidate = request.evidence?.authorityEvidence?.candidateCommit ?? null;
+  const timeline = result.deliveryProgress;
+  const timelineFields = ["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"];
+  const canonicalInstant = value => typeof value === "string" && !Number.isNaN(Date.parse(value))
+    && new Date(value).toISOString() === value;
+  if (!Object.hasOwn(result, "candidate") || result.candidate !== expectedCandidate
+    || timeline === null || typeof timeline !== "object" || Array.isArray(timeline)
+    || Object.keys(timeline).length !== timelineFields.length
+    || timelineFields.some(field => !Object.hasOwn(timeline, field) || !canonicalInstant(timeline[field]))
+    || Date.parse(timeline.repositoryCloseAcquiredAt) > Date.parse(timeline.targetWriterAcquiredAt)
+    || Date.parse(timeline.targetWriterAcquiredAt) > Date.parse(timeline.closeCompletedAt)) {
+    throw new Error("Native successful close outcome lacks its exact candidate and ordered owner timeline");
+  }
 };
 const taskRequestFrom = prompt => {
   if (!prompt) return undefined;
@@ -157,10 +173,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       requestIdentity: context.requestIdentity, taskRef: ref, phase: context.phase,
       candidate: taskCandidates.get(ref.threadId) ?? null } : null;
   };
-  const observationRequest = refs => ({ producer: {
+  const observationRequest = (refs, options = {}) => ({ producer: {
     revision: workflowVersion?.sourceCommit ?? "unavailable",
     packageVersion: workflowVersion?.id ?? "unavailable",
-  }, bindings: refs.map(observationBinding).filter(Boolean) });
+  }, bindings: refs.map(observationBinding).filter(Boolean), ...options });
   const nativeEnvelopeFor = (result, ref) => {
     const envelope = result?.nativeObservationEnvelope;
     if (!envelope) return null; // Direct unit adapters predate the installed host seam.
@@ -315,9 +331,21 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     }
   };
   const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true, observationBudget = null } = {}) => {
-    let snapshot = ownerHistory(await call("read_thread", { ...ref, turnLimit: latestOnly ? 1 : 2,
-      includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
-    let aggregateBytes = encodedBytes(snapshot);
+    const readPage = async (arguments_) => {
+      const result = ownerHistory(await call("read_thread", arguments_, { interruptible, retryReadOnly, observationBudget }));
+      if (["native-history-budget-exceeded", "native-history-field-budget-exceeded"].includes(result.error?.code)) throw responseBudgetError({
+        operation: "read_thread-history", locator: result.error.locator,
+        encodedResponseBytes: result.error.encodedResponseBytes,
+        maxEncodedResponseBytes: result.error.maxEncodedResponseBytes,
+      });
+      if (result.error) throw new Error(`Native owner history is unavailable: ${result.error.code}`);
+      return result;
+    };
+    let snapshot = await readPage({ ...ref, turnLimit: latestOnly ? 1 : 2,
+      includeOutputs: true, maxOutputCharsPerItem: 8192,
+      __workflowObservation: observationRequest([ref], { mode: "owner-history",
+        maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES }) });
+    let aggregateBytes = snapshot.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(snapshot);
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
       if (aggregateBytes > MAX_HISTORY_RESPONSE_BYTES) throw responseBudgetError({ operation: "read_thread-history",
@@ -328,11 +356,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const cursor = snapshot.page.nextCursor;
       if (!cursor || cursorsSeen.has(cursor) || page >= MAX_HISTORY_READS - 1) throw new Error("Task history is unresolved within its bounded read; preserve the existing lane");
       cursorsSeen.add(cursor);
-      const older = ownerHistory(await call("read_thread", { ...ref, cursor, turnLimit: 2,
-        includeOutputs: true, maxOutputCharsPerItem: 8192 }, { interruptible, retryReadOnly, observationBudget }));
+      const remainingBytes = MAX_HISTORY_RESPONSE_BYTES - aggregateBytes;
+      if (remainingBytes < MIN_HISTORY_ENVELOPE_BYTES) throw responseBudgetError({ operation: "read_thread-history",
+        locator: `codex-host://history/${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}`,
+        encodedResponseBytes: aggregateBytes, maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES });
+      const older = await readPage({ ...ref, cursor, turnLimit: 2,
+        includeOutputs: true, maxOutputCharsPerItem: 8192,
+        __workflowObservation: observationRequest([ref], { mode: "owner-history", maxEncodedResponseBytes: remainingBytes }) });
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
-      aggregateBytes = encodedBytes(snapshot);
+      aggregateBytes += older.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(older);
     }
   };
   const reconcileReservedMessage = async ({ ref, receipts, promptIdentity, prompt }) => {
@@ -477,7 +510,18 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         receipts.observe(receipt.promptIdentity, closeResult);
       }
       else closeResult = receipt.outcome?.result;
-    }
+    } else if (!receipt && closeResult) {
+      const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] })
+        .some(text => text.includes("Close request identity:"))
+        && (turn.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer"
+          && /^Workflow close result: (\{.+\})$/mu.test(item.text)));
+      const owningPrompt = owningTurn ? userTexts({ turns: [owningTurn] })
+        .find(text => text.includes("Close request identity:")) : undefined;
+      const owningMatch = owningTurn?.items.findLast(item => item.type === "agentMessage" && item.phase === "final_answer")
+        ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
+      closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
+      if (closeResult) assertCloseOutcomeIdentity(closeResult, closeRequestFrom(owningPrompt));
+    } else if (receipt) closeResult = undefined;
     const recoveryResultMatch = finals.map(final => final?.match(/^Workflow recovery result: (\{.+\})$/mu)).find(Boolean);
     const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";

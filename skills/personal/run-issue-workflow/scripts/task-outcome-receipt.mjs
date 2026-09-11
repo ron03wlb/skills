@@ -101,7 +101,7 @@ export function validateNativeObservationEnvelope(envelope) {
     requireText(binding.taskRef.hostId, "native observation hostId");
     if (binding.candidate !== null && !candidate.test(binding.candidate)) throw new TypeError("Native observation candidate is invalid");
   }
-  assertAllowed(envelope.payload, new Set(["timedOut", "polls", "results", "threads", "thread", "turns", "error"]), "native observation payload");
+  assertAllowed(envelope.payload, new Set(["timedOut", "polls", "results", "threads", "thread", "turns", "page", "error"]), "native observation payload");
   if (Object.hasOwn(envelope.payload, "timedOut") && typeof envelope.payload.timedOut !== "boolean") {
     throw new TypeError("Native observation timedOut must be boolean");
   }
@@ -127,8 +127,8 @@ export function validateNativeObservationEnvelope(envelope) {
       }
     }
     if (entry.thread !== undefined) {
-      assertAllowed(entry.thread, new Set(["id", "hostId", "status", "cwd"]), "native observation thread");
-      for (const field of ["id", "hostId", "cwd"]) {
+      assertAllowed(entry.thread, new Set(["id", "hostId", "status", "cwd", "preview"]), "native observation thread");
+      for (const field of ["id", "hostId", "cwd", "preview"]) {
         if (entry.thread[field] !== undefined) requireText(entry.thread[field], `native observation thread.${field}`, 8192);
       }
       if (entry.thread.status !== undefined) {
@@ -138,21 +138,55 @@ export function validateNativeObservationEnvelope(envelope) {
     }
     if (entry.needsAttention !== undefined && typeof entry.needsAttention !== "boolean") throw new TypeError("Native observation needsAttention must be boolean");
     if (entry.error !== undefined) {
-      assertAllowed(entry.error, new Set(["code"]), "native observation error");
+      assertAllowed(entry.error, new Set(["code", "locator", "encodedResponseBytes", "maxEncodedResponseBytes"]), "native observation error");
       requireText(entry.error.code, "native observation error code", 8192);
+      if (entry.error.locator !== undefined) requireText(entry.error.locator, "native observation error locator", 1024);
+      for (const field of ["encodedResponseBytes", "maxEncodedResponseBytes"]) {
+        if (entry.error[field] !== undefined) requireNonNegative(entry.error[field], `native observation error.${field}`);
+      }
+      if (["native-history-budget-exceeded", "native-history-field-budget-exceeded"].includes(entry.error.code)
+        && (!entry.error.locator || entry.error.encodedResponseBytes === undefined
+          || entry.error.maxEncodedResponseBytes === undefined)) {
+        throw new TypeError("Native history overflow lacks its attributable locator and byte budget");
+      }
     }
   }
   if (envelope.payload.turns !== undefined && (!Array.isArray(envelope.payload.turns)
-    || envelope.payload.turns.length > 1 || envelope.payload.turns.some(turn => !isRecord(turn)
-      || Object.keys(turn).some(field => !new Set(["id", "status"]).has(field))
+    || envelope.payload.turns.length > 2 || envelope.payload.turns.some(turn => !isRecord(turn)
+      || Object.keys(turn).some(field => !new Set(["id", "status", "items"]).has(field))
       || turn.id !== undefined && (typeof turn.id !== "string" || turn.id.length > 8192)
-      || typeof turn.status !== "string" || turn.status.length === 0 || turn.status.length > 8192))) {
-    throw new TypeError("Native observation turns must be a bounded status-only list");
+      || typeof turn.status !== "string" || turn.status.length === 0 || turn.status.length > 8192
+      || turn.items !== undefined && (!Array.isArray(turn.items) || turn.items.length > 32
+        || turn.items.some(item => {
+          if (!isRecord(item)) return true;
+          if (item.type === "userMessage") return Object.keys(item).some(field => !new Set(["type", "content"]).has(field))
+            || !Array.isArray(item.content) || item.content.length > 8 || item.content.some(part => !isRecord(part)
+              || Object.keys(part).some(field => !new Set(["type", "text"]).has(field))
+              || part.type !== "text" || typeof part.text !== "string" || part.text.length > 8192);
+          if (item.type === "agentMessage") return Object.keys(item).some(field => !new Set(["type", "phase", "text"]).has(field))
+            || item.phase !== "final_answer" || typeof item.text !== "string" || item.text.length > 8192;
+          if (item.type === "functionCallOutput") return Object.keys(item).some(field =>
+            !new Set(["type", "namespace", "name", "output"]).has(field)) || item.namespace !== "codex_app"
+            || !["create_thread", "send_message_to_thread"].includes(item.name) || !isRecord(item.output)
+            || Object.keys(item.output).some(field => !new Set(["text", "truncated"]).has(field))
+            || item.output.truncated !== false || typeof item.output.text !== "string" || item.output.text.length > 8192;
+          return true;
+        }))))) {
+    throw new TypeError("Native observation turns must be bounded owner history");
+  }
+  if (envelope.payload.page !== undefined && (!isRecord(envelope.payload.page)
+    || Object.keys(envelope.payload.page).some(field => !new Set(["hasMore", "nextCursor"]).has(field))
+    || typeof envelope.payload.page.hasMore !== "boolean"
+    || envelope.payload.page.hasMore && envelope.payload.page.nextCursor === undefined
+    || envelope.payload.page.nextCursor !== undefined && (typeof envelope.payload.page.nextCursor !== "string"
+      || envelope.payload.page.nextCursor.length === 0 || envelope.payload.page.nextCursor.length > 8192))) {
+    throw new TypeError("Native observation page is malformed");
   }
   assertExact(envelope.budget, nativeBudgetFields, "native observation budget");
   for (const field of nativeBudgetFields) requireNonNegative(envelope.budget[field], `native observation budget.${field}`);
   if (envelope.budget.encodedResponseBytes > envelope.budget.maxEncodedResponseBytes
-    || envelope.budget.maxEncodedResponseBytes !== MAX_HOST_ENCODED_RESPONSE_BYTES) {
+    || envelope.budget.maxEncodedResponseBytes < 1
+    || envelope.budget.maxEncodedResponseBytes > MAX_HOST_ENCODED_RESPONSE_BYTES) {
     throw new TypeError("Native observation exceeds its encoded response budget");
   }
   const { identity, ...identityInput } = envelope;

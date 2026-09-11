@@ -152,11 +152,50 @@ test("owner history lookup has a fixed small page and output budget", async () =
   const tasks = createCodexWorkflowTasks({ project: {}, host: { async call(name, args) {
     assert.equal(name, "mcp__codex_app__read_thread"); reads++;
     assert.ok(args.turnLimit <= 2); assert.ok(args.maxOutputCharsPerItem <= 8192);
+    assert.equal(args.__workflowObservation.mode, "owner-history");
+    assert.ok(args.__workflowObservation.maxEncodedResponseBytes <= 256 * 1024);
     return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
       page: { hasMore: true, nextCursor: String(reads) }, turns: [{ id: String(reads), items: [] }] };
   } } });
   await assert.rejects(tasks.read(ref), /history.*unresolved/iu);
   assert.ok(reads <= 4);
+});
+
+test("a successful native close requires its exact candidate and ordered owner timeline", async () => {
+  const root = mkdtempSync(join(tmpdir(), "close-success-evidence-"));
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1",
+    authorityEvidence: { candidateCommit: candidate } };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const valid = { schema: "issue-close-result:v1", state: "CLOSED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, deliveryProgress: {
+      repositoryCloseAcquiredAt: "2026-09-11T00:00:00.000Z",
+      targetWriterAcquiredAt: "2026-09-11T00:00:01.000Z",
+      closeCompletedAt: "2026-09-11T00:00:02.000Z",
+    } };
+  let result = valid;
+  const options = { store: createRunStore({ gitCommonDir: join(root, ".git") }), runId: "run",
+    project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
+      ] }] }; } } };
+  try {
+    assert.deepEqual((await createCodexWorkflowTasks(options).read(ref)).closeResult, valid);
+    for (const invalid of [
+      { ...valid, schema: "issue-close-result:v2" },
+      { ...valid, candidate: "c".repeat(40) },
+      { ...valid, deliveryProgress: undefined },
+      { ...valid, deliveryProgress: { ...valid.deliveryProgress,
+        closeCompletedAt: "2026-09-10T23:59:59.000Z" } },
+    ]) {
+      result = invalid;
+      await assert.rejects(createCodexWorkflowTasks(options).read(ref), /Native.*(?:identity|candidate|timeline)/iu);
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("owner history overflow identifies the exact task instead of accepting partial evidence", async () => {

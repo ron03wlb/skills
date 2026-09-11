@@ -32,6 +32,18 @@ test("technical recovery routing discriminates diagnosis, read-back, local repai
   assert.deepEqual(route(undefined), { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNDIAGNOSED" });
   assert.deepEqual(route({ classification: "UNCLASSIFIED", source: "bounded receipt", reason: "no matching owner row" }),
     { phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNCLASSIFIED" });
+  for (const malformed of [
+    { classification: "NEW_UNKNOWN_STATE", source: "bounded receipt", reason: "new producer state" },
+    { classification: "ISSUE_DEFECT" },
+    null,
+  ]) {
+    const bound = bindTechnicalFailure({ ...base, diagnosis: malformed });
+    assert.equal(bound.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(bound.diagnosis.source, malformed?.source ?? "source");
+    assert.deepEqual(routeTechnicalRecovery(bound), {
+      phase: "DIAGNOSE", owner: "evidence-producer", disposition: "UNCLASSIFIED",
+    });
+  }
   assert.deepEqual(route({ classification: "OUTCOME_UNKNOWN", source: "native", reason: "lost ACK" }),
     { phase: "READBACK", owner: "original-command-owner", disposition: "LOST_ACK_OR_OUTCOME_UNKNOWN" });
   assert.deepEqual(route({ classification: "ISSUE_DEFECT", source: "tests", reason: "local defect", scopeCompatible: true }),

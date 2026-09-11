@@ -379,6 +379,9 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     assert.equal(runStore.observeRepositoryCloseLease().state, "ABSENT");
     const resumed = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(resumed.run.state, "SUCCEEDED", JSON.stringify(resumed));
+    assert.equal(runStore.readEvents(beforeClose.runIdentity.runId)
+      .some(event => event.type === "delivery.observed" && event.stage === "CLOSE_COMPLETED"), false,
+    "tracker closed_at cannot fabricate the original close owner's completion evidence after a lost native result");
     assert.equal((await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" })).run.state, "SUCCEEDED");
     assert.equal(nativeMessages, 2, "one original action plus one bounded continuation; lost replies cause no duplicate sends");
     assert.equal(hostCleanupRecoveries, 1, "tracker continuation does not repeat host recovery");

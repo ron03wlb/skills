@@ -568,9 +568,18 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         const terminalReceipt = receipt?.disposition === "SUCCEEDED"
           && receipt.candidate === completion.record.candidate ? receipt : null;
         const closeTimeline = task?.closeResult?.deliveryProgress;
-        if (closeTimeline !== undefined && (task.closeResult.schema !== "issue-close-result:v1"
-          || task.closeResult.state !== "CLOSED" || !["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"]
-            .every(field => typeof closeTimeline?.[field] === "string"))) {
+        const closeTimelineFields = ["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"];
+        const closeCandidate = completion.record.candidate ?? null;
+        const closeInstant = value => typeof value === "string" && !Number.isNaN(Date.parse(value))
+          && new Date(value).toISOString() === value;
+        if ((task?.closeResult?.state === "CLOSED" || closeTimeline !== undefined)
+          && (task.closeResult.schema !== "issue-close-result:v1"
+          || task.closeResult.state !== "CLOSED" || task.closeResult.candidate !== closeCandidate
+          || closeTimeline === null || typeof closeTimeline !== "object" || Array.isArray(closeTimeline)
+          || Object.keys(closeTimeline).length !== closeTimelineFields.length
+          || closeTimelineFields.some(field => !Object.hasOwn(closeTimeline, field) || !closeInstant(closeTimeline[field]))
+          || Date.parse(closeTimeline.repositoryCloseAcquiredAt) > Date.parse(closeTimeline.targetWriterAcquiredAt)
+          || Date.parse(closeTimeline.targetWriterAcquiredAt) > Date.parse(closeTimeline.closeCompletedAt))) {
           throw new Error("Close delivery progression is malformed or lacks its successful close owner");
         }
         node.deliveryProgressSource = {
@@ -584,8 +593,8 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
           closeRequestIdentity: task?.closeRequest?.requestIdentity ?? null,
           repositoryCloseAcquiredAt: closeTimeline?.repositoryCloseAcquiredAt ?? null,
           targetWriterAcquiredAt: closeTimeline?.targetWriterAcquiredAt ?? null,
-          closeCompletedAt: closeTimeline?.closeCompletedAt ?? issue.closed_at ?? null,
-          closeCompletedOwner: closeTimeline ? "close-issue" : "tracker-source-adapter",
+          closeCompletedAt: closeTimeline?.closeCompletedAt ?? null,
+          closeCompletedOwner: closeTimeline ? "close-issue" : null,
         };
       }
       nodes.push(node);
