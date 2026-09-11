@@ -549,6 +549,59 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     assert.deepEqual(selectionFailure.runs[0].workflowRuntime.packageVersion, selectedImportFailure.version);
     assert.equal(selectionFailure.runs[0].workflowRuntime.packageRoot, selectedImportFailure.root);
     assert.match(selectionFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenterOnStep: false };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  return {
+    specId,
+    async run({ mode }) {
+      if (mode === "step" && fixtureState.reenterOnStep) {
+        fixtureState.reenterOnStep = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "recursive unavailable selection fixture");
+    const beforeUnavailableSelection = f.install();
+    f.addCompleted(5, false, true, beforeUnavailableSelection.version);
+    const beforeUnavailableComposition = await import(pathToFileURL(join(beforeUnavailableSelection.root, scriptsPath, "codex-workflow.mjs")).href);
+    beforeUnavailableComposition.fixtureState.reenterOnStep = true;
+    let selectedUnavailable;
+    globalThis.__disconnectUnavailableSelection = () => { f.host.disconnected = true; };
+    f.host.installCurrent = () => {
+      writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => {
+  globalThis.__disconnectUnavailableSelection();
+  return { compatible: false, reason: "Fixture renewed package incompatible" };
+};
+export async function prepareCodexWorkflow() { throw new Error("Incompatible fixture must not prepare"); }
+export async function runCodexWorkflow() { throw new Error("Incompatible fixture must not run"); }
+`);
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed unavailable package fixture");
+      selectedUnavailable = f.install();
+    };
+    const unavailableSelection = await runInstalledEntry({ repository: f.repository, host: f.host,
+      specIds: ["5"], maxWorkers: 1 });
+    f.host.disconnected = false;
+    delete globalThis.__disconnectUnavailableSelection;
+    assert.equal(unavailableSelection.state, "PRESERVED");
+    assert.equal(unavailableSelection.runs[0].run.state, "UNAVAILABLE");
+    assert.match(unavailableSelection.runs[0].reason, /Fixture renewed package incompatible/u, JSON.stringify(unavailableSelection));
+    assert.ok(selectedUnavailable, "the recursive selection reads the renewed unavailable package");
+    assert.deepEqual(unavailableSelection.runs[0].workflowRuntime.packageVersion, selectedUnavailable.version);
+    assert.equal(unavailableSelection.runs[0].workflowRuntime.packageRoot, selectedUnavailable.root);
+    assert.match(unavailableSelection.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
   } finally { f.close(); }
 });
 

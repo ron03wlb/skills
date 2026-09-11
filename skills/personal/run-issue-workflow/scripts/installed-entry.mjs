@@ -123,7 +123,9 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
             await closeLane();
             const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
-            if (typeof renewed.run !== "function") return { ...status, workflowRuntime: effectiveRuntime,
+            if (typeof renewed.run !== "function") return { ...status,
+              run: { ...status.run, state: "UNAVAILABLE" },
+              workflowRuntime: renewed.workflowRuntime ?? effectiveRuntime,
               capacityUnknown: true, reason: renewed.reason };
             lane = renewed; versionId = installed.version.id;
             effectiveRuntime = renewed.workflowRuntime;
