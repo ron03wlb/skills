@@ -30,7 +30,8 @@ export async function runBatch({ lanes, maxWorkers = 3, sleep, connected = () =>
         progressed = true;
       } catch (error) {
         // Unknown task creation outcomes are reconciled on the next observation, never repeated here.
-        statuses.set(lane.specId, { ...status, capacityUnknown: true, run: { ...status.run, state: "UNAVAILABLE" }, error: error.message });
+        statuses.set(lane.specId, { ...status, workflowRuntime: lane.workflowRuntime ?? status.workflowRuntime,
+          capacityUnknown: true, run: { ...status.run, state: "UNAVAILABLE" }, error: error.message });
       }
     }
     cursor = (cursor + 1) % lanes.length;

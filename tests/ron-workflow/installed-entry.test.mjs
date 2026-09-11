@@ -91,7 +91,7 @@ function fixture({ legacyRuntime = false } = {}) {
     return JSON.stringify([response]);
   };
   syncBuiltinESMExports();
-  const addCompleted = (number = 1, multi = false, recordRun = true) => {
+  const addCompleted = (number = 1, multi = false, recordRun = true, workflowVersion = retained.version) => {
     const specId = `I_${number}`;
     const body = `Approved single Spec ${number}`;
     const authority = { specId, target: "main", planningSeal: seal, classification: multi ? "MULTI" : "SINGLE", approvedScopeHash: bodyDigest(body), decompositionIdentity: multi ? `IC_decomp_${number}` : null };
@@ -137,7 +137,7 @@ function fixture({ legacyRuntime = false } = {}) {
     const runIdentity = { ...runFields, runId: deriveRunOperationIdentity({ repositoryId: "github:example/repo", specId, approvedPublicationIdentity: authority.approvedScopeHash }).key };
     if (recordRun) {
       const writer = store.acquireWriter(runIdentity.runId);
-      writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity, maxParallel: 3, workflowVersion: retained.version });
+      writer.append({ type: "grant.recorded", at: "2026-09-08T00:00:00.000Z", runIdentity, maxParallel: 3, workflowVersion });
       for (const member of multi ? children : [issue]) writer.append({ type: "dispatch.recorded", at: "2026-09-08T00:00:00.000Z", issueId: member.node_id,
         attempt: 1, taskRef: { threadId: `task-${member.number}`, hostId: "local" } });
       writer.release();
@@ -457,6 +457,57 @@ await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-clos
     assertRuntime(reentryFailure.runs[0]);
     assert.ok(installedDuringReentry, "the lane reaches its runtime re-entry close boundary");
     assert.deepEqual(composition.closes, ["I_1"], "final batch cleanup cannot repeat an uncertain re-entry close effect");
+
+    writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenterOnStep: false };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  return {
+    specId,
+    async run({ mode }) {
+      if (mode === "step" && fixtureState.reenterOnStep) {
+        fixtureState.reenterOnStep = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+    git(f.source, "add", "skills"); git(f.source, "commit", "-m", "step runtime re-entry fixture");
+    const beforeStepReentry = f.install();
+    f.addCompleted(3, false, true, beforeStepReentry.version);
+    const beforeStepComposition = await import(pathToFileURL(join(beforeStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
+    beforeStepComposition.fixtureState.reenterOnStep = true;
+    let installedDuringStepReentry;
+    f.host.installCurrent = () => {
+      writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export async function prepareCodexWorkflow({ specId }) {
+  return { specId,
+    async run() { throw new Error("Fixture renewed selected execution failed"); },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed runtime failure fixture");
+      installedDuringStepReentry = f.install();
+    };
+    const stepReentryFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
+      specIds: ["3"], maxWorkers: 1 });
+    assert.equal(stepReentryFailure.state, "PRESERVED");
+    assert.match(stepReentryFailure.runs[0].error, /Fixture renewed selected execution failed/u, JSON.stringify(stepReentryFailure));
+    assert.ok(installedDuringStepReentry, "the step reaches the renewed selected runtime");
+    assert.deepEqual(stepReentryFailure.runs[0].workflowRuntime.packageVersion, installedDuringStepReentry.version);
+    assert.equal(stepReentryFailure.runs[0].workflowRuntime.packageRoot, installedDuringStepReentry.root);
+    assert.match(stepReentryFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
   } finally { f.close(); }
 });
 
