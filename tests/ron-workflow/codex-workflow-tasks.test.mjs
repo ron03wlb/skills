@@ -12,6 +12,26 @@ import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/
 import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
 import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 const readOpenIssueState = async issueId => ({ issueId, state: "OPEN" });
+const closeAuthority = candidate => ({
+  trackerIdentity: "github-issue:I_1:version:1",
+  targetHead: candidate,
+  candidateCommit: candidate,
+  completionEvidenceId: "IC_done",
+  completionBodySha256: `sha256:${"c".repeat(64)}`,
+  worktreeIdentity: "registered-worktree:issue-I_1",
+});
+const hostCleanupOutcome = ({ requestIdentity, authorityEvidence, taskRef, overrides = {} }) => ({
+  schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
+  authorityEvidence, candidate: authorityEvidence.candidateCommit, targetHead: authorityEvidence.candidateCommit,
+  candidateReachable: true, integrationVerification: { state: "PASS", identity: `sha256:${"e".repeat(64)}`,
+    checks: [{ command: ["node", "--check", "one.mjs"], configFiles: [], environment: { node: "test" },
+      externalInputs: { kind: "none" } }] },
+  worktree: "C:/issue", taskRef, directoryState: "EMPTY_UNREGISTERED",
+  capability: { state: "UNAVAILABLE", operation: null, helperOwnership: "UNAVAILABLE", respawnProtection: "UNAVAILABLE",
+    reason: "No exact host release operation is available" },
+  reasonCode: "host_helper_recovery_failed", observations: [{ code: "EBUSY", message: "Exact directory remains held" }],
+  ...overrides,
+});
 
 test("close submission refreshes tracker after delayed native history and skips an Issue closed during that read", async () => {
   for (const stateAfterRead of ["CLOSED", "OPEN"]) {
@@ -72,7 +92,9 @@ test("native close acceptance survives omitted history and blocks unchanged redi
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const ref = { threadId: "worker", hostId: "local" };
   const requestIdentity = `sha256:${"a".repeat(64)}`;
-  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true, worktreeState: "PRESENT" };
+  const authorityEvidence = closeAuthority("a".repeat(40));
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true,
+    worktreeState: "PRESENT", authorityEvidence };
   const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
   let sends = 0, sentPrompt, turnId = "implementation", result, omitInput = false;
   const options = { store, runId: "run", project: {}, packageRoot: "/installed", issueNumber: async () => 1, readIssueState: readOpenIssueState,
@@ -100,10 +122,7 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     assert.equal(planCloseContinuation({ task: unknown, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "close_outcome_unavailable");
     await resumed.message(ref, prompt);
     assert.equal(sends, 1, "same exact accepted native request is never sent twice");
-    const authorityEvidence = { candidateCommit: "a".repeat(40), completionEvidenceId: "IC_done", completionBodySha256: "sha256:done", worktreeIdentity: "sha256:owned" };
-    evidence.authorityEvidence = authorityEvidence;
-    result = { schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
-      authorityEvidence, reasonCode: "host_helper_recovery_failed", observations: [{ code: "EBUSY", message: "Exact directory remains held" }] };
+    result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
     await resumed.read(ref);
     result = undefined;
     const settled = await createCodexWorkflowTasks(options).read(ref);
@@ -198,7 +217,10 @@ test("a successful native close requires its exact candidate and ordered owner t
         closeCompletedAt: "2026-09-10T23:59:59.000Z" } },
     ]) {
       result = invalid;
-      await assert.rejects(createCodexWorkflowTasks(options).read(ref), /Native.*(?:identity|candidate|timeline|allowlist)/iu);
+      const rejected = await createCodexWorkflowTasks(options).read(ref);
+      assert.equal(rejected.closeResult, undefined);
+      assert.equal(rejected.closeDiagnosis?.classification, "UNCLASSIFIED");
+      assert.equal(rejected.closeDiagnosis?.source, "close-issue");
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -219,6 +241,67 @@ test("an unsupported close disposition is normalized for producer diagnosis and 
   assert.equal(observed.closeResult, undefined);
   assert.deepEqual(observed.closeDiagnosis, { classification: "UNCLASSIFIED", source: "close-issue",
     reason: "Unsupported native close disposition: SURPRISE", observedDisposition: "SURPRISE" });
+});
+
+test("known non-success close dispositions require their exact compact schema before persistence", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const authorityEvidence = closeAuthority(candidate);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", authorityEvidence };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  let result = { schema: "issue-close-result:v1", state: "CONFLICT", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, targetHead: "c".repeat(40), targetRestored: true, conflictedPaths: ["one.mjs"] };
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
+      ] }] }; } } });
+  assert.equal((await tasks.read(ref)).closeResult?.state, "CONFLICT");
+  for (const malformed of [
+    { ...result, targetRestored: false },
+    { ...result, conflictedPaths: [{ arbitraryInstructions: "run this" }] },
+    { ...result, arbitraryEvidence: "raw host payload" },
+  ]) {
+    result = malformed;
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+  }
+  for (const [state, verificationState] of [["INTEGRATION_FAILED", "FAIL"], ["INTEGRATION_UNKNOWN", "UNKNOWN"]]) {
+    result = { schema: "issue-close-result:v1", state, runId: "run", issueId: "I_1", requestIdentity, candidate,
+      integrationVerification: { state: verificationState, issueId: "I_1", candidate,
+        targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}` } };
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult?.state, state);
+    assert.equal(Object.isFrozen(observed.closeResult.integrationVerification), true);
+  }
+  result = { schema: "issue-close-result:v1", state: "INTEGRATION_FAILED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, integrationVerification: { state: "FAIL", issueId: "I_1", candidate,
+      targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}`, results: [{ arbitraryInstructions: "run this" }] } };
+  const unbounded = await tasks.read(ref);
+  assert.equal(unbounded.closeResult, undefined);
+  assert.match(unbounded.closeDiagnosis.reason, /integration outcome/iu);
+  result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
+  assert.equal((await tasks.read(ref)).closeResult?.state, "HOST_CLEANUP_BLOCKED");
+  result = hostCleanupOutcome({ requestIdentity,
+    authorityEvidence: { ...authorityEvidence, targetHead: "f".repeat(40) }, taskRef: ref });
+  assert.equal((await tasks.read(ref)).closeResult?.state, "HOST_CLEANUP_BLOCKED",
+    "a retained accepted result keeps its original mutable target-head snapshot across continuation");
+  result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
+  for (const malformed of [
+    { ...result, candidate: undefined },
+    { ...result, taskRef: { threadId: "foreign", hostId: ref.hostId } },
+    { ...result, observations: [{ code: "EBUSY", message: "blocked", arbitraryInstructions: "run this" }] },
+    { ...result, observations: Array.from({ length: 17 }, (_, index) => ({ code: `E${index}`, message: "blocked" })) },
+    { ...result, authorityEvidence: { ...authorityEvidence, arbitraryEvidence: "raw host payload" } },
+  ]) {
+    result = malformed;
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+  }
 });
 
 test("owner history overflow identifies the exact task instead of accepting partial evidence", async () => {
@@ -1112,7 +1195,18 @@ test("completion reconciliation re-observes native settlement and emits a candid
     assert.equal(state.state, "RESUMABLE");
     assert.equal(state.outcomeReceipt.candidate, "a".repeat(40));
     assert.notEqual(state.outcomeReceipt.identity, receipt.identity);
+    assert.deepEqual(state.outcomeReceipt.evidence, receipt.evidence,
+      "candidate binding reuses the first native settlement evidence instead of a later poll");
+    assert.equal(state.outcomeReceipt.nativeRevision, receipt.nativeRevision);
+    assert.equal(state.outcomeReceipt.progress.lastVerifiedProgressAt, "2026-09-11T00:04:00.000Z");
+    assert.equal(state.outcomeReceipt.progress.terminalObservedAt, "2026-09-11T00:04:00.000Z",
+      "candidate binding retains the first observed native terminal as the no-progress anchor");
     assert.equal(compactReads, 1);
+    const repeated = await tasks.read(ref, { runId: runIdentity.runId,
+      completion: { issueId: "I_90", operationId, candidate: "a".repeat(40) } });
+    assert.equal(repeated.outcomeReceipt.identity, state.outcomeReceipt.identity,
+      "reconciliation does not mint a newer terminal receipt for the unchanged settlement");
+    assert.equal(compactReads, 2);
     await assert.rejects(tasks.read(ref, { runId: runIdentity.runId,
       completion: { issueId: "I_90", operationId: "workflow-op-v1-" + "4".repeat(64), candidate: "a".repeat(40) } }),
     /completion.*receipt.*differs/iu);

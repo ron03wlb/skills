@@ -12,10 +12,13 @@ test("operator and recovery contracts publish compact normal outcomes and one fi
   const lifecycle = readFileSync(new URL("../../skills/personal/run-issue-workflow/references/coordinator-lifecycle.md", import.meta.url), "utf8");
   for (const source of [skill, recovery, lifecycle]) {
     assert.match(source, /workflow-task-outcome:v1|`task\.outcome`/u);
-    assert.match(source, /300 seconds|Five minutes/u);
     assert.match(source, /does not read full task history|do not read full history|never reads full task history/u);
   }
-  for (const source of [recovery, lifecycle]) assert.match(source, /coordinator[^.]*never repair/iu);
+  assert.match(recovery, /300 seconds/u, "the recovery contract owns the literal threshold");
+  assert.match(lifecycle, /\[compact recovery outcome and progress diagnosis contract\]\(recovery\.md#compact-outcomes-and-progress-diagnosis\)/u,
+    "the lifecycle consumes the authoritative threshold instead of duplicating it");
+  assert.match(lifecycle, /coordinator[^.]*never repair/iu,
+    "the coordinator lifecycle owns its no-repair boundary");
   assert.match(recovery, /16 KiB/u);
   assert.match(recovery, /1 MiB/u);
   assert.match(recovery, /256 KiB/u);

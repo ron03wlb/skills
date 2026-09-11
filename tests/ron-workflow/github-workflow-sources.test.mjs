@@ -337,6 +337,8 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
               checks: [{ command: integrationCheck.command, configFiles: integrationCheck.configFiles,
                 environment: integrationCheck.environment, externalInputs: { kind: "none" } }] },
             worktree: lane, taskRef: ref, directoryState: "EMPTY_UNREGISTERED",
+            capability: { state: "UNAVAILABLE", operation: null, helperOwnership: "UNAVAILABLE", respawnProtection: "UNAVAILABLE",
+              reason: "No exact host release operation is available" },
             reasonCode: "host_release_unavailable",
             observations: [{ code: "EBUSY", message: "Exact task helpers retain the empty directory" }] })}`;
         }

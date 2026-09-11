@@ -14,6 +14,7 @@ import {
   MAX_HISTORY_READS,
   MAX_HISTORY_RESPONSE_BYTES,
   MAX_HOST_ENCODED_RESPONSE_BYTES,
+  MAX_TASK_OUTCOME_RECEIPT_BYTES,
   createTaskOutcomeReceipt,
   encodedBytes,
   responseBudgetError,
@@ -62,9 +63,12 @@ const closeRequestFrom = prompt => {
     ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
 };
 const CLOSE_OUTCOME_STATES = new Set(["CLOSED", "CONFLICT", "INTEGRATION_FAILED", "INTEGRATION_UNKNOWN", "HOST_CLEANUP_BLOCKED"]);
-const CLOSE_OUTCOME_FIELDS = new Set(["schema", "state", "runId", "issueId", "requestIdentity", "candidate", "targetHead",
-  "targetRestored", "conflictedPaths", "integrationVerification", "authorityEvidence", "candidateReachable", "worktree",
-  "taskRef", "directoryState", "capability", "reasonCode", "observations", "deliveryProgress"]);
+const CLOSE_BASE_FIELDS = ["schema", "state", "runId", "issueId", "requestIdentity"];
+const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const exactFields = (value, fields) => record(value) && Object.keys(value).length === fields.length
+  && fields.every(field => Object.hasOwn(value, field));
+const bounded = (value, maximum = 1024) => typeof value === "string" && value.length > 0 && value.length <= maximum;
+const candidateSha = value => typeof value === "string" && /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(value);
 const deepFreeze = value => {
   if (value && typeof value === "object" && !Object.isFrozen(value)) {
     Object.freeze(value);
@@ -72,33 +76,104 @@ const deepFreeze = value => {
   }
   return value;
 };
-const bindCloseOutcome = (result, request) => {
-  if (result?.schema !== "issue-close-result:v1" || typeof result.state !== "string" || !result.state
-    || result.runId !== request.runId || result.issueId !== request.issueId
+const bindSettlementCandidate = (receipt, candidate) => {
+  const { schema: ignoredSchema, identity: ignoredIdentity, ...input } = receipt;
+  return createTaskOutcomeReceipt({ ...input, candidate });
+};
+const bindCloseOutcome = (result, request, ownerTaskRef) => {
+  if (!record(result) || !bounded(result.state, 128) || result.runId !== request.runId || result.issueId !== request.issueId
     || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
-  if (!CLOSE_OUTCOME_STATES.has(result.state)) return { diagnosis: Object.freeze({
+  const malformed = reason => ({ diagnosis: Object.freeze({
     classification: "UNCLASSIFIED", source: "close-issue",
-    reason: `Unsupported native close disposition: ${result.state.slice(0, 128)}`,
+    reason,
     observedDisposition: result.state.slice(0, 128),
-  }) };
-  if (Object.keys(result).some(field => !CLOSE_OUTCOME_FIELDS.has(field))) {
-    throw new Error("Native close outcome contains fields outside its exact allowlist");
-  }
-  if (result.state !== "CLOSED") return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }) });
+  if (result.schema !== "issue-close-result:v1") return malformed(`Unsupported native close outcome schema: ${String(result.schema).slice(0, 128)}`);
+  if (!CLOSE_OUTCOME_STATES.has(result.state)) return malformed(`Unsupported native close disposition: ${result.state.slice(0, 128)}`);
+  if (encodedBytes(result) > MAX_TASK_OUTCOME_RECEIPT_BYTES) return malformed("Native close outcome exceeds its compact result byte budget");
   const expectedCandidate = request.evidence?.authorityEvidence?.candidateCommit ?? null;
+  if (result.state === "CONFLICT") {
+    const fields = [...CLOSE_BASE_FIELDS, "candidate", "targetHead", "targetRestored", "conflictedPaths"];
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !candidateSha(result.targetHead) || result.targetRestored !== true || !Array.isArray(result.conflictedPaths)
+      || !result.conflictedPaths.length || result.conflictedPaths.length > 128
+      || new Set(result.conflictedPaths).size !== result.conflictedPaths.length
+      || !result.conflictedPaths.every(path => bounded(path) && !/^(?:[A-Za-z]:|[/\\])/u.test(path)
+        && !/(?:^|[/\\])\.\.(?:$|[/\\])/u.test(path))) {
+      return malformed("Native conflict outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
+  if (["INTEGRATION_FAILED", "INTEGRATION_UNKNOWN"].includes(result.state)) {
+    const fields = [...CLOSE_BASE_FIELDS, "candidate", "integrationVerification"];
+    const verification = result.integrationVerification;
+    const expectedState = result.state === "INTEGRATION_FAILED" ? "FAIL" : "UNKNOWN";
+    const verificationFields = ["state", "issueId", "candidate", "targetHead", "identity"];
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !exactFields(verification, verificationFields) || verification.state !== expectedState
+      || verification.issueId !== request.issueId || verification.candidate !== expectedCandidate
+      || !candidateSha(verification.targetHead) || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity)) {
+      return malformed("Native integration outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
+  if (result.state === "HOST_CLEANUP_BLOCKED") {
+    const fields = [...CLOSE_BASE_FIELDS, "authorityEvidence", "candidate", "targetHead", "candidateReachable",
+      "integrationVerification", "worktree", "taskRef", "directoryState", "capability", "reasonCode", "observations"];
+    const verification = result.integrationVerification;
+    const capability = result.capability;
+    const authority = result.authorityEvidence;
+    const authorityFields = ["trackerIdentity", "targetHead", "candidateCommit", "completionEvidenceId",
+      "completionBodySha256", "worktreeIdentity"];
+    const fixedAuthorityFields = authorityFields.filter(field => field !== "targetHead");
+    const validCheck = check => exactFields(check, ["command", "configFiles", "environment", "externalInputs"])
+      && Array.isArray(check.command) && check.command.length > 0 && check.command.length <= 64
+      && check.command.every(item => typeof item === "string" && item.length <= 1024)
+      && Array.isArray(check.configFiles) && check.configFiles.length <= 64 && check.configFiles.every(item => bounded(item))
+      && record(check.environment) && Object.keys(check.environment).length > 0 && Object.keys(check.environment).length <= 64
+      && Object.entries(check.environment).every(([key, value]) => bounded(key, 128)
+        && (["string", "number", "boolean"].includes(typeof value)
+          && (typeof value !== "string" || value.length <= 1024)))
+      && exactFields(check.externalInputs, ["kind"]) && check.externalInputs.kind === "none";
+    if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
+      || !candidateSha(result.targetHead)
+      || result.candidateReachable !== true || !record(request.evidence?.authorityEvidence)
+      || !exactFields(authority, authorityFields) || authority.candidateCommit !== expectedCandidate
+      || !candidateSha(authority.targetHead) || !authorityFields.every(field => bounded(authority[field], 8192))
+      || !exactFields(request.evidence.authorityEvidence, authorityFields)
+      || !fixedAuthorityFields.every(field => authority[field] === request.evidence.authorityEvidence[field])
+      || !exactFields(verification, ["state", "identity", "checks"]) || verification.state !== "PASS"
+      || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity) || !Array.isArray(verification.checks)
+      || verification.checks.length > 16
+      || !verification.checks.every(validCheck) || !bounded(result.worktree, 8192)
+      || !exactFields(result.taskRef, ["threadId", "hostId"]) || !bounded(result.taskRef.threadId) || !bounded(result.taskRef.hostId)
+      || result.taskRef.threadId !== ownerTaskRef?.threadId || result.taskRef.hostId !== ownerTaskRef?.hostId
+      || result.directoryState !== "EMPTY_UNREGISTERED"
+      || !exactFields(capability, ["state", "operation", "helperOwnership", "respawnProtection", "reason"])
+      || capability.state !== "UNAVAILABLE" || capability.operation !== null || capability.helperOwnership !== "UNAVAILABLE"
+      || capability.respawnProtection !== "UNAVAILABLE" || !bounded(capability.reason)
+      || !["host_release_unavailable", "host_task_ownership_unproven", "host_cleanup_ownership_unproven",
+        "host_cleanup_policy_rejected", "host_helper_recovery_failed"].includes(result.reasonCode)
+      || !Array.isArray(result.observations) || !result.observations.length || result.observations.length > 16
+      || !result.observations.every(item => exactFields(item, ["code", "message"])
+        && bounded(item.code, 128) && bounded(item.message, 4096))) {
+      return malformed("Native host-cleanup outcome is malformed or differs from its exact close owner");
+    }
+    return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
+  }
   const timeline = result.deliveryProgress;
   const timelineFields = ["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"];
   const resultFields = ["schema", "state", "runId", "issueId", "requestIdentity", "candidate", "deliveryProgress"];
   const canonicalInstant = value => typeof value === "string" && !Number.isNaN(Date.parse(value))
     && new Date(value).toISOString() === value;
   if (Object.keys(result).length !== resultFields.length || resultFields.some(field => !Object.hasOwn(result, field))
-    || result.candidate !== expectedCandidate
+    || result.candidate !== expectedCandidate || result.candidate !== null && !candidateSha(result.candidate)
     || timeline === null || typeof timeline !== "object" || Array.isArray(timeline)
     || Object.keys(timeline).length !== timelineFields.length
     || timelineFields.some(field => !Object.hasOwn(timeline, field) || !canonicalInstant(timeline[field]))
     || Date.parse(timeline.repositoryCloseAcquiredAt) > Date.parse(timeline.targetWriterAcquiredAt)
     || Date.parse(timeline.targetWriterAcquiredAt) > Date.parse(timeline.closeCompletedAt)) {
-    throw new Error("Native successful close outcome lacks its exact candidate and ordered owner timeline");
+    return malformed("Native successful close outcome lacks its exact candidate and ordered owner timeline");
   }
   return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
 };
@@ -469,9 +544,13 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         return { state: "RUNNING", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd };
       }
       if (compactCompleted && !snapshot.error) {
-        const current = outcomeReceipt({ ref, observation: { status: type, event: "completion" }, disposition: "SUCCEEDED",
-          evidenceKind: ownership.completion ? "tracker-completion" : "native-settlement",
-          observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
+        const retained = outcome?.receipt?.disposition === "SUCCEEDED" ? outcome.receipt : null;
+        const candidateCurrent = !ownership.completion || retained?.candidate === ownership.completion.candidate;
+        const current = retained && candidateCurrent ? retained
+          : retained && ownership.completion ? bindSettlementCandidate(retained, ownership.completion.candidate)
+            : outcomeReceipt({ ref, observation: { status: type, event: "completion" }, disposition: "SUCCEEDED",
+              evidenceKind: ownership.completion ? "tracker-completion" : "native-settlement",
+              observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
         return { state: "RESUMABLE", ...(current ? { outcomeReceipt: current } : {}), snapshot, cwd: snapshot.thread.cwd,
           inactiveEvidence: current?.evidence.map(item => item.locator)
             ?? [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
@@ -532,12 +611,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        const bound = bindCloseOutcome(closeResult, closeRequest);
+        const bound = bindCloseOutcome(closeResult, closeRequest, ref);
         closeResult = bound.result;
         closeDiagnosis = bound.diagnosis;
         if (closeResult) receipts.observe(receipt.promptIdentity, closeResult);
       }
-      else if (receipt.outcome?.result) closeResult = bindCloseOutcome(receipt.outcome.result, closeRequest).result;
+      else if (receipt.outcome?.result) closeResult = bindCloseOutcome(receipt.outcome.result, closeRequest, ref).result;
     } else if (!receipt && closeResult) {
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] })
         .some(text => text.includes("Close request identity:"))
@@ -549,7 +628,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt));
+        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt), ref);
         closeResult = bound.result;
         closeDiagnosis = bound.diagnosis;
       }
