@@ -107,6 +107,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     let versionId = runtime.version.id;
     let effectiveRuntime = workflowRuntime;
     let closedLane;
+    let unavailableStatus;
     const closeLane = async () => {
       const closing = lane;
       if (closedLane === closing) return;
@@ -116,6 +117,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     };
     return { specId: lane.specId, get workflowRuntime() { return effectiveRuntime; },
       async run(request) {
+        if (unavailableStatus) return unavailableStatus;
         const status = await lane.run(request);
         if (status.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")
           && !host.disconnected && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(status.run.state)) {
@@ -123,10 +125,13 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
             await closeLane();
             const renewed = await selectInstalledLane({ repository, specId, runId: status.run.runId, host, prepareOnly: true });
-            if (typeof renewed.run !== "function") return { ...status,
-              run: { ...status.run, state: "UNAVAILABLE" },
-              workflowRuntime: renewed.workflowRuntime ?? effectiveRuntime,
-              capacityUnknown: true, reason: renewed.reason };
+            if (typeof renewed.run !== "function") {
+              effectiveRuntime = renewed.workflowRuntime ?? effectiveRuntime;
+              versionId = installed.version.id;
+              unavailableStatus = { ...status, run: { ...status.run, state: "UNAVAILABLE" },
+                workflowRuntime: effectiveRuntime, capacityUnknown: true, reason: renewed.reason };
+              return unavailableStatus;
+            }
             lane = renewed; versionId = installed.version.id;
             effectiveRuntime = renewed.workflowRuntime;
             const renewedStatus = await lane.run({ ...request, mode: "snapshot" });

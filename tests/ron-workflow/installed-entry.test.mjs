@@ -553,11 +553,13 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
-export const fixtureState = { reenterOnStep: false };
+export const fixtureState = { reenterOnStep: false, calls: [] };
 export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  let closed = false;
   return {
     specId,
     async run({ mode }) {
+      fixtureState.calls.push(mode + ":" + closed);
       if (mode === "step" && fixtureState.reenterOnStep) {
         fixtureState.reenterOnStep = false;
         host.installCurrent();
@@ -566,7 +568,7 @@ export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
       }
       return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
     },
-    async close() {},
+    async close() { closed = true; },
   };
 }
 export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
@@ -577,12 +579,10 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     const beforeUnavailableComposition = await import(pathToFileURL(join(beforeUnavailableSelection.root, scriptsPath, "codex-workflow.mjs")).href);
     beforeUnavailableComposition.fixtureState.reenterOnStep = true;
     let selectedUnavailable;
-    globalThis.__disconnectUnavailableSelection = () => { f.host.disconnected = true; };
     f.host.installCurrent = () => {
       writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => {
-  globalThis.__disconnectUnavailableSelection();
   return { compatible: false, reason: "Fixture renewed package incompatible" };
 };
 export async function prepareCodexWorkflow() { throw new Error("Incompatible fixture must not prepare"); }
@@ -593,8 +593,6 @@ export async function runCodexWorkflow() { throw new Error("Incompatible fixture
     };
     const unavailableSelection = await runInstalledEntry({ repository: f.repository, host: f.host,
       specIds: ["5"], maxWorkers: 1 });
-    f.host.disconnected = false;
-    delete globalThis.__disconnectUnavailableSelection;
     assert.equal(unavailableSelection.state, "PRESERVED");
     assert.equal(unavailableSelection.runs[0].run.state, "UNAVAILABLE");
     assert.match(unavailableSelection.runs[0].reason, /Fixture renewed package incompatible/u, JSON.stringify(unavailableSelection));
@@ -602,6 +600,8 @@ export async function runCodexWorkflow() { throw new Error("Incompatible fixture
     assert.deepEqual(unavailableSelection.runs[0].workflowRuntime.packageVersion, selectedUnavailable.version);
     assert.equal(unavailableSelection.runs[0].workflowRuntime.packageRoot, selectedUnavailable.root);
     assert.match(unavailableSelection.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+    assert.deepEqual(beforeUnavailableComposition.fixtureState.calls, ["snapshot:false", "step:false"],
+      "a connected next round must not re-enter the closed old runtime");
   } finally { f.close(); }
 });
 
