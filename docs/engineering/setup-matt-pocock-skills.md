@@ -50,7 +50,7 @@ The first three ship as templates in the skill and work out of the box. Local ma
 
 ## Installed workflow diagnostics
 
-After configuration, setup reads the current harness's resolved installations and reports the configured tracker, triage labels when applicable, required public skill surfaces, operation-scoped producer store, producer handoff, target reader, shared target writer, deterministic operation identity, repository close lease, per-Run execution capacity, and Run composition. For hosted trackers it compares every configured triage label with the provider's read-only label listing; the local-file adapter validates its `Status:` mappings because it has no separate label registry. A missing or unknown seam names its owning source, observed evidence, and the smallest human action there, such as repairing tracker access or updating the package that owns the adapter.
+After configuration, setup reads the current harness's resolved installations and reports the configured tracker, triage labels when applicable, required public skill surfaces, operation-scoped producer store, producer handoff, concrete GitLab Spec and Decomposition producers when applicable, target reader, shared target writer, deterministic operation identity, repository close lease, per-Run execution capacity, and Run composition. For hosted trackers it compares every configured triage label with the provider's read-only label listing; the local-file adapter validates its `Status:` mappings because it has no separate label registry. A missing or unknown seam names its owning source, observed evidence, and the smallest human action there, such as repairing tracker access or updating the package that owns the adapter.
 
 The diagnostic is deliberately read-only. It does not install or repair a separately owned coordinator, create a producer transaction, derive or adopt an operation identity, create a Run, acquire either closeout lease, mutate the tracker, or authorize publication, execution, integration, aggregate verification, or push. Aggregate setup health is orientation for the human; every later skill reads its own authority at its own boundary.
 
@@ -58,7 +58,7 @@ The diagnostic is deliberately read-only. It does not install or repair a separa
 
 **A producer says its adapter is missing. Will re-running setup install it?**
 
-No. Setup writes tracker, label and domain-document configuration, and inspects installed workflow capabilities. A missing concrete producer adapter needs its owning package's installation or explicit repository binding. GitLab tracker-only Spec publication uses the personal coordinator's GitLab producer binding; automatic Run host support remains a separate capability. An interface document marked present is not evidence that a concrete GitLab implementation is configured.
+No. Setup writes tracker, label and domain-document configuration, and inspects installed workflow capabilities. A missing concrete producer adapter needs its owning package's installation or explicit repository binding. GitLab tracker-only Spec and Decomposition publication use separate entries in the personal coordinator; the latter also reads the repository-owned `Blocking representation`. Automatic Run host support remains a separate capability. An interface document marked present is not evidence that a concrete GitLab implementation is configured.
 
 **Do I have to use GitHub?**
 

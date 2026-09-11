@@ -88,7 +88,7 @@ At a phase boundary, choose whether to continue, clear, create a [handoff](https
 
 ## Where it fits
 
-Missing tracker, labels or domain-document configuration routes to [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills). A missing concrete GitLab Spec producer routes to the personal coordinator's explicit producer binding entry. Setup only diagnoses that capability; repeating it does not install an adapter or configure automatic Run support.
+Missing tracker, labels or domain-document configuration routes to [setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills). A missing concrete GitLab Spec or Decomposition producer routes to its separate personal-coordinator binding entry. Setup only diagnoses those capabilities; repeating it does not install an adapter or configure automatic Run support.
 
 `ask-matt` is a reach-for-it-anytime router, not a chain step. Its most common neighbours are [grill-with-docs](https://aihero.dev/skills-grill-with-docs), [to-spec](https://aihero.dev/skills-to-spec), and [execute-issue](https://aihero.dev/skills-execute-issue); [ask-matt](https://aihero.dev/skills-ask-matt) remains the map of record.
 

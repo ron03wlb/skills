@@ -18,14 +18,14 @@ Fresh decomposition is tracker-only: no planning lane is required. The consumed 
 ## Tracker adapter
 
 - `tracker.discoverChildren` returns every tracker-supported identity source for the expected Decomposition keys without mutation, plus the selected `blockingRepresentation`: exactly `body` or `native`. A missing, unreadable, or unsupported representation is `UNKNOWN`; producer policy stops before child, relation, label, or parent-record mutation and asks for one explicit `body` or `native` repair.
-- `tracker.publishChild` creates one missing canonical child, including its canonical `## Blocked by` body section. `tracker.publishRelation` creates only one expected absent native parent relation or a blocking relation in `native` representation; it is never the body-mode blocker publisher. Each call returns an immutable Issue or relation identity after exact read-back.
+- `tracker.publishChild` creates one missing canonical child, including its canonical `## Blocked by` body section. `tracker.updateChild` replaces one approved unfinished child contract only after exact old body/version, previous completed Decomposition, and absent execution-lane evidence read back; it preserves Issue identity and relationships. `tracker.publishRelation` creates only one expected absent relation that the concrete binding supports: a native parent relation when proven available, or a blocking relation in `native` representation. The current GitLab binding without proven native Issue hierarchy never calls it for parent evidence and uses canonical child `## Parent` plus the parent `decomposition:v1` mapping and exact body digest instead; it never substitutes `relates_to`. The method is never the body-mode blocker publisher. Each call returns an immutable Issue or relation identity after exact read-back.
 - Ordinary child read-back returns the canonical body blocker edges in stable tracker-identity order. In `native` representation it additionally returns the native blocking relation evidence; body-mode read-back never infers a native relation.
 - `tracker.readDecomposition` returns zero or one exact `decomposition:v1` record identity, exact body digest, key mapping, and blocker edges. `tracker.publishDecomposition` appends only the already-rendered record, then reads it back.
 - `tracker.readReadyState` returns every mapped child's open/closed and ready-label state. `tracker.writeReadyState` applies only the state derived from published blockers and returns the complete frontier after read-back.
 
 ## Handoff adapter
 
-- `handoff.read` takes the exact current transaction identity and returns zero or one immutable composite handoff.
+- `handoff.read` takes the exact current transaction identity and returns zero or one immutable composite handoff. After ready-state read-back, later child lifecycle changes do not rewrite or invalidate that frozen receipt; the handoff record and exact Decomposition record still read back independently.
 - `handoff.append` writes one receipt binding the upstream publication and handoff identities, current operation transaction identity and completed decomposition/ready-state receipts, Decomposition publication identity and body digest, parent and tracker identity, target, Planning Seal, mapping, blocker edges, Multi-Issue classification, and approved-scope identity. Read it back before advancing `handoff.completed`.
 
 ## Dispositions
@@ -36,6 +36,8 @@ Fresh decomposition is tracker-only: no planning lane is required. The consumed 
 | Recoverable blocker | The owning source is readable but needs human repair | Report the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-tickets` retry. |
 | Advisory | The observation cannot affect mutation identity, attribution, durable state, or published behavior | Keep it visible; it never blocks or changes authority. |
 
-## Installed Codex GitHub binding
+## Installed Codex tracker bindings
 
 For this configured host, serialize the existing owner-verified publication and handoff fields through [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The installed reader consumes exact native comment IDs and body digests; it never creates or repairs producer checkpoints. The producer remains responsible for approval, ordered stage writes, and independent read-back.
+
+For a configured GitLab repository, use the separately installed coordinator's [GitLab Decomposition producer binding](../../../personal/run-issue-workflow/references/gitlab-to-tickets-adapters.md). Its read-only `inspect` owns executable availability and repository-binding diagnostics. Its `invoke` entry supplies the existing interfaces above for `to-tickets@v2`, while `Blocking representation` remains repository-owned configuration and automatic Run hosting remains a separate capability.
