@@ -293,12 +293,18 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
         operationId: compactOperationId,
         candidate: latest.record.candidate,
       } : undefined;
+      const compactIntegrationRecord = compactCompletion ? createIntegrationVerification({ gitCommonDir,
+        operationId: compactOperationId, issueId: issue.node_id, candidate: compactCompletion.candidate }).read() : null;
+      const compactIntegrationVerification = compactIntegrationRecord?.current ? Object.fromEntries(
+        ["state", "issueId", "candidate", "targetHead", "identity"]
+          .map(field => [field, compactIntegrationRecord.current[field]])) : undefined;
       const compactObservation = !latest || ["implementation_progress", "implementation_repair_progress"].includes(latest.record.kind)
         ? { issueId: issue.node_id, operationId: compactOperationId } : undefined;
-      const task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], {
+      let task = taskRefs[issue.node_id] ? await tasks.read(taskRefs[issue.node_id], {
         runId: selectedIdentity.runId,
         ...(compactCompletion ? { completion: compactCompletion } : {}),
         ...(compactObservation ? { observation: compactObservation } : {}),
+        ...(compactIntegrationVerification ? { integrationVerification: compactIntegrationVerification } : {}),
       }) : null;
       const originalTaskRef = journal.findLast(event => event.type === "dispatch.recorded" && event.issueId === issue.node_id)?.taskRef;
       const recoveryIntent = journal.findLast(event => event.type === "recovery.intent" && event.issueId === issue.node_id);
@@ -452,6 +458,20 @@ export function createGitHubWorkflowSources({ repository, repositoryName, store,
             }
             if (node.integrationVerification.state !== "PASS" && (issue.state === "closed" || node.worktreeState === "ABSENT")) throw new Error("Cleanup or closure contradicts the unresolved integration obligation; retain the closed-Issue owner boundary");
           }
+        }
+        if (["INTEGRATION_FAILED", "INTEGRATION_UNKNOWN", "HOST_CLEANUP_BLOCKED"].includes(task?.closeResult?.state)) {
+          const reported = task.closeResult.integrationVerification;
+          const current = integrationRecord?.current;
+          const expectedState = task.closeResult.state === "INTEGRATION_FAILED" ? "FAIL"
+            : task.closeResult.state === "INTEGRATION_UNKNOWN" ? "UNKNOWN" : "PASS";
+          const matches = current?.state === expectedState && current.issueId === issue.node_id
+            && current.candidate === record.candidate && current.identity === reported?.identity
+            && (task.closeResult.state === "HOST_CLEANUP_BLOCKED" || current.targetHead === reported?.targetHead);
+          if (!matches) task = { ...task, closeResult: undefined, closeDiagnosis: {
+            classification: "UNCLASSIFIED", source: "close-issue",
+            reason: "Native close result references missing, stale, or foreign integration evidence",
+            observedDisposition: task.closeResult.state,
+          } };
         }
         if (record.recovery) {
           const transfer = journal.find(event => event.type === "recovery.task" && event.requestIdentity === record.recovery.requestIdentity);

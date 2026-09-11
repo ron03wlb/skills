@@ -80,7 +80,7 @@ const bindSettlementCandidate = (receipt, candidate) => {
   const { schema: ignoredSchema, identity: ignoredIdentity, ...input } = receipt;
   return createTaskOutcomeReceipt({ ...input, candidate });
 };
-const bindCloseOutcome = (result, request, ownerTaskRef) => {
+const bindCloseOutcome = (result, request, ownerTaskRef, verificationAuthority) => {
   if (!record(result) || !bounded(result.state, 128) || result.runId !== request.runId || result.issueId !== request.issueId
     || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
   const malformed = reason => ({ diagnosis: Object.freeze({
@@ -112,7 +112,9 @@ const bindCloseOutcome = (result, request, ownerTaskRef) => {
     if (!exactFields(result, fields) || result.candidate !== expectedCandidate || !candidateSha(result.candidate)
       || !exactFields(verification, verificationFields) || verification.state !== expectedState
       || verification.issueId !== request.issueId || verification.candidate !== expectedCandidate
-      || !candidateSha(verification.targetHead) || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity)) {
+      || !candidateSha(verification.targetHead) || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity)
+      || !exactFields(verificationAuthority, verificationFields)
+      || verificationFields.some(field => verification[field] !== verificationAuthority[field])) {
       return malformed("Native integration outcome is malformed or differs from its exact close owner");
     }
     return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
@@ -145,6 +147,9 @@ const bindCloseOutcome = (result, request, ownerTaskRef) => {
       || !exactFields(verification, ["state", "identity", "checks"]) || verification.state !== "PASS"
       || !/^sha256:[a-f0-9]{64}$/u.test(verification.identity) || !Array.isArray(verification.checks)
       || verification.checks.length > 16
+      || !exactFields(verificationAuthority, ["state", "issueId", "candidate", "targetHead", "identity"])
+      || verificationAuthority.state !== "PASS" || verificationAuthority.issueId !== request.issueId
+      || verificationAuthority.candidate !== result.candidate || verificationAuthority.identity !== verification.identity
       || !verification.checks.every(validCheck) || !bounded(result.worktree, 8192)
       || !exactFields(result.taskRef, ["threadId", "hostId"]) || !bounded(result.taskRef.threadId) || !bounded(result.taskRef.hostId)
       || result.taskRef.threadId !== ownerTaskRef?.threadId || result.taskRef.hostId !== ownerTaskRef?.hostId
@@ -522,22 +527,24 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const journal = store?.readEvents?.(ownership.runId ?? runId);
       const latestStart = journal?.findLast(event => event.type === "execution.started"
         && event.issueId === compactEvidence.issueId && sameTaskRef(event.taskRef, ref));
-      const retainedOutcome = journal?.findLast(event => event.type === "task.outcome"
-        && sameTaskRef(event.receipt.taskRef, ref));
-      const outcome = retainedOutcome && (!latestStart || retainedOutcome.receipt.phase === latestStart.phase
-        && retainedOutcome.receipt.requestIdentity === latestStart.phaseIdentity) ? retainedOutcome : null;
-      if (outcome) {
-        validateTaskOutcomeReceipt(outcome.receipt);
+      const retainedOutcomes = journal?.filter(event => event.type === "task.outcome"
+        && sameTaskRef(event.receipt.taskRef, ref)
+        && (!latestStart || event.receipt.phase === latestStart.phase
+          && event.receipt.requestIdentity === latestStart.phaseIdentity)) ?? [];
+      for (const retained of retainedOutcomes) {
+        validateTaskOutcomeReceipt(retained.receipt);
         const expected = compactEvidence;
-        if (outcome.receipt.runId !== (ownership.runId ?? runId) || outcome.receipt.issueId !== expected.issueId
-          || outcome.receipt.operationId !== expected.operationId || !sameTaskRef(outcome.receipt.taskRef, ref)) {
+        if (retained.receipt.runId !== (ownership.runId ?? runId) || retained.receipt.issueId !== expected.issueId
+          || retained.receipt.operationId !== expected.operationId || !sameTaskRef(retained.receipt.taskRef, ref)) {
           throw new Error("Completion or observation settlement receipt differs from its Run, Issue, operation, or task");
         }
-        if (ownership.completion && outcome.receipt.candidate !== null
-          && outcome.receipt.candidate !== ownership.completion.candidate) {
+        if (ownership.completion && retained.receipt.candidate !== null
+          && retained.receipt.candidate !== ownership.completion.candidate) {
           throw new Error("Native settlement receipt candidate differs from the completion publication");
         }
       }
+      const outcome = retainedOutcomes.findLast(event => event.receipt.disposition === "SUCCEEDED")
+        ?? retainedOutcomes.at(-1) ?? null;
       if (["active", "running"].includes(type) && !snapshot.error) {
         const current = outcomeReceipt({ ref, observation: { status: type, event: "compact-read" }, disposition: "RUNNING",
           evidenceKind: "native-progress", observedAt: nativeEnvelope?.observedAt, nativeEnvelope });
@@ -611,12 +618,16 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        const bound = bindCloseOutcome(closeResult, closeRequest, ref);
+        const bound = bindCloseOutcome(closeResult, closeRequest, ref, ownership.integrationVerification);
         closeResult = bound.result;
         closeDiagnosis = bound.diagnosis;
         if (closeResult) receipts.observe(receipt.promptIdentity, closeResult);
       }
-      else if (receipt.outcome?.result) closeResult = bindCloseOutcome(receipt.outcome.result, closeRequest, ref).result;
+      else if (receipt.outcome?.result) {
+        const bound = bindCloseOutcome(receipt.outcome.result, closeRequest, ref, ownership.integrationVerification);
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+      }
     } else if (!receipt && closeResult) {
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] })
         .some(text => text.includes("Close request identity:"))
@@ -628,7 +639,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt), ref);
+        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt), ref, ownership.integrationVerification);
         closeResult = bound.result;
         closeDiagnosis = bound.diagnosis;
       }
@@ -638,7 +649,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
       closeRequest, closeAcceptedAt, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult, closeDiagnosis,
-      closeOutcomeUnavailable: Boolean(receipt && !closeResult), snapshot, cwd: snapshot.thread.cwd };
+      closeOutcomeUnavailable: Boolean(receipt && !closeResult && !closeDiagnosis), snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
     const key = markerFor({ runId: runIdentity.runId, issueId });

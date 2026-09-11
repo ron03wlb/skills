@@ -355,6 +355,16 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
       readIssueState: issueId => liveOwners.readIssueState(issueId), sleep: async () => {} });
     const liveOwners = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: runStore, tasks: nativeTasks });
     const beforeClose = await refresh();
+    const refreshLiveOwners = async () => {
+      fixture.comments[0].body = renderWorkflowRecord(publication);
+      fixture.comments[1].body = renderWorkflowRecord(handoff);
+      writeFileSync(fixturePath, JSON.stringify(fixture));
+      return liveOwners.sources.reconciliation.read({
+        tracker: await liveOwners.sources.tracker.read({ specId: "1" }),
+        journal: runStore.readEvents(beforeClose.runIdentity.runId),
+        request: {},
+      });
+    };
     const writer = runStore.acquireWriter(beforeClose.runIdentity.runId);
     writer.append({ type: "grant.recorded", at: "2026-09-06T00:00:00.000Z", runIdentity: beforeClose.runIdentity, maxParallel: 3 });
     writer.append({ type: "dispatch.recorded", at: "2026-09-06T00:00:00.000Z", issueId: "I_1", attempt: 1, taskRef: ref }); writer.release();
@@ -374,6 +384,19 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const partial = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(partial.nodes[0].close.candidateReachable, true);
     assert.equal(partial.nodes[0].close.worktreeState, "PRESENT");
+    const integrationOwner = createIntegrationVerification({ gitCommonDir: join(root, ".git"), operationId: execution.key,
+      issueId: "I_1", candidate: packet.candidate });
+    const acceptedVerificationIdentity = integrationVerification.identity;
+    await integrationOwner.verify({ targetHead: packet.candidate,
+      checks: [{ ...integrationCheck, environment: { runtime: "foreign-current-input" } }],
+      assertCurrent: () => {}, repository: root });
+    const foreignVerification = await refreshLiveOwners();
+    assert.equal(foreignVerification.facts.nodes[0].recovery.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(foreignVerification.facts.nodes[0].recovery.diagnosis.reason,
+      "Native host-cleanup outcome is malformed or differs from its exact close owner");
+    integrationVerification = await integrationOwner.verify({ targetHead: packet.candidate, checks: [integrationCheck],
+      assertCurrent: () => {}, repository: root });
+    assert.equal(integrationVerification.identity, acceptedVerificationIdentity, "restoring exact inputs restores the accepted owner identity");
     const pendingCleanup = await refresh();
     assert.equal(pendingCleanup.facts.nodes[0].completionState, "COMPLETE");
     assert.deepEqual(pendingCleanup.facts.contradictions, []);
@@ -388,13 +411,15 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     rmSync(lane); symlinkSync(`${root}-missing`, lane, "junction");
     assert.match((await refresh()).facts.contradictions[0].evidence[0], /ownership differs/u, "a dangling link is not physical absence");
     rmSync(lane); mkdirSync(lane);
+    const finalCloseOwner = await refreshLiveOwners();
+    assert.ok(finalCloseOwner.facts.nodes[0].pendingHostCleanup, JSON.stringify(finalCloseOwner.facts.nodes[0]));
     const recovered = await createCoordinator(coordinatorOptions).run({ specId: "I_1", mode: "step" });
     assert.equal(recovered.run.state, "RUNNING", JSON.stringify(recovered));
     assert.equal(recovered.nodes[0].close.completionState, "COMPLETE");
-    assert.equal(recovered.nodes[0].close.worktreeState, "ABSENT");
+    assert.equal(hostCleanupRecoveries, 1, JSON.stringify({ recovered, events: runStore.readEvents(beforeClose.runIdentity.runId) }));
+    assert.equal(recovered.nodes[0].close.worktreeState, "ABSENT", JSON.stringify(recovered));
     assert.equal(fixture.state, "open");
     assert.equal(nativeMessages, 1, "a known host limitation does not spend three more cleanup attempts");
-    assert.equal(hostCleanupRecoveries, 1, "the existing close owner receives one bounded recovery call");
     assert.equal(git("rev-parse", "HEAD"), packet.candidate);
     assert.equal(runStore.readTargetMutationWriterLock("main"), null);
     assert.equal(runStore.observeRepositoryCloseLease().state, "ABSENT");

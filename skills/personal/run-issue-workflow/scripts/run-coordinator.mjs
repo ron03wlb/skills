@@ -856,7 +856,13 @@ export function createCoordinator({
       ...(sourceNode.maintenanceRecoveryIdentity ? { maintenanceRecoveryIdentity: sourceNode.maintenanceRecoveryIdentity } : {}),
     };
     let requestIdentity = closeRequestIdentityFor(requestEvidence);
-    const task = await tasks.read(taskRef);
+    const integrationVerification = sourceNode.integrationVerification ? Object.fromEntries(
+      ["state", "issueId", "candidate", "targetHead", "identity"]
+        .map(field => [field, sourceNode.integrationVerification[field]])) : undefined;
+    const task = await tasks.read(taskRef, {
+      runId: current.runIdentity.runId,
+      ...(integrationVerification ? { integrationVerification } : {}),
+    });
     const acceptedForLane = task?.closeRequest?.state === "ACCEPTED"
       && task.closeRequest.runId === current.runIdentity.runId
       && task.closeRequest.issueId === action.issueId;

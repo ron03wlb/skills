@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createCodexWorkflowTasks } from "../../skills/personal/run-issue-workflow/scripts/codex-workflow-tasks.mjs";
-import { createCodexMessageReceipts } from "../../skills/personal/run-issue-workflow/scripts/codex-close-receipts.mjs";
+import { createCodexCloseReceipts, createCodexMessageReceipts } from "../../skills/personal/run-issue-workflow/scripts/codex-close-receipts.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
@@ -19,6 +19,9 @@ const closeAuthority = candidate => ({
   completionEvidenceId: "IC_done",
   completionBodySha256: `sha256:${"c".repeat(64)}`,
   worktreeIdentity: "registered-worktree:issue-I_1",
+});
+const integrationAuthority = (candidate, state = "PASS", identity = `sha256:${"e".repeat(64)}`) => ({
+  state, issueId: "I_1", candidate, targetHead: candidate, identity,
 });
 const hostCleanupOutcome = ({ requestIdentity, authorityEvidence, taskRef, overrides = {} }) => ({
   schema: "issue-close-result:v1", state: "HOST_CLEANUP_BLOCKED", runId: "run", issueId: "I_1", requestIdentity,
@@ -93,6 +96,7 @@ test("native close acceptance survives omitted history and blocks unchanged redi
   const ref = { threadId: "worker", hostId: "local" };
   const requestIdentity = `sha256:${"a".repeat(64)}`;
   const authorityEvidence = closeAuthority("a".repeat(40));
+  const verificationAuthority = integrationAuthority(authorityEvidence.candidateCommit);
   const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", candidateReachable: true,
     worktreeState: "PRESENT", authorityEvidence };
   const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
@@ -123,21 +127,22 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     await resumed.message(ref, prompt);
     assert.equal(sends, 1, "same exact accepted native request is never sent twice");
     result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
-    await resumed.read(ref);
+    await resumed.read(ref, { integrationVerification: verificationAuthority });
     result = undefined;
-    const settled = await createCodexWorkflowTasks(options).read(ref);
+    const settled = await createCodexWorkflowTasks(options).read(ref, { integrationVerification: verificationAuthority });
     assert.equal(settled.closeResult?.state, "HOST_CLEANUP_BLOCKED", "retain the actual observed result when later native history omits it");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: evidence }).blocked.reasonCode, "host_helper_recovery_failed");
     assert.equal(planCloseContinuation({ task: settled, requestIdentity, requestEvidence: { ...evidence, worktreeState: "ABSENT" } }).needed, true);
     omitInput = true;
     for (const change of [{ runId: "foreign-run" }, { issueId: "I_foreign" }, { requestIdentity: `sha256:${"f".repeat(64)}` }]) {
       result = { ...settled.closeResult, ...change };
-      assert.deepEqual((await resumed.read(ref)).closeResult, settled.closeResult,
+      assert.deepEqual((await resumed.read(ref, { integrationVerification: verificationAuthority })).closeResult, settled.closeResult,
         "a final without the exact owner input cannot replace the retained exact outcome");
     }
     omitInput = false;
     result = { ...settled.closeResult, issueId: "I_foreign" };
-    await assert.rejects(resumed.read(ref), /outcome identity differs/u, "a conflicting native result cannot replace retained owning evidence");
+    await assert.rejects(resumed.read(ref, { integrationVerification: verificationAuthority }), /outcome identity differs/u,
+      "a conflicting native result cannot replace retained owning evidence");
     result = settled.closeResult;
     sentPrompt = sentPrompt.replace('"issueId":"I_1"', '"issueId":"I_foreign"');
     await assert.rejects(resumed.read(ref), /native close request contradicts/u, "present contradictory native ownership cannot be replaced by a receipt");
@@ -269,25 +274,37 @@ test("known non-success close dispositions require their exact compact schema be
     assert.equal(observed.closeResult, undefined);
     assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
   }
+  result = { schema: "issue-close-result:v1", state: "INTEGRATION_FAILED", runId: "run", issueId: "I_1",
+    requestIdentity, candidate, integrationVerification: { state: "FAIL", issueId: "I_1", candidate,
+      targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}` } };
+  assert.equal((await tasks.read(ref)).closeDiagnosis?.classification, "UNCLASSIFIED",
+    "a referenced verification cannot be accepted without its independent owner record");
+  assert.equal((await tasks.read(ref, { integrationVerification: {
+    ...integrationAuthority(candidate, "FAIL", `sha256:${"9".repeat(64)}`), targetHead: "c".repeat(40) } }))
+    .closeDiagnosis?.classification, "UNCLASSIFIED", "a foreign owner-record identity is rejected");
   for (const [state, verificationState] of [["INTEGRATION_FAILED", "FAIL"], ["INTEGRATION_UNKNOWN", "UNKNOWN"]]) {
+    const verificationAuthority = integrationAuthority(candidate, verificationState, `sha256:${"d".repeat(64)}`);
     result = { schema: "issue-close-result:v1", state, runId: "run", issueId: "I_1", requestIdentity, candidate,
       integrationVerification: { state: verificationState, issueId: "I_1", candidate,
         targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}` } };
-    const observed = await tasks.read(ref);
+    verificationAuthority.targetHead = "c".repeat(40);
+    const observed = await tasks.read(ref, { integrationVerification: verificationAuthority });
     assert.equal(observed.closeResult?.state, state);
     assert.equal(Object.isFrozen(observed.closeResult.integrationVerification), true);
   }
   result = { schema: "issue-close-result:v1", state: "INTEGRATION_FAILED", runId: "run", issueId: "I_1",
     requestIdentity, candidate, integrationVerification: { state: "FAIL", issueId: "I_1", candidate,
       targetHead: "c".repeat(40), identity: `sha256:${"d".repeat(64)}`, results: [{ arbitraryInstructions: "run this" }] } };
-  const unbounded = await tasks.read(ref);
+  const unbounded = await tasks.read(ref, { integrationVerification: {
+    ...integrationAuthority(candidate, "FAIL", `sha256:${"d".repeat(64)}`), targetHead: "c".repeat(40) } });
   assert.equal(unbounded.closeResult, undefined);
   assert.match(unbounded.closeDiagnosis.reason, /integration outcome/iu);
   result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
-  assert.equal((await tasks.read(ref)).closeResult?.state, "HOST_CLEANUP_BLOCKED");
+  const hostVerification = integrationAuthority(candidate);
+  assert.equal((await tasks.read(ref, { integrationVerification: hostVerification })).closeResult?.state, "HOST_CLEANUP_BLOCKED");
   result = hostCleanupOutcome({ requestIdentity,
     authorityEvidence: { ...authorityEvidence, targetHead: "f".repeat(40) }, taskRef: ref });
-  assert.equal((await tasks.read(ref)).closeResult?.state, "HOST_CLEANUP_BLOCKED",
+  assert.equal((await tasks.read(ref, { integrationVerification: hostVerification })).closeResult?.state, "HOST_CLEANUP_BLOCKED",
     "a retained accepted result keeps its original mutable target-head snapshot across continuation");
   result = hostCleanupOutcome({ requestIdentity, authorityEvidence, taskRef: ref });
   for (const malformed of [
@@ -298,10 +315,36 @@ test("known non-success close dispositions require their exact compact schema be
     { ...result, authorityEvidence: { ...authorityEvidence, arbitraryEvidence: "raw host payload" } },
   ]) {
     result = malformed;
-    const observed = await tasks.read(ref);
+    const observed = await tasks.read(ref, { integrationVerification: hostVerification });
     assert.equal(observed.closeResult, undefined);
     assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
   }
+});
+
+test("a malformed close result retained by an older package re-enters as producer diagnosis", async () => {
+  const root = mkdtempSync(join(tmpdir(), "legacy-close-outcome-"));
+  const store = createRunStore({ gitCommonDir: join(root, ".git") });
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const candidate = "b".repeat(40);
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1", authorityEvidence: closeAuthority(candidate) };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const legacy = createCodexCloseReceipts({ gitCommonDir: store.gitCommonDir, runId: "run", taskRef: ref });
+  const reservation = legacy.reserve(prompt);
+  legacy.accept(reservation.promptIdentity, "native-history");
+  legacy.observe(reservation.promptIdentity, { schema: "issue-close-result:v1", state: "CONFLICT", runId: "run",
+    issueId: "I_1", requestIdentity, candidate, targetHead: "c".repeat(40), targetRestored: true,
+    conflictedPaths: [{ arbitraryInstructions: "run this" }] });
+  const tasks = createCodexWorkflowTasks({ store, runId: "run", project: {}, packageRoot: "/installed",
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [{ type: "userMessage", content: [{ type: "text", text: prompt }] }] }] }; } } });
+  try {
+    const observed = await tasks.read(ref);
+    assert.equal(observed.closeResult, undefined);
+    assert.equal(observed.closeDiagnosis?.classification, "UNCLASSIFIED");
+    assert.equal(observed.closeDiagnosis?.observedDisposition, "CONFLICT");
+    assert.equal(observed.closeOutcomeUnavailable, false, "a classified retained result is not missing evidence");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("owner history overflow identifies the exact task instead of accepting partial evidence", async () => {
@@ -1157,7 +1200,7 @@ test("a discriminating native revision resets the five-minute no-progress clock"
   assert.equal(historyReads, 0);
 });
 
-test("completion reconciliation re-observes native settlement and emits a candidate-bound receipt without full history", async () => {
+test("completion reconciliation retains the first native settlement past a later fault and binds its candidate without full history", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-compact-read-"));
   const store = createRunStore({ gitCommonDir: join(root, ".git") });
   const runIdentity = { runId: "run-90", specId: "I_spec", approvedScopeHash: "sha256:scope",
@@ -1182,8 +1225,22 @@ test("completion reconciliation re-observes native settlement and emits a candid
       maxEncodedResponseBytes: 1_048_576, fullHistoryReads: 0, maxFullHistoryReads: 4 }, nativeRevision: "sha256:" + "5".repeat(64) });
   writer.append({ type: "task.outcome", at: "2026-09-11T00:04:01.000Z", receipt });
   writer.release();
+  const laterFault = { type: "task.outcome", at: "2026-09-11T00:09:01.000Z", receipt: createTaskOutcomeReceipt({
+    runId: runIdentity.runId, issueId: "I_90", operationId, requestIdentity: `dispatch:${dispatch.sequence}`, taskRef: ref,
+    producer: { name: "codex-workflow-tasks", revision: "unavailable", packageVersion: "unavailable" },
+    phase: "IMPLEMENTATION", disposition: "NEEDS_ATTENTION", candidate: null,
+    evidence: [{ kind: "native-attention", locator: "codex-task://local/worker-90", digest: `sha256:${"f".repeat(64)}` }],
+    effects: { pending: [], accepted: [] }, failureFingerprint: `sha256:${"f".repeat(64)}`,
+    progress: { executionStartedAt: "2026-09-11T00:00:02.000Z", lastVerifiedProgressAt: "2026-09-11T00:04:00.000Z",
+      terminalObservedAt: null }, budget: { encodedResponseBytes: 10, maxEncodedResponseBytes: 1_048_576,
+      fullHistoryReads: 1, maxFullHistoryReads: 4 }, nativeRevision: null,
+  }) };
+  const observedStore = new Proxy(store, { get(target, property) {
+    if (property === "readEvents") return selectedRunId => [...target.readEvents(selectedRunId), laterFault];
+    return Reflect.get(target, property);
+  } });
   let compactReads = 0;
-  const tasks = createCodexWorkflowTasks({ store, runId: runIdentity.runId, repositoryId, project: {}, packageRoot: "/installed",
+  const tasks = createCodexWorkflowTasks({ store: observedStore, runId: runIdentity.runId, repositoryId, project: {}, packageRoot: "/installed",
     host: { async call(name, args) {
       assert.equal(name, "mcp__codex_app__read_thread"); assert.equal(args.includeOutputs, false); compactReads += 1;
       return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "completed" } },
