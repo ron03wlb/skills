@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
@@ -11,6 +12,7 @@ const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/sc
 const api = runInNewContext(source);
 const plain = value => JSON.parse(JSON.stringify(value));
 const frame = value => `workflow-host ${JSON.stringify(value)}\n`;
+const promptIdentity = value => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 const request = { type: "tool", id: "original-id", name: "mcp__codex_app__list_threads", arguments: { limit: 100 } };
 
 test("the same dependency-free source loads without Node globals", () => {
@@ -56,15 +58,20 @@ test("compact read observations cannot substitute requested identity for missing
 });
 
 test("exceptional owner history is allowlisted and budgeted at the native host boundary", () => {
+  const owningPrompt = "exact owning request";
   const readRequest = { type: "tool", id: "history-1", name: "mcp__codex_app__read_thread",
     arguments: { threadId: "worker", hostId: "local", __workflowObservation: {
       producer: { revision: "unavailable", packageVersion: "unavailable" }, bindings: [],
       mode: "owner-history", maxEncodedResponseBytes: 256 * 1024,
+      ownerSelector: { promptIdentities: [promptIdentity(owningPrompt)] },
     } } };
   const compact = plain(api.compactNativeResult(readRequest, { structuredContent: {
     thread: { id: "worker", hostId: "local", preview: "bounded discovery", status: { type: "idle" } },
-    turns: [{ id: "turn-1", status: "completed", items: [
-      { type: "userMessage", content: [{ type: "text", text: "exact owning request" }] },
+    turns: [{ id: "unrelated", status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: "unrelated request with private material" }] },
+      { type: "agentMessage", phase: "final_answer", text: "unrelated private result" },
+    ] }, { id: "turn-1", status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
       { type: "agentMessage", phase: "commentary", text: "unrelated private reasoning" },
       { type: "agentMessage", phase: "final_answer", text: "exact owning result" },
       { type: "commandExecution", output: "full secret command output" },
@@ -76,12 +83,27 @@ test("exceptional owner history is allowlisted and budgeted at the native host b
   assert.equal(JSON.stringify(compact).includes("private reasoning"), false);
   assert.equal(JSON.stringify(compact).includes("secret command"), false);
   assert.equal(JSON.stringify(compact).includes("arbitraryInstructions"), false);
+  assert.equal(JSON.stringify(compact).includes("unrelated private"), false);
   assert.ok(compact.structuredContent.budget.encodedResponseBytes <= 256 * 1024);
 
-  const overflow = plain(api.compactNativeResult(readRequest, { structuredContent: {
+  const ambiguous = plain(api.compactNativeResult(readRequest, { structuredContent: {
+    thread: { id: "worker", hostId: "local", status: { type: "idle" } },
+    turns: ["one", "two"].map(id => ({ id, status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
+      { type: "agentMessage", phase: "final_answer", text: `result ${id}` },
+    ] })), page: { hasMore: false },
+  } }));
+  assert.equal(ambiguous.structuredContent.payload.error.code, "native-owner-selector-ambiguous");
+  assert.deepEqual(ambiguous.structuredContent.payload.turns, []);
+
+  const oversizedPrompt = "x".repeat(8193);
+  const overflowRequest = { ...readRequest, arguments: { ...readRequest.arguments,
+    __workflowObservation: { ...readRequest.arguments.__workflowObservation,
+      ownerSelector: { promptIdentities: [promptIdentity(oversizedPrompt)] } } } };
+  const overflow = plain(api.compactNativeResult(overflowRequest, { structuredContent: {
     thread: { id: "worker", hostId: "local", status: { type: "idle" } },
     turns: [{ status: "completed", items: [{ type: "userMessage",
-      content: [{ type: "text", text: "x".repeat(8193) }] }] }], page: { hasMore: false },
+      content: [{ type: "text", text: oversizedPrompt }] }] }], page: { hasMore: false },
   } }));
   assert.equal(validateNativeObservationEnvelope(overflow.structuredContent), overflow.structuredContent);
   assert.equal(overflow.structuredContent.payload.error.code, "native-history-field-budget-exceeded");
@@ -89,16 +111,19 @@ test("exceptional owner history is allowlisted and budgeted at the native host b
   assert.ok(overflow.structuredContent.payload.error.encodedResponseBytes > 8192);
   assert.deepEqual(overflow.structuredContent.payload.turns, []);
 
-  const budgetOverflow = plain(api.compactNativeResult(readRequest, { structuredContent: {
+  const budgetRequest = { ...readRequest, arguments: { ...readRequest.arguments,
+    __workflowObservation: { ...readRequest.arguments.__workflowObservation, maxEncodedResponseBytes: 4096 } } };
+  const budgetOverflow = plain(api.compactNativeResult(budgetRequest, { structuredContent: {
     thread: { id: "worker", hostId: "local", status: { type: "idle" } },
-    turns: [{ status: "completed", items: Array.from({ length: 32 }, (_, index) => ({
-      type: "agentMessage", phase: "final_answer", text: `${index}:${"x".repeat(8188)}`,
-    })) }], page: { hasMore: false },
+    turns: [{ status: "completed", items: [
+      { type: "userMessage", content: [{ type: "text", text: owningPrompt }] },
+      { type: "agentMessage", phase: "final_answer", text: "x".repeat(8192) },
+    ] }], page: { hasMore: false },
   } }));
   assert.equal(validateNativeObservationEnvelope(budgetOverflow.structuredContent), budgetOverflow.structuredContent);
   assert.equal(budgetOverflow.structuredContent.payload.error.code, "native-history-budget-exceeded");
-  assert.ok(budgetOverflow.structuredContent.budget.encodedResponseBytes <= 256 * 1024);
-  assert.equal(JSON.stringify(budgetOverflow).includes("x".repeat(8188)), false);
+  assert.ok(budgetOverflow.structuredContent.budget.encodedResponseBytes <= 4096);
+  assert.equal(JSON.stringify(budgetOverflow).includes("x".repeat(8192)), false);
 });
 
 test("workflow mutation requests expose only allowlisted durable owner references", () => {

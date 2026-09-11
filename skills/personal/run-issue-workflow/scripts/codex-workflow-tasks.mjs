@@ -50,6 +50,7 @@ const historyProvesSettlement = snapshot => snapshot?.turns?.[0]?.status === "co
   || (snapshot?.turns?.[0]?.items ?? []).some(item => item.type === "agentMessage" && item.phase === "final_answer");
 const markerFor = ({ runId, issueId }) => `Workflow lane ${createHash("sha256").update(JSON.stringify({ runId, issueId })).digest("hex")}`;
 const promptIdentityFor = prompt => `sha256:${createHash("sha256").update(JSON.stringify(prompt)).digest("hex")}`;
+const promptOwner = prompt => ({ promptIdentities: [promptIdentityFor(prompt)] });
 const uncertainNativeResult = result => [result?.type, result?.status].some(value => ["error", "failed", "response-accepted"].includes(value));
 const closeRequestFrom = prompt => {
   if (!prompt) return undefined;
@@ -60,17 +61,38 @@ const closeRequestFrom = prompt => {
   return { state: "ACCEPTED", requestIdentity: match[1], runId: evidence.runIdentity.runId, issueId: evidence.issueId, evidence,
     ...(continuation ? { continuation: JSON.parse(continuation[1]) } : {}) };
 };
-const assertCloseOutcomeIdentity = (result, request) => {
+const CLOSE_OUTCOME_STATES = new Set(["CLOSED", "CONFLICT", "INTEGRATION_FAILED", "INTEGRATION_UNKNOWN", "HOST_CLEANUP_BLOCKED"]);
+const CLOSE_OUTCOME_FIELDS = new Set(["schema", "state", "runId", "issueId", "requestIdentity", "candidate", "targetHead",
+  "targetRestored", "conflictedPaths", "integrationVerification", "authorityEvidence", "candidateReachable", "worktree",
+  "taskRef", "directoryState", "capability", "reasonCode", "observations", "deliveryProgress"]);
+const deepFreeze = value => {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const nested of Object.values(value)) deepFreeze(nested);
+  }
+  return value;
+};
+const bindCloseOutcome = (result, request) => {
   if (result?.schema !== "issue-close-result:v1" || typeof result.state !== "string" || !result.state
     || result.runId !== request.runId || result.issueId !== request.issueId
     || result.requestIdentity !== request.requestIdentity) throw new Error("Native close outcome identity differs from its accepted request");
-  if (result.state !== "CLOSED") return;
+  if (!CLOSE_OUTCOME_STATES.has(result.state)) return { diagnosis: Object.freeze({
+    classification: "UNCLASSIFIED", source: "close-issue",
+    reason: `Unsupported native close disposition: ${result.state.slice(0, 128)}`,
+    observedDisposition: result.state.slice(0, 128),
+  }) };
+  if (Object.keys(result).some(field => !CLOSE_OUTCOME_FIELDS.has(field))) {
+    throw new Error("Native close outcome contains fields outside its exact allowlist");
+  }
+  if (result.state !== "CLOSED") return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
   const expectedCandidate = request.evidence?.authorityEvidence?.candidateCommit ?? null;
   const timeline = result.deliveryProgress;
   const timelineFields = ["repositoryCloseAcquiredAt", "targetWriterAcquiredAt", "closeCompletedAt"];
+  const resultFields = ["schema", "state", "runId", "issueId", "requestIdentity", "candidate", "deliveryProgress"];
   const canonicalInstant = value => typeof value === "string" && !Number.isNaN(Date.parse(value))
     && new Date(value).toISOString() === value;
-  if (!Object.hasOwn(result, "candidate") || result.candidate !== expectedCandidate
+  if (Object.keys(result).length !== resultFields.length || resultFields.some(field => !Object.hasOwn(result, field))
+    || result.candidate !== expectedCandidate
     || timeline === null || typeof timeline !== "object" || Array.isArray(timeline)
     || Object.keys(timeline).length !== timelineFields.length
     || timelineFields.some(field => !Object.hasOwn(timeline, field) || !canonicalInstant(timeline[field]))
@@ -78,6 +100,7 @@ const assertCloseOutcomeIdentity = (result, request) => {
     || Date.parse(timeline.targetWriterAcquiredAt) > Date.parse(timeline.closeCompletedAt)) {
     throw new Error("Native successful close outcome lacks its exact candidate and ordered owner timeline");
   }
+  return { result: deepFreeze(JSON.parse(JSON.stringify(result))) };
 };
 const taskRequestFrom = prompt => {
   if (!prompt) return undefined;
@@ -330,7 +353,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       }
     }
   };
-  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true, observationBudget = null } = {}) => {
+  const readHistory = async (ref, predicate, { latestOnly = false, interruptible = false, retryReadOnly = true,
+    observationBudget = null, ownerSelector = { latestWorkflowOwner: true } } = {}) => {
     const readPage = async (arguments_) => {
       const result = ownerHistory(await call("read_thread", arguments_, { interruptible, retryReadOnly, observationBudget }));
       if (["native-history-budget-exceeded", "native-history-field-budget-exceeded"].includes(result.error?.code)) throw responseBudgetError({
@@ -344,7 +368,7 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     let snapshot = await readPage({ ...ref, turnLimit: latestOnly ? 1 : 2,
       includeOutputs: true, maxOutputCharsPerItem: 8192,
       __workflowObservation: observationRequest([ref], { mode: "owner-history",
-        maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES }) });
+        maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES, ownerSelector }) });
     let aggregateBytes = snapshot.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(snapshot);
     const cursorsSeen = new Set();
     for (let page = 0; ; page += 1) {
@@ -362,7 +386,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         encodedResponseBytes: aggregateBytes, maxEncodedResponseBytes: MAX_HISTORY_RESPONSE_BYTES });
       const older = await readPage({ ...ref, cursor, turnLimit: 2,
         includeOutputs: true, maxOutputCharsPerItem: 8192,
-        __workflowObservation: observationRequest([ref], { mode: "owner-history", maxEncodedResponseBytes: remainingBytes }) });
+        __workflowObservation: observationRequest([ref], { mode: "owner-history",
+          maxEncodedResponseBytes: remainingBytes, ownerSelector }) });
       if (older.thread?.id !== ref.threadId || older.thread?.hostId !== ref.hostId) throw new Error("Task history identity differs");
       snapshot = { ...snapshot, page: older.page, turns: [...(snapshot.turns ?? []), ...(older.turns ?? [])] };
       aggregateBytes += older.nativeObservationEnvelope?.budget.encodedResponseBytes ?? encodedBytes(older);
@@ -377,7 +402,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       await sleep(observation.delayMs);
       let snapshot;
       try {
-        snapshot = await readHistory(ref, value => userTexts(value).includes(prompt), { retryReadOnly: false });
+        snapshot = await readHistory(ref, value => userTexts(value).includes(prompt), {
+          retryReadOnly: false, ownerSelector: promptOwner(prompt),
+        });
       } catch (error) {
         if (!faultCategory(error)) throw error;
         continue;
@@ -450,8 +477,10 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
             ?? [`codex-task://${encodeURIComponent(ref.hostId)}/${encodeURIComponent(ref.threadId)}?status=${type}`] };
       }
     }
-    const snapshot = await readHistory(ref, value => Boolean(receipt || messageReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
-      { latestOnly: Boolean(receipt || messageReceipt), interruptible, observationBudget });
+    const selectedReceipt = messageReceipt ?? receipt;
+    const snapshot = await readHistory(ref, value => Boolean(selectedReceipt) || userTexts(value).some(text => /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:)/u.test(text)),
+      { latestOnly: Boolean(selectedReceipt), interruptible, observationBudget,
+        ownerSelector: selectedReceipt ? { promptIdentities: [selectedReceipt.promptIdentity] } : { latestWorkflowOwner: true } });
     if (snapshot.thread?.id !== ref.threadId || snapshot.thread?.hostId !== ref.hostId) throw new Error("Task read-back identity differs");
     const type = snapshot.thread.status?.type;
     const nativePrompt = userTexts(snapshot).find((text) => text.includes("Close request identity:"));
@@ -494,11 +523,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
     const finals = (snapshot.turns ?? []).flatMap(turn => (turn.items ?? []).filter(item => item.type === "agentMessage" && item.phase === "final_answer").map(item => item.text));
     const closeResultMatch = finals.map(final => final?.match(/^Workflow close result: (\{.+\})$/mu)).find(Boolean);
     let closeResult = closeResultMatch ? JSON.parse(closeResultMatch[1]) : undefined;
+    let closeDiagnosis;
     if (receipt?.accepted) {
-      // Omitted input cannot hide a present contradiction in the current turn.
-      // Matching identity alone still cannot prove that turn owns this prompt.
-      const currentMatch = final?.match(/^Workflow close result: (\{.+\})$/mu);
-      if (currentMatch) assertCloseOutcomeIdentity(JSON.parse(currentMatch[1]), closeRequest);
       // A same-identity continuation may have an older outcome in another turn.
       // Only the turn containing this exact accepted prompt can add its result.
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] }).includes(receipt.prompt));
@@ -506,10 +532,12 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
       if (closeResult) {
-        assertCloseOutcomeIdentity(closeResult, closeRequest);
-        receipts.observe(receipt.promptIdentity, closeResult);
+        const bound = bindCloseOutcome(closeResult, closeRequest);
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+        if (closeResult) receipts.observe(receipt.promptIdentity, closeResult);
       }
-      else closeResult = receipt.outcome?.result;
+      else if (receipt.outcome?.result) closeResult = bindCloseOutcome(receipt.outcome.result, closeRequest).result;
     } else if (!receipt && closeResult) {
       const owningTurn = snapshot.turns.find(turn => userTexts({ turns: [turn] })
         .some(text => text.includes("Close request identity:"))
@@ -520,13 +548,17 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const owningMatch = owningTurn?.items.findLast(item => item.type === "agentMessage" && item.phase === "final_answer")
         ?.text?.match(/^Workflow close result: (\{.+\})$/mu);
       closeResult = owningMatch ? JSON.parse(owningMatch[1]) : undefined;
-      if (closeResult) assertCloseOutcomeIdentity(closeResult, closeRequestFrom(owningPrompt));
+      if (closeResult) {
+        const bound = bindCloseOutcome(closeResult, closeRequestFrom(owningPrompt));
+        closeResult = bound.result;
+        closeDiagnosis = bound.diagnosis;
+      }
     } else if (receipt) closeResult = undefined;
     const recoveryResultMatch = finals.map(final => final?.match(/^Workflow recovery result: (\{.+\})$/mu)).find(Boolean);
     const recoveryResult = recoveryResultMatch ? JSON.parse(recoveryResultMatch[1]) : undefined;
     const settled = type === "idle" || type === "notLoaded" && snapshot.turns?.[0]?.status === "completed";
     return { state: type === "active" ? "RUNNING" : settled ? "RESUMABLE" : "UNKNOWN",
-      closeRequest, closeAcceptedAt, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult,
+      closeRequest, closeAcceptedAt, retryRequest, repairRequest, modelRequest, modelYield, recoveryRequest, recoveryResult, closeResult, closeDiagnosis,
       closeOutcomeUnavailable: Boolean(receipt && !closeResult), snapshot, cwd: snapshot.thread.cwd };
   };
   const findIssueLane = async ({ issueId, runIdentity, prepared }) => {
@@ -538,7 +570,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const ref = prepared.taskRef;
       if (!ref?.threadId || ref.hostId !== project.hostId) throw new Error("Prepared task identity is unproven");
       const marker = `Workflow prerequisite lane: ${JSON.stringify({ issueId, specId: runIdentity.specId, target: runIdentity.target, approvedScopeHash: runIdentity.approvedScopeHash })}`;
-      const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)));
+      const snapshot = await readHistory(ref, value => userTexts(value).some(text => text.includes(marker)),
+        { ownerSelector: { textMarkers: [marker] } });
       const cwd = snapshot.thread.cwd;
       const common = path => realpathSync.native(resolve(path, execFileSync("git", ["-C", path, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       if (cwd !== prepared.worktree || common(cwd) !== common(project.path)
@@ -555,7 +588,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const common = (cwd) => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const hint of await discoverTasks({ prompt: intent.prompt, since })) {
         const ref = { threadId: hint.threadId, hostId: hint.hostId };
-        const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt));
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(intent.prompt),
+          { ownerSelector: promptOwner(intent.prompt) });
         const cwd = snapshot.thread.cwd;
         if (cwd !== hint.cwd || common(cwd) !== common(project.path) || !userTexts(snapshot).includes(intent.prompt)) {
           throw new Error("Native discovered task ownership is unproven");
@@ -573,7 +607,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       // This intent creates a worktree. A task in the saved checkout cannot own it.
       if (project.path && task.cwd === project.path) continue;
       const ref = { threadId: task.id, hostId: task.hostId };
-      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt));
+      const snapshot = await readHistory(ref, value => value.thread.preview?.startsWith(`${key}\n`) || userTexts(value).includes(intent.prompt),
+        { ownerSelector: { ...promptOwner(intent.prompt), previewPrefix: `${key}\n` } });
       if (snapshot.thread.preview?.startsWith(`${key}\n`) || userTexts(snapshot).includes(intent.prompt)) found.push(ref);
     }
     if (found.length === 0) throw new Error("TASK_CREATION_UNRESOLVED: preserve the recorded intent and inspect the host; do not create another task");
@@ -773,7 +808,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const matches = [];
       const common = cwd => realpathSync.native(resolve(cwd, execFileSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], { encoding: "utf8" }).trim()));
       for (const ref of new Map(hints.map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
-        const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+        const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+          { ownerSelector: promptOwner(prompt) });
         if (userTexts(snapshot).includes(prompt) && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(scope.sourceRepository)
           && realpathSync.native(snapshot.thread.cwd) !== realpathSync.native(failure.worktree)
           && common(snapshot.thread.cwd) === common(scope.sourceRepository)) matches.push(ref);
@@ -808,7 +844,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         handoffReceipt = handoffReceipts.read(handoffIdentity);
       }
       if (!handoffReceipt) {
-        const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt));
+        const history = await readHistory(originalTaskRef, value => userTexts(value).includes(prompt),
+          { ownerSelector: promptOwner(prompt) });
         if (userTexts(history).includes(prompt)) {
           handoffReceipt = handoffReceipts.reserve({ kind: "recovery-handoff", request: handoffRequest, promptIdentity: handoffIdentity });
           handoffReceipts.accept(handoffIdentity, "native-history");
@@ -835,7 +872,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (project.hostId === "local") hints.push(...await discoverTasks({ prompt, since: reservation.intent.createdAt }));
         const matches = [];
         for (const ref of new Map(hints.filter(ref => ref.threadId !== originalTaskRef.threadId).map(ref => [ref.threadId, { threadId: ref.threadId, hostId: ref.hostId }])).values()) {
-          const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+            { ownerSelector: promptOwner(prompt) });
           if (snapshot.thread.cwd === worktree && userTexts(snapshot).includes(prompt)) matches.push(ref);
         }
         if (matches.length > 1) throw new Error("Recovery task ownership is ambiguous; preserve all matches");
@@ -859,7 +897,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         if (!taskRef) return { pending: true, reason: "RECOVERY_TASK_SETUP_UNRESOLVED", waitingRef: originalTaskRef };
       }
       if (taskRef.threadId === originalTaskRef.threadId) throw new Error("Repair requires a separate task");
-      const snapshot = await readHistory(taskRef, value => userTexts(value).includes(prompt));
+      const snapshot = await readHistory(taskRef, value => userTexts(value).includes(prompt),
+        { ownerSelector: promptOwner(prompt) });
       if (snapshot.thread.cwd !== worktree || !userTexts(snapshot).includes(prompt)) throw new Error("Recovery fork does not preserve the exact ownership handoff");
       await settledOwner();
       return { taskRef, previousOwner };
@@ -883,7 +922,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         }
         throw new Error("Upgrade continuation outcome unresolved; preserve the original request");
       }
-      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt));
+      const snapshot = await readHistory(ref, value => userTexts(value).includes(prompt),
+        { ownerSelector: promptOwner(prompt) });
       if (userTexts(snapshot).includes(prompt)) {
         messageReceipts.reserve({ kind: "upgrade", request: marker, promptIdentity });
         messageReceipts.accept(promptIdentity, "native-history");
@@ -947,7 +987,9 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
       const stored = receipts?.read();
       if (stored?.prompt === frozenPrompt && stored.accepted) return close
         ? { accepted: true, acceptedAt: stored.acceptedAt } : { observed: true };
-      const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), { latestOnly: Boolean(stored) });
+      const previous = await readHistory(ref, value => Boolean(stored) || userTexts(value).includes(frozenPrompt), {
+        latestOnly: Boolean(stored), ownerSelector: promptOwner(stored?.prompt ?? frozenPrompt),
+      });
       if (userTexts(previous).includes(frozenPrompt)) {
         if (receipts) { const intent = receipts.reserve(frozenPrompt); receipts.accept(intent.promptIdentity, "native-history"); }
         if (messageReceipts) { const intent = messageReceipts.reserve(taskRequest); messageReceipts.accept(intent.promptIdentity, "native-history"); }
@@ -1003,7 +1045,8 @@ export function createCodexWorkflowTasks({ host, store, project, packageRoot, is
         catch (error) {
           // Even a failed response may have accepted the message. Never resend without native read-back.
           await sleep(delay);
-          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt));
+          const snapshot = await readHistory(ref, value => userTexts(value).includes(frozenPrompt),
+            { ownerSelector: promptOwner(frozenPrompt) });
           if (userTexts(snapshot).includes(frozenPrompt)) {
             receipts?.accept(reservation.promptIdentity, "native-history");
             return close ? { accepted: true, acceptedAt: receipts.read().acceptedAt, observed: true }

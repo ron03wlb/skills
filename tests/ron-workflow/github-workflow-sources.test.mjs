@@ -165,6 +165,25 @@ test("the GitHub source joins CLI tracker read-back to the real Git checkpoint a
     const issueGit = (...args) => execFileSync("git", ["-C", lane, ...args], { encoding: "utf8" }).trim();
     issueGit("add", "change.sql"); issueGit("commit", "-m", "prerequisite candidate");
     const execution = deriveExecuteIssueOperationIdentity({ repositoryId: "github:example/repo", specId: "I_1", issueId: "I_1", approvedPublicationIdentity: authority.approvedScopeHash });
+    const settledRef = { threadId: "task", hostId: "local" };
+    const terminalReceipt = { disposition: "SUCCEEDED", candidate: null, identity: "sha256:native-terminal",
+      progress: { terminalObservedAt: "2026-09-11T00:00:00.000Z" } };
+    const settledOwner = createGitHubWorkflowSources({ repository: root, repositoryName: "example/repo", store: {},
+      tasks: { read: async () => ({ state: "RESUMABLE", cwd: lane, outcomeReceipt: terminalReceipt,
+        snapshot: { turns: [{ status: "completed" }] } }) } });
+    const settledJournal = [{ type: "dispatch.recorded", issueId: "I_1", taskRef: settledRef }];
+    const publicationPending = await settledOwner.sources.reconciliation.read({ tracker: snapshot, journal: settledJournal, request: {} });
+    assert.equal(publicationPending.facts.nodes[0].taskState, "EXECUTING", "settlement without publication retains the original lane instead of retrying implementation");
+    assert.equal(publicationPending.facts.nodes[0].deliveryProgressSource.completionPublishedAt, null);
+    const diagnosisEvent = { type: "delivery.observed", sequence: 2, at: "2026-09-11T00:05:00.000Z", issueId: "I_1",
+      operationId: execution.key, stage: "PROGRESS_DIAGNOSED", disposition: "DIAGNOSED", sourceAt: "2026-09-11T00:05:00.000Z",
+      owner: "evidence-producer", evidenceIdentity: "sha256:publication-stall", requestIdentity: null,
+      blockingPredicate: "completion_publication_unresolved" };
+    const diagnosedPublication = await settledOwner.sources.reconciliation.read({ tracker: snapshot,
+      journal: [...settledJournal, diagnosisEvent], request: {} });
+    assert.equal(diagnosedPublication.facts.nodes[0].taskState, "NONE", "producer diagnosis releases capacity only to the recovery owner");
+    assert.equal(diagnosedPublication.facts.nodes[0].recovery.diagnosis.classification, "UNCLASSIFIED");
+    assert.equal(diagnosedPublication.facts.nodes[0].recovery.ownerTaskRef.threadId, settledRef.threadId);
     const finding = { identity: "F1", axis: "Spec", governingSource: "AC-1", summary: "Confirmed contract defect", classification: "confirmed", inScope: true };
     const waves = [];
     for (const number of [1, 2]) {

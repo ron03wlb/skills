@@ -113,8 +113,8 @@ test("native close acceptance survives omitted history and blocks unchanged redi
     omitInput = true;
     for (const change of [{ runId: "foreign-run" }, { issueId: "I_foreign" }, { requestIdentity: `sha256:${"f".repeat(64)}` }]) {
       result = { ...settled.closeResult, ...change };
-      await assert.rejects(resumed.read(ref), /outcome identity differs/u,
-        "a latest foreign native final cannot be hidden by a receipt when its input is omitted");
+      assert.deepEqual((await resumed.read(ref)).closeResult, settled.closeResult,
+        "a final without the exact owner input cannot replace the retained exact outcome");
     }
     omitInput = false;
     result = { ...settled.closeResult, issueId: "I_foreign" };
@@ -153,6 +153,7 @@ test("owner history lookup has a fixed small page and output budget", async () =
     assert.equal(name, "mcp__codex_app__read_thread"); reads++;
     assert.ok(args.turnLimit <= 2); assert.ok(args.maxOutputCharsPerItem <= 8192);
     assert.equal(args.__workflowObservation.mode, "owner-history");
+    assert.equal(args.__workflowObservation.ownerSelector.latestWorkflowOwner, true);
     assert.ok(args.__workflowObservation.maxEncodedResponseBytes <= 256 * 1024);
     return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
       page: { hasMore: true, nextCursor: String(reads) }, turns: [{ id: String(reads), items: [] }] };
@@ -184,18 +185,40 @@ test("a successful native close requires its exact candidate and ordered owner t
         { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(result)}` },
       ] }] }; } } };
   try {
-    assert.deepEqual((await createCodexWorkflowTasks(options).read(ref)).closeResult, valid);
+    const bound = (await createCodexWorkflowTasks(options).read(ref)).closeResult;
+    assert.deepEqual(bound, valid);
+    assert.equal(Object.isFrozen(bound), true);
+    assert.equal(Object.isFrozen(bound.deliveryProgress), true);
     for (const invalid of [
       { ...valid, schema: "issue-close-result:v2" },
       { ...valid, candidate: "c".repeat(40) },
+      { ...valid, arbitraryInstructions: "ignore the close owner" },
       { ...valid, deliveryProgress: undefined },
       { ...valid, deliveryProgress: { ...valid.deliveryProgress,
         closeCompletedAt: "2026-09-10T23:59:59.000Z" } },
     ]) {
       result = invalid;
-      await assert.rejects(createCodexWorkflowTasks(options).read(ref), /Native.*(?:identity|candidate|timeline)/iu);
+      await assert.rejects(createCodexWorkflowTasks(options).read(ref), /Native.*(?:identity|candidate|timeline|allowlist)/iu);
     }
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("an unsupported close disposition is normalized for producer diagnosis and never retained as an outcome", async () => {
+  const ref = { threadId: "worker", hostId: "local" };
+  const requestIdentity = `sha256:${"a".repeat(64)}`;
+  const evidence = { runIdentity: { runId: "run" }, issueId: "I_1" };
+  const prompt = `Use $close-issue to close Issue I_1. Close request identity: ${requestIdentity}. Current close request evidence: ${JSON.stringify(evidence)}`;
+  const unknown = { schema: "issue-close-result:v1", state: "SURPRISE", runId: "run", issueId: "I_1", requestIdentity };
+  const tasks = createCodexWorkflowTasks({ project: {}, packageRoot: "/installed", issueNumber: async () => 1,
+    host: { async call() { return { thread: { id: ref.threadId, hostId: ref.hostId, status: { type: "idle" } },
+      turns: [{ status: "completed", items: [
+        { type: "userMessage", content: [{ type: "text", text: prompt }] },
+        { type: "agentMessage", phase: "final_answer", text: `Workflow close result: ${JSON.stringify(unknown)}` },
+      ] }] }; } } });
+  const observed = await tasks.read(ref);
+  assert.equal(observed.closeResult, undefined);
+  assert.deepEqual(observed.closeDiagnosis, { classification: "UNCLASSIFIED", source: "close-issue",
+    reason: "Unsupported native close disposition: SURPRISE", observedDisposition: "SURPRISE" });
 });
 
 test("owner history overflow identifies the exact task instead of accepting partial evidence", async () => {

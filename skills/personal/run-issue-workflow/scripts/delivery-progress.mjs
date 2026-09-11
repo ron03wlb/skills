@@ -65,9 +65,10 @@ export function diagnoseDeliveryStall({ events, issueId, operationId, now, noPro
     && event.issueId === issueId && event.operationId === operationId)
     .map(event => validateDeliveryProgress(Object.fromEntries([...fields].map(field => [field, event[field]]))));
   const publication = selected.findLast(event => event.stage === "COMPLETION_PUBLISHED");
-  if (!publication) return null;
+  const orphanTerminal = !publication ? selected.findLast(event => event.stage === "NATIVE_TERMINAL_OBSERVED") : null;
+  if (!publication && !orphanTerminal) return null;
   const current = selected.filter(event => semanticStages.has(event.stage)
-    && Date.parse(event.sourceAt) >= Date.parse(publication.sourceAt));
+    && Date.parse(event.sourceAt) >= Date.parse((publication ?? orphanTerminal).sourceAt));
   const latest = stage => current.findLast(event => event.stage === stage);
   const terminal = latest("NATIVE_TERMINAL_OBSERVED");
   const evidence = latest("EVIDENCE_VALIDATED");
@@ -78,7 +79,8 @@ export function diagnoseDeliveryStall({ events, issueId, operationId, now, noPro
   const targetWriter = latest("TARGET_WRITER_ACQUIRED");
   const completed = latest("CLOSE_COMPLETED");
   let unresolved;
-  if (!terminal) unresolved = { anchor: publication, predicate: "native_terminal_unobserved", owner: "native-task-owner" };
+  if (!publication) unresolved = { anchor: orphanTerminal, predicate: "completion_publication_unresolved", owner: "evidence-producer" };
+  else if (!terminal) unresolved = { anchor: publication, predicate: "native_terminal_unobserved", owner: "native-task-owner" };
   else if (!evidence) unresolved = { anchor: terminal, predicate: "evidence_validation_unresolved", owner: "evidence-producer" };
   else if (eligibility?.stage === "CLOSE_INELIGIBLE") {
     if (healthyContention.has(eligibility.blockingPredicate)) return null;

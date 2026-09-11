@@ -155,6 +155,15 @@ const preWaitEvidenceFor = (input) => {
   });
 };
 
+test("a durable delivery diagnosis moves its exact close owner ahead of unchanged polling", () => {
+  const input = facts([
+    { ...node("13"), completionState: "COMPLETE", candidateReachable: true },
+    { ...node("14"), completionState: "COMPLETE", candidateReachable: true,
+      deliveryDiagnosis: { stage: "PROGRESS_DIAGNOSED", blockingPredicate: "native_close_acceptance_unresolved" } },
+  ]);
+  assert.deepEqual(reduceRun(input).legalActions, [{ type: "close_issue", issueId: "14" }]);
+});
+
 test("model upgrades and isolated recovery share the same available execution slots", () => {
   const recovery = bindTechnicalFailure({ runId: "run-12", issueId: "14", operationId: "issue-14", candidate: "b".repeat(40),
     targetHead: "a".repeat(40), worktree: "/issue-14", topic: "issue-14", owningSource: "native process", observedResult: "failure",

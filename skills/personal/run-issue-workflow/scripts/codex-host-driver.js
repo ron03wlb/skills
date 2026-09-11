@@ -173,6 +173,56 @@
     }
     return null;
   };
+  const delegatedOwnerText = item => {
+    if (item?.type !== "functionCallOutput" || item.namespace !== "codex_app"
+      || !["create_thread", "send_message_to_thread"].includes(item.name)) return null;
+    const output = typeof item.output === "string" ? item.output
+      : item.output?.truncated === false ? item.output.text : null;
+    return output?.match(/^<codex_delegation>\n  <source_thread_id>[^\n]+<\/source_thread_id>\n  <input>([\s\S]*)<\/input>\n<\/codex_delegation>$/u)?.[1] ?? null;
+  };
+  const ownerTexts = item => item?.type === "userMessage"
+    ? (Array.isArray(item.content) ? item.content.filter(part => part?.type === "text" && typeof part.text === "string").map(part => part.text) : [])
+    : delegatedOwnerText(item) === null ? [] : [delegatedOwnerText(item)];
+  const workflowOwner = /(?:Close request identity:|Retry request:|Repair request:|Recovery request:|Model upgrade request:|Workflow recovery ownership:|Workflow lane |Workflow prerequisite lane:)/u;
+  const selectOwnerTurn = (payload, selector) => {
+    if (!record(selector) || Object.keys(selector).some(key => !["promptIdentities", "textMarkers", "latestWorkflowOwner", "previewPrefix"].includes(key))) {
+      return { error: "native-owner-selector-invalid" };
+    }
+    const promptIdentities = Array.isArray(selector.promptIdentities) ? selector.promptIdentities : [];
+    const textMarkers = Array.isArray(selector.textMarkers) ? selector.textMarkers : [];
+    if (promptIdentities.length > 4 || promptIdentities.some(value => !/^sha256:[a-f0-9]{64}$/u.test(value))
+      || textMarkers.length > 4 || textMarkers.some(value => !boundedText(value)
+        || !/^(?:Workflow lane |Workflow prerequisite lane:)/u.test(value))
+      || selector.latestWorkflowOwner !== undefined && typeof selector.latestWorkflowOwner !== "boolean"
+      || selector.previewPrefix !== undefined && !boundedText(selector.previewPrefix)
+      || !promptIdentities.length && !textMarkers.length && selector.latestWorkflowOwner !== true
+        && selector.previewPrefix === undefined) return { error: "native-owner-selector-invalid" };
+    const turns = Array.isArray(payload?.turns) ? payload.turns : [];
+    const entries = turns.map(turn => ({ turn, items: (Array.isArray(turn?.items) ? turn.items : [])
+      .map(item => ({ item, texts: ownerTexts(item) })).filter(entry => entry.texts.length) }));
+    let matches = [];
+    for (const identity of promptIdentities) {
+      matches = entries.filter(entry => entry.items.some(({ texts }) => texts.some(text => `sha256:${sha256Hex(JSON.stringify(text))}` === identity)));
+      if (matches.length) break;
+    }
+    if (!matches.length && textMarkers.length) {
+      matches = entries.filter(entry => entry.items.some(({ texts }) => texts.some(text => textMarkers.some(marker => text.includes(marker)))));
+    }
+    if (!matches.length && selector.latestWorkflowOwner === true) {
+      const latest = entries.find(entry => entry.items.some(({ texts }) => texts.some(text => workflowOwner.test(text))));
+      if (latest) matches = [latest];
+    }
+    if (matches.length > 1) return { error: "native-owner-selector-ambiguous" };
+    if (!matches.length) return { turn: null, ownerItems: [] };
+    const selected = matches[0];
+    const matchesOwner = text => promptIdentities.some(identity => `sha256:${sha256Hex(JSON.stringify(text))}` === identity)
+      || textMarkers.some(marker => text.includes(marker))
+      || selector.latestWorkflowOwner === true && workflowOwner.test(text);
+    const ownerItems = selected.items.filter(({ texts }) => texts.some(matchesOwner)).map(({ item }) => item);
+    const final = (Array.isArray(selected.turn.items) ? selected.turn.items : [])
+      .findLast(item => item?.type === "agentMessage" && item.phase === "final_answer");
+    return { turn: selected.turn, ownerItems: [...ownerItems, ...(final ? [final] : [])] };
+  };
   const compactOwnerHistoryPayload = (payload, request, maximum, nativeFailed = false) => {
     const base = compactReadPayload(payload, request, nativeFailed);
     if (base.error) return base;
@@ -184,12 +234,14 @@
     if (Array.isArray(payload?.turns) && payload.turns.length > 2) {
       return overflow();
     }
+    const selection = selectOwnerTurn(payload, request.arguments.__workflowObservation?.ownerSelector);
+    if (selection.error) return { ...base, turns: [], error: { code: selection.error } };
     const turns = [];
-    for (const turn of Array.isArray(payload?.turns) ? payload.turns : []) {
+    for (const turn of selection.turn ? [selection.turn] : []) {
       if (typeof turn?.id === "string" && !boundedText(turn.id)
         || typeof turn?.status === "string" && !boundedText(turn.status)) return overflow();
       const selected = [];
-      for (const item of Array.isArray(turn?.items) ? turn.items : []) {
+      for (const item of selection.ownerItems) {
         const compact = compactOwnerItem(item);
         if (compact?.error) return overflow();
         if (compact?.value && selected.push(compact.value) > 32) return overflow();
@@ -197,15 +249,18 @@
       turns.push({ ...(boundedText(turn?.id) ? { id: turn.id } : {}),
         status: boundedText(turn?.status) ?? "unknown", items: selected });
     }
-    if (typeof payload?.thread?.preview === "string" && !boundedText(payload.thread.preview)
+    const selectedPreview = typeof request.arguments.__workflowObservation?.ownerSelector?.previewPrefix === "string"
+      && payload?.thread?.preview?.startsWith(request.arguments.__workflowObservation.ownerSelector.previewPrefix)
+      ? payload.thread.preview : undefined;
+    if (typeof selectedPreview === "string" && !boundedText(selectedPreview)
       || typeof payload?.page?.nextCursor === "string" && !boundedText(payload.page.nextCursor)
       || payload?.page?.hasMore === true && !boundedText(payload.page.nextCursor)) {
       return overflow();
     }
     const page = record(payload?.page) ? { hasMore: payload.page.hasMore === true,
       ...(boundedText(payload.page.nextCursor) ? { nextCursor: payload.page.nextCursor } : {}) } : undefined;
-    return { ...base, ...(boundedText(payload?.thread?.preview) ? { thread: { ...base.thread,
-      preview: payload.thread.preview } } : {}), turns, ...(page ? { page } : {}) };
+    return { ...base, ...(boundedText(selectedPreview) ? { thread: { ...base.thread,
+      preview: selectedPreview } } : {}), turns, ...(page ? { page } : {}) };
   };
   const nativeObservationEnvelope = (request, payload, maximum = maxEncodedResponseBytes) => {
     const supplied = request.arguments?.__workflowObservation;

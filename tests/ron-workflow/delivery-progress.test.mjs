@@ -132,6 +132,16 @@ test("delivery handoff and close scheduling diagnose one unchanged five-minute s
     "new discriminating semantic progress permits one diagnosis for the next unresolved stage");
 });
 
+test("a settled native owner without completion publication diagnoses the evidence producer after five minutes", () => {
+  const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
+  const terminal = progress("NATIVE_TERMINAL_OBSERVED", "OBSERVED", at(0), { at: at(0), owner: "native-task-owner" });
+  assert.equal(diagnoseDeliveryStall({ events: [terminal], issueId, operationId, now: at(4) }), null);
+  const diagnosis = diagnoseDeliveryStall({ events: [terminal], issueId, operationId, now: at(5) });
+  assert.equal(diagnosis.owner, "evidence-producer");
+  assert.equal(diagnosis.blockingPredicate, "completion_publication_unresolved");
+  assert.equal(diagnosis.requestIdentity, terminal.requestIdentity);
+});
+
 test("healthy close-writer contention is recorded but never diagnosed as a progress fault", () => {
   const at = minutes => new Date(Date.UTC(2026, 8, 11, 0, minutes)).toISOString();
   const event = (stage, disposition, sourceAt, overrides = {}) => progress(stage, disposition, sourceAt,
