@@ -177,7 +177,7 @@ Skills I use daily for code work.
 - **[verify-target-before-push](./skills/engineering/verify-target-before-push/SKILL.md)** — Verify a deterministic operation identity set for a local-ahead or already-pushed completion-note range, including non-authorizing `workflowArtifacts`, with confirmation-gated direct-contribution, closed-Issue, or command-placeholder recovery and no push.
 - **[push-target](./skills/engineering/push-target/SKILL.md)** — Consume one current local-ahead `push_ready` receipt for one ordinary non-force push and exact remote read-back.
 - **[ask-matt](./skills/engineering/ask-matt/SKILL.md)** — Ask which skill or flow fits your situation. A router over the user-invoked skills in this repo.
-- **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Ask about codebase boundaries and costly commitments, delegate ordinary details, and record scoped glossary or ADR changes in an isolated planning worktree.
+- **[grill-with-docs](./skills/engineering/grill-with-docs/SKILL.md)** — Reserve direction, architecture, table DDL and migration costs; delegate routine choices and record scoped glossary or ADR changes in an isolated planning worktree.
 - **[triage](./skills/engineering/triage/SKILL.md)** — Move issues through a state machine of triage roles.
 - **[improve-codebase-architecture](./skills/engineering/improve-codebase-architecture/SKILL.md)** — Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.
 - **[setup-matt-pocock-skills](./skills/engineering/setup-matt-pocock-skills/SKILL.md)** — Configure this repo for the engineering skills (issue tracker, triage labels, domain doc layout). Run once per repo before using the other engineering skills.

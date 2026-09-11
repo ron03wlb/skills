@@ -1,6 +1,6 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then runs a **boundary-first** interview. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) asks about persistence boundaries, major directions and costly commitments, while ordinary business and implementation details follow project evidence or suitable established practice. Only accepted glossary or ADR writes require an isolated planning worktree.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then runs a **boundary-first** interview. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reserves new major direction, architecture, table DDL and any migration cost for you, while ordinary business and implementation details follow project evidence or suitable established practice. Each question includes a concrete proposal, alternatives, trade-offs, reasons and a recommendation. Only accepted glossary or ADR writes require an isolated planning worktree.
 
 Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
@@ -45,13 +45,15 @@ The skill still maps the whole design, but its decision aperture controls what r
 
 | Choice | Handling |
 | --- | --- |
-| Create, split or merge a table; change ownership, aggregate, system-of-record, destructive lifecycle or migration boundaries | Ask when evidence cannot settle it |
-| Set a major module, system, external-contract, trust or authorization direction | Ask when evidence cannot settle it |
+| Create or change table DDL, including columns, types, constraints and indexes; change ownership, aggregate, system-of-record or destructive lifecycle | Reuse an applicable accepted decision, otherwise bring the exact proposal to you |
+| Set a new overall direction, architecture, or major module, system, external-contract, trust or authorization direction | Recommend from evidence and ask for the missing decision; convention alone does not approve it |
+| Introduce any migration cost for data, state, existing consumers or an operational workflow | Explain the concrete transition, cost and recovery, then ask, even when small or the code can be reverted |
 | Add scope, operation permission, or a costly or irreversible commitment | Ask for the missing decision or approval |
 | Choose ordinary business or implementation detail inside settled boundaries | Follow explicit decisions, project contracts, source conventions, then suitable established practice |
-| Prepare SQL columns, types, indexes, queries, bindings and validation | Derive the details, then ask once for the coherent exact change set before editing SQL |
+| Adjust routine reversible application queries and bindings with no reserved effects | Decide directly from evidence and retain focused verification needs |
+| Prepare DDL, data corrections, destructive or costly SQL, or SQL with migration costs | Derive the details, then ask once for the coherent exact change set before editing its artifact |
 
-Multiple plausible answers alone do not create a question. Delegated defaults retain their basis, reversal and verification assumptions in the handoff.
+Multiple plausible answers alone do not create a question. An existing design that meets accepted requirements stays settled; an unselected alternative with migration costs does not reopen it. The agent checks that a precedent fits the requirements, considers important failure cases and practical reversal, and carries concise evidence and verification assumptions in the handoff. These checks preserve design work while reducing the decisions you must make. Ordinary implementation effort without an existing data, consumer or operational transition is not a migration cost.
 
 ## The paper trail
 
@@ -66,7 +68,7 @@ The recording destination follows the kind of decision, independently of whether
 
 `CONTEXT.md` stays a glossary. Related decisions can share one ADR; routine choices need no new file. The visible handoff carries requirements that do not belong in an ADR so a later [to-spec](https://aihero.dev/skills-to-spec) invocation can retain their exact meaning.
 
-SQL adjustments need prior approval even when the change is a local file or an embedded read query. The agent first inspects the current design and presents the proposed effect, then prepares and validates the approved SQL before dependent application implementation. Independent work can continue. Database execution retains its own permissions and any declared Manual prerequisite process.
+SQL follows its effects. Routine reversible queries and bindings are delegated; a SELECT that needs a new index includes DDL and comes back as one exact proposal. For reserved SQL, the agent inspects the design and prepares the change set for your decision, then writes and validates the approved artifact before dependent implementation. Independent work can continue. Database execution retains its own permissions and any declared Manual prerequisite process.
 
 ## Common questions
 
@@ -83,10 +85,13 @@ That is the skill failing to load one of its two dependencies. Without [grilling
 The handoff carries exact non-ADR requirements, including ordering, negative requirements, numeric defaults, and verification assumptions. `to-spec` preserves those in the Spec and retains each decision's basis. The packet is visible conversation content, so carry it into a new task explicitly; it is not a hidden persistent ledger.
 
 **Can it finish without asking me to approve every choice?**
-Yes. Ordinary business and implementation details inside settled boundaries follow evidence and delegated authority, even when several plausible answers exist. You receive their reasoning and one closing handoff without a second confirmation. Boundary choices that evidence cannot settle, missing scope or permission, and costly commitments still require a concrete question. SQL comes as one exact change-set approval. An explicit request for your review still applies.
+Yes. Ordinary business and implementation details inside settled boundaries follow evidence and delegated authority, even when several plausible answers exist. You receive a compact summary and one closing handoff without a second confirmation. New reserved boundaries, any migration cost, missing scope or permission, and costly commitments still require a concrete question. Reserved SQL comes as one exact change-set approval. An explicit request for your review still applies.
 
 **Why is it still asking me implementation-level questions?**
-It should not ask merely because two detailed implementations are plausible. Check whether the choice changes a persistence, ownership, system, contract, trust or authorization boundary, or creates a costly commitment. If it does not, the skill should choose from project evidence or established practice and record the default in the handoff.
+It should not ask merely because two detailed implementations are plausible. Check whether the choice changes direction, architecture or table DDL, introduces a migration cost, or creates another reserved commitment. If it does not, the skill should choose from project evidence or established practice and record the default in the handoff. General SQL syntax or a missing convention alone does not require your decision.
+
+**Does a reversible change with a small migration still need me?**
+Yes. Moving existing data, adapting consumers or transitioning an operational workflow is a migration cost even when small. The agent names that transition and offers alternatives with a recommendation; reverting code alone does not remove the transition work.
 
 **Can I point it at an existing repo that has no docs at all?**
 Yes. This is the right skill for a codebase with no ADRs, no domain language and no design principles: invoke it and say "help me document my repo". The community pattern pairs it with [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) for building or repairing a `CONTEXT.md`. Expect to steer it: it will read code and ask you about what it finds, and you are the one who says which of the words already in the codebase are the right ones.
@@ -109,6 +114,7 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 - The glossary reads as pure vocabulary (your project's words with tight definitions) and contains no implementation detail or spec-like prose.
 - Questions the codebase can answer get answered by reading the codebase, not asked of you.
 - Ordinary details inside settled boundaries appear as delegated defaults rather than questions.
+- New architecture, DDL and migration choices come with concrete alternatives, trade-offs, reasons and a recommendation; existing approvals are reused.
 - Durable rationale is recorded directly in your project's ADR format, with the decision's actual basis visible.
 - It challenges a word you used because your existing glossary defines it differently.
 - The closing message gives you the exact handoff and the later `/to-spec` command.

@@ -36,7 +36,7 @@ The installed Codex GitHub path records publication and handoff fields in struct
 
 Planning now prepares the exact operation inventory and read-only host capability evidence before one request for missing permission. Existing approvals carry forward. Declared SQL is handed to [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) before Run-ready, with its environment, committed content and human APPLIED/NO_OP outcome bound; no SQL is N/A. GitHub publication is described truthfully as immediate pre-read, write and exact post-read, rather than unsupported atomic CAS.
 
-Every SQL adjustment needs its scoped approval before artifact edits. The Spec carries approved SQL preparation and validation before dependent application implementation, while independent work stays eligible. Approval to prepare the artifact grants no database execution permission.
+The Spec preserves the shared SQL decision boundary: routine reversible queries and bindings are delegated; table DDL, data corrections, destructive or costly effects, and any migration cost require the missing exact approval. It carries approved SQL preparation and validation before dependent application implementation, while independent work stays eligible. Artifact preparation grants no database execution permission.
 
 ## It's working if
 

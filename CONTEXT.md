@@ -101,7 +101,7 @@ A caller- or human-selected boundary over a design tree that identifies which un
 _Avoid_: Question limit, skipped design work, assumed approval
 
 **Delegated design decision**:
-An evidence-backed choice made by the agent within the user's agreed goal and delegated planning scope, whose consequences can be reversed at low cost. It records its evidence and delegation source, is not an individual human approval, and grants no new operation permission. Ordinary business detail outside the **Decision aperture** may follow project conventions or suitable established practice; a choice inside the aperture and every costly commitment, including each exact SQL change set, require the missing human decision first.
+An evidence-backed choice made by the agent within the user's agreed goal and delegated planning scope, whose consequences can be reversed at low cost without migration costs. It records its evidence and delegation source, is not an individual human approval, and grants no new operation permission. Ordinary business detail outside the **Decision aperture**, including routine reversible application queries and bindings, may follow project conventions or suitable established practice. New major direction, architecture, table DDL, data corrections, destructive or costly commitments, and any migration cost remain reserved for the missing human decision.
 _Avoid_: Assumed consent, implicit database authority, human-confirmed by the agent
 
 **Planning handoff packet**:

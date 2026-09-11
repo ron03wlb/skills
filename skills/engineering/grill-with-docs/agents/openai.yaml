@@ -1,5 +1,5 @@
 interface:
   display_name: "Grill with Docs"
-  short_description: "Grill boundaries; record delegated design decisions"
+  short_description: "Delegate routine choices; reserve boundaries and migration"
 policy:
   allow_implicit_invocation: false

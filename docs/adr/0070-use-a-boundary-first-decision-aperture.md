@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0071
 ---
 
 # Use a boundary-first decision aperture for codebase grilling
