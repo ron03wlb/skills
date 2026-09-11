@@ -341,7 +341,7 @@ test("selected batch close failures retain runtime evidence and finish lane clea
 export const supportsCompletedRunReentry = true;
 export const closes = [];
 export const calls = [];
-export const fixtureState = { reenter: false };
+export const fixtureState = { reenter: false, directUnavailable: process.env.WORKFLOW_FIXTURE_COMPOUND === "1" };
 export async function prepareCodexWorkflow({ specId, host }) {
   let closed = false;
   let done = false;
@@ -349,6 +349,10 @@ export async function prepareCodexWorkflow({ specId, host }) {
     specId,
     async run({ mode }) {
       calls.push(specId + ":" + mode + ":" + closed);
+      if (fixtureState.directUnavailable && specId === "I_1") return {
+        run: { state: "UNAVAILABLE", specId }, nodes: [], legalActions: [],
+        capacityUnknown: true, reason: "Fixture primary lane unavailable",
+      };
       if (done) return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
       if (mode === "step" && fixtureState.reenter && specId === "I_1") {
         fixtureState.reenter = false;
@@ -365,7 +369,8 @@ export async function prepareCodexWorkflow({ specId, host }) {
     async close() {
       closes.push(specId);
       closed = true;
-      if (specId === "I_1") throw new Error("Fixture selected lane close failed");
+      if (!fixtureState.directUnavailable && specId === "I_1") throw new Error("Fixture selected lane close failed");
+      if (fixtureState.directUnavailable && specId === "I_2") throw new Error("Fixture secondary CLI cleanup failed");
     },
   };
 }
@@ -404,6 +409,20 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     );
     assert.deepEqual(composition.closes, ["I_1", "I_2"], "cleanup failure cannot replace the first batch failure or stop cleanup");
 
+    composition.closes.splice(0);
+    await assert.rejects(
+      runInstalledEntry({ repository: f.repository, host: f.host, specIds: ["404", "1"], maxWorkers: 1 }),
+      error => {
+        assert.equal(error.workflowRuntime, undefined, "pre-selection primary failure cannot inherit another lane's runtime");
+        assert.ok(error.workflowResult);
+        assert.equal(error.workflowResult.runs[0].workflowRuntime, undefined);
+        assert.deepEqual(error.cleanupFailures.map(item => [item.specId, item.error, item.workflowRuntime.packageVersion]),
+          [["I_1", "Fixture selected lane close failed", current.version]]);
+        return true;
+      },
+    );
+    assert.deepEqual(composition.closes, ["I_1"]);
+
     const cliHarness = `
 import childProcess from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
@@ -438,16 +457,21 @@ await import(pathToFileURL(process.env.WORKFLOW_FIXTURE_ENTRY).href + "?cli-clos
           WORKFLOW_FIXTURE_ENTRY: entry,
           WORKFLOW_FIXTURE_REPOSITORY: f.repository,
           WORKFLOW_FIXTURE_ISSUES: JSON.stringify([...f.issues]),
+          WORKFLOW_FIXTURE_COMPOUND: "1",
         },
       }),
       error => {
         const line = error.stdout.split(/\r?\n/u).find(value => value.startsWith("workflow-host "));
         const emitted = JSON.parse(line.slice("workflow-host ".length));
         assert.equal(emitted.type, "error");
-        assert.match(emitted.message, /Fixture selected lane close failed/u);
+        assert.match(emitted.message, /Fixture primary lane unavailable/u);
         assert.deepEqual(emitted.workflowRuntime.packageVersion, current.version);
         assert.equal(emitted.workflowRuntime.packageRoot, current.root);
         assert.match(emitted.workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
+        assert.equal(emitted.workflowResult.runs[0].run.state, "UNAVAILABLE");
+        assert.match(emitted.workflowResult.runs[0].reason, /Fixture primary lane unavailable/u);
+        assert.deepEqual(emitted.cleanupFailures.map(item => [item.specId, item.error]),
+          [["I_2", "Fixture secondary CLI cleanup failed"]]);
         return true;
       },
     );
@@ -494,7 +518,9 @@ export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
       }
       return { run: { state: "RUNNING", specId }, nodes: [], legalActions: [{ type: "close_issue" }] };
     },
-    async close() {},
+    async close() {
+      if (specId === "I_7") throw new Error("Fixture secondary cleanup failed");
+    },
   };
 }
 export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
@@ -506,7 +532,33 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     const beforeStepComposition = await import(pathToFileURL(join(beforeStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
     beforeStepComposition.fixtureState.reenterOnStep = true;
     let installedDuringStepReentry;
+    let installedDuringNestedStepReentry;
     f.host.installCurrent = () => {
+      if (!installedDuringStepReentry) {
+        writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenter: true };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  return { specId,
+    async run() {
+      if (fixtureState.reenter) {
+        fixtureState.reenter = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+        git(f.source, "add", "skills"); git(f.source, "commit", "-m", "intermediate renewed runtime fixture");
+        installedDuringStepReentry = f.install();
+        return;
+      }
       writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
@@ -517,7 +569,7 @@ export async function prepareCodexWorkflow({ specId }) {
       fixtureState.calls.push(specId);
       if (fixtureState.throwOnce) {
         fixtureState.throwOnce = false;
-        throw new Error("Fixture renewed selected execution failed");
+        throw "Fixture renewed selected execution failed";
       }
       return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
     },
@@ -526,18 +578,29 @@ export async function prepareCodexWorkflow({ specId }) {
 }
 export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
 `);
-      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed runtime failure fixture");
-      installedDuringStepReentry = f.install();
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "nested renewed runtime failure fixture");
+      installedDuringNestedStepReentry = f.install();
     };
-    const stepReentryFailure = await runInstalledEntry({ repository: f.repository, host: f.host,
-      specIds: ["3", "7"], maxWorkers: 1 });
-    assert.equal(stepReentryFailure.state, "PRESERVED");
-    assert.match(stepReentryFailure.runs[0].error, /Fixture renewed selected execution failed/u, JSON.stringify(stepReentryFailure));
-    assert.ok(installedDuringStepReentry, "the step reaches the renewed selected runtime");
-    assert.deepEqual(stepReentryFailure.runs[0].workflowRuntime.packageVersion, installedDuringStepReentry.version);
-    assert.equal(stepReentryFailure.runs[0].workflowRuntime.packageRoot, installedDuringStepReentry.root);
+    let stepReentryFailure;
+    await assert.rejects(
+      runInstalledEntry({ repository: f.repository, host: f.host, specIds: ["3", "7"], maxWorkers: 1 }),
+      error => {
+        assert.match(error.message, /Fixture renewed selected execution failed/u);
+        assert.ok(error.workflowResult, "the primary lane result survives secondary cleanup rejection");
+        assert.equal(error.workflowResult.runs[0].run.state, "UNAVAILABLE");
+        assert.match(error.workflowResult.runs[0].error, /Fixture renewed selected execution failed/u);
+        assert.deepEqual(error.cleanupFailures.map(item => [item.specId, item.error]),
+          [["I_7", "Fixture secondary cleanup failed"]]);
+        stepReentryFailure = error.workflowResult;
+        return true;
+      },
+    );
+    assert.ok(installedDuringStepReentry && installedDuringNestedStepReentry,
+      "the step reaches both renewed selected runtimes");
+    assert.deepEqual(stepReentryFailure.runs[0].workflowRuntime.packageVersion, installedDuringNestedStepReentry.version);
+    assert.equal(stepReentryFailure.runs[0].workflowRuntime.packageRoot, installedDuringNestedStepReentry.root);
     assert.match(stepReentryFailure.runs[0].workflowRuntime.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
-    const stepReentryComposition = await import(pathToFileURL(join(installedDuringStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
+    const stepReentryComposition = await import(pathToFileURL(join(installedDuringNestedStepReentry.root, scriptsPath, "codex-workflow.mjs")).href);
     assert.deepEqual(stepReentryComposition.fixtureState.calls, ["I_3"],
       "another progressing lane must not let the next connected round retry a renewed runtime throw");
 
@@ -574,8 +637,34 @@ export async function runCodexWorkflow() { throw new Error("Fixture batch must u
     f.addCompleted(9, false, true, beforeRenewedUnavailable.version);
     const beforeRenewedUnavailableComposition = await import(pathToFileURL(join(beforeRenewedUnavailable.root, scriptsPath, "codex-workflow.mjs")).href);
     beforeRenewedUnavailableComposition.fixtureState.reenterOnStep = true;
+    let intermediateRenewedUnavailable;
     let selectedRenewedUnavailable;
     f.host.installCurrent = () => {
+      if (!intermediateRenewedUnavailable) {
+        writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
+export const supportsCompletedRunReentry = true;
+export const assessRecoveryCompatibility = () => ({ compatible: true });
+export const fixtureState = { reenter: true };
+export async function prepareCodexWorkflow({ specId, host, runIdentity }) {
+  return { specId,
+    async run() {
+      if (fixtureState.reenter) {
+        fixtureState.reenter = false;
+        host.installCurrent();
+        return { run: { state: "EXECUTING", specId, runId: runIdentity.runId },
+          diagnoses: [{ reasonCode: "workflow_runtime_reentry_required" }], nodes: [], legalActions: [] };
+      }
+      return { run: { state: "SUCCEEDED", specId }, nodes: [], legalActions: [] };
+    },
+    async close() {},
+  };
+}
+export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
+`);
+        git(f.source, "add", "skills"); git(f.source, "commit", "-m", "intermediate renewed unavailable fixture");
+        intermediateRenewedUnavailable = f.install();
+        return;
+      }
       writeFileSync(join(f.source, scriptsPath, "codex-workflow.mjs"), `
 export const supportsCompletedRunReentry = true;
 export const assessRecoveryCompatibility = () => ({ compatible: true });
@@ -596,7 +685,7 @@ export async function prepareCodexWorkflow({ specId }) {
 }
 export async function runCodexWorkflow() { throw new Error("Fixture batch must use prepareCodexWorkflow"); }
 `);
-      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "renewed unavailable status selected fixture");
+      git(f.source, "add", "skills"); git(f.source, "commit", "-m", "nested renewed unavailable status fixture");
       selectedRenewedUnavailable = f.install();
     };
     const renewedUnavailable = await runInstalledEntry({ repository: f.repository, host: f.host,

@@ -108,6 +108,8 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     let effectiveRuntime = workflowRuntime;
     let closedLane;
     let unavailableStatus;
+    let delegatedLane = false;
+    let lastStatus;
     const closeLane = async () => {
       const closing = lane;
       if (closedLane === closing) return;
@@ -118,9 +120,31 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
     return { specId: lane.specId, get workflowRuntime() { return effectiveRuntime; },
       async run(request) {
         if (unavailableStatus) return unavailableStatus;
-        const status = await lane.run(request);
+        if (delegatedLane) {
+          let delegatedStatus;
+          try { delegatedStatus = await lane.run(request); }
+          catch (error) {
+            const delegatedFailure = attachWorkflowRuntime(error, lane.workflowRuntime ?? effectiveRuntime);
+            effectiveRuntime = delegatedFailure.workflowRuntime;
+            unavailableStatus = { ...lastStatus,
+              run: { ...lastStatus?.run, state: "UNAVAILABLE", specId: lastStatus?.run?.specId ?? lane.specId },
+              workflowRuntime: effectiveRuntime, capacityUnknown: true, error: delegatedFailure.message };
+            throw delegatedFailure;
+          }
+          effectiveRuntime = delegatedStatus.workflowRuntime ?? lane.workflowRuntime ?? effectiveRuntime;
+          const effectiveStatus = { ...delegatedStatus, workflowRuntime: effectiveRuntime };
+          lastStatus = effectiveStatus;
+          if (delegatedStatus.run?.state === "UNAVAILABLE") unavailableStatus = {
+            ...effectiveStatus, capacityUnknown: true,
+          };
+          return unavailableStatus ?? effectiveStatus;
+        }
+        let status;
+        try { status = await lane.run(request); }
+        catch (error) { throw attachWorkflowRuntime(error, effectiveRuntime); }
+        lastStatus = { ...status, workflowRuntime: effectiveRuntime };
         if (status.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")
-          && !host.disconnected && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(status.run.state)) {
+          && !host.disconnected && !["PAUSED", "PAUSING", "STOPPED", "STOPPING", "UNAVAILABLE"].includes(status.run.state)) {
           const installed = selectWorkflowVersion({ cacheDirectory });
           if (installed.state === "AVAILABLE" && installed.version.id !== versionId) {
             try { await closeLane(); }
@@ -146,17 +170,20 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
                 workflowRuntime: effectiveRuntime, capacityUnknown: true, reason: renewed.reason };
               return unavailableStatus;
             }
-            lane = renewed; versionId = installed.version.id;
+            lane = renewed; delegatedLane = true; versionId = installed.version.id;
             effectiveRuntime = renewed.workflowRuntime;
             let renewedStatus;
             try { renewedStatus = await lane.run({ ...request, mode: "snapshot" }); }
             catch (error) {
-              effectiveRuntime = error.workflowRuntime ?? effectiveRuntime;
+              const renewedFailure = attachWorkflowRuntime(error, lane.workflowRuntime ?? effectiveRuntime);
+              effectiveRuntime = renewedFailure.workflowRuntime;
               unavailableStatus = { ...status, run: { ...status.run, state: "UNAVAILABLE" },
-                workflowRuntime: effectiveRuntime, capacityUnknown: true, error: error.message };
-              throw error;
+                workflowRuntime: effectiveRuntime, capacityUnknown: true, error: renewedFailure.message };
+              throw renewedFailure;
             }
+            effectiveRuntime = renewedStatus.workflowRuntime ?? lane.workflowRuntime ?? effectiveRuntime;
             const effectiveStatus = { ...renewedStatus, workflowRuntime: effectiveRuntime };
+            lastStatus = effectiveStatus;
             if (renewedStatus.run?.state === "UNAVAILABLE") unavailableStatus = {
               ...effectiveStatus, capacityUnknown: true,
             };
@@ -174,7 +201,7 @@ async function selectInstalledLane({ repository, specId, runId, host, prepareOnl
   if (result.status?.diagnoses?.some(item => item.reasonCode === "workflow_runtime_reentry_required")) {
     const installed = selectWorkflowVersion({ cacheDirectory });
     if (installed.state === "AVAILABLE" && installed.version.id !== runtime.version.id && !host.disconnected
-      && !["PAUSED", "PAUSING", "STOPPED", "STOPPING"].includes(result.status.run.state)) {
+      && !["PAUSED", "PAUSING", "STOPPED", "STOPPING", "UNAVAILABLE"].includes(result.status.run.state)) {
       try {
         const renewed = await selectInstalledLane({ repository, specId, runId: result.status.run.runId, host });
         return renewed?.workflowRuntime ? renewed : { ...renewed, workflowRuntime };
@@ -201,15 +228,30 @@ export async function runInstalledEntry({ repository, specId, runId, host, specI
   }
   let result;
   let failure;
+  let primaryResultFailure = false;
+  const cleanupFailures = [];
   try { result = await runBatch({ lanes, maxWorkers, sleep, connected: () => !host.disconnected }); }
   catch (error) { failure = error; }
+  const primaryStatus = result?.runs?.find(status => status?.error || status?.run?.state === "UNAVAILABLE");
   for (const lane of lanes) {
     try { await lane.close?.(); }
-    catch (error) { failure ??= attachWorkflowRuntime(error, lane.workflowRuntime); }
+    catch (error) {
+      const cleanupFailure = attachWorkflowRuntime(error, lane.workflowRuntime);
+      cleanupFailures.push({ specId: lane.specId, error: cleanupFailure.message,
+        workflowRuntime: cleanupFailure.workflowRuntime });
+      if (!primaryStatus) failure ??= cleanupFailure;
+    }
+  }
+  if (!failure && primaryStatus && cleanupFailures.length > 0) {
+    failure = attachWorkflowRuntime(new Error(primaryStatus.error ?? primaryStatus.reason ?? "Workflow lane unavailable"),
+      primaryStatus.workflowRuntime);
+    primaryResultFailure = true;
   }
   if (failure) {
+    failure.workflowResult ??= result;
+    if (cleanupFailures.length > 0) failure.cleanupFailures ??= cleanupFailures;
     const selectedRuntime = lanes.find(lane => lane.workflowRuntime)?.workflowRuntime;
-    throw selectedRuntime ? attachWorkflowRuntime(failure, selectedRuntime) : failure;
+    throw !primaryResultFailure && selectedRuntime ? attachWorkflowRuntime(failure, selectedRuntime) : failure;
   }
   return result;
 
@@ -239,6 +281,8 @@ if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.me
       emit({ type: "result", result, metrics: host.metrics() });
     } catch (error) {
       emit({ type: "error", message: error.message, ...(error.workflowRuntime ? { workflowRuntime: error.workflowRuntime } : {}),
+        ...(error.workflowResult ? { workflowResult: error.workflowResult } : {}),
+        ...(error.cleanupFailures ? { cleanupFailures: error.cleanupFailures } : {}),
         metrics: host?.metrics() ?? { toolCalls: 0 }, recovery: "Preserve the Run and tasks; resume this installed entry from observed state." });
       process.exitCode = 1;
     } finally { host?.close(); restoreInput(); process.stdin.pause(); }
