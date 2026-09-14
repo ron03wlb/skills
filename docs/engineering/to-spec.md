@@ -29,7 +29,7 @@ Inherited, human-confirmed, and delegated choices retain their actual bases and 
 
 Before publication or a Planning Seal write, `to-spec` re-reads only relevant glossary, ADR, and source facts. Compatible target movement binds the latest baseline. Relevant semantic drift returns the changed fact, the owning source, the smallest human action, preserved progress, and the same `/to-spec` retry after renewed confirmation.
 
-Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordinary tracker publication uses a current transaction with Planning Seal, publication, and `handoff.completed` read-back; it creates no target operational-plan file or commit. Existing valid incomplete legacy and profile-v1 operations keep their frozen exact-resume behavior.
+Only accepted glossary or ADR changes enter a scoped Planning Seal write. Ordinary tracker publication uses a current transaction with Planning Seal, publication, and `handoff.completed` read-back; it creates no target operational-plan file or commit. A Single-Issue whose complete accepted outcome is one non-empty Planning Seal documentation diff may explicitly declare that Seal, its sole parent, and every changed path as a documentation-only Seal candidate; a revision re-reads that existing evidence and creates no empty Seal. Existing valid incomplete legacy and profile-v1 operations keep their frozen exact-resume behavior.
 
 
 The installed Codex GitHub path records publication and handoff fields in structured comments, preserving the native comment identities and exact body digests. The producer still owns approval and checkpoint completion; installation or a readable comment alone never starts a Run.

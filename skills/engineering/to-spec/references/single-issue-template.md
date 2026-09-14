@@ -6,6 +6,17 @@
 - Commit: <full local target-branch commit SHA>
 - Seal: <created, successor, or reused>
 
+## Documentation-only Seal candidate
+
+`N/A`, or all of the following exact declarations:
+
+- Planning Seal candidate: `<full Seal SHA>`
+- Review baseline: `<the Seal's sole parent SHA>`
+- Exact declared documentation paths: `<non-empty repository-relative list>`
+- Scope confirmation: `<the Seal diff contains only these documentation paths; runtime, schema, API, deployment, Manual prerequisites, and any other execution change are out of scope>`
+
+This is the only exception to an execution-baseline-to-candidate diff. It is available only when the non-empty Planning Seal itself delivered the complete accepted outcome; it never authorizes an empty commit or an inferred documentation-only scope.
+
 ## Delivery classification
 
 - Shape: Single-Issue

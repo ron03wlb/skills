@@ -835,6 +835,48 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   ]) assert.match(read(path), /Planning Seal/u, `${path} omits the Planning Seal contract`);
 });
 
+test("documentation-only Planning Seal candidates are an explicit non-empty review exception", () => {
+  const spec = readToSpecContract();
+  const template = read("skills/engineering/to-spec/references/single-issue-template.md");
+  const execute = readExecuteIssueContract();
+  const sealCandidate = read("skills/engineering/execute-issue/references/documentation-only-seal-candidate.md");
+  const review = read("skills/engineering/code-review/SKILL.md");
+  const completion = read("skills/engineering/execute-issue/references/completion-evidence.md");
+  const closeEvidence = read("skills/engineering/close-issue/references/completion-evidence.md");
+  const aggregate = read("skills/engineering/verify-target-before-push/references/aggregate-verification-interfaces.md");
+  const context = read("CONTEXT.md");
+  const adrPath = "docs/adr/0074-review-documentation-only-planning-seals-as-execution-candidates.md";
+
+  assert.match(template, /Documentation-only Seal candidate.*Planning Seal candidate.*Review baseline.*Exact declared documentation paths.*Scope confirmation/isu);
+  assert.match(template, /only exception.*execution-baseline-to-candidate diff.*non-empty Planning Seal.*empty commit.*inferred documentation-only/isu);
+  assert.match(spec, /(?:entire|complete) accepted outcome.*non-empty Planning Seal.*exact documentation diff.*documentation-only Seal candidate.*full Seal SHA.*sole parent.*every repository-relative documentation path/isu);
+  assert.match(spec, /revision.*existing Seal.*exact parent-to-Seal diff.*no new empty Seal/isu);
+
+  assert.match(execute, /Declared documentation-only candidate.*read \[Seal rules\].*stop on failure/isu);
+  assert.match(sealCandidate, /execution baseline equals.*Planning Seal `S`.*exactly one parent `P`.*git diff --name-only P\.\.\.S.*non-empty.*exact repository-relative documentation-path list/isu);
+  assert.match(sealCandidate, /runtime, schema, API, deployment, Manual prerequisites.*every other execution change.*candidate `C = S`.*`workflowArtifacts = \[\]`.*frozen `P\.\.\.S` range/isu);
+  assert.match(sealCandidate, /Do not create an empty marker commit.*do not infer.*ordinary non-empty baseline-to-candidate rule/isu);
+  assert.match(review, /Planning-Seal documentation candidate.*only when `execute-issue`.*published.*declaration.*validated `reviewBasis`.*sole-parent review baseline `P`.*Planning Seal candidate `S`.*non-empty.*exactly.*documentation paths/isu);
+  assert.match(review, /requester cannot select it.*documentation-only/isu);
+  assert.match(completion, /candidate equals (?:the )?execution baseline.*`reviewBasis`.*planning_seal_documentation:v1.*`reviewBaseline`.*`reviewCandidate`.*non-empty.*documentation-path list/isu);
+
+  assert.match(closeEvidence, /(?:completion )?candidate equals its execution baseline.*reviewBasis\.kind: planning_seal_documentation:v1.*published Issue declaration.*(?:sole|exactly one) parent `reviewBaseline`.*non-empty.*documentation-path list.*`workflowArtifacts`.*empty list/isu);
+  assert.match(closeEvidence, /does not.*extend the Issue contribution.*authorize an empty commit/isu);
+  assert.match(aggregate, /When `C` equals the Execution baseline.*planning_seal_documentation:v1.*Planning Seal.*`reviewCandidate`.*sole parent `reviewBaseline`.*non-empty.*documentation diff.*empty `workflowArtifacts`/isu);
+  assert.match(context, /Documentation-only Seal review.*non-empty Planning Seal.*sole parent.*every changed documentation path.*execution baseline and candidate.*normal Issue contribution remains empty/isu);
+  assert.equal(existsSync(adrPath), true, "documentation-only Seal exception needs its ADR");
+  assert.match(read(adrPath), /^status: accepted$/mu);
+  assert.match(read(adrPath), /never creates an empty marker commit.*infer.*filenames.*labels/isu);
+
+  for (const path of [
+    "docs/engineering/to-spec.md",
+    "docs/engineering/execute-issue.md",
+    "docs/engineering/code-review.md",
+    "docs/engineering/close-issue.md",
+    "docs/engineering/verify-target-before-push.md",
+  ]) assert.match(read(path), /documentation-only.*Seal|Seal.*documentation-only/isu, `${path} omits the documentation-only Seal rule`);
+});
+
 test("to-spec owns minimal operation-scoped publication and Single-Issue Run handoff", () => {
   const spec = readToSpecContract();
   const metadata = read("skills/engineering/to-spec/agents/openai.yaml");

@@ -14,6 +14,10 @@ When the note contains `workflowArtifacts`, require an explicit list whose entri
 
 `workflowArtifacts` supplies scope classification only. It never supplies Issue-to-candidate identity, contribution coverage, verification authority, or a reason to bypass any closeout precondition.
 
+## Documentation-only Seal review basis
+
+When a completion candidate equals its execution baseline, accept it only with `reviewBasis.kind: planning_seal_documentation:v1`. Re-read the published Issue declaration and require its Planning Seal and final candidate to equal `reviewCandidate`, that commit to have exactly one parent `reviewBaseline`, and the non-empty `reviewBaseline...reviewCandidate` diff to contain exactly the declaration's non-empty documentation-path list. Require the declaration to exclude runtime, schema, API, deployment, Manual prerequisites, and all other execution changes, and require `workflowArtifacts` to be an explicit empty list. This basis is a review range for already sealed documentation; it does not turn those paths into workflow artifacts, extend the Issue contribution, or authorize an empty commit. A missing, malformed, mismatched, or broader basis stops. A candidate distinct from its execution baseline follows the ordinary completion rules.
+
 The Spec-scoped adoption record is compatibility evidence only and grants no implementation, review, coverage, verification, close, push, or deployment authority.
 
 ## Manual attestations

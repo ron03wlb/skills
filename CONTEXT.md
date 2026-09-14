@@ -65,12 +65,16 @@ The local branch recorded in an **Issue** when its **Issue worktree** is created
 _Avoid_: Current checked-out branch, latest moving branch, inferred merge destination
 
 **Execution baseline**:
-The exact target-branch commit captured once when one explicit `execute-issue` attempt starts. It is that attempt's fixed point for Standards and Spec review; a human or same-Grant coordinator repair after a safely aborted merge conflict starts a new attempt from the latest target without creating another Issue branch or worktree.
+The exact target-branch commit captured once when one explicit `execute-issue` attempt starts. It is that attempt's fixed point for Standards and Spec review, except that a valid **Documentation-only Seal review** uses the declared Planning Seal's sole parent as the review fixed point while retaining the Seal as the execution baseline and candidate; a human or same-Grant coordinator repair after a safely aborted merge conflict starts a new attempt from the latest target without creating another Issue branch or worktree.
 _Avoid_: Per-wave hash confirmation, lifecycle Grant
 
 **Planning Seal**:
 The local target-branch commit selected as the planning baseline before Spec or ticket work becomes executable. When a new seal commit is needed, it contains only approved glossary and ADR changes owned by that scope. When there is no relevant planning-artifact delta, the current target commit is reused without claiming that all of its contents are planning artifacts; unrelated or mixed dirt remains untouched.
 _Avoid_: Dirty-doc commit, lifecycle authorization, execution checkpoint
+
+**Documentation-only Seal review**:
+A narrow formal review mode in which a non-empty Planning Seal itself delivered a Single-Issue's complete accepted documentation outcome. The published Issue names that Seal, its sole parent, and every changed documentation path; `execute-issue` may use the parent-to-Seal diff for review only when the Seal is also the execution baseline and candidate, while the normal Issue contribution remains empty.
+_Avoid_: Empty commit, inferred docs-only scope, workflow artifact declaration
 
 **Execution completion note**:
 The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, **Issue target branch**, worktree, topic branch, attempt baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. Target-branch movement alone does not supersede it; a later successful explicit attempt publishes the new current note.
@@ -642,6 +646,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - A dependency-ready **Issue** receives one **Issue worktree**, **Execution baseline**, and writable owner
 - Direct or active-lane `pre-execute-issue` creates or reuses only the unique **Issue worktree**, records a **Manual execution attestation**, and never grants implementation authority to a direct invocation
 - `/to-spec` creates or reuses the primary or revised **Planning Seal** before a Spec becomes ready
+- A **Documentation-only Seal review** reuses only the declared non-empty parent-to-Seal documentation diff as the reviewed evidence; it does not create an execution commit or widen the **Issue contribution**
 - `grill-with-docs` transfers only accepted glossary and ADR changes through a **Planning artifact handoff**; `/to-spec` consumes that exact handoff as its owned **Planning Seal** delta
 - A **Planning handoff packet** is consumed directly inside the same task; a fresh task requires that packet or renewed human scope confirmation before `/to-spec` may commit planning artifacts
 - Fresh `to-spec` and `to-tickets` producers create no **Workflow plan checkpoint** or prospective **Direct target contribution record**; a frozen legacy/profile-v1 resume keeps its exact historical checkpoint and may invoke model-invoked `attest-target-contribution` only at that existing stage

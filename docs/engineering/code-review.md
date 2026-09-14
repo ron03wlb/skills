@@ -20,6 +20,7 @@ Automatic risk-based invocation does not relax that gate: the review still requi
 
 - Committed work: resolve the supplied candidate ref, or `HEAD` by default, to one SHA. Review its merge-base diff unless the user explicitly requests another comparison; record both endpoints.
 - Work in progress: `HEAD` is the default fixed point when none is named; include tracked changes and explicitly in-scope untracked files, preserving unrelated dirt.
+- Documentation-only Planning Seal: only `execute-issue` may supply its published declaration and validated review basis. Review the non-empty Seal-parent-to-Seal diff, with the Seal retained separately as the execution baseline and candidate; callers cannot opt into this form by labeling a change documentation-only.
 
 ## Prerequisites
 
@@ -49,7 +50,7 @@ The Coordinator checks every observation against its cited candidate hunk and go
 
 ## It's working if
 
-- It pins and confirms the fixed point first (`git rev-parse`), failing fast on a bad ref or empty candidate; a WIP candidate may consist only of explicitly in-scope untracked files.
+- It pins and confirms the fixed point first (`git rev-parse`), failing fast on a bad ref or empty candidate; a WIP candidate may consist only of explicitly in-scope untracked files, while the formal documentation-only Seal form requires its exact non-empty parent-to-Seal diff.
 - Standards and Spec findings arrive in two distinct blocks, each citing its source — a repo standard or baseline smell for one, a quoted spec line for the other.
 - Each observation is labelled confirmed or advisory; an assessed axis is clean when it has no Confirmed code review finding, even when Code review advisories remain visible.
 - Spec findings quote the applicable requirement and its provenance; assumptions and unaccepted proposals never become approved scope.
