@@ -193,6 +193,9 @@ export async function recoverPendingHostCleanup({ leaseInput, completion, taskRe
         observations.push({ code: error.code, message: error.message });
       }
       if (removed) return await confirmAbsence();
+      // WSL has no Windows sharing-lock recovery. A residual directory remains
+      // with its original closeout owner rather than triggering process inspection.
+      if (process.platform === "linux") return { ...assessment, observations };
       const existingRecord = lstatSync(recordPath, { throwIfNoEntry: false });
       let interrupted, progressPath, resultPath;
       if (existingRecord) {

@@ -475,29 +475,39 @@
     return lane;
   }
 
+  function posixJsonPath(path, kind) {
+    if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0") || !path.endsWith(".json")) {
+      throw new Error(`Exact absolute POSIX ${kind} path required`);
+    }
+    return path;
+  }
+
+  // The WSL host owns a POSIX shell. Single-quote every dynamic value, then
+  // publish only through rename after each complete temporary-file write.
+  const shellQuote = value => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+
   function createCheckpointWriter({ tools, path }) {
-    if (typeof path !== "string" || !/^[A-Za-z]:[\\/]/u.test(path) || !path.endsWith(".json")) throw new Error("Exact absolute Windows checkpoint path required");
-    const quote = value => "'" + value.replaceAll("'", "''") + "'";
+    posixJsonPath(path, "checkpoint");
+    const directory = path.slice(0, path.lastIndexOf("/")) || "/";
     const temporary = path + ".pending-" + Date.now() + "-" + Math.random().toString(16).slice(2);
     return async snapshot => {
       const body = JSON.stringify(snapshot);
       for (let offset = 0; offset < body.length; offset += 6000) {
-        const method = offset === 0 ? "WriteAllText" : "AppendAllText";
-        const cmd = `[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName(${quote(path)})) | Out-Null; `
-          + `[IO.File]::${method}(${quote(temporary)}, ${quote(body.slice(offset, offset + 6000))}, [Text.UTF8Encoding]::new($false))`;
+        const redirect = offset === 0 ? ">" : ">>";
+        const cmd = `mkdir -p -- ${shellQuote(directory)} && printf %s ${shellQuote(body.slice(offset, offset + 6000))} ${redirect} ${shellQuote(temporary)}`;
         const result = await tools.exec_command({ cmd, max_output_tokens: 1000 });
         if (result.exit_code !== 0) throw new Error("Host checkpoint write failed; preserve original request state");
       }
-      const result = await tools.exec_command({ cmd: `Move-Item -LiteralPath ${quote(temporary)} -Destination ${quote(path)} -Force -ErrorAction Stop`, max_output_tokens: 1000 });
+      const result = await tools.exec_command({ cmd: `mv -f -- ${shellQuote(temporary)} ${shellQuote(path)}`, max_output_tokens: 1000 });
       if (result.exit_code !== 0) throw new Error("Host checkpoint publish failed; preserve original request state");
     };
   }
 
   function createControlReader({ tools, path }) {
-    if (typeof path !== "string" || !/^[A-Za-z]:[\\/]/u.test(path) || !path.endsWith(".json")) throw new Error("Exact absolute Windows control path required");
-    const quoted = "'" + path.replaceAll("'", "''") + "'";
+    posixJsonPath(path, "control");
+    const quoted = shellQuote(path);
     return async () => {
-      const result = await tools.exec_command({ cmd: `if (Test-Path -LiteralPath ${quoted}) { Get-Content -Raw -LiteralPath ${quoted} -ErrorAction Stop }`, max_output_tokens: 1000 });
+      const result = await tools.exec_command({ cmd: `if [ -e ${quoted} ]; then cat -- ${quoted}; else :; fi`, max_output_tokens: 1000 });
       if (result.exit_code !== 0) throw new Error("Host control read failed");
       if (!result.output.trim()) return null;
       const message = JSON.parse(result.output);

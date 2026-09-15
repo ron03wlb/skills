@@ -20,6 +20,29 @@ test("the same dependency-free source loads without Node globals", () => {
   assert.equal(typeof api.parseTransport, "function");
 });
 
+test("WSL checkpoint and control adapters require POSIX paths and never emit PowerShell", async () => {
+  const commands = [];
+  const tools = { exec_command: async input => {
+    commands.push(input.cmd);
+    return { exit_code: 0, output: input.cmd.startsWith("if [ -e")
+      ? JSON.stringify({ id: "control-1", control: "PAUSE", runId: "run-1", revision: 1 }) : "" };
+  } };
+  assert.throws(() => api.createCheckpointWriter({ tools, path: "C:\\workflow\\checkpoint.json" }), /POSIX checkpoint/u);
+  assert.throws(() => api.createControlReader({ tools, path: "relative.json" }), /POSIX control/u);
+  const writer = api.createCheckpointWriter({ tools, path: "/tmp/workflow's/checkpoint.json" });
+  await writer({ schema: "fixture", message: "apostrophe: '" });
+  assert.match(commands[0], /^mkdir -p -- '/u);
+  assert.ok(commands.some(command => command.startsWith("mv -f -- ")));
+  assert.equal(commands.some(command => /PowerShell|Move-Item|WriteAllText|powershell/iu.test(command)), false);
+  const control = await api.createControlReader({ tools, path: "/tmp/workflow/control.json" })();
+  assert.deepEqual(plain(control), { id: "control-1", control: "PAUSE", runId: "run-1", revision: 1 });
+});
+
+test("a malformed WSL control remains fail-closed", async () => {
+  const tools = { exec_command: async () => ({ exit_code: 0, output: '{"id":"control-1","control":"PAUSE"}' }) };
+  await assert.rejects(api.createControlReader({ tools, path: "/tmp/workflow/control.json" })(), /Malformed host control/u);
+});
+
 test("wait_threads is compacted at the native adapter before cross-host forwarding", () => {
   const waitRequest = { type: "tool", id: "wait-1", name: "mcp__codex_app__wait_threads",
     arguments: { targets: [{ threadId: "worker", hostId: "local" }], __workflowObservation: {
@@ -489,7 +512,7 @@ test("the documented loader and run entry use the same tested source", async () 
   assert.equal(values.get("workflow.driverSource"), source);
   values.set("workflow.host", api.createLane({ sessionId: 7, output: frame({ type: "result", result: { state: "PRESERVED" } }), exit_code: 0 }));
   const reports = [];
-  await new AsyncFunction("tools", "load", "store", "text", "setTimeout", "clearTimeout", "yield_control", snippets[1].replaceAll("<absolute-Git-common-directory>", "C:/fixture/.git"))(
+  await new AsyncFunction("tools", "load", "store", "text", "setTimeout", "clearTimeout", "yield_control", snippets[1].replaceAll("<absolute-Git-common-directory>", "/tmp/fixture/.git"))(
     { exec_command: async () => ({ exit_code: 0 }) }, key => values.get(key), (key, value) => values.set(key, value), value => reports.push(value), setTimeout, clearTimeout, async () => {},
   );
   assert.ok(reports.some(item => item.type === "result" && item.result.state === "PRESERVED"));

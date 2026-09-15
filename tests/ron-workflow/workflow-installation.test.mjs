@@ -55,12 +55,12 @@ const version = process.argv[3];
 const stages = [
   ["settled-host-cleanup-routing", "HOST_CLEANUP_BLOCKED was terminal"],
   ["stable-close-identity", "controlRevision changed request identity"],
-  ["interrupted-helper-continuation", "fixed inspector lifetime lost remaining helpers"],
+  ["posix-worktree-cleanup", "ordinary POSIX cleanup required process recovery"],
 ];
 if (process.argv[2] === "--qualify-repair-package") {
   let results = stages.map(([stage, failureSignature]) => ({ stage, failureSignature,
     command: JSON.stringify([process.execPath, process.argv[1], "--qualify-repair-package", version]),
-    result: "PASS", packageVersionId: version }));
+    result: "PASS", packageVersionId: version, fixtureRevision: "wsl-posix-v1", runtime: process.platform + "-" + process.arch }));
   if (process.env.WORKFLOW_QUALIFICATION_FAULT === "subset") results = results.slice(0, 1);
   if (process.env.WORKFLOW_QUALIFICATION_FAULT === "wrong-version") results[0].packageVersionId = "f".repeat(64);
   if (process.env.WORKFLOW_QUALIFICATION_FAULT === "failed") results[0].result = "FAIL";
@@ -87,7 +87,7 @@ export const installed = true;
     assert.deepEqual(evidence.entries.map(item => item.path), [codexEntry, agentsEntry]);
     assert.ok(evidence.entries.every(item => item.packageVersionId === first.version.id));
     assert.deepEqual(evidence.failedStageResults.map(result => result.stage), [
-      "settled-host-cleanup-routing", "stable-close-identity", "interrupted-helper-continuation",
+      "settled-host-cleanup-routing", "stable-close-identity", "posix-worktree-cleanup",
     ]);
     assert.ok(evidence.failedStageResults.every(result => result.packageVersionId === first.version.id && result.result === "PASS"));
     assert.throws(() => readWorkflowInstallationEvidence({ cacheDirectory, skillDirectories: [codexEntry],

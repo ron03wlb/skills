@@ -4,11 +4,11 @@ Use after the human starts the selected Run. The installed entry owns authority,
 
 ## Load and drive
 
-Load the verified package's `scripts/codex-host-driver.js` **before** launching the installed entry, so initial requests receive prompt heartbeats. It is a dependency-free JavaScript expression, shared by the Node bridge and deterministic tests. The current `functions.exec` host provides `Function`, `load`, `store`, timers and tools; it provides no Node `process`, `require`, filesystem imports or URL global. Read the source through the available shell tool. Substitute the exact verified package path below; shell-quote it as a PowerShell literal.
+Load the verified package's `scripts/codex-host-driver.js` **before** launching the installed entry, so initial requests receive prompt heartbeats. It is a dependency-free JavaScript expression, shared by the Node bridge and deterministic tests. The current `functions.exec` host provides `Function`, `load`, `store`, timers and tools; it provides no Node `process`, `require`, filesystem imports or URL global. Read the source through the available POSIX shell tool. Substitute the exact verified package path below and shell-quote it as a POSIX literal.
 
 ```js
 const loaded = await tools.exec_command({
-  cmd: "Get-Content -Raw -LiteralPath '<verified-package>/skills/personal/run-issue-workflow/scripts/codex-host-driver.js'",
+  cmd: "cat -- '<verified-package>/skills/personal/run-issue-workflow/scripts/codex-host-driver.js'",
   max_output_tokens: 16000,
 });
 if (loaded.exit_code !== 0) throw new Error("Driver source unavailable; preserve the original Run");
@@ -32,7 +32,7 @@ const driver = api.createDriver({
 await driver.run(yield_control);
 ```
 
-Use one exact checkpoint path under the consumer Git common directory, unique to the original session. The writer uses available PowerShell file operations, waits for atomic publication before dispatch/forwarding, and fails closed on write errors. It stores only request/session identities, allowlisted task-operation and receipt references, progress, and pending-control metadata. Native arguments/results, task prompts, panel URLs, raw frames and terminal payloads remain in the active cell: the existing bridge-token secret boundary also applies to checkpoint files. Task creation, continuation-message, and replacement/fork requests retain their Run, Issue, task, operation-kind, and receipt owner where applicable. An owner mismatch cannot be repaired with a different native mutation.
+Use one exact absolute POSIX checkpoint path under the consumer Git common directory, unique to the original session. The writer uses POSIX `mkdir`, `printf`, and atomic `mv`, waits for publication before dispatch/forwarding, and fails closed on write errors. It stores only request/session identities, allowlisted task-operation and receipt references, progress, and pending-control metadata. Native arguments/results, task prompts, panel URLs, raw frames and terminal payloads remain in the active cell: the existing bridge-token secret boundary also applies to checkpoint files. Task creation, continuation-message, and replacement/fork requests retain their Run, Issue, task, operation-kind, and receipt owner where applicable. An owner mismatch cannot be repaired with a different native mutation.
 
 Collect yields with `functions.wait` from that same cell. Keep it alive while its session or native Promise is pending; report meaningful progress at least once a minute. The tested implementation owns the allowlist, the host's 50-task read limit and bounded transport reads. A separate timer sends non-mutating heartbeats throughout the active `run`, including native calls, durable checkpoint writes, control-file reads and pending yields between ticks. A standalone `tick` owns its timer only until that tick settles; neither entry may overlap another active entry on the same driver.
 

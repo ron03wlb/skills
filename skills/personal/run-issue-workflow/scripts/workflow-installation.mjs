@@ -77,10 +77,12 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   }
 }
 
-const failedStageFields = ["command", "failureSignature", "packageVersionId", "result", "stage"];
-const requiredFailedStages = ["interrupted-helper-continuation", "settled-host-cleanup-routing", "stable-close-identity"];
+const qualificationFixtureRevision = "wsl-posix-v1";
+const qualificationRuntime = `${process.platform}-${process.arch}`;
+const failedStageFields = ["command", "failureSignature", "fixtureRevision", "packageVersionId", "result", "runtime", "stage"];
+const requiredFailedStages = ["posix-worktree-cleanup", "settled-host-cleanup-routing", "stable-close-identity"];
 const failedStageSignatures = new Map([
-  ["interrupted-helper-continuation", "fixed inspector lifetime lost remaining helpers"],
+  ["posix-worktree-cleanup", "ordinary POSIX cleanup required process recovery"],
   ["settled-host-cleanup-routing", "HOST_CLEANUP_BLOCKED was terminal"],
   ["stable-close-identity", "controlRevision changed request identity"],
 ]);
@@ -133,7 +135,8 @@ export function readWorkflowInstallationEvidence({ cacheDirectory, skillDirector
       || result.failureSignature !== failedStageSignatures.get(result.stage)
       || result.command !== qualificationCommand
       || !/^(?:PASS(?:ED)?|SUCCEEDED)\b/u.test(result.result ?? "")
-      || result.packageVersionId !== selected.version.id || seen.has(identity)) {
+      || result.packageVersionId !== selected.version.id || result.fixtureRevision !== qualificationFixtureRevision
+      || result.runtime !== qualificationRuntime || seen.has(identity)) {
       throw new Error("Installed workflow failed-stage result is malformed, duplicated or bound to another package");
     }
     seen.add(identity);
