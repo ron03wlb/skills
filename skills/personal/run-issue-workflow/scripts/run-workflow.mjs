@@ -1,5 +1,5 @@
 import { createCoordinator } from "./run-coordinator.mjs";
-import { createRunAuthorityAdapters } from "./run-authority-adapters.mjs";
+import { createRunAuthorityAdapters } from "./delivery-authority.mjs";
 import {
   createRunPanelControl,
   startRunPanelBridge,

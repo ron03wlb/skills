@@ -8,18 +8,16 @@ import {
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
 import { createRunStore } from "./run-store.mjs";
 import {
-  planCloseContinuation,
   closeContinuationSuffix,
-} from "./close-continuation.mjs";
-import { closeRequestIdentityFor } from "./run-coordinator.mjs";
-import { createWorkflowRuntime } from "./run-workflow.mjs";
-import { validateJournal } from "./run-journal.mjs";
-import { recoveryDigest } from "./recovery-evidence.mjs";
-import { bodyDigest } from "./github-workflow-records.mjs";
-import {
   deriveExecuteIssueOperationIdentity,
   deriveRunOperationIdentity,
-} from "./workflow-operation-identity.mjs";
+  planCloseContinuation,
+  recoveryDigest,
+  validateJournal,
+} from "./delivery-authority.mjs";
+import { closeRequestIdentityFor } from "./run-coordinator.mjs";
+import { createWorkflowRuntime } from "./run-workflow.mjs";
+import { bodyDigest } from "./github-workflow-records.mjs";
 import { recoverPendingHostCleanup } from "../../../engineering/close-issue/scripts/pending-host-cleanup.mjs";
 import { verifyIntegratedCandidate } from "../../../engineering/close-issue/scripts/merge-candidate.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
