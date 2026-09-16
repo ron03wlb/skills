@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "name": "deliver-tracker-spec",
+  "description": "Deliver one Tracker Spec DAG Run by materializing only the actions the Domain action reducer returns.",
+  "defaults": {
+    "agent": "scout",
+    "readOnly": false,
+    "tools": ["read", "grep", "find", "ls", "bash", "edit", "write"]
+  },
+  "artifactGraph": {
+    "stages": [
+      {
+        "id": "delivery",
+        "type": "dynamic",
+        "dynamic": {
+          "uses": "./helpers/controller.mjs",
+          "mode": "graph-splice",
+          "permissions": { "approval": "auto" },
+          "budget": {
+            "maxAgents": 64,
+            "maxConcurrency": 3,
+            "maxRuntimeMs": 21600000,
+            "maxGraphMutations": 512,
+            "maxHelperRuns": 32
+          }
+        },
+        "output": {
+          "analysis": { "required": true },
+          "refs": { "required": true }
+        }
+      }
+    ]
+  }
+}

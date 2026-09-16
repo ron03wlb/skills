@@ -13,6 +13,13 @@ export const ISSUE_EXECUTION_PHASES = Object.freeze([
   "CONFLICT_REPAIR",
 ]);
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
+// The vocabulary of a host Run supersession link. The authority journal owns these reasons because the
+// link proves that a superseding host run did not re-dispatch an attempt the blocked run already owned.
+export const RUN_SUPERSEDED_EVENT = "run.superseded";
+export const RUN_SUPERSEDED_REASONS = Object.freeze([
+  "DYNAMIC_REPLAY_DIVERGED",
+  "DYNAMIC_REPLAY_UNKNOWN",
+]);
 export const RUN_EVENT_TYPES = Object.freeze([
   "grant.recorded",
   "model.acceptance",
@@ -38,6 +45,7 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "repository-close-wait.settled",
   "target-writer-wait.started",
   "target-writer-wait.settled",
+  "run.superseded",
   "pause.transitioned",
   "stop.transitioned",
 ]);
@@ -87,6 +95,7 @@ const eventFields = new Map([
   ["target-writer-wait.settled", new Set([
     "type", "at", "waitSequence", "issueId", "target", "owner", "outcome", "evidence",
   ])],
+  ["run.superseded", new Set(["type", "at", "supersededRunId", "reason", "evidence"])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
 ]);
@@ -356,6 +365,14 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
     case "stop.transitioned":
       requirePositiveInteger(event.revision, "transition revision");
       break;
+    case "run.superseded":
+      requireText(event.supersededRunId, "superseded host Run id");
+      if (!RUN_SUPERSEDED_REASONS.includes(event.reason)) throw new TypeError("Unsupported host Run supersession reason");
+      if (!Array.isArray(event.evidence) || event.evidence.length === 0
+        || !event.evidence.every((item) => typeof item === "string" && item.length > 0)) {
+        throw new TypeError("Host Run supersession requires exact evidence");
+      }
+      break;
     default:
       throw new TypeError(`Unsupported event type: ${String(event.type)}`);
   }
@@ -432,6 +449,14 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       || events.some(item => item.type === "recovery.task" && item.issueId === event.issueId && item.phase !== "MAINTENANCE"
         && event.phase !== "MAINTENANCE" && !sameRecoveryTask(item.taskRef, event.taskRef))
       || events.some(item => item.type === "recovery.task" && item.requestIdentity === event.requestIdentity)) throw new Error("Recovery transfer lacks its exact prior intent and exclusive ownership proof");
+  }
+  if (event.type === "run.superseded") {
+    if (storageRunId !== undefined && event.supersededRunId === storageRunId) {
+      throw new TypeError("A host Run cannot supersede itself");
+    }
+    if (events.some(item => item.type === "run.superseded")) {
+      throw new TypeError("A host Run records exactly one supersession link");
+    }
   }
   if (event.type === "runtime.observed") {
     const grant = events.findLast(({ type }) => type === "grant.recorded");
