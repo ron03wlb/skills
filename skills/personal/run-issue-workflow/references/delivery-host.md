@@ -27,6 +27,10 @@ and the coordinator lifecycle governs only the retired path until Issue 102 remo
 - `helpers/host-runs.mjs` — reads pi-workflow run records back for one Spec and target. The selected
   host run comes with its recorded operations in recorded order (`recordedFromRunRecord`), so the
   re-issue proof runs against exactly what the blocked run already owns.
+- `helpers/lane-agent.mjs` — proves the lane's worker agent resolves from the roots pi-workflow itself
+  searches, and reads that agent's own declared tool ceiling.
+- `scripts/issue-lane.mjs` (beside this bundle) — the one-lane-per-Issue decision, the tool and prompt
+  scope checks, and the supersession draft a replacement carries.
 
 Validate and launch by path:
 
@@ -42,6 +46,39 @@ declared ref (`uses`, `helpers`, `workflows`) is a `./` path inside the bundle d
 import rule is narrower than "nobody else may import the entry": production modules of this package may
 import `delivery-authority.mjs`, but they may not import one of the owner modules inside its closure
 directly.
+
+## The Issue lane
+
+One executable Issue owns exactly one lane: one isolated worker and one dedicated Issue worktree. The
+bundle declares `defaults.worktreePolicy: "on"`, so every generated lane task runs in its own managed
+worktree, and the shared checkout stays read-only apart from ordinary worktree registration.
+
+The lane's worker is the agent named by `defaults.agent` (shipped here as `agents/worker.md`). pi-workflow
+resolves a generated agent name only from the project `.pi/agents/` directory, the user agent root, or
+its own bundled agents, so a delivery repository or user agent root must provide that definition. The
+controller proves resolution before it materializes any lane and otherwise stops with
+`lane_agent_unresolved`, naming both roots and this canonical source.
+
+For each planned lane the domain half decides exactly one action from the observed lane evidence:
+
+| Observed lane | Decision |
+| --- | --- |
+| none, no creation intent | `CREATE` — the dispatch reservation is journaled before native delivery |
+| none, a reserved creation intent | stop `creation_intent_unresolved` — a lost response is read back, never re-created |
+| one `RESUMABLE` lane at this attempt | `REUSE` — the recorded request is the reservation |
+| one `ACTIVE` lane | `OBSERVE` — an active lane is never re-dispatched or replaced |
+| one `INACTIVE` lane with exact inactive evidence | `REPLACE` — the supersession link is journaled first |
+| one `INACTIVE` lane without evidence, one `UNKNOWN` lane, or two observed lanes | stop |
+
+Every new lane journals one `dispatch.recorded` attempt reference before the worker exists, so a lost
+creation response, a restart, or a retry cannot produce a second lane and no attempt goes uncounted. A
+replacement carries a `retry.recorded` supersession link whose authorized task reference is exactly the
+lane the host then materializes.
+
+A lane's tools are always a subset of the declared ceiling and of the ceiling its agent definition
+declares for itself. Its prompt invokes exactly one contract skill — an implementation lane never
+closes, and a close lane never implements — so no worker can grant itself scope, a DAG Run Grant, or
+close authority.
 
 ## One round
 

@@ -478,16 +478,47 @@ test("convergence refuses to escape contradictory evidence and no-ops on a termi
   assert.equal(terminal.decision, "NO_ACTION");
 });
 
-test("the controller materializes only the planned actions", async () => {
-  const calls = [];
-  const result = await controller(fakeContext(calls, taskPayload()));
-  assert.deepEqual(calls.map((call) => call.id), ["dispatch_13_1", "dispatch_14_1"]);
-  assert.deepEqual(calls.map((call) => call.agent), [HOST_LANE_AGENT, HOST_LANE_AGENT]);
-  for (const call of calls) {
-    for (const tool of call.tools) assert.ok(HOST_TOOL_CEILING.includes(tool));
+// A delivery project that can actually resolve the lane worker, plus the authority journal a new lane
+// reserves its dispatch attempt in.
+const laneRuntime = () => {
+  const directory = mkdtempSync(join(tmpdir(), "piwf-host-lane-"));
+  mkdirSync(join(directory, ".pi", "agents"), { recursive: true });
+  writeFileSync(
+    join(directory, ".pi", "agents", "worker.md"),
+    "---\nname: worker\ntools: read, grep, find, ls, bash, edit, write\nreadOnly: false\n---\n\nLane worker.\n",
+  );
+  const gitCommonDir = join(directory, ".git-common");
+  mkdirSync(gitCommonDir, { recursive: true });
+  const store = createRunStore({ gitCommonDir });
+  const writer = store.acquireWriter("run-12");
+  try {
+    const { schema, sequence, ...draft } = grant;
+    writer.append(draft);
+  } finally {
+    writer.release();
   }
-  assert.deepEqual(result.control.generatedTaskIds, ["dispatch_13_1", "dispatch_14_1"]);
-  assert.equal(result.control.status, "dispatched");
+  return { directory, gitCommonDir, cleanup: () => rmSync(directory, { recursive: true, force: true }) };
+};
+
+test("the controller materializes only the planned actions", async () => {
+  const runtime = laneRuntime();
+  try {
+    const calls = [];
+    const result = await controller(fakeContext(calls, taskPayload({
+      cwd: runtime.directory,
+      homeDir: runtime.directory,
+      gitCommonDir: runtime.gitCommonDir,
+    })));
+    assert.deepEqual(calls.map((call) => call.id), ["dispatch_13_1", "dispatch_14_1"]);
+    assert.deepEqual(calls.map((call) => call.agent), [HOST_LANE_AGENT, HOST_LANE_AGENT]);
+    for (const call of calls) {
+      for (const tool of call.tools) assert.ok(HOST_TOOL_CEILING.includes(tool));
+    }
+    assert.deepEqual(result.control.generatedTaskIds, ["dispatch_13_1", "dispatch_14_1"]);
+    assert.equal(result.control.status, "dispatched");
+  } finally {
+    runtime.cleanup();
+  }
 });
 
 test("the controller dispatches nothing when the round is refused", async () => {

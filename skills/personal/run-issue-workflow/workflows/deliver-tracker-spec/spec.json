@@ -3,7 +3,7 @@
   "name": "deliver-tracker-spec",
   "description": "Deliver one Tracker Spec DAG Run by materializing only the actions the Domain action reducer returns.",
   "defaults": {
-    "agent": "scout",
+    "agent": "worker",
     "readOnly": false,
     "tools": [
       "read",
@@ -13,7 +13,8 @@
       "bash",
       "edit",
       "write"
-    ]
+    ],
+    "worktreePolicy": "on"
   },
   "artifactGraph": {
     "stages": [

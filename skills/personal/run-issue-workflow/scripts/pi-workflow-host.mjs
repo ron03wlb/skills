@@ -23,6 +23,7 @@ import {
   reduceRun,
   requireIsoInstant,
 } from "./delivery-authority.mjs";
+import { LANE_AGENT_NAME, LANE_TOOL_CEILING, LANE_WORKTREE_POLICY } from "./issue-lane.mjs";
 import { createRunStore } from "./run-store.mjs";
 
 export const HOST_PLAN_SCHEMA = "pi-workflow-host-plan:v1";
@@ -66,22 +67,15 @@ export const HOST_UNRESOLVED_REASON_CODES = Object.freeze([
 ]);
 
 // The declared authority ceiling. A generated lane task selects a subset of this list and can never
-// widen it; the bundle spec declares the same ceiling as its read/write policy.
-export const HOST_TOOL_CEILING = Object.freeze([
-  "read",
-  "grep",
-  "find",
-  "ls",
-  "bash",
-  "edit",
-  "write",
-]);
+// widen it; the bundle spec declares the same ceiling as its read/write policy. The lane module owns
+// the value so the host and the lane can never disagree about it.
+export const HOST_TOOL_CEILING = LANE_TOOL_CEILING;
 const ISSUE_LANE_TOOLS = Object.freeze([...HOST_TOOL_CEILING]);
 const HOST_OBSERVATION_TOOLS = Object.freeze(["read", "ls"]);
 
 // One implementation agent serves every Issue lane; the skill the worker must follow is declared
 // separately so a generated task can never borrow authority from the agent name alone.
-export const HOST_LANE_AGENT = "worker";
+export const HOST_LANE_AGENT = LANE_AGENT_NAME;
 export const LANE_SKILLS = Object.freeze(["execute-issue", "close-issue"]);
 
 // One materialization policy per reducer action. `skill` names the preserved contract skill the worker
@@ -227,6 +221,9 @@ const materialization = (action) => {
     skill: policy.skill,
     agent: policy.agent,
     tools,
+    // One generated lane task gets one dedicated managed worktree; the shared checkout is never the
+    // worker's working directory.
+    worktreePolicy: LANE_WORKTREE_POLICY,
     prompt,
     requestIdentity: identity({ id, skill: policy.skill, agent: policy.agent, tools, prompt }),
     ...(action.type === "dispatch_issue" ? { attempt: action.attempt } : {}),
@@ -319,6 +316,19 @@ export function planHostActions(status, { journal } = {}) {
     materializations.push(item);
   }
 
+  // One executable Issue owns exactly one lane: two lane materializations for one Issue in one round is
+  // a duplicate, never a queue position.
+  const laneIssues = new Set();
+  for (const item of materializations) {
+    if (!["dispatch_issue", "repair_issue", "recover_issue", "upgrade_issue", "close_issue", "close_parent"].includes(item.actionType)) continue;
+    if (laneIssues.has(item.issueId)) {
+      return plan("BLOCKED", [], stopFor(
+        HOST_STOP_CODES.duplicateMaterialization,
+        [`Reducer round authorized more than one lane for Issue ${item.issueId}.`],
+      ));
+    }
+    laneIssues.add(item.issueId);
+  }
   const invalidWait = materializations.find((item) => item.kind === "host" && item.execution === "wait"
     && (!Number.isInteger(item.timeoutMs) || item.timeoutMs < 1));
   if (invalidWait) {

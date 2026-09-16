@@ -4,6 +4,7 @@
 // controller. It is a single JSON object; large evidence lives in a file the object points at. Nothing
 // here decides authority: it validates the shape and returns it, or refuses the round.
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { blockedHostRunFor } from "./host-runs.mjs";
 
 export { recordedFromRunRecord } from "./host-runs.mjs";
@@ -88,6 +89,13 @@ export function parseRoundInput(text, {
   if (!Array.isArray(recorded) || !recorded.every((entry) => isRecord(entry) && isText(entry.id))) {
     refuse("recorded must be an array of host operations with an id");
   }
+  // Lane evidence is a scheduling fact the host run record owns; the round hands it over verbatim.
+  const lanes = source.lanes ?? { observed: [], creationIntents: [] };
+  if (!isRecord(lanes) || !Array.isArray(lanes.observed) || !Array.isArray(lanes.creationIntents)) {
+    refuse("lanes must name observed lanes and creation intents");
+  }
+  const cwd = isText(source.cwd) ? source.cwd : null;
+  const homeDir = isText(source.homeDir) ? source.homeDir : homedir();
   const at = source.at ?? null;
   if (at !== null && !isText(at)) refuse("at must be one canonical ISO instant");
   const gitCommonDir = source.gitCommonDir ?? null;
@@ -97,6 +105,9 @@ export function parseRoundInput(text, {
     facts,
     blockedHostRun,
     recorded,
+    lanes,
+    cwd,
+    homeDir,
     at,
     gitCommonDir,
     stageId,
