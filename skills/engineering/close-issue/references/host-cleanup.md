@@ -1,6 +1,10 @@
 # Host cleanup recovery
 
-Use this branch after the exact pending-directory removal fails or its tool rejects cleanup. Preserve the failed code/message and current Git/tracker observations. A policy rejection is `POLICY_REJECTED`, not an OS sharing error; stop at that boundary without alternate-tool retries.
+Read this reference for a pending unregistered empty directory, held handles, unknown owners, linked or nonempty paths, or tool-policy rejection.
+
+An unregistered ordinary empty directory is pending only when its recorded topic names the candidate `C`, no registration claims its path/topic, and `C` is reachable. The close owner preserves completion and removes only that directory nonrecursively after proving ownership; linked or nonempty paths, unknown owners and tool-policy rejection stop without another tool.
+
+After the exact pending-directory removal fails or its tool rejects cleanup, preserve the failed code/message and current Git/tracker observations. A policy rejection is `POLICY_REJECTED`, not an OS sharing error; stop at that boundary without alternate-tool retries.
 
 The native Codex desktop bridge still declares `CODEX_HOST_RELEASE_CAPABILITY` as `UNAVAILABLE`; archive/handoff is not a release API. On WSL, an ordinary nonrecursive removal is the only cleanup action. A residual directory after `EBUSY`, `EPERM`, or `EACCES` remains `HOST_CLEANUP_BLOCKED` with its existing closeout owner. Do not inspect process ownership, translate a Windows path, or terminate a process. Policy rejection, unknown ownership, and unsupported hosts remain blockers. The retained Windows adapter below belongs only to a verified native Windows package, never the WSL execution path.
 
