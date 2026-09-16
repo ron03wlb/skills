@@ -63,9 +63,9 @@ For each planned lane the domain half decides exactly one action from the observ
 
 | Observed lane | Decision |
 | --- | --- |
-| none, no creation intent | `CREATE` — the dispatch reservation is journaled before native delivery |
+| none, no creation intent | `CREATE` — an implementation lane journals its dispatch reservation before native delivery |
 | none, a reserved creation intent | stop `creation_intent_unresolved` — a lost response is read back, never re-created |
-| one `RESUMABLE` lane at this attempt | `REUSE` — the recorded request is the reservation |
+| one `RESUMABLE` lane at this attempt, journaled | `REUSE` — the recorded request is the reservation; an unjournaled re-use stops |
 | one `RESUMABLE` lane one attempt behind | `RESUME` — the retry is accounted with `replacement: null` and the same lane is resumed |
 | one `ACTIVE` lane | `OBSERVE` — an active lane is never re-dispatched or replaced |
 | one `INACTIVE` lane with exact inactive evidence | `REPLACE` — the supersession link is journaled first |

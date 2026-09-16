@@ -20,6 +20,7 @@ import {
   HOST_LANE_AGENT,
   HOST_TOOL_CEILING,
   HOST_STOP_CODES,
+  assertReissueOrder,
   planHostActions,
 } from "../../skills/personal/run-issue-workflow/scripts/pi-workflow-host.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -238,6 +239,25 @@ test("a transient retry reuses the same reachable lane instead of creating a sec
   assert.equal(noAttempt.stop.code, LANE_STOP_CODES.attemptUnaligned);
 });
 
+test("a lane with no recorded attempt can neither resume nor be replaced", () => {
+  const resuming = planIssueLane({
+    runId, issueId, attempt: 1, at: "2026-09-16T02:00:00.000Z",
+    observed: [{ runId, issueId, laneRef: "dispatch_13_1", state: "RESUMABLE" }],
+  });
+  assert.equal(resuming.decision, "STOP");
+  assert.equal(resuming.stop.code, LANE_STOP_CODES.attemptUnaligned);
+
+  const replacing = planIssueLane({
+    runId, issueId, attempt: 1, at: "2026-09-16T02:00:00.000Z",
+    observed: [{
+      runId, issueId, laneRef: "dispatch_13_1", state: "INACTIVE",
+      inactiveEvidence: ["native task settled with no active turn"],
+    }],
+  });
+  assert.equal(replacing.decision, "STOP");
+  assert.equal(replacing.stop.code, LANE_STOP_CODES.replacementWithoutPriorAttempt);
+});
+
 test("a replacement lane must be a distinct lane", () => {
   const same = planIssueLane({
     runId,
@@ -362,6 +382,26 @@ test("exactly one lane per Issue is materialized per round", () => {
   assert.deepEqual(plan.materializations, []);
 });
 
+test("the re-issue proof governs exactly the lanes the round materializes", () => {
+  const status = {
+    schema: "dag-run-status:v1",
+    run: { runId, specId: "12", target: "features/ron", state: "RUNNING", controlRevision: 0 },
+    legalActions: [{ type: "dispatch_issue", issueId: "13", attempt: 1 }],
+    diagnoses: [],
+  };
+  const plan = planHostActions(status, { journal: [grant] });
+  // A recorded lane the round only observes is not part of the proof.
+  assert.equal(assertReissueOrder(plan, [{ id: "dispatch_14_1" }]), null);
+  assert.equal(assertReissueOrder(plan, [{ id: "dispatch_14_1" }], new Set(["dispatch_13_1"])), null);
+  // A recorded lane the round does materialize with a different request shape is refused.
+  const divergent = assertReissueOrder(
+    plan,
+    [{ id: "dispatch_13_1", requestIdentity: `sha256:${"c".repeat(64)}` }],
+    new Set(["dispatch_13_1"]),
+  );
+  assert.equal(divergent.code, HOST_STOP_CODES.replayDivergence);
+});
+
 test("every declared lane names a skill, an agent and a managed worktree", () => {
   assert.equal(HOST_LANE_AGENT, LANE_AGENT_NAME);
   for (const [actionType, policy] of Object.entries(HOST_ACTION_POLICY)) {
@@ -465,6 +505,55 @@ test("the controller resumes the same lane on a transient retry and accounts bot
     assert.deepEqual(events.map((event) => event.type), ["grant.recorded", "dispatch.recorded", "retry.recorded", "dispatch.recorded"]);
     assert.deepEqual(events[2].replacement, null);
     assert.deepEqual(events[3].taskRef, laneTaskRef("dispatch_13_1"));
+  } finally {
+    project.cleanup();
+    journal.cleanup();
+  }
+});
+
+test("a re-used lane whose dispatch is not journaled stops instead of throwing", async () => {
+  const project = laneProject({ project: true });
+  const journal = journalWith();
+  try {
+    const calls = [];
+    const result = await controller(fakeContext(calls, JSON.stringify({
+      facts: facts([readyNode("13")], [grant]),
+      cwd: project.directory,
+      homeDir: project.homeDir,
+      gitCommonDir: journal.gitCommonDir,
+      lanes: {
+        observed: [{ runId, issueId, laneRef: "dispatch_13_1", attempt: 1, state: "RESUMABLE" }],
+        creationIntents: [],
+      },
+    })));
+    assert.deepEqual(calls, []);
+    assert.equal(result.control.stopCode, LANE_STOP_CODES.dispatchUnaccounted);
+  } finally {
+    project.cleanup();
+    journal.cleanup();
+  }
+});
+
+test("a new lane whose attempt has no journaled retry stops instead of throwing", async () => {
+  const project = laneProject({ project: true });
+  const journal = journalWith(dispatchRecordDraft(1, "dispatch_13_1"));
+  try {
+    const failedNode = {
+      ...readyNode("13"),
+      taskState: "TRANSIENT_FAILURE",
+      failure: { kind: "transient", evidence: ["native launch failed"] },
+    };
+    const calls = [];
+    // No observed lane, so the module plans CREATE at attempt 2 with no retry fact of its own.
+    const result = await controller(fakeContext(calls, JSON.stringify({
+      facts: facts([failedNode], [grant, dispatchDraft(1, "dispatch_13_1")]),
+      cwd: project.directory,
+      homeDir: project.homeDir,
+      gitCommonDir: journal.gitCommonDir,
+      at: "2026-09-16T02:00:00.000Z",
+    })));
+    assert.deepEqual(calls, []);
+    assert.equal(result.control.stopCode, LANE_STOP_CODES.dispatchUnaccounted);
   } finally {
     project.cleanup();
     journal.cleanup();

@@ -15,6 +15,7 @@ import {
   recordHostRunSupersession,
 } from "../../../scripts/pi-workflow-host.mjs";
 import {
+  LANE_STOP_CODES,
   assertLanePromptScope,
   assertLaneTools,
   laneTaskRef,
@@ -159,6 +160,8 @@ export default async function controller(ctx) {
   const observedLanes = [];
   const resumedLanes = [];
   const pending = [];
+  // Retries this round already journaled, so a later dispatch in the same round can be accounted.
+  const appendedRetries = new Set();
   let batch = [];
   const flush = async () => {
     if (batch.length === 0) return;
@@ -236,6 +239,7 @@ export default async function controller(ctx) {
       ]);
       if (blocked) return blocked;
       appendAuthority(input, lane.retry);
+      appendedRetries.add(`${item.issueId}:${lane.retry.attempt}`);
       const recorded = appendAuthority(input, lane.dispatch);
       resumedLanes.push({ issueId: item.issueId, laneRef: lane.laneRef, attempt: lane.dispatch.attempt, sequence: recorded.sequence });
       continue;
@@ -249,15 +253,35 @@ export default async function controller(ctx) {
       ]);
       if (blocked) return blocked;
       appendAuthority(input, lane.supersession);
+      appendedRetries.add(`${item.issueId}:${lane.supersession.attempt}`);
     }
     const attempt = item.attempt ?? 1;
     const recordedBefore = input.facts.journal.some((event) => (
       event?.type === "dispatch.recorded" && event.issueId === item.issueId && event.attempt === attempt
     ));
+    if (!recordedBefore && lane.requiresRecordedDispatch !== undefined) {
+      // A re-used lane must be the attempt the journal already dispatched.
+      return blockedControl({
+        input,
+        code: LANE_STOP_CODES.dispatchUnaccounted,
+        evidence: [`Lane ${item.id} is re-used but the journal records no dispatch attempt ${attempt} for Issue ${item.issueId}.`],
+      });
+    }
     if (!recordedBefore && item.skill === "execute-issue") {
       // A new implementation lane reserves its dispatch attempt in the authority journal before
       // native delivery, so a lost response can never become a second lane and no attempt goes
       // uncounted. A close lane owns close authority, not a dispatch attempt.
+      const hasPriorRetry = appendedRetries.has(`${item.issueId}:${attempt - 1}`)
+        || input.facts.journal.some((event) => (
+          event?.type === "retry.recorded" && event.issueId === item.issueId && event.attempt === attempt - 1
+        ));
+      if (attempt > 1 && !hasPriorRetry) {
+        return blockedControl({
+          input,
+          code: LANE_STOP_CODES.dispatchUnaccounted,
+          evidence: [`Issue ${item.issueId} attempt ${attempt} has no journaled retry fact for attempt ${attempt - 1}.`],
+        });
+      }
       await flush();
       const blocked = blockedIfJournalUnavailable(input, "lane_dispatch_journal_unavailable", [
         "A new Issue lane needs the authority journal common directory.",

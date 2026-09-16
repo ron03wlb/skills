@@ -38,6 +38,7 @@ export const LANE_STOP_CODES = Object.freeze({
   replacementNotDistinct: "lane_replacement_not_distinct",
   replacementWithoutPriorAttempt: "lane_replacement_without_prior_attempt",
   attemptUnaligned: "lane_attempt_unaligned",
+  dispatchUnaccounted: "lane_dispatch_unaccounted",
   toolOutsideCeiling: "lane_tool_outside_declared_ceiling",
   toolOutsideAgent: "lane_tool_outside_agent_ceiling",
   promptMissingSkill: "lane_prompt_missing_skill",
@@ -144,9 +145,19 @@ export function planIssueLane({ runId, issueId, attempt, observed = [], creation
   if (lane.state === "RESUMABLE") {
     if (lane.attempt === attempt) {
       // The same recorded request is re-issued; the host's recorded request hash is the reservation.
-      return Object.freeze({ ...base, decision: "REUSE", laneRef: lane.laneRef, retry: null, dispatch: null, supersession: null, stop: null });
+      return Object.freeze({
+        ...base,
+        decision: "REUSE",
+        laneRef: lane.laneRef,
+        retry: null,
+        dispatch: null,
+        // A re-used lane must be the attempt the journal already dispatched.
+        requiresRecordedDispatch: attempt,
+        supersession: null,
+        stop: null,
+      });
     }
-    if (lane.attempt === attempt - 1) {
+    if (lane.attempt >= 1 && lane.attempt === attempt - 1) {
       // A transient retry reuses the same reachable lane: the new attempt is accounted in the authority
       // journal with `replacement: null`, and the host run resumes that recorded lane instead of
       // creating a second worker for the same Issue.
@@ -155,6 +166,7 @@ export function planIssueLane({ runId, issueId, attempt, observed = [], creation
         ...base,
         decision: "RESUME",
         laneRef: lane.laneRef,
+        requiresRecordedDispatch: lane.attempt,
         retry: Object.freeze({
           type: "retry.recorded",
           at: instant(at),
