@@ -17,8 +17,11 @@ routing, close eligibility, or stop classification.
   round, asks `scripts/pi-workflow-host.mjs` what the Domain action reducer authorizes, and materializes
   exactly that.
 - `helpers/round-input.mjs` — validates the runtime task (one JSON object, optionally pointing at a
-  round-input file) and reads the recorded host operations back from a run record.
-- `helpers/host-runs.mjs` — reads pi-workflow run records back for one Spec and target.
+  round-input file). When the round does not name a blocked host run and supplies the project checkout,
+  it calls the reader itself and refuses an ambiguous match.
+- `helpers/host-runs.mjs` — reads pi-workflow run records back for one Spec and target. The selected
+  host run comes with its recorded operations in recorded order (`recordedFromRunRecord`), so the
+  re-issue proof runs against exactly what the blocked run already owns.
 
 Validate and launch by path:
 
@@ -30,8 +33,10 @@ Validate and launch by path:
 Trusted controller code reaches the domain through two Node imports beside the bundle directory:
 `scripts/pi-workflow-host.mjs` (the domain half of the host) and, through it,
 `scripts/delivery-authority.mjs` (the bundle-local authority entry). Neither is a pi-workflow ref: every
-declared ref (`uses`, `helpers`, `workflows`) is a `./` path inside the bundle directory, and no other
-production module may reach the authority surface directly.
+declared ref (`uses`, `helpers`, `workflows`) is a `./` path inside the bundle directory. The enforced
+import rule is narrower than "nobody else may import the entry": production modules of this package may
+import `delivery-authority.mjs`, but they may not import one of the owner modules inside its closure
+directly.
 
 ## One round
 
@@ -43,7 +48,8 @@ The runtime task is one JSON object:
 
 - `facts` is the reconciled `dag-run-facts:v1` input. `inputPath` may point at the same evidence in a
   file instead of inlining it.
-- `recorded` lists the host operations the run already materialized, in recorded order.
+- `recorded` lists the host operations the run already materialized, in recorded order. When a blocked
+  host run is read back, its own recorded operations supply this list.
 - `blockedHostRun` is a prior host run read back for convergence, or `null` on a fresh run. When the
   field is absent and `cwd` names the project checkout, the controller reads the prior host run back
   itself; more than one candidate is an ambiguity it refuses rather than guesses.
@@ -68,9 +74,11 @@ A generated task's tools are always a subset of the declared ceiling, and no lan
 from its agent name alone.
 
 The round stops without dispatching anything when the reducer returns a contradictory or unavailable
-action set, when an action has no declared materialization, when a recorded operation is no longer
-authorized or changed its request shape, when a settled operation recurs, or when a dispatch attempt is
-not accounted by the journal. It never escapes a contradiction by opening a second host run.
+action set, when an action has no declared materialization, when a re-issued operation changed its
+recorded request shape or its recorded order, when a settled operation recurs, when a newer dispatch
+would bypass an unsettled recorded attempt, or when a dispatch attempt is not accounted by the journal.
+It never escapes a contradiction by opening a second host run, and the re-issue proof only governs a
+round that actually materializes something: an idle or blocked round dispatches nothing.
 
 ## Blocked-run convergence
 
@@ -83,7 +91,8 @@ half then decides:
 - `NO_ACTION` — the host run is already terminal.
 - `CONTINUE_SAME_RUN` — the host run can re-issue its recorded operations in order; resume it.
 - `NEW_RUN` — the host run cannot be replayed. The controller first appends exactly one
-  `run.superseded` event to the authority journal naming the blocked host run, then returns
+  `run.superseded` event to the authority journal whose `supersededHostRunId` is the blocked
+  pi-workflow host run identity (deliberately not this journal's logical DAG Run id), then returns
   `status: "superseded"` and dispatches nothing. The journal event is the authority fact that proves the
   superseding host run did not re-dispatch an attempt the blocked run already owned; the control
   projection carries only the journal sequence.

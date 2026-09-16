@@ -132,6 +132,11 @@ const fakeContext = (calls, task) => ({
     calls.push(request);
     return { ok: true };
   },
+  parallel: async (thunks) => {
+    const settled = [];
+    for (const thunk of thunks) settled.push(await thunk());
+    return settled;
+  },
 });
 
 test("the plan materializes exactly the reducer's actions, in order", () => {
@@ -331,12 +336,29 @@ test("re-issued host operations must keep their recorded order and request shape
   const item = plan.materializations[0];
   assert.equal(assertReissueOrder(plan, [{ id: item.id, requestIdentity: item.requestIdentity }]), null);
   assert.equal(assertReissueOrder(plan, [{ id: item.id, requestIdentity: null }]), null);
+  // An operation the reducer no longer re-issues is not a divergence: it may already have settled.
+  assert.equal(assertReissueOrder(plan, [{ id: "close_99" }]), null);
 
   const divergent = assertReissueOrder(plan, [{ id: item.id, requestIdentity: `sha256:${"a".repeat(64)}` }]);
   assert.equal(divergent.code, HOST_STOP_CODES.replayDivergence);
 
-  const unissued = assertReissueOrder(plan, [{ id: "dispatch_99_1" }]);
-  assert.equal(unissued.code, HOST_STOP_CODES.replayDivergence);
+  const unordered = planHostActions({
+    schema: "dag-run-status:v1",
+    run: { runId: "run-12", specId: "12", target: "features/ron", state: "RUNNING", controlRevision: 0 },
+    legalActions: [
+      { type: "dispatch_issue", issueId: "13", attempt: 1 },
+      { type: "dispatch_issue", issueId: "14", attempt: 1 },
+    ],
+    diagnoses: [],
+  }, { journal: [grant] });
+  const outOfOrder = assertReissueOrder(unordered, [{ id: "dispatch_14_1" }, { id: "dispatch_13_1" }]);
+  assert.equal(outOfOrder.code, HOST_STOP_CODES.replayDivergence);
+});
+
+test("a newer planned dispatch cannot bypass an unsettled recorded attempt", () => {
+  const plan = planHostActions(dispatchPlan("13", 1), { journal: [grant] });
+  const conflict = assertReissueOrder(plan, [{ id: "dispatch_13_2", requestIdentity: null }]);
+  assert.equal(conflict.code, HOST_STOP_CODES.duplicateDispatch);
 });
 
 test("a settled host operation is never materialized a second time", () => {
@@ -383,11 +405,11 @@ test("blocked-run convergence journals one superseding host run without re-dispa
     at: "2026-09-16T01:00:00.000Z",
   });
   assert.equal(convergence.decision, "NEW_RUN");
-  assert.equal(convergence.supersession.supersededRunId, "host-1");
+  assert.equal(convergence.supersession.supersededHostRunId, "host-1");
   assert.deepEqual(convergence.journalEvent, {
     type: RUN_SUPERSEDED_EVENT,
     at: "2026-09-16T01:00:00.000Z",
-    supersededRunId: "host-1",
+    supersededHostRunId: "host-1",
     reason: "DYNAMIC_REPLAY_DIVERGED",
     evidence: convergence.journalEvent.evidence,
   });
@@ -411,7 +433,7 @@ test("blocked-run convergence journals one superseding host run without re-dispa
     const events = readFileSync(join(gitCommonDir, "matt-workflow-control", "runs", "run-12", "events.jsonl"), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     assert.deepEqual(events.map((event) => event.type), ["grant.recorded", RUN_SUPERSEDED_EVENT]);
-    assert.equal(events[1].supersededRunId, "host-1");
+    assert.equal(events[1].supersededHostRunId, "host-1");
   } finally {
     rmSync(gitCommonDir, { recursive: true, force: true });
   }
@@ -663,10 +685,26 @@ test("the controller reads a blocked host run back itself when the round does no
     const result = await controller(fakeContext(calls, JSON.stringify({
       facts: facts([node("13", [], { taskState: "DISPATCHED" })], [grant, dispatchEvent("13", 1)]),
       cwd: root,
+      stageId: "delivery",
     })));
     assert.deepEqual(calls, []);
     assert.equal(result.control.decision, "CONTINUE_SAME_RUN");
     assert.equal(result.control.status, "idle");
+
+    // The read-back carries the blocked run's recorded operations, so a divergence on that path is
+    // refused instead of silently passing an empty re-issue proof.
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({
+      id: "workflow_a",
+      status: "failed",
+      task: JSON.stringify({ facts: facts([node("13"), node("14")]) }),
+      tasks: [{ specId: "delivery.dispatch_13_1", status: "running", requestHash: "f".repeat(64) }],
+    }));
+    const divergent = await controller(fakeContext([], JSON.stringify({
+      facts: facts([node("13"), node("14")]),
+      cwd: root,
+      stageId: "delivery",
+    })));
+    assert.equal(divergent.control.stopCode, HOST_STOP_CODES.replayDivergence);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

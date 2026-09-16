@@ -33,7 +33,7 @@ const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
   refs: [],
 });
 
-const journalUnavailable = (input, code, evidence) => (
+const journalBlockedControl = (input, code, evidence) => (
   input.gitCommonDir === null ? blockedControl({ input, code, evidence }) : null
 );
 
@@ -58,10 +58,10 @@ export default async function controller(ctx) {
       // The superseding host run is journaled before it dispatches anything, so the blocked run's
       // recorded attempts can never be dispatched twice. The control projection carries only the
       // journal locator; the authority journal owns the superseded host run identity.
-      const unavailable = journalUnavailable(input, "supersession_journal_unavailable", [
+      const blocked = journalBlockedControl(input, "supersession_journal_unavailable", [
         "A superseding host run needs the authority journal common directory.",
       ]);
-      if (unavailable) return unavailable;
+      if (blocked) return blocked;
       const recorded = recordHostRunSupersession({
         gitCommonDir: input.gitCommonDir,
         runId: input.facts.run.runId,
@@ -78,7 +78,7 @@ export default async function controller(ctx) {
           supersessionSequence: recorded.sequence,
           generatedTaskIds: [],
         },
-        analysis: `Host run ${convergence.supersession.supersededRunId} is superseded by ${input.facts.run.runId} with a journaled supersession link; no recorded operation is re-dispatched.`,
+        analysis: `Host run ${convergence.supersession.supersededHostRunId} is superseded by ${input.facts.run.runId} with a journaled supersession link; no recorded operation is re-dispatched.`,
         refs: [],
       };
     }
@@ -87,22 +87,42 @@ export default async function controller(ctx) {
   if (round.stop && convergence?.decision !== "CONTINUE_SAME_RUN") {
     return blockedControl({ input, code: round.stop.code, evidence: round.stop.evidence });
   }
-  const replayStop = assertReissueOrder(round, input.recorded);
+  // The re-issue proof only governs a round that actually materializes something: an idle or blocked
+  // round dispatches nothing, so there is no duplicate to refuse.
+  const replayStop = round.materializations.length > 0 ? assertReissueOrder(round, input.recorded) : null;
   if (replayStop) return blockedControl({ input, code: replayStop.code, evidence: replayStop.evidence });
 
   const generated = [];
   const pending = [];
+  // One reducer round may authorize up to `max_parallel` dispatches. They are generated through
+  // `ctx.parallel` so the declared host concurrency is what actually bounds them, while the runtime
+  // still records every sibling generation in plan order before the controller suspends.
+  let batch = [];
+  const flush = async () => {
+    if (batch.length === 0) return;
+    const queued = batch;
+    batch = [];
+    const settled = await ctx.parallel(queued.map((entry) => () => ctx.agent({
+      id: entry.id,
+      agent: entry.agent,
+      tools: entry.tools,
+      prompt: entry.prompt,
+    })));
+    for (const [index, entry] of queued.entries()) {
+      generated.push({
+        id: entry.id,
+        actionType: entry.actionType,
+        issueId: entry.issueId,
+        settled: typeof settled?.[index] === "object",
+      });
+    }
+  };
   for (const item of round.materializations) {
     if (item.kind === "agent") {
-      const settled = await ctx.agent({
-        id: item.id,
-        agent: item.agent,
-        tools: item.tools,
-        prompt: item.prompt,
-      });
-      generated.push({ id: item.id, actionType: item.actionType, issueId: item.issueId, settled: typeof settled === "object" });
+      batch.push(item);
       continue;
     }
+    await flush();
     if (item.execution === "wait") {
       // A domain close wait is a host-side bounded observation that consumes no generated agent and no
       // concurrency slot. Its duration, its owner and its pre-wait evidence are the reducer's, never the
@@ -124,10 +144,10 @@ export default async function controller(ctx) {
         generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision });
         continue;
       }
-      const unavailable = journalUnavailable(input, "control_settlement_journal_unavailable", [
+      const blocked = journalBlockedControl(input, "control_settlement_journal_unavailable", [
         "A cooperative control settlement needs the authority journal common directory.",
       ]);
-      if (unavailable) return unavailable;
+      if (blocked) return blocked;
       const recorded = recordHostAuthorityEvent({
         gitCommonDir: input.gitCommonDir,
         runId: input.facts.run.runId,
@@ -140,6 +160,7 @@ export default async function controller(ctx) {
     // the single reconciliation entry instead of skipping it or inventing an adapter for it.
     pending.push({ id: item.id, actionType: item.actionType, operation: item.operation, issueId: item.issueId });
   }
+  await flush();
 
   return {
     control: {

@@ -15,6 +15,8 @@ export const ISSUE_EXECUTION_PHASES = Object.freeze([
 export const CONTROL_COMMANDS = Object.freeze(["PAUSE", "RESUME", "STOP"]);
 // The vocabulary of a host Run supersession link. The authority journal owns these reasons because the
 // link proves that a superseding host run did not re-dispatch an attempt the blocked run already owned.
+// `supersededHostRunId` is a pi-workflow host run identity, deliberately distinct from this journal's
+// logical DAG Run id.
 export const RUN_SUPERSEDED_EVENT = "run.superseded";
 export const RUN_SUPERSEDED_REASONS = Object.freeze([
   "DYNAMIC_REPLAY_DIVERGED",
@@ -95,7 +97,7 @@ const eventFields = new Map([
   ["target-writer-wait.settled", new Set([
     "type", "at", "waitSequence", "issueId", "target", "owner", "outcome", "evidence",
   ])],
-  ["run.superseded", new Set(["type", "at", "supersededRunId", "reason", "evidence"])],
+  ["run.superseded", new Set(["type", "at", "supersededHostRunId", "reason", "evidence"])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
 ]);
@@ -366,7 +368,7 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       requirePositiveInteger(event.revision, "transition revision");
       break;
     case "run.superseded":
-      requireText(event.supersededRunId, "superseded host Run id");
+      requireText(event.supersededHostRunId, "superseded host Run id");
       if (!RUN_SUPERSEDED_REASONS.includes(event.reason)) throw new TypeError("Unsupported host Run supersession reason");
       if (!Array.isArray(event.evidence) || event.evidence.length === 0
         || !event.evidence.every((item) => typeof item === "string" && item.length > 0)) {
@@ -451,9 +453,8 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
       || events.some(item => item.type === "recovery.task" && item.requestIdentity === event.requestIdentity)) throw new Error("Recovery transfer lacks its exact prior intent and exclusive ownership proof");
   }
   if (event.type === "run.superseded") {
-    if (storageRunId !== undefined && event.supersededRunId === storageRunId) {
-      throw new TypeError("A host Run cannot supersede itself");
-    }
+    // The superseded identity is a pi-workflow host run id, not this logical DAG Run's id: the link
+    // proves a superseding host run did not re-dispatch a recorded attempt of the blocked host run.
     if (events.some(item => item.type === "run.superseded")) {
       throw new TypeError("A host Run records exactly one supersession link");
     }

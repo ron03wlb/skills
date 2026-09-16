@@ -8,6 +8,8 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { HOST_TERMINAL_RUN_STATES } from "../../../scripts/pi-workflow-host.mjs";
+
 export const HOST_RUN_READBACK_SCHEMA = "pi-workflow-host-run-readback:v1";
 
 // The exact host replay-invariant failure E1 observed: a recorded controller operation re-issued with a
@@ -38,6 +40,8 @@ const evidenceOf = (record, dynamicState) => [
   textOf(record?.reason),
   textOf(dynamicState?.error),
   textOf(dynamicState?.reason),
+  // The documented per-task field the host writes a failure message into.
+  ...(Array.isArray(record?.tasks) ? record.tasks.map((task) => textOf(task?.statusDetail)) : []),
 ].filter((value) => value !== null);
 
 const stateFor = (status) => RUN_STATES[status] ?? "UNKNOWN";
@@ -64,7 +68,7 @@ export function readHostRuns({ workflowRoot, readFile = defaultReadFile, readdir
     } catch {
       // An unreadable run record is a host fact this reader cannot prove; it stays visible instead of
       // being silently dropped.
-      runs.push({ runId: entry, readable: false, status: null, task: null, generatedTaskIds: [], evidence: [] });
+      runs.push({ runId: entry, readable: false, status: null, task: null, rawTasks: [], generatedTaskIds: [], evidence: [] });
       continue;
     }
     const statePath = join(workflowRoot, entry, "dynamic", "state.json");
@@ -81,6 +85,7 @@ export function readHostRuns({ workflowRoot, readFile = defaultReadFile, readdir
       readable: true,
       status: textOf(record?.status),
       task: textOf(record?.task),
+      rawTasks: Array.isArray(record?.tasks) ? record.tasks : [],
       generatedTaskIds: Array.isArray(record?.tasks)
         ? record.tasks.filter((task) => task && typeof task.specId === "string").map((task) => task.specId)
         : [],
@@ -104,14 +109,14 @@ const taskBinding = (task) => {
 };
 
 // Selects the one host run that binds this exact Spec and target and is not terminal.
-export function selectBlockedHostRun(runs, { specId, target } = {}) {
+export function selectBlockedHostRun(runs, { specId, target, stageId } = {}) {
   if (!Array.isArray(runs)) throw new TypeError("Host run read-back needs the discovered run list");
   if (typeof specId !== "string" || !specId) throw new TypeError("Host run read-back needs one Spec id");
   if (typeof target !== "string" || !target) throw new TypeError("Host run read-back needs one target branch");
   const candidates = runs.filter((run) => {
     const binding = taskBinding(run.task);
     if (!binding || binding.specId !== specId || binding.target !== target) return false;
-    return !["SUCCEEDED", "STOPPED"].includes(stateFor(run.status));
+    return !HOST_TERMINAL_RUN_STATES.includes(stateFor(run.status));
   });
   const base = { schema: HOST_RUN_READBACK_SCHEMA, specId, target };
   if (candidates.length === 0) return Object.freeze({ ...base, status: "NONE", runIds: [] });
@@ -123,6 +128,9 @@ export function selectBlockedHostRun(runs, { specId, target } = {}) {
     ...base,
     status: "SELECTED",
     runIds: [run.runId],
+    // The recorded operations the blocked host run already owns, in recorded order. The re-entry proof
+    // runs against exactly these, so a continue or a supersession can never dispatch twice.
+    recorded: recordedFromRunRecord({ tasks: run.rawTasks }, stageId),
     hostRun: Object.freeze({
       runId: run.runId,
       state: stateFor(run.status),
@@ -132,8 +140,29 @@ export function selectBlockedHostRun(runs, { specId, target } = {}) {
   });
 }
 
+// The recorded operations the host already materialized for one run, in recorded order, with the
+// request shape it proved. A record that carries no request hash keeps `null`, which the domain half
+// treats as "not provable here" rather than as a mismatch.
+export function recordedFromRunRecord(runJson, stageId) {
+  if (runJson === null || typeof runJson !== "object" || !Array.isArray(runJson.tasks)) return [];
+  const prefix = typeof stageId === "string" && stageId ? `${stageId}.` : null;
+  return runJson.tasks
+    .filter((task) => task && typeof task.specId === "string"
+      && (prefix === null || task.specId.startsWith(prefix)))
+    .map((task) => ({
+      id: prefix === null ? task.specId : task.specId.slice(prefix.length),
+      requestIdentity: typeof task.requestHash === "string" && task.requestHash
+        ? `sha256:${task.requestHash}`
+        : null,
+      outcome: task.status === "completed" ? "settled" : "recorded",
+    }));
+}
+
 // One call the entry can make once it knows the project checkout and the selected Spec.
-export function blockedHostRunFor({ cwd, specId, target, ...readers } = {}) {
+export function blockedHostRunFor({ cwd, specId, target, stageId, ...readers } = {}) {
   if (typeof cwd !== "string" || !cwd) throw new TypeError("Host run read-back needs the project checkout");
-  return selectBlockedHostRun(readHostRuns({ workflowRoot: workflowRootFor(cwd), ...readers }), { specId, target });
+  return selectBlockedHostRun(
+    readHostRuns({ workflowRoot: workflowRootFor(cwd), ...readers }),
+    { specId, target, stageId },
+  );
 }

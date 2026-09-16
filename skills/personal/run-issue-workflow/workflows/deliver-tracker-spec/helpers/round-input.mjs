@@ -6,6 +6,8 @@
 import { readFileSync } from "node:fs";
 import { blockedHostRunFor } from "./host-runs.mjs";
 
+export { recordedFromRunRecord } from "./host-runs.mjs";
+
 export const ROUND_INPUT_SCHEMA = "delivery-host-round-input:v1";
 export const FACT_SCHEMA = "dag-run-facts:v1";
 
@@ -51,15 +53,26 @@ export function parseRoundInput(text, {
   // The re-entry authority reads a blocked or failed host run back itself when the round does not
   // already name one. An explicit `null` means "this is a fresh run"; an absent field means "look".
   let blockedHostRun = source.blockedHostRun ?? null;
+  let roundRecorded = [];
   if (source.blockedHostRun === undefined && isText(source.cwd)) {
-    const readBack = resolveBlockedHostRun({ cwd: source.cwd, specId: facts.run.specId, target: facts.run.target });
+    const readBack = resolveBlockedHostRun({
+      cwd: source.cwd,
+      specId: facts.run.specId,
+      target: facts.run.target,
+      stageId: isText(source.stageId) ? source.stageId : undefined,
+    });
     if (readBack.status === "AMBIGUOUS") {
       refuse(`more than one host run matches this Spec and target: ${readBack.runIds.join(", ")}`);
     }
     blockedHostRun = readBack.status === "SELECTED" ? readBack.hostRun : null;
+    if (readBack.status === "SELECTED" && source.recorded === undefined) {
+      // Reading a host run back is only reconciliation if the recorded operations it already owns come
+      // with it; otherwise the re-issue proof has nothing to prove against.
+      roundRecorded = readBack.recorded ?? [];
+    }
   }
   if (blockedHostRun !== null && !isRecord(blockedHostRun)) refuse("blockedHostRun must be one host run record");
-  const recorded = source.recorded ?? [];
+  const recorded = source.recorded ?? roundRecorded;
   if (!Array.isArray(recorded) || !recorded.every((entry) => isRecord(entry) && isText(entry.id))) {
     refuse("recorded must be an array of host operations with an id");
   }
@@ -77,19 +90,4 @@ export function parseRoundInput(text, {
     stageId,
     digest: checksum({ runId: facts.run.runId, specId: facts.run.specId, target: facts.run.target }),
   });
-}
-
-// The recorded operations the host already materialized for this Run, in recorded order, with the
-// request shape it proved. The controller re-issues exactly these before anything new.
-export function recordedFromRunRecord(runJson, stageId) {
-  if (!isRecord(runJson) || !Array.isArray(runJson.tasks)) return [];
-  const prefix = isText(stageId) ? `${stageId}.` : null;
-  return runJson.tasks
-    .filter((task) => isRecord(task) && isText(task.specId)
-      && (prefix === null || task.specId.startsWith(prefix)))
-    .map((task) => ({
-      id: prefix === null ? task.specId : task.specId.slice(prefix.length),
-      requestIdentity: isText(task.requestHash) ? `sha256:${task.requestHash}` : null,
-      outcome: task.status === "completed" ? "settled" : "recorded",
-    }));
 }

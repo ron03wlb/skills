@@ -44,6 +44,8 @@ export const HOST_RUN_DYNAMIC_DISPOSITIONS = Object.freeze([
   "UNKNOWN",
 ]);
 export const HOST_PLAN_DISPOSITIONS = Object.freeze(["DISPATCH", "IDLE", "TERMINAL", "BLOCKED"]);
+// One exact definition of a terminal host run, shared with the read-back that selects a blocked one.
+export const HOST_TERMINAL_RUN_STATES = Object.freeze(["SUCCEEDED", "STOPPED"]);
 export const HOST_STOP_CODES = Object.freeze({
   blockedRun: "blocked_run",
   contradictoryActionSet: "contradictory_action_set",
@@ -336,7 +338,7 @@ export function planHostActions(status, { journal } = {}) {
   }
 
   if (materializations.length > 0) return plan("DISPATCH", materializations, null);
-  if (["SUCCEEDED", "STOPPED"].includes(run.state)) return plan("TERMINAL", [], null);
+  if (HOST_TERMINAL_RUN_STATES.includes(run.state)) return plan("TERMINAL", [], null);
   if (run.state === "BLOCKED") {
     return plan("BLOCKED", [], unresolved.length > 0
       ? stopFor(
@@ -358,9 +360,12 @@ export function planHostRound({ facts, journal } = {}) {
   return planHostActions(reduceRun(facts), { journal: journal ?? facts?.journal });
 }
 
-// The re-issue proof a controller must satisfy before it materializes anything new: every operation the
-// host already recorded is re-issued in the recorded order with the recorded request shape. A recorded
-// operation that settled may never be materialized a second time.
+// The re-issue proof a controller must satisfy before it materializes anything new.
+//
+// A host operation the reducer no longer authorizes is simply not re-issued: it may already have settled,
+// and the host keeps its artifact. What must hold is that every operation the plan *does* re-issue keeps
+// its recorded request shape and recorded order, that a settled operation never recurs, and that no new
+// dispatch bypasses a dispatch attempt the blocked host run still owns unsettled.
 export function assertReissueOrder(plan, recorded) {
   if (!isRecord(plan) || plan.schema !== HOST_PLAN_SCHEMA) {
     throw new TypeError("Re-issue order is proved against one pi-workflow-host-plan:v1 plan");
@@ -378,19 +383,10 @@ export function assertReissueOrder(plan, recorded) {
   });
   const byId = new Map(plan.materializations.map((item) => [item.id, item]));
   const order = new Map(plan.materializations.map((item, index) => [item.id, index]));
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
+  let lastPosition = -1;
+  for (const entry of entries) {
     const item = byId.get(entry.id);
-    if (!item) {
-      return stopFor(HOST_STOP_CODES.replayDivergence, [
-        `Host operation ${entry.id} is already recorded but the reducer no longer authorizes it.`,
-      ]);
-    }
-    if (index > 0 && order.get(entry.id) <= order.get(entries[index - 1].id)) {
-      return stopFor(HOST_STOP_CODES.replayDivergence, [
-        `Recorded host operations ${entries[index - 1].id} and ${entry.id} are not a re-issuable prefix.`,
-      ]);
-    }
+    if (!item) continue;
     if (entry.requestIdentity !== null && entry.requestIdentity !== item.requestIdentity) {
       return stopFor(HOST_STOP_CODES.replayDivergence, [
         `Host operation ${entry.id} was recorded with request identity ${entry.requestIdentity} and is now ${item.requestIdentity}.`,
@@ -399,6 +395,26 @@ export function assertReissueOrder(plan, recorded) {
     if (entry.outcome === "settled") {
       return stopFor(HOST_STOP_CODES.duplicateDispatch, [
         `Host operation ${entry.id} already settled and must not be materialized again.`,
+      ]);
+    }
+    const position = order.get(entry.id);
+    if (position <= lastPosition) {
+      return stopFor(HOST_STOP_CODES.replayDivergence, [
+        `Re-issued host operation ${entry.id} does not follow the recorded order.`,
+      ]);
+    }
+    lastPosition = position;
+  }
+  for (const item of plan.materializations) {
+    if (item.actionType !== "dispatch_issue") continue;
+    const conflicting = entries.find((entry) => {
+      const dispatch = parseHostDispatchId(entry.id);
+      return dispatch !== null && dispatch.issueId === item.issueId
+        && entry.outcome !== "settled" && dispatch.attempt >= item.attempt && entry.id !== item.id;
+    });
+    if (conflicting) {
+      return stopFor(HOST_STOP_CODES.duplicateDispatch, [
+        `Issue ${item.issueId} attempt ${item.attempt} would dispatch while ${conflicting.id} is still unsettled.`,
       ]);
     }
   }
@@ -439,7 +455,7 @@ export function convergeBlockedRun({ facts, hostRun, at } = {}) {
     supersession: null,
     journalEvent: null,
   };
-  if (["SUCCEEDED", "STOPPED"].includes(observed.state)) {
+  if (HOST_TERMINAL_RUN_STATES.includes(observed.state)) {
     return Object.freeze({ ...base, decision: "NO_ACTION", reason: "HOST_RUN_TERMINAL", evidence: [] });
   }
   if (plan.stop && plan.stop.code !== HOST_STOP_CODES.blockedRun) {
@@ -485,11 +501,11 @@ export function convergeBlockedRun({ facts, hostRun, at } = {}) {
     decision: "NEW_RUN",
     reason,
     evidence,
-    supersession: Object.freeze({ supersededRunId: observed.runId, reason, evidence: [...evidence] }),
+    supersession: Object.freeze({ supersededHostRunId: observed.runId, reason, evidence: [...evidence] }),
     journalEvent: Object.freeze({
       type: RUN_SUPERSEDED_EVENT,
       at,
-      supersededRunId: observed.runId,
+      supersededHostRunId: observed.runId,
       reason,
       evidence: [...evidence],
     }),
@@ -543,7 +559,7 @@ export function recordHostRunSupersession({ gitCommonDir, runId, event } = {}) {
   if (!isRecord(event) || event.type !== RUN_SUPERSEDED_EVENT) {
     throw new TypeError("Only one run.superseded draft can be recorded as a host Run supersession");
   }
-  requireText(event.supersededRunId, "superseded host Run id");
+  requireText(event.supersededHostRunId, "superseded host Run id");
   if (!RUN_SUPERSEDED_REASONS.includes(event.reason)) throw new TypeError("Unsupported host Run supersession reason");
   requireIsoInstant(event.at, "Host Run supersession timestamp");
   if (!Array.isArray(event.evidence) || event.evidence.length === 0
