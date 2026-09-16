@@ -332,7 +332,7 @@ worktree { enabled: true,
 - The agent wrote `/tmp/piwf-probe-98/.pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2/probe-managed-worktree.txt` containing `managed-worktree-probe`. The target checkout did **not** contain that file, confirming the documented "no auto-merge; managed worktree output is recorded for human review".
 - Re-addressing from the target checkout succeeded: `git -C /tmp/piwf-probe-98 worktree list` listed the worktree on its `pi-workflow/...-task-2` branch, and the file was read back through that path.
 - Removal: `git -C /tmp/piwf-probe-98 worktree remove .pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2` failed with `fatal: '.../worktrees/task-2' contains modified or untracked files, use --force to delete it`; `git -C /tmp/piwf-probe-98 worktree remove --force .pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2` exited 0. Afterwards the registration count for `worktrees/task-2` was `0` and the directory was `ABSENT`; the topic branch `pi-workflow/workflow_mu3o9xvu_eeca35-task-2` remained.
-- Caveat: the task never settled. The wait driver printed `raw artifact ownership/link contract could not be established`, so the mutation-capable path failed at artifact publication and the run stayed `running` until `/workflow stop workflow_mu3o9xvu_eeca35` returned `Interrupted 2 task(s)`. The retained record after that stop is `status: interrupted` with `taskSummary {running: 0, interrupted: 2}` and both tasks `interrupted`/`workflow_stopped`; the driver text itself is not stored in the run and is reproduced by re-running the E2 command. The worktree outlived the interrupted run, which is what the close-stage re-addressing above exercised. The E2 command above was re-run twice more from the same and from a separately bootstrapped project with the same result (see "Reproduction pass").
+- Caveat: the task never settled. The wait driver printed `raw artifact ownership/link contract could not be established`, so the mutation-capable path failed at artifact publication and the run stayed `running` until `/workflow stop workflow_mu3o9xvu_eeca35` returned `Interrupted 2 task(s)`. The retained record after that stop is `status: interrupted` with `taskSummary {running: 0, interrupted: 2}` and both tasks `interrupted`/`workflow_stopped`; the driver text itself is not stored in the run and is reproduced by re-running the E2 command. The worktree outlived the interrupted run, which is what the close-stage re-addressing above exercised. The E2 probe was re-run twice more, once in a separately bootstrapped project (`workflow_mu3ok4kx_5f0ccd`, `/tmp/piwf-probe-98-repro`) and once from the fixtures extracted from this document (`workflow_mu3oobiw_a5677c`, `/tmp/piwf-probe-98-doc`); both produced the same interrupted run, worktree and removal result. In the recorded runs the driver's `/workflow wait` step returned once the artifact error surfaced, so the stop step did not have to wait out its timeout.
 
 **Verdict: `proven`** for the worktree lifecycle (created, retained after the run stopped, re-addressable from the target checkout, removable). The removal requires an explicit `--force` because the retained output is uncommitted, and the mutation-capable artifact-publication failure is recorded under AC-2.
 
@@ -389,6 +389,21 @@ for _, delta in events:
     cur += delta; mx = max(mx, cur)
 print('max observed concurrent generated agents =', mx)
 EOF
+# second observation: the controller context surface the host exposes
+timeout 60 node -e '
+const fs = require("node:fs"), crypto = require("node:crypto");
+const s = fs.readFileSync("/home/ron/.pi/accounts/b/npm/node_modules/@agwab/pi-workflow/dist/engine.js", "utf8");
+const open = s.indexOf("{", s.indexOf("const ctx = {"));
+let depth = 0, end = -1;
+for (let k = open; k < s.length; k++) {
+  if (s[k] === "{") depth++;
+  else if (s[k] === "}") { depth--; if (depth === 0) { end = k + 1; break; } }
+}
+const block = s.slice(open, end);
+const keys = [...block.matchAll(/^    (?:async )?([A-Za-z]+)\s*[:(]/gm)].map(m => m[1]);
+console.log("bytes", block.length, "sha256", crypto.createHash("sha256").update(block).digest("hex"));
+console.log("members:", keys.join(", "), "| count", keys.length, "| wait/lock/lease/slot:", keys.some(k => /wait|lock|lease|slot/i.test(k)));
+'
 ```
 
 **Observed (run `workflow_mu3obh2c_3af021`, `maxConcurrency: 3`, five agents requested)**
@@ -406,8 +421,9 @@ Run `status: completed`, 6/6 tasks completed, controller counters `agents: 5`.
 
 - The cap is honoured exactly: three agents run at once, and `adaptive.c4` does not start until `adaptive.c1` completes.
 - The admitted unit is a *generated agent task*. `ctx.parallel` generated all five ops, but only three were admitted at a time; a generated agent that is waiting for a slot still holds one of the three.
+- Second observation, on the installed package's controller context: the extracted `ctx` block is 3,719 bytes with SHA-256 `8e1b55f6efefcb41fed04b66ed20c897e161135b92b573f5c2688342dd18ded9`, and it exposes exactly 17 members - `task, sources, phase, log, artifact, graph, budget, tools, dynamic, decision, stateIndex, fanout, result, helper, workflow, agent, parallel` - with no `wait`, `lock`, `lease` or `slot` member.
 
-**Verdict: `proven`.** The host expresses "three at a time" as a cap of exactly three generated agent tasks (measured 3 with 5 requested). The dynamic controller context exposes no wait, lock or lease operation - its surface is `task`, `sources`, `phase`, `log`, `artifact`, `graph`, `budget`, `tools`, `dynamic`, `decision`, `stateIndex`, `fanout`, `result`, `helper`, `workflow`, `agent` and `parallel` - and the only unit admitted against the cap is a generated agent, so a domain close wait has no host representation that would put it inside those slots. The close-wait clause is therefore satisfied structurally rather than by exercising a close wait: no controller-visible wait primitive exists to exercise. The host does own internal run, topology and supervisor leases for retention and pruning; those are not exposed to a controller, were not exercised, and stay in the unexercised list.
+**Verdict: `unproven`.** The cap half is observed: the host admitted exactly three of five generated agents, and `adaptive.c4` waited for `adaptive.c1` to finish. The close-wait half is argued rather than run: the second observation shows the controller context exposes no `wait`, `lock`, `lease` or `slot` member, so a domain close wait has no controller-visible representation that would put it inside the cap - but no experiment modelled a close wait and measured that it consumes no slot. The assumption states both halves, so it is not proven as a whole; a domain close-wait experiment, and the host's own internal run/topology/supervisor leases, remain in the unexercised list.
 
 ## E5 — host retry and `/workflow resume` do not bypass dispatch accounting
 
@@ -456,7 +472,8 @@ Named so they are not mistaken for proven:
 
 - Any detached run that must launch new children after detachment (blocked above; only pre-detachment launches were observed to complete).
 - Host-level transient retry of a launch or output attempt. The only run with a real failure followed by recovery used `/workflow resume`; its counters stayed `launch=0, output=0`, so no transient retry was induced or observed, which is why E5 is `unproven`. An attempted output-retry induction (a generated child told to reply `PROBE-INVALID-OUTPUT` instead of artifact sections) also produced no retry: the child honoured the workflow output contract and emitted valid sections, and the run finished `retries: output=0`.
-- Batch/`--all` supervision, `pi-workflow prune`, run retention, and topology-lease behaviour.
+- Batch/`--all` supervision, `pi-workflow prune`, run retention, and the host's internal run/topology/supervisor leases; none of those were exercised.
+- A domain close-wait experiment. No probe modelled a close wait and measured that it consumes no agent slot, which is why E4's close-wait clause is `unproven`; only the controller-visible surface above was observed.
 - Nested dynamic workflows (`ctx.workflow`), dynamic helpers (`ctx.helper`), `dynamic.decisionLoop`, and `approval: "ask"` (which needs an interactive UI; the probes used `approval: "auto"`).
 - Loop stages, streaming foreach, and the bundled workflows' evidence gates (only `validate` was run on `deep-research`).
 - Windows/WSL path translation and the `durable-launch-barrier-v2` revocation races; no revocation or crash-interruption path was forced.
