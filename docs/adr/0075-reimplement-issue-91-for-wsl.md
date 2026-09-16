@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: superseded by ADR-0078
 ---
 
 # Reimplement Issue 91 for WSL

@@ -21,3 +21,5 @@ Every blocked, failed, or paused outcome carries one stable **DAG stop diagnosis
 [ADR-0066](0066-carry-start-authority-through-approved-bootstrap.md) narrows the pre-Run maintenance boundary: an already-approved repair can retain the original Start authority while remaining isolated from the affected runtime. It does not broaden a product Run Grant or remove fresh reconciliation.
 
 [ADR-0068](0068-separate-issue-execution-from-observation-and-contention.md) adds the Issue-owned execution-budget evidence carried by this journal and keeps that allowance independent of observation backoff and healthy contention.
+
+[ADR-0076](0076-schedule-delivery-through-pi-workflow-with-a-domain-action-reducer.md) supersedes this decision's Codex-native-coordinator, control-panel, control-bridge, and status-snapshot clauses. This decision's sole Start authority, Issue-lane isolation, leaf execution, lease, closeout-ordering, and stop-diagnosis clauses remain in force.

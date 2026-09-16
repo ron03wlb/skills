@@ -273,7 +273,7 @@ A monotonic read-back record of a deliberate control-setting change made while a
 _Avoid_: Live configuration drift, UI-local setting, unrecorded override
 
 **DAG run reconciliation**:
-The re-entrant entry behavior of `/run-issue-workflow <Spec-ID>` or an unambiguous no-argument resume that rebuilds one run's current state from the Spec, any **Decomposition publication record**, tracker history, Git ancestry, registered worktrees, and Codex task evidence. It recognizes valid manual progress, resumes partial closeout, skips **DAG node success**, and selects only the current dependency-ready unfinished Issues without trusting stale worker or UI state.
+The re-entrant entry behavior of `/run-issue-workflow <Spec-ID>` or an unambiguous no-argument resume that rebuilds one run's current state from the Spec, any **Decomposition publication record**, tracker history, Git ancestry, registered worktrees, and Issue worker evidence. It recognizes valid manual progress, resumes partial closeout, skips **DAG node success**, and selects only the current dependency-ready unfinished Issues without trusting stale worker, host-record, or UI state.
 _Avoid_: Run reset, replay from the first Issue, stale task-status resume
 
 **DAG run selection**:
@@ -289,7 +289,7 @@ The control state that immediately prevents new Issue dispatches and new `close-
 _Avoid_: Forced cancellation, process suspension, UI-only pause
 
 **DAG graceful stop**:
-The terminal control transition that revokes the current **DAG Run Grant**, starts no new execution or closeout, and lets already-dispatched workers settle before the control engine records stopped state and closes its **DAG control bridge**. It never kills workers, removes worktrees or branches, rolls back candidates, or closes unfinished Issues; a later explicit invocation may reconcile the evidence and create a new grant.
+The terminal control transition that revokes the current **DAG Run Grant**, starts no new execution or closeout, and lets already-dispatched workers settle before the **Domain action reducer** records stopped state in the **DAG run journal**. It never kills workers, removes worktrees or branches, rolls back candidates, or closes unfinished Issues; a later explicit invocation may reconcile the evidence and create a new grant.
 _Avoid_: Force abort, repository cleanup, permanent cancellation
 
 **DAG stop diagnosis**:
@@ -304,20 +304,28 @@ _Avoid_: Generic failure, automatic skill rewrite, UI diagnosis
 The rule that a skill-contract gap or control-engine defect keeps affected product execution inactive while a separate scoped, reviewed, and verified workflow change repairs it. Product workers never edit or install their own governing skills or coordinator. Before Run creation, an explicitly selected Spec's already-approved maintenance may proceed under the original human Start authority, independently of the unavailable coordinator. Verified installation returns to fresh **DAG run reconciliation** under that continuing authority; a new human command is needed only when authorization no longer covers continuation.
 _Avoid_: Self-modifying run, product-worktree skill repair, silent coordinator patch
 
-**Codex-native coordinator**:
-The active Codex task that owns DAG reduction and uses Codex-native task create, read, wait, and message capabilities to dispatch and observe the child Codex tasks explicitly authorized by one **DAG Run Grant**. It does not require Orca or a Codex App Server client in v1; re-entry reconstructs state through **DAG run reconciliation** instead of treating the coordinator task's memory as durable authority.
-_Avoid_: Orca runtime, standalone Node task client, UI task list as scheduler
+**Delivery workflow host**:
+The pi-workflow run that owns one **DAG Run**'s scheduling, durable task records, and Issue worker lifecycle, dispatching and observing only the workers explicitly authorized by that Run's **DAG Run Grant**. It never decides authority, scope, retries, budgets, close eligibility, or stop classification, and **DAG run reconciliation** rebuilds state from owning sources rather than treating the host record as authority.
+_Avoid_: Codex-native coordinator, Orca runtime, standalone Node task client, host record as authority
 
-**Coordinator liveness boundary**:
-The v1 rule that automatic scheduling and closeout exist only while the **Codex-native coordinator** task is actively running. If that task or the Codex app execution disappears, no new Issue is dispatched or closed; already-created child Codex tasks may settle, but their evidence is adopted only by a later explicit `/run-issue-workflow <Spec-ID>` reconciliation. Independent execution after coordinator loss requires a future Codex App Server design.
-_Avoid_: Hidden daemon authority, panel-owned execution, assumed background continuation
+**Domain action reducer**:
+The single deterministic owner of a **DAG Run**'s legal actions, computed from reconciled tracker, Git, worktree, completion, and journal evidence. The **Delivery workflow host** materializes only the actions this reducer returns and never invents, reorders, or reclassifies them.
+_Avoid_: Host-side scheduler policy, model-decided dispatch, duplicated action planning
 
-**Codex Issue lane**:
-The one-to-one binding between an executable Issue and one sidebar-visible child Codex task running in the saved project's local environment. The child invokes `execute-issue`, which alone creates or reuses the dedicated **Issue worktree** and performs every product edit, verification, and candidate commit there; the shared checkout remains read-only except for ordinary worktree registration. A transient retry reuses the same child task when reachable, and a replacement requires proof that the prior task cannot continue plus a journaled supersession link.
-_Avoid_: Codex-managed nested worktree, product edits in shared checkout, duplicate Issue task
+**Host liveness boundary**:
+The rule that automatic scheduling and closeout exist only while the **Delivery workflow host** run is active. A stopped or lost host dispatches and closes nothing; already-dispatched workers may settle, and their evidence is adopted only by a later explicit `/run-issue-workflow <Spec-ID>` reconciliation.
+_Avoid_: Hidden daemon authority, assumed background continuation, host-record-owned progress
+
+**Delivery substrate cutover**:
+The migration rule that every non-terminal **DAG Run** reaches terminal state on the retired Codex-native host before any Run starts on the **Delivery workflow host**. The two substrates never schedule one repository concurrently, and the authority journal stays readable throughout.
+_Avoid_: Parallel substrates, mid-Run substrate switch, forced Run abandonment
+
+**Issue lane**:
+The one-to-one binding between an executable Issue and one isolated Issue worker with its dedicated **Issue worktree**. The worker invokes `execute-issue`, which alone creates or reuses that worktree and performs every product edit, verification, and candidate commit there; the shared checkout remains read-only except for ordinary worktree registration. A transient retry reuses the same lane when reachable, and a replacement requires proof that the prior worker cannot continue plus a journaled supersession link.
+_Avoid_: Codex Issue lane, Codex-managed nested worktree, product edits in shared checkout, duplicate Issue lane
 
 **Workflow evidence ownership**:
-The rule that each workflow fact is decided only by its owning source: tracker and decomposition evidence for scope and blockers, completion notes for Issue-to-candidate review evidence, Git and worktree state for integration and cleanup, Codex task lifecycle evidence for dispatch liveness, and the control engine for grants and controls. Cross-source contradiction pauses the run; no source wins outside its domain, and UI state owns no fact.
+The rule that each workflow fact is decided only by its owning source: tracker and decomposition evidence for scope and blockers, completion notes for Issue-to-candidate review evidence, Git and worktree state for integration and cleanup, Issue worker lifecycle evidence for dispatch liveness, and the **Domain action reducer** for grants and controls. Cross-source contradiction pauses the run; no source wins outside its domain, and UI state owns no fact.
 _Avoid_: Global source priority, last-write-wins, panel authority
 
 **Bounded environment remediation**:
@@ -332,25 +340,29 @@ _Avoid_: Workaround loop, hidden retry, successful wrapper means successful buil
 The fail-closed suspension of new dispatch and closeout when current tracker evidence cannot be read. The engine makes three health/read probes after 5, 15, and 30 seconds without consuming the **DAG retry budget**; recovery triggers full evidence reconciliation, while continued failure yields run-level `BLOCKED` with reason `tracker_unavailable`. Already-running workers may settle local work, but no candidate becomes authoritative `IMPLEMENTATION_COMPLETE` and no new close step starts without tracker read-back.
 _Avoid_: Cached tracker authority, worker retry, offline Issue close
 
-**DAG control panel**:
-The Codex browser-panel projection of one **DAG Run**'s authoritative status and named Pause, Resume, Stop, and Refresh controls. It renders DAG progress, child Codex task state, close progress, and **DAG stop diagnosis** records through the **DAG control bridge** but never starts a Run or owns workflow state, scheduling authority, or failure classification.
-_Avoid_: Workflow source of truth, scheduler, permanent sidebar
+**Delivery status projection**:
+The read-only **Delivery workflow host** board and status view of one **DAG Run**'s scheduling state, Issue worker state, close progress, and **DAG stop diagnosis** records. It never starts a Run or owns workflow state, scheduling authority, or failure classification.
+_Avoid_: DAG control panel, workflow source of truth, scheduler, permanent sidebar
 
-**DAG control bridge**:
-The active control engine's ephemeral `127.0.0.1` HTTP interface, protected by one random per-run control token and limited to status plus named Pause, Resume, Stop, and Refresh commands. It exposes no Start authority, arbitrary shell execution, persistent database, or remote listener.
-_Avoid_: Public API, daemon database, command console
+**Operator control intent**:
+The durable, journaled Pause, Resume, or Stop request carrying one control request identity and expected next Run revision. The **Domain action reducer** reads the current intent before returning further legal actions, so recovery inspects the exact journaled control and never replays an uncertain mutation.
+_Avoid_: DAG control bridge, UI-only control, replayed control mutation
+
+**Emergency host interrupt**:
+The host-level stop that interrupts active Issue workers without letting them settle. It is not an **Operator control intent**, bypasses the cooperative contract, and is recorded separately from a **DAG graceful stop**.
+_Avoid_: Cooperative pause, graceful stop, silent worker kill
 
 **DAG run journal**:
-The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single control-engine writer. It records only engine-owned grants, control revisions, Codex task dispatch-attempt references, **Issue execution budget** evidence, bounded-remediation records, closeout-wait observations, and pause or stop transitions; tracker, Git, worktree, and Codex task facts remain references to their owning sources and are re-read during reconciliation. The per-run control token is never written to the journal.
-_Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint
+The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single domain authority writer. It records only authority facts: grants, control revisions, dispatch-attempt references, **Issue execution budget** evidence, bounded-remediation records, closeout-wait observations, and pause or stop transitions. Scheduling facts remain owned by the **Delivery workflow host** run record; tracker, Git, worktree, and worker facts remain references to their owning sources and are re-read during reconciliation.
+_Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint, scheduler record as authority
 
 **DAG status snapshot**:
-The atomically replaced, versioned `status.json` projection derived from one **DAG run journal** plus current authoritative evidence for the **DAG control panel**. It is disposable and rebuildable, owns no workflow fact, and never contains the per-run control token.
+The disposable **Delivery workflow host** run-status projection of one **DAG Run**'s scheduling state. It owns no workflow fact, carries no per-run control token, and is rebuildable from the host run record and the **DAG run journal**.
 _Avoid_: Resume authority, append-only audit record, UI-owned state
 
 **DAG run-state cleanup**:
-An auditable startup retention sweep that may remove eligible terminal-run journals and snapshots from `${git-common-dir}/matt-workflow-control/runs/`. A Run is eligible only when it is `SUCCEEDED` or `STOPPED`, is older than 30 days, and is outside the newest ten terminal Runs; uncertain engine-lock or active Codex task evidence makes it ineligible. Each deletion is first recorded in append-only `cleanup.jsonl`, while `--cleanup-preview` reports the same selection without deleting. It never deletes an active, pausing, paused, blocked, or stopping Run, and it never touches tracker history, branches, worktrees, candidates, or product files.
-_Avoid_: Automatic active-run deletion, repository cleanup, tracker-history retention
+An auditable startup retention sweep that may remove eligible terminal-run journals and snapshots from `${git-common-dir}/matt-workflow-control/runs/`. A Run is eligible only when it is `SUCCEEDED` or `STOPPED`, is older than 30 days, and is outside the newest ten terminal Runs; uncertain authority-writer or active-worker evidence makes it ineligible. Each deletion is first recorded in append-only `cleanup.jsonl`, while `--cleanup-preview` reports the same selection without deleting. It never deletes an active, pausing, paused, blocked, or stopping Run, and it never touches tracker history, branches, worktrees, candidates, or product files. **Delivery workflow host** run-record retention stays separate and is owned by that host.
+_Avoid_: Automatic active-run deletion, repository cleanup, tracker-history retention, host retention as audit authority
 
 **Workflow interface**:
 The user-visible skills and explicit handoffs that represent distinct human-owned authority transitions in the development flow. A user invokes `close-issue` with an Issue ID; `close-issue` resolves the tracker state and local identities before calling its internal module. Interface size is judged by the decisions the human must own, not by skill count or Markdown length.
