@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readPlanningBaseline } from "../../../engineering/to-spec/scripts/planning-entry.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
-import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint, deriveSpecReservationOperationIdentity } from "./workflow-operation-identity.mjs";
+import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint, deriveSpecReservationOperationIdentity } from "./delivery-authority.mjs";
 import { connectGitLabProducer, conflict, digest, gitRead, withProducerLock } from "./gitlab-producer-transport.mjs";
 import { mutateOnce, readMutation } from "./gitlab-producer-mutations.mjs";
 import { createGitPlanningSeal } from "./git-planning-seal.mjs";

@@ -9,7 +9,7 @@ import {
   TASK_OUTCOME_RECEIPT_SCHEMA,
   createTaskOutcomeReceipt,
   validateTaskOutcomeReceipt,
-} from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+} from "../../skills/personal/run-issue-workflow/scripts/journal-event-schema.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
 const input = {

@@ -1,4 +1,4 @@
-import { deriveExecuteIssueOperationIdentity } from "./workflow-operation-identity.mjs";
+import { deriveExecuteIssueOperationIdentity } from "./delivery-authority.mjs";
 
 const actions = new Set(["workflow-install", "task-create", "task-message", "local-close", "tracker-write"]);
 const key = value => JSON.stringify([value.action, value.scope]);

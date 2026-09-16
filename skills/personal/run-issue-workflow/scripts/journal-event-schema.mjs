@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 
+// The DAG run journal owns these delivery-evidence payload schemas. Host producers, readers and
+// projections import the schema from this authority-owned module, so no authority decision depends
+// on Codex-host transport, task-lifecycle or presentation code.
+
 export const TASK_OUTCOME_RECEIPT_SCHEMA = "workflow-task-outcome:v1";
 export const NATIVE_OBSERVATION_SCHEMA = "codex-native-observation:v1";
 export const MAX_TASK_OUTCOME_RECEIPT_BYTES = 16 * 1024;
@@ -60,7 +64,7 @@ const requireText = (value, label, maximum = 512) => {
   }
 };
 const requireInstantOrNull = (value, label) => {
-  if (value !== null && (!isoInstant.test(value) || new Date(value).toISOString() !== value)) {
+  if (value !== null && !isCanonicalInstant(value)) {
     throw new TypeError(`${label} must be a canonical ISO instant or null`);
   }
 };
@@ -71,6 +75,8 @@ const canonicalize = value => Array.isArray(value) ? value.map(canonicalize)
   : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]))
     : value;
 const digest = value => `sha256:${createHash("sha256").update(JSON.stringify(canonicalize(value))).digest("hex")}`;
+
+export const isCanonicalInstant = value => isoInstant.test(value) && new Date(value).toISOString() === value;
 
 export const encodedBytes = value => Buffer.byteLength(JSON.stringify(value), "utf8");
 
@@ -288,4 +294,56 @@ export function responseBudgetError({ operation, locator, encodedResponseBytes, 
   error.encodedResponseBytes = encodedResponseBytes;
   error.maxEncodedResponseBytes = maxEncodedResponseBytes;
   return error;
+}
+
+export const DELIVERY_PROGRESS_EVENT = "delivery.observed";
+export const DELIVERY_STAGES = Object.freeze([
+  "COMPLETION_PUBLISHED",
+  "NATIVE_TERMINAL_OBSERVED",
+  "EVIDENCE_VALIDATED",
+  "CLOSE_ELIGIBLE",
+  "CLOSE_INELIGIBLE",
+  "CLOSE_DISPATCH_INTENT",
+  "NATIVE_CLOSE_ACCEPTED",
+  "REPOSITORY_CLOSE_ACQUIRED",
+  "TARGET_WRITER_ACQUIRED",
+  "CLOSE_COMPLETED",
+  "PROGRESS_DIAGNOSED",
+]);
+
+const deliveryProgressFields = new Set([
+  "type", "at", "issueId", "operationId", "stage", "disposition", "sourceAt",
+  "owner", "evidenceIdentity", "requestIdentity", "blockingPredicate",
+]);
+const stageDispositions = Object.freeze({
+  COMPLETION_PUBLISHED: "OBSERVED",
+  NATIVE_TERMINAL_OBSERVED: "OBSERVED",
+  EVIDENCE_VALIDATED: "OBSERVED",
+  CLOSE_ELIGIBLE: "ELIGIBLE",
+  CLOSE_INELIGIBLE: "BLOCKED",
+  CLOSE_DISPATCH_INTENT: "INTENT_RECORDED",
+  NATIVE_CLOSE_ACCEPTED: "ACCEPTED",
+  REPOSITORY_CLOSE_ACQUIRED: "ACQUIRED",
+  TARGET_WRITER_ACQUIRED: "ACQUIRED",
+  CLOSE_COMPLETED: "COMPLETED",
+  PROGRESS_DIAGNOSED: "DIAGNOSED",
+});
+const boundedProgressText = value => typeof value === "string" && value.length > 0 && value.length <= 1024;
+
+export const DELIVERY_PROGRESS_FIELDS = Object.freeze([...deliveryProgressFields]);
+
+export function validateDeliveryProgress(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)
+    || Object.keys(event).some(field => !deliveryProgressFields.has(field))
+    || [...deliveryProgressFields].some(field => !Object.hasOwn(event, field))) throw new TypeError("Delivery progress fields are malformed");
+  if (event.type !== DELIVERY_PROGRESS_EVENT || !boundedProgressText(event.issueId) || !operationIdentity.test(event.operationId)
+    || !DELIVERY_STAGES.includes(event.stage) || event.disposition !== stageDispositions[event.stage]
+    || !isCanonicalInstant(event.at) || !isCanonicalInstant(event.sourceAt) || !boundedProgressText(event.owner)
+    || event.evidenceIdentity !== null && !boundedProgressText(event.evidenceIdentity)
+    || event.requestIdentity !== null && !boundedProgressText(event.requestIdentity)
+    || event.blockingPredicate !== null && !boundedProgressText(event.blockingPredicate)
+    || ["CLOSE_INELIGIBLE", "PROGRESS_DIAGNOSED"].includes(event.stage) !== (event.blockingPredicate !== null)) {
+    throw new TypeError("Delivery progress identity, stage, disposition, or time is malformed");
+  }
+  return event;
 }

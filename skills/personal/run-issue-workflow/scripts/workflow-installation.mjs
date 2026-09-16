@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
-import { validateWorkflowVersion } from "./run-journal.mjs";
+import { validateWorkflowVersion } from "./delivery-authority.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");

@@ -1,5 +1,4 @@
 import { maintainLeaseHealth, readLeaseHealth } from "./lease-health.mjs";
-import { validateFrozenModelDecision } from "./issue-model-policy.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -16,17 +15,19 @@ import {
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { reduceRun, STATUS_SCHEMA } from "./run-core.mjs";
 import {
   EVENT_SCHEMA,
-  normalizeEventDraft,
   RUN_EVENT_TYPES,
+  STATUS_SCHEMA,
+  normalizeEventDraft,
+  reduceRun,
   requireIsoInstant,
   validateEventDraft,
   validateEventSemantics,
+  validateFrozenModelDecision,
   validateJournal,
-} from "./run-journal.mjs";
-import { validateStaleOwnerProof } from "./run-stale-proof.mjs";
+  validateStaleOwnerProof,
+} from "./delivery-authority.mjs";
 
 export { EVENT_SCHEMA, RUN_EVENT_TYPES };
 export const CLEANUP_SCHEMA = "dag-run-cleanup:v1";

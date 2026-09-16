@@ -12,8 +12,6 @@ import {
   deriveExecuteIssueOperationIdentity,
   deriveRunOperationIdentity,
   planCloseContinuation,
-  recoveryDigest,
-  validateJournal,
 } from "./delivery-authority.mjs";
 import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 import { createWorkflowRuntime } from "./run-workflow.mjs";
@@ -21,6 +19,8 @@ import { bodyDigest } from "./github-workflow-records.mjs";
 import { recoverPendingHostCleanup } from "../../../engineering/close-issue/scripts/pending-host-cleanup.mjs";
 import { verifyIntegratedCandidate } from "../../../engineering/close-issue/scripts/merge-candidate.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
+
+export { assessRecoveryCompatibility } from "./delivery-authority.mjs";
 
 export const supportsCompletedRunReentry = true;
 
@@ -159,44 +159,6 @@ export function createCodexHostCleanupOwner({
         }),
     });
   };
-}
-
-export function assessRecoveryCompatibility({ journal, taskIntents }) {
-  try {
-    validateJournal(journal);
-    const grant = journal.find((event) => event.type === "grant.recorded");
-    if (!grant) throw new Error("Recorded Grant is missing");
-    for (const intent of taskIntents) {
-      if (
-        intent.runId !== grant.runIdentity.runId ||
-        typeof intent.issueId !== "string" ||
-        typeof intent.prompt !== "string"
-      )
-        throw new Error("Original native task intent is malformed or foreign");
-    }
-    // The current reducers retain legacy dispatch/conflict records and require explicit ownership
-    // transfers for new recovery. Parsing the exact journal exercises both semantic contracts.
-    return {
-      compatible: true,
-      contract: "isolated-technical-recovery:v1",
-      journalIdentity: recoveryDigest(journal),
-      taskIntentIdentity: recoveryDigest(taskIntents),
-      preserves: [
-        "original-grant",
-        "operation",
-        "legacy-receipts",
-        "task-intents",
-        "cumulative-budget",
-        "exclusive-writer",
-      ],
-    };
-  } catch (error) {
-    return {
-      compatible: false,
-      reason: error.message,
-      nextOwner: "workflow-maintenance",
-    };
-  }
 }
 
 export async function prepareCodexWorkflow({

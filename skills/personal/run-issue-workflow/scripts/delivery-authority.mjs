@@ -1,69 +1,75 @@
-// This is the trusted bundle-local boundary for deterministic delivery authority.
-// Hosts may read evidence and materialize returned actions, but never reimplement these decisions.
-export const AUTHORITY_SURFACE = Object.freeze([
-  "run-identity-and-grant",
-  "operation-identity",
-  "approved-scope-and-decomposition",
-  "issue-execution-and-dispatch-budgets",
-  "material-repair-budget-and-model-policy",
-  "closeout-authority-and-writer-serialization",
-  "cooperative-pause-graceful-stop-and-diagnosis",
-]);
+// The trusted bundle-local entry for deterministic delivery authority. A workflow bundle imports
+// this module; the host may read evidence and materialize returned actions, but never reimplement
+// these decisions. Every module reachable from here is authority code, not host transport,
+// task-lifecycle, or presentation code.
+export const AUTHORITY_SURFACE = Object.freeze({
+  "run-identity-and-grant": [
+    "reduceRunReadyHandoff",
+    "reduceRun",
+    "planControl",
+    "createRunAuthorityAdapters",
+    "validateJournal",
+  ],
+  "operation-identity": [
+    "deriveWorkflowOperationIdentity",
+    "deriveRunOperationIdentity",
+    "deriveExecuteIssueOperationIdentity",
+    "deriveCloseIssueOperationIdentity",
+    "deriveToSpecPublicationOperationIdentity",
+    "deriveToTicketsOperationIdentity",
+    "deriveAggregateVerificationOperationIdentity",
+    "deriveSpecReservationOperationIdentity",
+    "bindProducerCheckpointOperationIdentity",
+    "assertWorkflowOperationIdentity",
+  ],
+  "approved-scope-and-decomposition": [
+    "createRunAuthorityAdapters",
+    "deriveWorkflowOperationIdentity",
+  ],
+  "issue-execution-and-dispatch-budgets": [
+    "createIssueExecutionBudgetController",
+    "summarizeIssueExecutionBudget",
+    "ISSUE_EXECUTION_LIMIT_MS",
+    "DEFAULT_MAX_PARALLEL",
+  ],
+  "material-repair-budget-and-model-policy": [
+    "nextRepairWave",
+    "nextMaintenanceWave",
+    "readRepairWaveCount",
+    "readModelRepairBaseline",
+    "modelDecisionInput",
+    "validateModelPolicy",
+    "validateFrozenModelDecision",
+    "automaticUpgrade",
+    "routeTechnicalRecovery",
+  ],
+  "closeout-authority-and-writer-serialization": [
+    "validateCloseAuthorityEvidence",
+    "createCloseWaitEvidence",
+    "createTargetWriterWaitEvidence",
+    "validateTargetWriterWaitEvidence",
+    "planCloseContinuation",
+    "completedCloseCleanup",
+  ],
+  "cooperative-pause-graceful-stop-and-diagnosis": [
+    "planControl",
+    "createRecoverableOperatorPacket",
+    "reduceRun",
+    "REASON_CODES",
+    "assessRecoveryCompatibility",
+  ],
+});
 
-export { createRunAuthorityAdapters } from "./run-authority-adapters.mjs";
-export {
-  reduceRunReadyHandoff,
-  createRecoverableOperatorPacket,
-  reduceRun,
-  planControl,
-} from "./run-core.mjs";
-export {
-  deriveWorkflowOperationIdentity,
-  deriveToSpecPublicationOperationIdentity,
-  deriveToTicketsOperationIdentity,
-  deriveRunOperationIdentity,
-  deriveExecuteIssueOperationIdentity,
-  deriveCloseIssueOperationIdentity,
-  deriveAggregateVerificationOperationIdentity,
-  deriveSpecReservationOperationIdentity,
-  bindProducerCheckpointOperationIdentity,
-  createProducerOperationCheckpoint,
-  assertWorkflowOperationIdentity,
-} from "./workflow-operation-identity.mjs";
-export { createIssueExecutionBudgetController } from "./issue-execution-budget.mjs";
-export {
-  modelDecisionInput,
-  validateModelPolicy,
-  validateModelDecision,
-  validateFrozenModelDecision,
-  automaticUpgrade,
-} from "./issue-model-policy.mjs";
-export {
-  recoveryDigest,
-  bindTechnicalFailure,
-  routeTechnicalRecovery,
-  nextRepairWave,
-  readRepairProgress,
-  readRepairWaveCount,
-  validateExecutionResolution,
-  validateVerificationResolution,
-} from "./recovery-evidence.mjs";
-export { readModelRepairBaseline } from "./model-repair-evidence.mjs";
-export {
-  validateJournal,
-  summarizeIssueExecutionBudget,
-  DEFAULT_MAX_PARALLEL,
-  ISSUE_EXECUTION_LIMIT_MS,
-} from "./run-journal.mjs";
-export {
-  validateCloseAuthorityEvidence,
-  createCloseWaitEvidence,
-  createTargetWriterWaitEvidence,
-  validateTargetWriterWaitEvidence,
-} from "./run-target-writer-wait.mjs";
-export { validateStaleOwnerProof, isExactStaleOwnerProof } from "./run-stale-proof.mjs";
-export {
-  completedCloseCleanup,
-  planCloseContinuation,
-  closeContinuationSuffix,
-} from "./close-continuation.mjs";
+export * from "./run-authority-adapters.mjs";
+export * from "./run-core.mjs";
+export * from "./workflow-operation-identity.mjs";
+export * from "./issue-execution-budget.mjs";
+export * from "./issue-model-policy.mjs";
+export * from "./recovery-evidence.mjs";
+export * from "./model-repair-evidence.mjs";
+export * from "./recovery-compatibility.mjs";
+export * from "./run-journal.mjs";
+export * from "./run-target-writer-wait.mjs";
+export * from "./run-stale-proof.mjs";
+export * from "./close-continuation.mjs";
+export * from "./journal-event-schema.mjs";

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { CONTROL_COMMANDS, STATUS_SCHEMA } from "./run-core.mjs";
+import { CONTROL_COMMANDS, STATUS_SCHEMA } from "./delivery-authority.mjs";
 
 const template = readFileSync(new URL("./run-panel.html", import.meta.url), "utf8");
 

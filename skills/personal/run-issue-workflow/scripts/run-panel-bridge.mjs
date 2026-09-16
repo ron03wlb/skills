@@ -1,7 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
-import { planControl, STATUS_SCHEMA } from "./run-core.mjs";
+import { planControl, STATUS_SCHEMA } from "./delivery-authority.mjs";
 import { renderRunPanel, statusDigest } from "./run-panel.mjs";
 
 const LOOPBACK_HOST = "127.0.0.1";

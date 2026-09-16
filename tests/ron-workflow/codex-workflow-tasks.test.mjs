@@ -9,7 +9,7 @@ import { createCodexCloseReceipts, createCodexMessageReceipts } from "../../skil
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { modelDecisionInput, ISSUE_MODEL_POLICY_VERSION } from "../../skills/personal/run-issue-workflow/scripts/issue-model-policy.mjs";
 import { planCloseContinuation } from "../../skills/personal/run-issue-workflow/scripts/close-continuation.mjs";
-import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/journal-event-schema.mjs";
 import { deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 const readOpenIssueState = async issueId => ({ issueId, state: "OPEN" });
 const closeAuthority = candidate => ({

@@ -19,7 +19,7 @@ import { RUN_READY_FACT_SCHEMA } from "../../skills/personal/run-issue-workflow/
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
 import { bindTechnicalFailure } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
-import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+import { createTaskOutcomeReceipt } from "../../skills/personal/run-issue-workflow/scripts/journal-event-schema.mjs";
 
 const createStoreFixture = () => {
   const root = mkdtempSync(join(tmpdir(), "dag-coordinator-"));

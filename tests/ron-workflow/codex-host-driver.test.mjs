@@ -6,7 +6,7 @@ import test from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { PassThrough } from "node:stream";
 import { createCodexHostBridge } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
-import { validateNativeObservationEnvelope } from "../../skills/personal/run-issue-workflow/scripts/task-outcome-receipt.mjs";
+import { validateNativeObservationEnvelope } from "../../skills/personal/run-issue-workflow/scripts/journal-event-schema.mjs";
 
 const source = readFileSync(new URL("../../skills/personal/run-issue-workflow/scripts/codex-host-driver.js", import.meta.url), "utf8");
 const api = runInNewContext(source);

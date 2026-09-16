@@ -3,7 +3,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { createRunStore } from "./run-store.mjs";
 import { assertWorkflowOperationIdentity, bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint,
-  deriveExecuteIssueOperationIdentity } from "./workflow-operation-identity.mjs";
+  deriveExecuteIssueOperationIdentity } from "./delivery-authority.mjs";
 import { connectGitLabProducer, conflict, digest, gitRead, withProducerLock } from "./gitlab-producer-transport.mjs";
 import { mutateOnce, readMutation } from "./gitlab-producer-mutations.mjs";
 

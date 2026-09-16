@@ -1,8 +1,7 @@
 import { validateCloseWaitEvidence } from "./run-target-writer-wait.mjs";
 import { validateRecoveryIntent, sameRecoveryTask, nextRepairWave, nextMaintenanceWave } from "./recovery-evidence.mjs";
 import { validateModelPolicy, validateModelSetting } from "./issue-model-policy.mjs";
-import { validateTaskOutcomeReceipt } from "./task-outcome-receipt.mjs";
-import { validateDeliveryProgress } from "./delivery-progress.mjs";
+import { validateDeliveryProgress, validateTaskOutcomeReceipt } from "./journal-event-schema.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
 export const DEFAULT_MAX_PARALLEL = 3;

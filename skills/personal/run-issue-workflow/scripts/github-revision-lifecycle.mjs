@@ -1,5 +1,5 @@
 import { bodyDigest } from "./github-workflow-records.mjs";
-import { assertWorkflowOperationIdentity, deriveExecuteIssueOperationIdentity } from "./workflow-operation-identity.mjs";
+import { assertWorkflowOperationIdentity, deriveExecuteIssueOperationIdentity } from "./delivery-authority.mjs";
 
 const one = (items, label) => {
   if (items.length !== 1) throw new Error(`${label}: expected one exact record`);

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { planCloseContinuation } from "./close-continuation.mjs";
+import { planCloseContinuation } from "./delivery-authority.mjs";
 import { createAutomaticHostCleanupPacket } from "./github-workflow-sources.mjs";
 import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 

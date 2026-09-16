@@ -15,7 +15,7 @@ import { selectWorkflowVersion } from "./workflow-installation.mjs";
 import { runBatch } from "./run-batch.mjs";
 import { createRunStore } from "./run-store.mjs";
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
-import { deriveRunOperationIdentity } from "./workflow-operation-identity.mjs";
+import { deriveRunOperationIdentity } from "./delivery-authority.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
 
 const packageRoot = resolve(

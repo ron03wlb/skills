@@ -12,44 +12,39 @@ import {
   assessBootstrapHandoff,
   readManualAttestation,
 } from "./run-preparation.mjs";
-import { reduceRun, reduceRunReadyHandoff } from "./run-core.mjs";
+import {
+  assertWorkflowOperationIdentity,
+  automaticUpgrade,
+  bindProducerCheckpointOperationIdentity,
+  bindTechnicalFailure,
+  creationUnavailable,
+  deriveExecuteIssueOperationIdentity,
+  deriveRunOperationIdentity,
+  modelDecisionInput,
+  modelEvidenceDigest,
+  planCloseContinuation,
+  readMaintenanceProgress,
+  readModelRepairBaseline,
+  readRepairProgress,
+  readRepairWaveCount,
+  reduceRun,
+  reduceRunReadyHandoff,
+  sameRecoveryTask,
+  validateExecutionResolution,
+  validateMaintenanceResult,
+  validateRepairCompletion,
+  validateRepairYield,
+  validateVerificationResolution,
+} from "./delivery-authority.mjs";
 import {
   bodyDigest,
   readWorkflowRecords,
   legacyCompletionAllowed,
 } from "./github-workflow-records.mjs";
-import {
-  bindProducerCheckpointOperationIdentity,
-  deriveRunOperationIdentity,
-  deriveExecuteIssueOperationIdentity,
-  assertWorkflowOperationIdentity,
-} from "./workflow-operation-identity.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
 import { selectRevisionLifecycle } from "./github-revision-lifecycle.mjs";
-import { planCloseContinuation } from "./close-continuation.mjs";
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
-import {
-  bindTechnicalFailure,
-  validateRepairCompletion,
-  validateMaintenanceResult,
-  validateVerificationResolution,
-  validateExecutionResolution,
-  sameRecoveryTask,
-  readRepairProgress,
-  readRepairWaveCount,
-  readMaintenanceProgress,
-} from "./recovery-evidence.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
-import {
-  modelDecisionInput,
-  modelEvidenceDigest,
-  automaticUpgrade,
-  creationUnavailable,
-} from "./issue-model-policy.mjs";
-import {
-  validateRepairYield,
-  readModelRepairBaseline,
-} from "./model-repair-evidence.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
 
 const authorityConflict = (message) =>
