@@ -4,10 +4,13 @@
 // a bundle loads the authority surface without the host boundary. The journal event schemas for
 // host-produced delivery evidence are owned here because the journal stores and validates that
 // evidence, while its producers stay in the host boundary.
-// AUTHORITY_SURFACE records which authority modules decide each semantic the delivery contract lists.
-// These are joint facts, so a row names every authority module that decides it; host store primitives
-// that only persist a decision are not listed. The tests assert that each named module is reachable
-// from this entry's closure and that no other production module imports an authority module directly.
+// AUTHORITY_SURFACE records, per semantic the delivery contract lists, the authority modules this entry
+// exposes as that semantic's owners. A row is a claim about ownership, not an exhaustive list of every
+// module that participates: host store primitives that only persist a decision are excluded, and a
+// module that exists only to define journalled event payload shape is not tied to one listed semantic.
+// This entry's closure is the authoritative list of modules a bundle loads.
+// The tests assert that each named module exists, that this entry reaches it, that the closure is exactly
+// the intended authority modules, and that no other production module imports one directly.
 export const AUTHORITY_SURFACE = Object.freeze({
   "run-identity-and-grant": ["run-core.mjs", "run-journal.mjs"],
   "operation-identity": ["workflow-operation-identity.mjs"],

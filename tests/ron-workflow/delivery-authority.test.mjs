@@ -43,7 +43,7 @@ const authorityClosure = () => {
     if (visited.has(file)) continue;
     visited.add(file);
     for (const next of relativeImports(file)) {
-      if (next.endsWith(".mjs")) pending.push(next);
+      if (next.endsWith(".mjs") || next.endsWith(".js")) pending.push(next);
     }
   }
   return visited;
