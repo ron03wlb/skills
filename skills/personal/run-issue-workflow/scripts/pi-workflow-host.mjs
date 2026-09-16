@@ -21,6 +21,7 @@ import {
   RUN_SUPERSEDED_REASONS,
   STATUS_SCHEMA,
   reduceRun,
+  requireIsoInstant,
 } from "./delivery-authority.mjs";
 import { createRunStore } from "./run-store.mjs";
 
@@ -35,6 +36,7 @@ export const HOST_RUN_STATES = Object.freeze([
   "INTERRUPTED",
   "STOPPED",
   "SUCCEEDED",
+  "UNKNOWN",
 ]);
 export const HOST_RUN_DYNAMIC_DISPOSITIONS = Object.freeze([
   "REPLAYABLE",
@@ -89,17 +91,16 @@ export const HOST_ACTION_POLICY = Object.freeze({
   upgrade_issue: Object.freeze({ kind: "agent", skill: "execute-issue", agent: HOST_LANE_AGENT, tools: ISSUE_LANE_TOOLS }),
   close_issue: Object.freeze({ kind: "agent", skill: "close-issue", agent: HOST_LANE_AGENT, tools: ISSUE_LANE_TOOLS }),
   close_parent: Object.freeze({ kind: "agent", skill: "close-issue", agent: HOST_LANE_AGENT, tools: ISSUE_LANE_TOOLS }),
-  remediate_environment: Object.freeze({ kind: "host", operation: "remediate_environment" }),
-  reconcile_run: Object.freeze({ kind: "host", operation: "reconcile_run", tools: HOST_OBSERVATION_TOOLS }),
-  wait_repository_close_lease: Object.freeze({ kind: "host", operation: "wait_repository_close_lease" }),
-  wait_target_writer: Object.freeze({ kind: "host", operation: "wait_target_writer" }),
-  settle_pause: Object.freeze({ kind: "host", operation: "settle_pause" }),
-  settle_stop: Object.freeze({ kind: "host", operation: "settle_stop" }),
+  remediate_environment: Object.freeze({ kind: "host", operation: "remediate_environment", execution: "delegated" }),
+  reconcile_run: Object.freeze({ kind: "host", operation: "reconcile_run", execution: "delegated", tools: HOST_OBSERVATION_TOOLS }),
+  wait_repository_close_lease: Object.freeze({ kind: "host", operation: "wait_repository_close_lease", execution: "wait" }),
+  wait_target_writer: Object.freeze({ kind: "host", operation: "wait_target_writer", execution: "wait" }),
+  settle_pause: Object.freeze({ kind: "host", operation: "settle_pause", execution: "settle" }),
+  settle_stop: Object.freeze({ kind: "host", operation: "settle_stop", execution: "settle" }),
 });
 
 const HOST_RUN_STATE_SET = new Set(HOST_RUN_STATES);
 const DISPATCH_LIMIT = 3;
-const isoInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isText = (value) => typeof value === "string" && value.length > 0;
 const canonical = (value) => {
@@ -114,13 +115,10 @@ const requireText = (value, label) => {
   if (!isText(value)) throw new TypeError(`${label} is required`);
   return value;
 };
-const requireIsoInstant = (value, label) => {
-  if (typeof value !== "string" || !isoInstantPattern.test(value)
-    || Number.isNaN(Date.parse(value)) || new Date(value).toISOString() !== value) {
-    throw new TypeError(`${label} must be one canonical ISO instant`);
-  }
-  return value;
-};
+const CONTROL_SETTLEMENTS = Object.freeze({
+  settle_pause: Object.freeze({ command: "PAUSE", event: "pause.transitioned" }),
+  settle_stop: Object.freeze({ command: "STOP", event: "stop.transitioned" }),
+});
 const requireGitObject = (value, label) => {
   if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value ?? "")) {
     throw new TypeError(`${label} must be one exact Git object identity`);
@@ -203,6 +201,15 @@ const materialization = (action) => {
       actionType: action.type,
       issueId: isText(action.issueId) ? action.issueId : null,
       operation: policy.operation,
+      execution: policy.execution,
+      // A close wait is the reducer's bound, not the host's: carry its exact owner and timeout through
+      // instead of letting the host choose either.
+      ...(action.type.startsWith("wait_") ? {
+        owner: { ...action.owner },
+        timeoutMs: action.timeoutMs,
+        preWaitEvidence: action.preWaitEvidence,
+      } : {}),
+      ...(action.type.startsWith("settle_") ? { revision: action.revision } : {}),
       ...(policy.tools === undefined ? {} : { tools: [...policy.tools] }),
     });
   }
@@ -301,6 +308,14 @@ export function planHostActions(status, { journal } = {}) {
     materializations.push(item);
   }
 
+  const invalidWait = materializations.find((item) => item.kind === "host" && item.execution === "wait"
+    && (!Number.isInteger(item.timeoutMs) || item.timeoutMs < 1));
+  if (invalidWait) {
+    return plan("BLOCKED", [], stopFor(
+      HOST_STOP_CODES.unsupportedAction,
+      [`Host operation ${invalidWait.id} arrived without the reducer's own bounded wait.`],
+    ));
+  }
   const attempts = dispatchAttemptsByIssue(journal);
   for (const item of materializations) {
     if (item.actionType !== "dispatch_issue") continue;
@@ -475,6 +490,44 @@ export function convergeBlockedRun({ facts, hostRun, at } = {}) {
   });
 }
 
+// A cooperative Pause or Stop settlement is a domain-owned journal transition. The host may only
+// append it when the journal's latest control revision still authorizes exactly that command.
+export function hostControlSettlement(action, journal, at) {
+  if (!isRecord(action) || !CONTROL_SETTLEMENTS[action.type]) {
+    throw new TypeError("Only a settle_pause or settle_stop action has a host control settlement");
+  }
+  const { command, event: eventType } = CONTROL_SETTLEMENTS[action.type];
+  const events = Array.isArray(journal) ? journal : [];
+  const latest = events.findLast((event) => event?.type === "control.revised" && event.command === command);
+  if (!latest || latest.revision !== action.revision) {
+    return {
+      stop: stopFor(HOST_STOP_CODES.unsupportedAction, [
+        `Control settlement ${action.type} at revision ${action.revision} is not authorized by the journal's latest ${command} revision ${latest?.revision ?? "none"}.`,
+      ]),
+      event: null,
+    };
+  }
+  if (events.some((event) => event?.type === eventType && event.revision === action.revision)) {
+    return { stop: null, event: null, revision: action.revision };
+  }
+  requireIsoInstant(at, "Control settlement timestamp");
+  return { stop: null, revision: action.revision, event: { type: eventType, at, revision: action.revision } };
+}
+
+// Every authority-journal append the host performs goes through the single journal writer.
+export function recordHostAuthorityEvent({ gitCommonDir, runId, event } = {}) {
+  requireText(gitCommonDir, "authority journal common directory");
+  requireText(runId, "authority journal Run id");
+  if (!isRecord(event) || !isText(event.type)) throw new TypeError("A host authority event needs its type");
+  const store = createRunStore({ gitCommonDir });
+  const writer = store.acquireWriter(runId);
+  try {
+    return writer.append(event);
+  } finally {
+    writer.release();
+  }
+}
+
 // The supersession link is an authority fact: it proves that the superseding host run did not
 // re-dispatch an attempt the blocked host run already owned. The authority journal keeps it, and its
 // single writer stays the only append path.
@@ -491,11 +544,5 @@ export function recordHostRunSupersession({ gitCommonDir, runId, event } = {}) {
     || !event.evidence.every((item) => isText(item))) {
     throw new TypeError("Host Run supersession requires exact evidence");
   }
-  const store = createRunStore({ gitCommonDir });
-  const writer = store.acquireWriter(runId);
-  try {
-    return writer.append({ ...event, evidence: [...event.evidence] });
-  } finally {
-    writer.release();
-  }
+  return recordHostAuthorityEvent({ gitCommonDir, runId, event: { ...event, evidence: [...event.evidence] } });
 }

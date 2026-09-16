@@ -3,19 +3,20 @@
 // This is transport, not authority. It reads one reconciled round from the workflow's runtime task,
 // asks the domain half (`scripts/pi-workflow-host.mjs`, reached through the bundle-local authority
 // entry) what the Domain action reducer authorizes, and materializes exactly that as official workflow
-// tasks. It never invents, reorders, or reclassifies an action, and it fails closed — returning a
-// blocked control with no generated work — whenever the domain half refuses the round.
+// tasks and domain-owned host steps. It never invents, reorders, or reclassifies an action, and it fails
+// closed — returning a blocked control with no generated work — whenever the domain half refuses the
+// round.
 import {
-  HOST_STOP_CODES,
   assertReissueOrder,
   convergeBlockedRun,
+  hostControlSettlement,
   planHostRound,
+  recordHostAuthorityEvent,
   recordHostRunSupersession,
 } from "../../../scripts/pi-workflow-host.mjs";
 import { parseRoundInput } from "./round-input.mjs";
 
-const WAIT_OPERATIONS = new Set(["wait_repository_close_lease", "wait_target_writer"]);
-const HOST_OPERATION_LIMIT_MS = 30_000;
+const boundedWait = (ms) => new Promise((resolve) => { setTimeout(resolve, Math.max(0, ms)); });
 
 const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
   control: {
@@ -32,20 +33,19 @@ const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
   refs: [],
 });
 
-const boundedWait = (ms) => new Promise((resolve) => { setTimeout(resolve, Math.max(0, ms)); });
+const journalUnavailable = (input, code, evidence) => (
+  input.gitCommonDir === null ? blockedControl({ input, code, evidence }) : null
+);
 
 export default async function controller(ctx) {
   const input = parseRoundInput(ctx.task);
   ctx.log("delivery host round", { runId: input.facts.run.runId, specId: input.facts.run.specId });
   const round = planHostRound({ facts: input.facts });
+  const at = input.at ?? new Date().toISOString();
 
   let convergence = null;
   if (input.blockedHostRun !== null) {
-    convergence = convergeBlockedRun({
-      facts: input.facts,
-      hostRun: input.blockedHostRun,
-      at: input.at ?? new Date().toISOString(),
-    });
+    convergence = convergeBlockedRun({ facts: input.facts, hostRun: input.blockedHostRun, at });
     ctx.log("blocked host run convergence", {
       hostRunId: convergence.hostRunId,
       decision: convergence.decision,
@@ -56,14 +56,12 @@ export default async function controller(ctx) {
     }
     if (convergence.decision === "NEW_RUN") {
       // The superseding host run is journaled before it dispatches anything, so the blocked run's
-      // recorded attempts can never be dispatched twice.
-      if (input.gitCommonDir === null) {
-        return blockedControl({
-          input,
-          code: "supersession_journal_unavailable",
-          evidence: ["A superseding host run needs the authority journal common directory."],
-        });
-      }
+      // recorded attempts can never be dispatched twice. The control projection carries only the
+      // journal locator; the authority journal owns the superseded host run identity.
+      const unavailable = journalUnavailable(input, "supersession_journal_unavailable", [
+        "A superseding host run needs the authority journal common directory.",
+      ]);
+      if (unavailable) return unavailable;
       const recorded = recordHostRunSupersession({
         gitCommonDir: input.gitCommonDir,
         runId: input.facts.run.runId,
@@ -77,7 +75,6 @@ export default async function controller(ctx) {
           runId: input.facts.run.runId,
           specId: input.facts.run.specId,
           target: input.facts.run.target,
-          supersededHostRunId: convergence.supersession.supersededRunId,
           supersessionSequence: recorded.sequence,
           generatedTaskIds: [],
         },
@@ -87,14 +84,14 @@ export default async function controller(ctx) {
     }
   }
 
-  if (round.stop && (!convergence || convergence.decision !== "CONTINUE_SAME_RUN")) {
+  if (round.stop && convergence?.decision !== "CONTINUE_SAME_RUN") {
     return blockedControl({ input, code: round.stop.code, evidence: round.stop.evidence });
   }
-  const recorded = input.recorded;
-  const replayStop = assertReissueOrder(round, recorded);
+  const replayStop = assertReissueOrder(round, input.recorded);
   if (replayStop) return blockedControl({ input, code: replayStop.code, evidence: replayStop.evidence });
 
   const generated = [];
+  const pending = [];
   for (const item of round.materializations) {
     if (item.kind === "agent") {
       const settled = await ctx.agent({
@@ -106,25 +103,40 @@ export default async function controller(ctx) {
       generated.push({ id: item.id, actionType: item.actionType, issueId: item.issueId, settled: typeof settled === "object" });
       continue;
     }
-    if (WAIT_OPERATIONS.has(item.operation)) {
-      // A domain close wait is a host-side bounded observation: it consumes no generated agent and no
-      // concurrency slot, and its settlement is read back from the owning sources on the next round.
-      await boundedWait(HOST_OPERATION_LIMIT_MS);
-      generated.push({ id: item.id, actionType: item.actionType, issueId: item.issueId, waited: true });
+    if (item.execution === "wait") {
+      // A domain close wait is a host-side bounded observation that consumes no generated agent and no
+      // concurrency slot. Its duration is the reducer's, never the host's.
+      await boundedWait(item.timeoutMs);
+      generated.push({ id: item.id, actionType: item.actionType, issueId: item.issueId, waited: true, timeoutMs: item.timeoutMs });
       continue;
     }
-    // Any other host-side settlement belongs to a later acceptance stage. Refusing it visibly is
-    // fail-closed; silently skipping it would let the reducer's round look settled when it is not.
-    return blockedControl({
-      input,
-      code: HOST_STOP_CODES.unsupportedAction,
-      evidence: [`Host operation ${item.operation} has no acceptance step in this bundle revision.`],
-    });
+    if (item.execution === "settle") {
+      const settlement = hostControlSettlement({ type: item.actionType, revision: item.revision }, input.facts.journal, at);
+      if (settlement.stop) return blockedControl({ input, code: settlement.stop.code, evidence: settlement.stop.evidence });
+      if (settlement.event === null) {
+        generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision });
+        continue;
+      }
+      const unavailable = journalUnavailable(input, "control_settlement_journal_unavailable", [
+        "A cooperative control settlement needs the authority journal common directory.",
+      ]);
+      if (unavailable) return unavailable;
+      const recorded = recordHostAuthorityEvent({
+        gitCommonDir: input.gitCommonDir,
+        runId: input.facts.run.runId,
+        event: settlement.event,
+      });
+      generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision, sequence: recorded.sequence });
+      continue;
+    }
+    // The bundle cannot perform this host step itself, so it hands the exact reducer operation back to
+    // the single reconciliation entry instead of skipping it or inventing an adapter for it.
+    pending.push({ id: item.id, actionType: item.actionType, operation: item.operation, issueId: item.issueId });
   }
 
   return {
     control: {
-      status: round.disposition === "DISPATCH" ? "dispatched" : round.disposition.toLowerCase(),
+      status: pending.length > 0 ? "awaiting_entry" : round.disposition === "DISPATCH" ? "dispatched" : round.disposition.toLowerCase(),
       decision: convergence?.decision ?? "PLAN",
       runId: round.runId,
       specId: round.specId,
@@ -133,6 +145,7 @@ export default async function controller(ctx) {
       authorizedActions: round.authorizedActions,
       generatedTaskIds: generated.map((item) => item.id),
       generated,
+      pendingOperations: pending,
     },
     analysis: `Reduced Run ${round.runId} to ${round.materializations.length} materialization(s) in disposition ${round.disposition}: ${round.authorizedActions.join(", ") || "none"}.`,
     refs: [],

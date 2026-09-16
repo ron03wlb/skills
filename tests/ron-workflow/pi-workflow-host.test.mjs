@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -7,7 +7,6 @@ import test from "node:test";
 import {
   HOST_ACTION_POLICY,
   HOST_LANE_AGENT,
-  HOST_PLAN_SCHEMA,
   HOST_STOP_CODES,
   HOST_TOOL_CEILING,
   LANE_SKILLS,
@@ -15,8 +14,10 @@ import {
   assertReissueOrder,
   convergeBlockedRun,
   hostActionIdentity,
+  hostControlSettlement,
   planHostActions,
   planHostRound,
+  recordHostAuthorityEvent,
   recordHostRunSupersession,
 } from "../../skills/personal/run-issue-workflow/scripts/pi-workflow-host.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -26,6 +27,11 @@ import {
   parseRoundInput,
   recordedFromRunRecord,
 } from "../../skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/helpers/round-input.mjs";
+import {
+  blockedHostRunFor,
+  readHostRuns,
+  selectBlockedHostRun,
+} from "../../skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/helpers/host-runs.mjs";
 
 const bundle = resolve(
   import.meta.dirname,
@@ -206,7 +212,10 @@ test("a host wait and the reconcile action are host operations, not generated wo
   const status = {
     schema: "dag-run-status:v1",
     run: { runId: "run-12", specId: "12", target: "features/ron", state: "RECONCILING", controlRevision: 0 },
-    legalActions: [{ type: "reconcile_run" }, { type: "wait_repository_close_lease", issueId: "13", owner: { operationId: "close-op-1" } }],
+    legalActions: [
+      { type: "reconcile_run" },
+      { type: "wait_repository_close_lease", issueId: "13", owner: { operationId: "close-op-1" }, timeoutMs: 30_000 },
+    ],
     diagnoses: [],
   };
   const reconcile = planHostActions(status, { journal: [grant] });
@@ -216,7 +225,89 @@ test("a host wait and the reconcile action are host operations, not generated wo
     ["host", "wait_repository_close_lease"],
   ]);
   assert.deepEqual(reconcile.materializations[0].tools, ["read", "ls"]);
-  assert.equal(reconcile.materializations[1].tools, undefined);
+  assert.equal(reconcile.materializations[0].execution, "delegated");
+  assert.equal(reconcile.materializations[1].execution, "wait");
+  assert.equal(reconcile.materializations[1].timeoutMs, 30_000);
+});
+
+test("a close wait carries the reducer's own bound, never a host-chosen one", () => {
+  const status = {
+    schema: "dag-run-status:v1",
+    run: { runId: "run-12", specId: "12", target: "features/ron", state: "WAITING_FOR_REPOSITORY_CLOSE_LEASE", controlRevision: 0 },
+    legalActions: [{
+      type: "wait_repository_close_lease",
+      issueId: "13",
+      owner: { operationId: "close-op-1", coordinatorInstanceId: "engine-1", generation: "g1" },
+      timeoutMs: 30_000,
+      preWaitEvidence: { schema: "close-wait-evidence:v1" },
+    }],
+    diagnoses: [],
+  };
+  const wait = planHostActions(status, { journal: [grant] }).materializations[0];
+  assert.equal(wait.execution, "wait");
+  assert.equal(wait.timeoutMs, 30_000);
+  assert.deepEqual(wait.owner, { operationId: "close-op-1", coordinatorInstanceId: "engine-1", generation: "g1" });
+
+  const unbounded = planHostActions({
+    ...status,
+    legalActions: [{ ...status.legalActions[0], timeoutMs: undefined }],
+  }, { journal: [grant] });
+  assert.equal(unbounded.stop.code, HOST_STOP_CODES.unsupportedAction);
+  assert.deepEqual(unbounded.materializations, []);
+});
+
+test("a cooperative pause settlement is a domain-owned journal transition", () => {
+  const control = {
+    schema: "dag-run-event:v1",
+    sequence: 2,
+    type: "control.revised",
+    at: "2026-09-16T00:02:00.000Z",
+    revision: 1,
+    command: "PAUSE",
+  };
+  const journal = [{ ...grant, sequence: 1 }, control];
+  const settlement = hostControlSettlement({ type: "settle_pause", revision: 1 }, journal, "2026-09-16T00:03:00.000Z");
+  assert.equal(settlement.stop, null);
+  assert.deepEqual(settlement.event, { type: "pause.transitioned", at: "2026-09-16T00:03:00.000Z", revision: 1 });
+
+  const unauthorized = hostControlSettlement({ type: "settle_stop", revision: 1 }, journal, "2026-09-16T00:03:00.000Z");
+  assert.equal(unauthorized.stop.code, HOST_STOP_CODES.unsupportedAction);
+  assert.equal(unauthorized.event, null);
+
+  const alreadySettled = hostControlSettlement({ type: "settle_pause", revision: 1 }, [
+    ...journal,
+    { ...settlement.event, sequence: 3 },
+  ], "2026-09-16T00:04:00.000Z");
+  assert.equal(alreadySettled.event, null);
+  assert.equal(alreadySettled.revision, 1);
+});
+
+test("the host appends a settlement through the single authority-journal writer", () => {
+  const gitCommonDir = mkdtempSync(join(tmpdir(), "piwf-host-settle-"));
+  try {
+    const store = createRunStore({ gitCommonDir });
+    const writer = store.acquireWriter("run-12");
+    try {
+      writer.append(grantDraft());
+      writer.append({
+        type: "control.revised",
+        at: "2026-09-16T00:02:00.000Z",
+        revision: 1,
+        command: "PAUSE",
+      });
+    } finally {
+      writer.release();
+    }
+    const settlement = hostControlSettlement({ type: "settle_pause", revision: 1 }, [
+      { ...grant, sequence: 1 },
+      { type: "control.revised", at: "2026-09-16T00:02:00.000Z", revision: 1, command: "PAUSE" },
+    ], "2026-09-16T00:03:00.000Z");
+    const recorded = recordHostAuthorityEvent({ gitCommonDir, runId: "run-12", event: settlement.event });
+    assert.equal(recorded.type, "pause.transitioned");
+    assert.equal(recorded.sequence, 3);
+  } finally {
+    rmSync(gitCommonDir, { recursive: true, force: true });
+  }
 });
 
 test("dispatch attempts are refused unless the journal accounts for the previous attempt", () => {
@@ -426,6 +517,7 @@ test("the controller journals a superseding host run without dispatching", async
     assert.equal(result.control.status, "superseded");
     assert.equal(result.control.decision, "NEW_RUN");
     assert.equal(result.control.supersessionSequence, 2);
+    assert.equal(Object.hasOwn(result.control, "supersededHostRunId"), false);
   } finally {
     rmSync(gitCommonDir, { recursive: true, force: true });
   }
@@ -465,6 +557,68 @@ test("recorded host operations are read back from the run record in order", () =
     { id: "close_13", requestIdentity: null, outcome: "recorded" },
   ]);
   assert.deepEqual(recordedFromRunRecord({}, "delivery"), []);
+});
+
+test("the bundle hands a host step it cannot perform back to the entry", async () => {
+  const calls = [];
+  const result = await controller(fakeContext(calls, JSON.stringify({
+    facts: { ...facts([node("13")]), run: { ...facts([node("13")]).run, reconciled: false } },
+  })));
+  assert.deepEqual(calls, []);
+  assert.equal(result.control.status, "awaiting_entry");
+  assert.deepEqual(result.control.pendingOperations.map((item) => item.operation), ["reconcile_run"]);
+});
+
+test("the entry reads one blocked host run back for the exact Spec and target", () => {
+  const root = mkdtempSync(join(tmpdir(), "piwf-host-runs-"));
+  const write = (runId, record) => {
+    mkdirSync(join(root, ".pi", "workflows", runId), { recursive: true });
+    writeFileSync(join(root, ".pi", "workflows", runId, "run.json"), JSON.stringify(record));
+  };
+  try {
+    write("workflow_a", {
+      id: "workflow_a",
+      status: "failed",
+      task: JSON.stringify({ facts: facts([node("13")]) }),
+      tasks: [{ specId: "delivery.dispatch_13_1", status: "completed" }],
+    });
+    write("workflow_b", {
+      id: "workflow_b",
+      status: "completed",
+      task: JSON.stringify({ facts: facts([node("13")]) }),
+      tasks: [],
+    });
+    write("workflow_c", {
+      id: "workflow_c",
+      status: "running",
+      task: JSON.stringify({ facts: { ...facts([node("13")]), run: { ...facts([node("13")]).run, specId: "99" } } }),
+      tasks: [],
+    });
+
+    const runs = readHostRuns({ workflowRoot: join(root, ".pi", "workflows") });
+    assert.deepEqual(runs.map((run) => run.runId).sort(), ["workflow_a", "workflow_b", "workflow_c"]);
+
+    const selected = blockedHostRunFor({ cwd: root, specId: "12", target: "features/ron" });
+    assert.equal(selected.schema, "pi-workflow-host-run-readback:v1");
+    assert.equal(selected.status, "SELECTED");
+    assert.deepEqual(selected.hostRun, {
+      runId: "workflow_a",
+      state: "FAILED",
+      dynamicDisposition: "DIVERGED",
+      generatedTaskIds: ["delivery.dispatch_13_1"],
+    });
+
+    assert.equal(blockedHostRunFor({ cwd: root, specId: "nope", target: "features/ron" }).status, "NONE");
+    const ambiguous = selectBlockedHostRun(
+      [...runs, { ...runs[0], runId: "workflow_d" }],
+      { specId: "12", target: "features/ron" },
+    );
+    assert.equal(ambiguous.status, "AMBIGUOUS");
+    assert.deepEqual(ambiguous.runIds, ["workflow_a", "workflow_d"]);
+    assert.equal(ambiguous.hostRun, undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("the bundle keeps every declared reference bundle-local and declares its ceiling", () => {
