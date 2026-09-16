@@ -64,18 +64,24 @@ export function parseRoundInput(text, {
     if (readBack.status === "AMBIGUOUS") {
       refuse(`more than one host run matches this Spec and target: ${readBack.runIds.join(", ")}`);
     }
-    blockedHostRun = readBack.status === "SELECTED" ? readBack.hostRun : null;
-    if (readBack.status === "SELECTED" && Array.isArray(source.recorded)
-      && source.recorded.length === 0 && (readBack.recorded ?? []).length > 0) {
-      // An explicit empty list beside a read-back would silently disable the no-duplicate-dispatch
-      // proof, so it is refused instead of obeyed.
-      refuse("an explicit empty recorded list would discard the read-back's recorded host operations");
+    if (readBack.status === "SELECTED") {
+      blockedHostRun = readBack.hostRun;
+      if (Array.isArray(source.recorded) && source.recorded.length === 0 && (readBack.recorded ?? []).length > 0) {
+        // An explicit empty list beside a read-back would silently disable the
+        // no-duplicate-dispatch proof, so it is refused instead of obeyed.
+        refuse("an explicit empty recorded list would discard the read-back's recorded host operations");
+      }
+      if (source.recorded === undefined) {
+        // Reading a host run back is only reconciliation if the recorded operations it already owns
+        // come with it; otherwise the re-issue proof has nothing to prove against.
+        roundRecorded = readBack.recorded ?? [];
+      }
     }
-    if (readBack.status === "SELECTED" && source.recorded === undefined) {
-      // Reading a host run back is only reconciliation if the recorded operations it already owns come
-      // with it; otherwise the re-issue proof has nothing to prove against.
-      roundRecorded = readBack.recorded ?? [];
-    }
+  }
+  if (blockedHostRun !== null && source.recorded === undefined && roundRecorded.length === 0) {
+    // A caller that names the blocked host run itself must still hand over what it already owns.
+    roundRecorded = (Array.isArray(blockedHostRun.generatedTaskIds) ? blockedHostRun.generatedTaskIds : [])
+      .map((id) => ({ id, requestIdentity: null, outcome: "recorded" }));
   }
   if (blockedHostRun !== null && !isRecord(blockedHostRun)) refuse("blockedHostRun must be one host run record");
   const recorded = source.recorded ?? roundRecorded;

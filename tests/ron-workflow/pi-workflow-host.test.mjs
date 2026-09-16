@@ -721,6 +721,37 @@ test("the controller reads a blocked host run back itself when the round does no
   }
 });
 
+test("an explicitly named blocked host run still hands over what it owns", async () => {
+  const input = facts([node("13", [], { completionState: "BLOCKED", failure: { kind: "implement", evidence: ["blocked"] } })]);
+  const calls = [];
+  const result = await controller(fakeContext(calls, JSON.stringify({
+    facts: input,
+    blockedHostRun: {
+      runId: "host-1",
+      state: "FAILED",
+      dynamicDisposition: "REPLAYABLE",
+      generatedTaskIds: ["delivery.dispatch_13_1"],
+    },
+  })));
+  assert.deepEqual(calls, []);
+  assert.equal(result.control.decision, "CONTINUE_SAME_RUN");
+  // A continued blocked run is idle rather than an unexplained blocked status.
+  assert.equal(result.control.status, "idle");
+  assert.equal(Object.hasOwn(result.control, "stopCode"), false);
+
+  // The derivation is load-bearing: the handed-over attempt is what refuses a duplicate dispatch.
+  const conflicting = await controller(fakeContext([], JSON.stringify({
+    facts: facts([node("13")]),
+    blockedHostRun: {
+      runId: "host-1",
+      state: "FAILED",
+      dynamicDisposition: "REPLAYABLE",
+      generatedTaskIds: ["delivery.dispatch_13_2"],
+    },
+  })));
+  assert.equal(conflicting.control.stopCode, HOST_STOP_CODES.duplicateDispatch);
+});
+
 test("the dispatch-id grammar has one reader", () => {
   assert.deepEqual(parseHostDispatchId("delivery.dispatch_13_2"), { issueId: "13", attempt: 2 });
   assert.equal(parseHostDispatchId("delivery.close_13"), null);

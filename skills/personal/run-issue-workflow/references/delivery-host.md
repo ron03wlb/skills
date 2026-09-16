@@ -85,8 +85,10 @@ A generated task's tools are always a subset of the declared ceiling, and no lan
 from its agent name alone.
 
 An empty action set is not by itself a failure. When the reducer has classified the Run as paused,
-stopping, idle, or terminal it returns no action, and the round reports `idle` or `terminal` and
-dispatches nothing.
+stopping, idle, or terminated it returns no action, and the round reports `idle` or `terminal` and
+dispatches nothing. A Run the reducer classifies `BLOCKED` with no legal action reports `blocked` with
+reason `blocked_run` — unless blocked-run convergence has just decided `CONTINUE_SAME_RUN`, in which
+case the round reports `idle` and the entry resumes the same host run.
 
 The round reports `blocked` and dispatches nothing when the reducer returns a contradictory action set,
 when an action cannot be materialized, when a re-issued operation changed its recorded request shape or

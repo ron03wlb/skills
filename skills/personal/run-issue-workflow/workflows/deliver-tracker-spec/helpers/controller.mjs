@@ -88,6 +88,11 @@ export default async function controller(ctx) {
   if (round.stop && convergence?.decision !== "CONTINUE_SAME_RUN") {
     return blockedControl({ input, code: round.stop.code, evidence: round.stop.evidence });
   }
+  // A blocked Run the domain has just decided to continue is not a stop: this round simply has no
+  // legal action of its own, and the entry resumes the same host run.
+  const disposition = convergence?.decision === "CONTINUE_SAME_RUN" && round.disposition === "BLOCKED"
+    ? "IDLE"
+    : round.disposition;
   // The re-issue proof only governs a round that actually materializes something: an idle or blocked
   // round dispatches nothing, so there is no duplicate to refuse.
   const replayStop = round.materializations.length > 0 ? assertReissueOrder(round, input.recorded) : null;
@@ -165,7 +170,7 @@ export default async function controller(ctx) {
 
   return {
     control: {
-      status: pending.length > 0 ? "awaiting_entry" : round.disposition === "DISPATCH" ? "dispatched" : round.disposition.toLowerCase(),
+      status: pending.length > 0 ? "awaiting_entry" : disposition === "DISPATCH" ? "dispatched" : disposition.toLowerCase(),
       decision: convergence?.decision ?? "PLAN",
       runId: round.runId,
       specId: round.specId,
@@ -176,7 +181,7 @@ export default async function controller(ctx) {
       generated,
       pendingOperations: pending,
     },
-    analysis: `Reduced Run ${round.runId} to ${round.materializations.length} materialization(s) in disposition ${round.disposition}: ${round.authorizedActions.join(", ") || "none"}.`,
+    analysis: `Reduced Run ${round.runId} to ${round.materializations.length} materialization(s) in disposition ${disposition}: ${round.authorizedActions.join(", ") || "none"}.`,
     refs: [],
   };
 }
