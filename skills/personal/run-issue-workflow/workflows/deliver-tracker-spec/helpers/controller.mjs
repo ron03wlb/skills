@@ -26,8 +26,6 @@ import { parseRoundInput } from "./round-input.mjs";
 // The canonical worker definition ships inside this skill package; a delivery repository or user agent
 // root must provide it where pi-workflow resolves generated agent names.
 const CANONICAL_AGENT_SOURCE = new URL("../../../agents/worker.md", import.meta.url).pathname;
-
-const EXECUTION_LANES = new Set(["execute-issue"]);
 const boundedWait = (ms) => new Promise((resolve) => { setTimeout(resolve, Math.max(0, ms)); });
 
 const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
@@ -48,6 +46,12 @@ const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
 const blockedIfJournalUnavailable = (input, code, evidence) => (
   input.gitCommonDir === null ? blockedControl({ input, code, evidence }) : null
 );
+
+const appendAuthority = (input, event) => recordHostAuthorityEvent({
+  gitCommonDir: input.gitCommonDir,
+  runId: input.facts.run.runId,
+  event,
+});
 
 export default async function controller(ctx) {
   const input = parseRoundInput(ctx.task);
@@ -74,11 +78,7 @@ export default async function controller(ctx) {
         "A superseding host run needs the authority journal common directory.",
       ]);
       if (blocked) return blocked;
-      const recorded = recordHostRunSupersession({
-        gitCommonDir: input.gitCommonDir,
-        runId: input.facts.run.runId,
-        event: convergence.journalEvent,
-      });
+      const recorded = appendAuthority(input, convergence.journalEvent);
       return {
         control: {
           status: "superseded",
@@ -101,13 +101,8 @@ export default async function controller(ctx) {
   }
   // A blocked Run the domain has just decided to continue is not a stop: this round simply has no
   // legal action of its own, and the entry resumes the same host run.
-  const disposition = convergence?.decision === "CONTINUE_SAME_RUN" && round.disposition === "BLOCKED"
-    ? "IDLE"
-    : round.disposition;
-  // The re-issue proof only governs a round that actually materializes something: an idle or blocked
-  // round dispatches nothing, so there is no duplicate to refuse.
-  const replayStop = round.materializations.length > 0 ? assertReissueOrder(round, input.recorded) : null;
-  if (replayStop) return blockedControl({ input, code: replayStop.code, evidence: replayStop.evidence });
+  const continued = convergence?.decision === "CONTINUE_SAME_RUN" && round.disposition === "BLOCKED";
+  const disposition = continued ? "IDLE" : round.disposition;
 
   const laneAgent = round.materializations.some((item) => item.kind === "agent")
     ? resolveLaneAgent({
@@ -120,13 +115,51 @@ export default async function controller(ctx) {
     return blockedControl({ input, code: laneAgent.stop.code, evidence: laneAgent.stop.evidence });
   }
 
+  // Phase 1 — decide, in plan order, what each lane may do. Nothing is dispatched here.
+  const steps = [];
+  const lanes = new Map();
+  for (const item of round.materializations) {
+    if (item.kind !== "agent") {
+      steps.push({ item, kind: "host" });
+      continue;
+    }
+    const creationIntent = input.lanes.creationIntents.find((intent) => (
+      intent?.runId === input.facts.run.runId && intent?.issueId === item.issueId
+    )) ?? null;
+    const lane = planIssueLane({
+      runId: input.facts.run.runId,
+      issueId: item.issueId,
+      attempt: item.attempt ?? 1,
+      observed: input.lanes.observed,
+      creationIntent,
+      nextLaneRef: item.id,
+      at,
+    });
+    if (lane.stop !== null) {
+      return blockedControl({ input, code: lane.stop.code, evidence: lane.stop.evidence });
+    }
+    const toolsStop = assertLaneTools({ tools: item.tools, agentCeiling: laneAgent.ceiling });
+    if (toolsStop !== null) return blockedControl({ input, code: toolsStop.code, evidence: toolsStop.evidence });
+    const promptStop = assertLanePromptScope({ prompt: item.prompt, skill: item.skill });
+    if (promptStop !== null) return blockedControl({ input, code: promptStop.code, evidence: promptStop.evidence });
+    lanes.set(item.id, lane);
+    steps.push({ item, kind: "lane", lane });
+  }
+
+  // Phase 2 — the re-issue proof governs only the lanes this round will actually materialize. An
+  // observed lane, or a lane the host run resumes, dispatches nothing new here.
+  const materialized = steps.filter(({ kind, lane }) => kind === "lane" && ["CREATE", "REUSE", "REPLACE"].includes(lane.decision));
+  if (materialized.length > 0) {
+    const replayStop = assertReissueOrder(round, input.recorded, new Set(materialized.map(({ item }) => item.id)));
+    if (replayStop) return blockedControl({ input, code: replayStop.code, evidence: replayStop.evidence });
+  }
+
+  // Phase 3 — materialize.
   const generated = [];
-  const observed = [];
+  const observedLanes = [];
+  const resumedLanes = [];
   const pending = [];
   let batch = [];
-  const enqueue = (item, extra = {}) => {
-    batch.push({ ...item, ...extra });
-  };
   const flush = async () => {
     if (batch.length === 0) return;
     const queued = batch;
@@ -134,24 +167,25 @@ export default async function controller(ctx) {
     // Generated lanes are issued through `ctx.parallel` so the declared host concurrency is what
     // actually bounds them, while the runtime records every sibling generation in plan order.
     const settled = await ctx.parallel(queued.map((entry) => () => ctx.agent({
-      id: entry.id,
-      agent: entry.agent,
-      tools: entry.tools,
-      prompt: entry.prompt,
+      id: entry.item.id,
+      agent: entry.item.agent,
+      tools: entry.item.tools,
+      prompt: entry.item.prompt,
     })));
     for (const [index, entry] of queued.entries()) {
       generated.push({
-        id: entry.id,
-        actionType: entry.actionType,
-        issueId: entry.issueId,
-        laneDecision: entry.laneDecision ?? null,
+        id: entry.item.id,
+        actionType: entry.item.actionType,
+        issueId: entry.item.issueId,
+        laneDecision: entry.lane.decision,
         settled: typeof settled?.[index] === "object",
       });
     }
   };
 
-  for (const item of round.materializations) {
-    if (item.kind !== "agent") {
+  for (const step of steps) {
+    const { item } = step;
+    if (step.kind === "host") {
       await flush();
       if (item.execution === "wait") {
         // A domain close wait is a host-side bounded observation that consumes no generated agent and
@@ -172,17 +206,13 @@ export default async function controller(ctx) {
         if (settlement.stop) return blockedControl({ input, code: settlement.stop.code, evidence: settlement.stop.evidence });
         if (settlement.event === null) {
           generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision });
-            continue;
+          continue;
         }
         const blocked = blockedIfJournalUnavailable(input, "control_settlement_journal_unavailable", [
           "A cooperative control settlement needs the authority journal common directory.",
         ]);
         if (blocked) return blocked;
-        const recorded = recordHostAuthorityEvent({
-          gitCommonDir: input.gitCommonDir,
-          runId: input.facts.run.runId,
-          event: settlement.event,
-        });
+        const recorded = appendAuthority(input, settlement.event);
         generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision, sequence: recorded.sequence });
         continue;
       }
@@ -192,64 +222,70 @@ export default async function controller(ctx) {
       continue;
     }
 
-    // One Issue, one lane. The decision is the lane module's, never this controller's.
-    const creationIntent = input.lanes.creationIntents.find((intent) => (
-      intent?.runId === input.facts.run.runId && intent?.issueId === item.issueId
-    )) ?? null;
-    const lane = planIssueLane({
-      runId: input.facts.run.runId,
-      issueId: item.issueId,
-      attempt: item.attempt ?? 1,
-      observed: input.lanes.observed,
-      creationIntent,
-      nextLaneRef: item.id,
-      at,
-    });
-    if (lane.stop !== null) {
-      return blockedControl({ input, code: lane.stop.code, evidence: lane.stop.evidence });
-    }
+    const { lane } = step;
     if (lane.decision === "OBSERVE") {
-      observed.push({ id: item.id, issueId: item.issueId, laneRef: lane.laneRef });
+      observedLanes.push({ id: item.id, issueId: item.issueId, laneRef: lane.laneRef });
+      continue;
+    }
+    if (lane.decision === "RESUME") {
+      // The transient retry is accounted in the authority journal, then the same recorded lane is
+      // resumed. No new worker is created for this Issue.
+      await flush();
+      const blocked = blockedIfJournalUnavailable(input, "lane_resume_journal_unavailable", [
+        "A transient lane retry needs the authority journal common directory.",
+      ]);
+      if (blocked) return blocked;
+      appendAuthority(input, lane.retry);
+      const recorded = appendAuthority(input, lane.dispatch);
+      resumedLanes.push({ issueId: item.issueId, laneRef: lane.laneRef, attempt: lane.dispatch.attempt, sequence: recorded.sequence });
       continue;
     }
     if (lane.decision === "REPLACE") {
-      // The replacement's supersession link is written to the authority journal before the replacement
-      // lane exists, so no replacement is ever unproven.
+      // The replacement's supersession link is written before the replacement lane exists, so no
+      // replacement is ever unproven.
+      await flush();
       const blocked = blockedIfJournalUnavailable(input, "lane_supersession_journal_unavailable", [
         "A replacement lane needs the authority journal common directory.",
       ]);
       if (blocked) return blocked;
-      recordHostAuthorityEvent({ gitCommonDir: input.gitCommonDir, runId: input.facts.run.runId, event: lane.supersession });
+      appendAuthority(input, lane.supersession);
     }
-    const toolsStop = assertLaneTools({ tools: item.tools, agentCeiling: laneAgent.ceiling });
-    if (toolsStop !== null) return blockedControl({ input, code: toolsStop.code, evidence: toolsStop.evidence });
-    const promptStop = assertLanePromptScope({ prompt: item.prompt, skill: item.skill });
-    if (promptStop !== null) return blockedControl({ input, code: promptStop.code, evidence: promptStop.evidence });
     const attempt = item.attempt ?? 1;
     const recordedBefore = input.facts.journal.some((event) => (
       event?.type === "dispatch.recorded" && event.issueId === item.issueId && event.attempt === attempt
     ));
-    if (!recordedBefore) {
-      // A brand-new lane reserves its creation intent in the authority journal before native
-      // delivery, so a lost response can never become a second lane and no attempt goes uncounted.
+    if (!recordedBefore && item.skill === "execute-issue") {
+      // A new implementation lane reserves its dispatch attempt in the authority journal before
+      // native delivery, so a lost response can never become a second lane and no attempt goes
+      // uncounted. A close lane owns close authority, not a dispatch attempt.
+      await flush();
       const blocked = blockedIfJournalUnavailable(input, "lane_dispatch_journal_unavailable", [
         "A new Issue lane needs the authority journal common directory.",
       ]);
       if (blocked) return blocked;
-      const recorded = recordHostAuthorityEvent({
-        gitCommonDir: input.gitCommonDir,
-        runId: input.facts.run.runId,
-        event: { type: "dispatch.recorded", at, issueId: item.issueId, attempt, taskRef: laneTaskRef(item.id) },
+      const recorded = appendAuthority(input, {
+        type: "dispatch.recorded",
+        at,
+        issueId: item.issueId,
+        attempt,
+        taskRef: laneTaskRef(item.id),
       });
       ctx.log("issue lane reserved", { issueId: item.issueId, attempt, laneRef: item.id, sequence: recorded.sequence });
     }
-    enqueue(item, { laneDecision: lane.decision });
+    batch.push({ item, lane });
   }
   await flush();
 
+  const suspended = resumedLanes.length > 0;
   return {
     control: {
-      status: pending.length > 0 ? "awaiting_entry" : disposition === "DISPATCH" ? "dispatched" : disposition.toLowerCase(),
+      status: pending.length > 0
+        ? "awaiting_entry"
+        : suspended
+          ? "resume_same_run"
+          : disposition === "DISPATCH"
+            ? "dispatched"
+            : disposition.toLowerCase(),
       decision: convergence?.decision ?? "PLAN",
       runId: round.runId,
       specId: round.specId,
@@ -259,7 +295,9 @@ export default async function controller(ctx) {
       laneAgent: laneAgent === null ? null : { name: laneAgent.name, scope: laneAgent.scope, ceiling: [...laneAgent.ceiling] },
       generatedTaskIds: generated.map((item) => item.id),
       generated,
-      observedLanes: observed,
+      observedLanes,
+      resumedLanes,
+      resumeSameHostRun: suspended,
       pendingOperations: pending,
     },
     analysis: `Reduced Run ${round.runId} to ${round.materializations.length} materialization(s) in disposition ${disposition}: ${round.authorizedActions.join(", ") || "none"}.`,

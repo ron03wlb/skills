@@ -12,7 +12,6 @@ import {
   LANE_WORKTREE_POLICY,
   assertLanePromptScope,
   assertLaneTools,
-  laneAgentInstallPath,
   laneTaskRef,
   planIssueLane,
 } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
@@ -200,6 +199,45 @@ test("an attempt behind an existing lane is refused and a resumable lane is reus
   assert.equal(reuse.decision, "REUSE");
 });
 
+test("a transient retry reuses the same reachable lane instead of creating a second one", () => {
+  const decision = planIssueLane({
+    runId,
+    issueId,
+    attempt: 2,
+    observed: [lane({ state: "RESUMABLE", attempt: 1 })],
+    at: "2026-09-16T02:00:00.000Z",
+  });
+  assert.equal(decision.decision, "RESUME");
+  assert.equal(decision.laneRef, "dispatch_13_1");
+  assert.equal(decision.supersession, null);
+  // The new attempt is accounted with replacement null, so the same lane is resumed.
+  assert.deepEqual(decision.retry, {
+    type: "retry.recorded",
+    at: "2026-09-16T02:00:00.000Z",
+    issueId,
+    attempt: 1,
+    reason: "transient_task_failure",
+    priorTaskRef: laneTaskRef("dispatch_13_1"),
+    replacement: null,
+  });
+  assert.deepEqual(decision.dispatch, {
+    type: "dispatch.recorded",
+    at: "2026-09-16T02:00:00.000Z",
+    issueId,
+    attempt: 2,
+    taskRef: laneTaskRef("dispatch_13_1"),
+  });
+
+  const unaligned = planIssueLane({ runId, issueId, attempt: 3, observed: [lane({ state: "RESUMABLE", attempt: 1 })], at: "2026-09-16T02:00:00.000Z" });
+  assert.equal(unaligned.stop.code, LANE_STOP_CODES.attemptUnaligned);
+
+  const noAttempt = planIssueLane({
+    runId, issueId, attempt: 2, at: "2026-09-16T02:00:00.000Z",
+    observed: [{ runId, issueId, laneRef: "dispatch_13_1", state: "RESUMABLE" }],
+  });
+  assert.equal(noAttempt.stop.code, LANE_STOP_CODES.attemptUnaligned);
+});
+
 test("a replacement lane must be a distinct lane", () => {
   const same = planIssueLane({
     runId,
@@ -285,11 +323,6 @@ test("the lane agent resolves only from the roots pi-workflow itself searches", 
     assert.equal(unresolved.stop.code, LANE_STOP_CODES.agentUnresolved);
     assert.ok(unresolved.stop.evidence.some((line) => line.includes(join(missing.homeDir, ".pi", "agent", "agents", "worker.md"))));
     assert.ok(unresolved.stop.evidence.some((line) => line.includes("agents/worker.md")));
-
-    assert.equal(
-      laneAgentInstallPath({ homeDir: "/home/example" }),
-      "/home/example/.pi/agent/agents/worker.md",
-    );
   } finally {
     project.cleanup();
     userOnly.cleanup();
@@ -331,7 +364,6 @@ test("exactly one lane per Issue is materialized per round", () => {
 
 test("every declared lane names a skill, an agent and a managed worktree", () => {
   assert.equal(HOST_LANE_AGENT, LANE_AGENT_NAME);
-  assert.deepEqual(HOST_TOOL_CEILING, LANE_TOOL_CEILING);
   for (const [actionType, policy] of Object.entries(HOST_ACTION_POLICY)) {
     if (policy.kind !== "agent") continue;
     assert.equal(policy.agent, LANE_AGENT_NAME, `${actionType} must use the lane agent`);
@@ -342,7 +374,9 @@ test("every declared lane names a skill, an agent and a managed worktree", () =>
     "../../skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/spec.json",
   ), "utf8"));
   assert.equal(spec.defaults.agent, LANE_AGENT_NAME);
-  assert.equal(spec.defaults.worktreePolicy, "on");
+  assert.deepEqual(spec.defaults.tools, [...LANE_TOOL_CEILING]);
+  assert.equal(spec.defaults.worktreePolicy, LANE_WORKTREE_POLICY);
+  assert.equal(HOST_TOOL_CEILING, LANE_TOOL_CEILING);
 });
 
 test("the controller refuses a lane whose worker agent does not resolve", async () => {
@@ -394,6 +428,43 @@ test("the controller materializes one resolvable lane and observes an active one
     assert.deepEqual(observedCalls, []);
     assert.deepEqual(observed.control.observedLanes.map((item) => item.laneRef), ["dispatch_13_1"]);
     assert.deepEqual(observed.control.generatedTaskIds, []);
+  } finally {
+    project.cleanup();
+    journal.cleanup();
+  }
+});
+
+test("the controller resumes the same lane on a transient retry and accounts both attempts", async () => {
+  const project = laneProject({ project: true });
+  const journal = journalWith(dispatchRecordDraft(1, "dispatch_13_1"));
+  try {
+    const failedNode = {
+      ...readyNode("13"),
+      taskState: "TRANSIENT_FAILURE",
+      failure: { kind: "transient", evidence: ["native launch failed"] },
+    };
+    const calls = [];
+    const result = await controller(fakeContext(calls, JSON.stringify({
+      facts: facts([failedNode], [grant, dispatchDraft(1, "dispatch_13_1")]),
+      cwd: project.directory,
+      homeDir: project.homeDir,
+      gitCommonDir: journal.gitCommonDir,
+      at: "2026-09-16T02:00:00.000Z",
+      lanes: {
+        observed: [{ runId, issueId, laneRef: "dispatch_13_1", attempt: 1, state: "RESUMABLE" }],
+        creationIntents: [],
+      },
+    })));
+    // No second worker is created for the same Issue.
+    assert.deepEqual(calls, []);
+    assert.equal(result.control.status, "resume_same_run");
+    assert.equal(result.control.resumeSameHostRun, true);
+    assert.deepEqual(result.control.resumedLanes, [{ issueId, laneRef: "dispatch_13_1", attempt: 2, sequence: 4 }]);
+    const events = readFileSync(join(journal.gitCommonDir, "matt-workflow-control", "runs", runId, "events.jsonl"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line));
+    assert.deepEqual(events.map((event) => event.type), ["grant.recorded", "dispatch.recorded", "retry.recorded", "dispatch.recorded"]);
+    assert.deepEqual(events[2].replacement, null);
+    assert.deepEqual(events[3].taskRef, laneTaskRef("dispatch_13_1"));
   } finally {
     project.cleanup();
     journal.cleanup();

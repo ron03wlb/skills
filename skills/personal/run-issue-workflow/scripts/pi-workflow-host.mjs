@@ -377,11 +377,16 @@ export function planHostRound({ facts, journal } = {}) {
 // and the host keeps its artifact. What must hold is that every operation the plan *does* re-issue keeps
 // its recorded request shape and recorded order, that a settled operation never recurs, and that no new
 // dispatch bypasses a dispatch attempt the blocked host run still owns unsettled.
-export function assertReissueOrder(plan, recorded) {
+export function assertReissueOrder(plan, recorded, only = null) {
   if (!isRecord(plan) || plan.schema !== HOST_PLAN_SCHEMA) {
     throw new TypeError("Re-issue order is proved against one pi-workflow-host-plan:v1 plan");
   }
   if (!Array.isArray(recorded) || recorded.length === 0) return null;
+  // The proof governs exactly the operations this round will materialize; a lane the host run
+  // observes or resumes dispatches nothing new here.
+  const materializations = only === null
+    ? plan.materializations
+    : plan.materializations.filter((item) => only.has(item.id));
   const entries = recorded.map((entry, index) => {
     if (!isRecord(entry) || !isText(entry.id)) throw new TypeError(`Recorded host operation ${index} needs an id`);
     if (entry.requestIdentity !== undefined && entry.requestIdentity !== null && !isText(entry.requestIdentity)) {
@@ -392,8 +397,8 @@ export function assertReissueOrder(plan, recorded) {
     }
     return { id: uniqueId(entry.id), requestIdentity: entry.requestIdentity ?? null, outcome: entry.outcome ?? "recorded" };
   });
-  const byId = new Map(plan.materializations.map((item) => [item.id, item]));
-  const order = new Map(plan.materializations.map((item, index) => [item.id, index]));
+  const byId = new Map(materializations.map((item) => [item.id, item]));
+  const order = new Map(materializations.map((item, index) => [item.id, index]));
   let lastPosition = -1;
   for (const entry of entries) {
     const item = byId.get(entry.id);
@@ -416,7 +421,7 @@ export function assertReissueOrder(plan, recorded) {
     }
     lastPosition = position;
   }
-  for (const item of plan.materializations) {
+  for (const item of materializations) {
     if (item.actionType !== "dispatch_issue") continue;
     const conflicting = entries.find((entry) => {
       const dispatch = parseHostDispatchId(entry.id);

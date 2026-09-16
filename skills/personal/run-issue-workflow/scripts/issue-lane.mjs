@@ -14,7 +14,8 @@ import { requireIsoInstant } from "./delivery-authority.mjs";
 export const LANE_DECISION_SCHEMA = "pi-workflow-issue-lane-decision:v1";
 export const LANE_STATES = Object.freeze(["ABSENT", "RESUMABLE", "ACTIVE", "INACTIVE", "UNKNOWN"]);
 // The one lane per Issue is one managed worktree per generated worker task, never the shared checkout.
-export const LANE_WORKTREE_POLICY = "MANAGED_PER_TASK";
+// The value is the host's own declared policy, so the spec default and this constant cannot drift.
+export const LANE_WORKTREE_POLICY = "on";
 export const LANE_HOST_ID = "pi-subagents";
 // The one implementation agent every Issue lane uses, and the authoritative tool ceiling the bundle
 // spec declares. A lane selects a subset of this ceiling and never widens it.
@@ -28,7 +29,6 @@ export const LANE_TOOL_CEILING = Object.freeze([
   "edit",
   "write",
 ]);
-export const LANE_OBSERVATION_TOOLS = Object.freeze(["read", "ls"]);
 export const LANE_STOP_CODES = Object.freeze({
   ambiguousLane: "issue_lane_ambiguous",
   attemptAhead: "lane_attempt_ahead",
@@ -36,6 +36,8 @@ export const LANE_STOP_CODES = Object.freeze({
   creationIntentUnresolved: "creation_intent_unresolved",
   replacementWithoutEvidence: "lane_replacement_without_inactive_evidence",
   replacementNotDistinct: "lane_replacement_not_distinct",
+  replacementWithoutPriorAttempt: "lane_replacement_without_prior_attempt",
+  attemptUnaligned: "lane_attempt_unaligned",
   toolOutsideCeiling: "lane_tool_outside_declared_ceiling",
   toolOutsideAgent: "lane_tool_outside_agent_ceiling",
   promptMissingSkill: "lane_prompt_missing_skill",
@@ -139,8 +141,48 @@ export function planIssueLane({ runId, issueId, attempt, observed = [], creation
     // An active lane is observed, never re-dispatched and never replaced.
     return Object.freeze({ ...base, decision: "OBSERVE", laneRef: lane.laneRef, supersession: null, stop: null });
   }
-  if (lane.state === "RESUMABLE" && lane.attempt === attempt) {
-    return Object.freeze({ ...base, decision: "REUSE", laneRef: lane.laneRef, supersession: null, stop: null });
+  if (lane.state === "RESUMABLE") {
+    if (lane.attempt === attempt) {
+      // The same recorded request is re-issued; the host's recorded request hash is the reservation.
+      return Object.freeze({ ...base, decision: "REUSE", laneRef: lane.laneRef, retry: null, dispatch: null, supersession: null, stop: null });
+    }
+    if (lane.attempt === attempt - 1) {
+      // A transient retry reuses the same reachable lane: the new attempt is accounted in the authority
+      // journal with `replacement: null`, and the host run resumes that recorded lane instead of
+      // creating a second worker for the same Issue.
+      const priorTaskRef = laneTaskRef(lane.laneRef);
+      return Object.freeze({
+        ...base,
+        decision: "RESUME",
+        laneRef: lane.laneRef,
+        retry: Object.freeze({
+          type: "retry.recorded",
+          at: instant(at),
+          issueId,
+          attempt: lane.attempt,
+          reason: "transient_task_failure",
+          priorTaskRef,
+          replacement: null,
+        }),
+        dispatch: Object.freeze({
+          type: "dispatch.recorded",
+          at: instant(at),
+          issueId,
+          attempt,
+          taskRef: priorTaskRef,
+        }),
+        supersession: null,
+        stop: null,
+      });
+    }
+    return Object.freeze({
+      ...base,
+      ...laneStop(LANE_STOP_CODES.attemptUnaligned, [
+        lane.attempt === 0
+          ? `Lane ${lane.laneRef} reports no attempt, so its retry reuse cannot be accounted.`
+          : `Lane ${lane.laneRef} at attempt ${lane.attempt} cannot account planned attempt ${attempt}.`,
+      ]),
+    });
   }
   if (lane.state === "INACTIVE") {
     if (lane.inactiveEvidence === null) {
@@ -153,6 +195,15 @@ export function planIssueLane({ runId, issueId, attempt, observed = [], creation
     }
     // The replacement ref is the exact lane the host will materialize, so the journal's authorized
     // taskRef and the created lane can never differ.
+    const priorAttempt = lane.attempt >= 1 ? lane.attempt : attempt - 1;
+    if (priorAttempt < 1) {
+      return Object.freeze({
+        ...base,
+        ...laneStop(LANE_STOP_CODES.replacementWithoutPriorAttempt, [
+          `Lane ${lane.laneRef} proves neither a prior attempt nor one to supersede.`,
+        ]),
+      });
+    }
     const nextTaskRef = laneTaskRef(isText(nextLaneRef) ? nextLaneRef : `${issueId}-attempt-${attempt}`);
     if (nextTaskRef.threadId === lane.laneRef) {
       // A replacement that reuses the inactive lane's own identity is not a replacement.
@@ -172,11 +223,11 @@ export function planIssueLane({ runId, issueId, attempt, observed = [], creation
         type: "retry.recorded",
         at: instant(at),
         issueId,
-        attempt: Math.max(lane.attempt, attempt - 1),
+        attempt: priorAttempt,
         reason: "prior_lane_inactive",
         priorTaskRef: laneTaskRef(lane.laneRef),
         replacement: Object.freeze({
-          supersedesAttempt: Math.max(lane.attempt, attempt - 1),
+          supersedesAttempt: priorAttempt,
           nextTaskRef,
           inactiveEvidence: [...lane.inactiveEvidence],
         }),
@@ -230,12 +281,3 @@ export function assertLanePromptScope({ prompt, skill } = {}) {
   }
   return null;
 }
-
-// The delivered worker agent definition. pi-workflow resolves a generated agent name only from the
-// project `.pi/agents/`, the user agent root, or its own bundled agents, so an unresolvable lane agent
-// is a fail-closed stop naming the exact path the operator must provision.
-export const laneAgentInstallPath = ({ homeDir, name = LANE_AGENT_NAME } = {}) => {
-  if (!isText(homeDir)) throw new TypeError("Lane agent resolution requires the user home directory");
-  if (!isText(name)) throw new TypeError("Lane agent resolution requires the agent name");
-  return `${homeDir.replace(/[\\/]+$/u, "")}/.pi/agent/agents/${name}.md`;
-};

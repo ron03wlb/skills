@@ -537,12 +537,19 @@ test("the controller dispatches nothing when the round is refused", async () => 
 });
 
 test("the controller refuses a divergent re-issue before generating work", async () => {
-  const calls = [];
-  const result = await controller(fakeContext(calls, taskPayload({
-    recorded: [{ id: "dispatch_13_1", requestIdentity: `sha256:${"b".repeat(64)}` }],
-  })));
-  assert.deepEqual(calls, []);
-  assert.equal(result.control.stopCode, HOST_STOP_CODES.replayDivergence);
+  const runtime = laneRuntime();
+  try {
+    const calls = [];
+    const result = await controller(fakeContext(calls, taskPayload({
+      cwd: runtime.directory,
+      homeDir: runtime.directory,
+      recorded: [{ id: "dispatch_13_1", requestIdentity: `sha256:${"b".repeat(64)}` }],
+    })));
+    assert.deepEqual(calls, []);
+    assert.equal(result.control.stopCode, HOST_STOP_CODES.replayDivergence);
+  } finally {
+    runtime.cleanup();
+  }
 });
 
 test("the controller journals a superseding host run without dispatching", async () => {
@@ -704,6 +711,12 @@ test("the entry reads one blocked host run back for the exact Spec and target", 
 test("the controller reads a blocked host run back itself when the round does not name one", async () => {
   const root = mkdtempSync(join(tmpdir(), "piwf-host-readback-"));
   try {
+    // The same project provides the run record and the resolvable lane worker.
+    mkdirSync(join(root, ".pi", "agents"), { recursive: true });
+    writeFileSync(
+      join(root, ".pi", "agents", "worker.md"),
+      "---\nname: worker\ntools: read, grep, find, ls, bash, edit, write\nreadOnly: false\n---\n\nLane worker.\n",
+    );
     const runDir = join(root, ".pi", "workflows", "workflow_a");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "run.json"), JSON.stringify({
@@ -716,6 +729,7 @@ test("the controller reads a blocked host run back itself when the round does no
     const result = await controller(fakeContext(calls, JSON.stringify({
       facts: facts([node("13", [], { taskState: "DISPATCHED" })], [grant, dispatchEvent("13", 1)]),
       cwd: root,
+      homeDir: root,
       stageId: "delivery",
     })));
     assert.deepEqual(calls, []);
@@ -733,6 +747,7 @@ test("the controller reads a blocked host run back itself when the round does no
     const divergent = await controller(fakeContext([], JSON.stringify({
       facts: facts([node("13"), node("14")]),
       cwd: root,
+      homeDir: root,
       stageId: "delivery",
     })));
     assert.equal(divergent.control.stopCode, HOST_STOP_CODES.replayDivergence);
@@ -742,6 +757,7 @@ test("the controller reads a blocked host run back itself when the round does no
       async () => controller(fakeContext([], JSON.stringify({
         facts: facts([node("13"), node("14")]),
         cwd: root,
+        homeDir: root,
         stageId: "delivery",
         recorded: [],
       }))),
@@ -754,9 +770,12 @@ test("the controller reads a blocked host run back itself when the round does no
 
 test("an explicitly named blocked host run still hands over what it owns", async () => {
   const input = facts([node("13", [], { completionState: "BLOCKED", failure: { kind: "implement", evidence: ["blocked"] } })]);
+  const lane = laneRuntime();
   const calls = [];
   const result = await controller(fakeContext(calls, JSON.stringify({
     facts: input,
+    cwd: lane.directory,
+    homeDir: lane.directory,
     blockedHostRun: {
       runId: "host-1",
       state: "FAILED",
@@ -773,6 +792,8 @@ test("an explicitly named blocked host run still hands over what it owns", async
   // The derivation is load-bearing: the handed-over attempt is what refuses a duplicate dispatch.
   const conflicting = await controller(fakeContext([], JSON.stringify({
     facts: facts([node("13")]),
+    cwd: lane.directory,
+    homeDir: lane.directory,
     blockedHostRun: {
       runId: "host-1",
       state: "FAILED",
@@ -781,6 +802,7 @@ test("an explicitly named blocked host run still hands over what it owns", async
     },
   })));
   assert.equal(conflicting.control.stopCode, HOST_STOP_CODES.duplicateDispatch);
+  lane.cleanup();
 });
 
 test("the dispatch-id grammar has one reader", () => {

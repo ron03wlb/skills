@@ -66,14 +66,18 @@ For each planned lane the domain half decides exactly one action from the observ
 | none, no creation intent | `CREATE` — the dispatch reservation is journaled before native delivery |
 | none, a reserved creation intent | stop `creation_intent_unresolved` — a lost response is read back, never re-created |
 | one `RESUMABLE` lane at this attempt | `REUSE` — the recorded request is the reservation |
+| one `RESUMABLE` lane one attempt behind | `RESUME` — the retry is accounted with `replacement: null` and the same lane is resumed |
 | one `ACTIVE` lane | `OBSERVE` — an active lane is never re-dispatched or replaced |
 | one `INACTIVE` lane with exact inactive evidence | `REPLACE` — the supersession link is journaled first |
-| one `INACTIVE` lane without evidence, one `UNKNOWN` lane, or two observed lanes | stop |
+| one `INACTIVE` lane without evidence or without a prior attempt, one `UNKNOWN` lane, one lane that cannot account the planned attempt, or two observed lanes | stop |
 
-Every new lane journals one `dispatch.recorded` attempt reference before the worker exists, so a lost
-creation response, a restart, or a retry cannot produce a second lane and no attempt goes uncounted. A
+Every new implementation lane journals one `dispatch.recorded` attempt reference before the worker
+exists, so a lost creation response, a restart, or a retry cannot produce a second lane and no attempt
+goes uncounted. A transient retry journals `retry.recorded` with `replacement: null` and a
+`dispatch.recorded` for the same lane, and the host run is resumed rather than re-dispatched. A
 replacement carries a `retry.recorded` supersession link whose authorized task reference is exactly the
-lane the host then materializes.
+lane the host then materializes. A close lane owns close authority rather than a dispatch attempt, so it
+carries no new dispatch reservation.
 
 A lane's tools are always a subset of the declared ceiling and of the ceiling its agent definition
 declares for itself. Its prompt invokes exactly one contract skill — an implementation lane never
@@ -85,11 +89,21 @@ close authority.
 The runtime task is one JSON object:
 
 ```json
-{ "facts": "<dag-run-facts:v1>", "cwd": "<project checkout>", "gitCommonDir": "...", "at": "<ISO instant>", "stageId": "delivery" }
+{
+  "facts": "<dag-run-facts:v1>",
+  "cwd": "<project checkout>",
+  "homeDir": "<user home, for lane agent resolution>",
+  "gitCommonDir": "...",
+  "at": "<ISO instant>",
+  "stageId": "delivery",
+  "lanes": { "observed": [], "creationIntents": [] }
+}
 ```
 
 Add `"blockedHostRun": null` to declare a fresh run that must not look for a prior host run, and
-`"recorded": [...]` to assert the recorded operations yourself.
+`"recorded": [...]` to assert the recorded operations yourself. `lanes.observed` lists the lanes the host
+run record already owns, and `lanes.creationIntents` the reserved creations whose native response is not
+yet proven.
 
 - `facts` is the reconciled `dag-run-facts:v1` input. `inputPath` may point at the same evidence in a
   file instead of inlining it.
@@ -101,8 +115,11 @@ Add `"blockedHostRun": null` to declare a fresh run that must not look for a pri
   field is absent and `cwd` names the project checkout, the controller reads the prior host run back
   itself; more than one candidate is an ambiguity it refuses rather than guesses.
 
-The controller returns `{ control, analysis, refs }`. `control.status` is `dispatched`, `idle`,
-`terminal`, `awaiting_entry`, `superseded`, or `blocked`. The entry performs every item in
+The controller returns `{ control, analysis, refs }`. `control.status` is `dispatched` when it
+materialized lanes, `idle` when the round has no legal action, `terminal` for a finished Run,
+`resume_same_run` when a transient retry reuses a recorded lane and the host run must be resumed,
+`awaiting_entry` when the entry owes a host step, `superseded` for a journaled new host run, and
+`blocked` with a `stopCode` when a domain owner refused the round. The entry performs every item in
 `control.pendingOperations` before the next round; the projection is never authority.
 
 ## The reducer owns the actions
