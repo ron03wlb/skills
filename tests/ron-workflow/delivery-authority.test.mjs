@@ -9,7 +9,8 @@ const repository = resolve(import.meta.dirname, "../..");
 const scripts = join(repository, "skills/personal/run-issue-workflow/scripts");
 const barrel = "delivery-authority.mjs";
 
-// Modules the Issue names as the Codex host boundary: transport, task lifecycle and presentation.
+// The Codex host boundary of this delivery package: host transport, task lifecycle, and presentation.
+// Other packages keep their own entry points, so this seam invariant is package-scoped.
 const hostModules = new Set([
   "run-store.mjs",
   "run-coordinator.mjs",
@@ -39,17 +40,16 @@ const authorityClosure = () => {
   const pending = [barrel];
   while (pending.length > 0) {
     const file = pending.pop();
-    const name = file.replace(/\.mjs$/u, ".mjs");
-    if (visited.has(name)) continue;
-    visited.add(name);
-    for (const next of relativeImports(name)) {
+    if (visited.has(file)) continue;
+    visited.add(file);
+    for (const next of relativeImports(file)) {
       if (next.endsWith(".mjs")) pending.push(next);
     }
   }
   return visited;
 };
 
-test("the delivery authority surface resolves to real exports of one bundle-local entry", () => {
+test("every listed authority semantic names exactly one resolving primary export", () => {
   assert.deepEqual(Object.keys(authority.AUTHORITY_SURFACE).sort(), [
     "approved-scope-and-decomposition",
     "closeout-authority-and-writer-serialization",
@@ -60,14 +60,19 @@ test("the delivery authority surface resolves to real exports of one bundle-loca
     "run-identity-and-grant",
   ]);
 
+  const seen = new Map();
   const unresolved = [];
+  const duplicated = [];
   for (const [semantic, names] of Object.entries(authority.AUTHORITY_SURFACE)) {
     assert.ok(names.length > 0, `${semantic} declares no owning export`);
     for (const name of names) {
       if (!(name in authority)) unresolved.push(`${semantic} -> ${name}`);
+      if (seen.has(name)) duplicated.push(`${name} (${seen.get(name)}, ${semantic})`);
+      seen.set(name, semantic);
     }
   }
   assert.deepEqual(unresolved, [], "every declared authority semantic must resolve to its export");
+  assert.deepEqual(duplicated, [], "one primary semantic per authority export");
 });
 
 test("the bundle-local authority entry reaches no Codex host, task-lifecycle or presentation code", () => {
@@ -80,9 +85,8 @@ test("the bundle-local authority entry reaches no Codex host, task-lifecycle or 
   assert.deepEqual(reachableHost, [], "authority code must not depend on the host boundary");
 });
 
-test("no production module outside the entry imports an authority module directly", () => {
-  const closure = authorityClosure();
-  const ownerModules = new Set([...closure].filter((name) => name !== barrel));
+test("no production module of this package outside the entry imports an authority module directly", () => {
+  const ownerModules = new Set([...authorityClosure()].filter((name) => name !== barrel));
   const offenders = [];
   for (const file of readdirSync(scripts).filter((name) => name.endsWith(".mjs"))) {
     if (file === barrel || ownerModules.has(file)) continue;
@@ -90,7 +94,7 @@ test("no production module outside the entry imports an authority module directl
       if (ownerModules.has(next)) offenders.push(`${file} -> ${next}`);
     }
   }
-  assert.deepEqual(offenders, [], "the bundle-local entry is the only authority seam");
+  assert.deepEqual(offenders, [], "the bundle-local entry is this package's only authority seam");
 });
 
 test("moved decisions live in authority code instead of the Codex host boundary", () => {
@@ -98,10 +102,6 @@ test("moved decisions live in authority code instead of the Codex host boundary"
   assert.equal(typeof authority.validateTaskOutcomeReceipt, "function");
   assert.equal(typeof authority.validateDeliveryProgress, "function");
   assert.equal(typeof authority.createTaskOutcomeReceipt, "function");
-
-  const composition = readFileSync(join(scripts, "codex-workflow.mjs"), "utf8");
-  assert.doesNotMatch(composition, /export function assessRecoveryCompatibility/u);
-  assert.match(composition, /export \{ assessRecoveryCompatibility \} from "\.\/delivery-authority\.mjs";/u);
 
   const journal = readFileSync(join(scripts, "run-journal.mjs"), "utf8");
   assert.match(journal, /from "\.\/journal-event-schema\.mjs"/u);

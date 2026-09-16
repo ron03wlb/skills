@@ -1,13 +1,16 @@
-// The trusted bundle-local entry for deterministic delivery authority. A workflow bundle imports
-// this module; the host may read evidence and materialize returned actions, but never reimplement
-// these decisions. Every module reachable from here is authority code, not host transport,
-// task-lifecycle, or presentation code.
+// The trusted bundle-local entry for deterministic delivery authority. A workflow bundle imports this
+// module instead of reaching into individual owner modules. Every module reachable from here is
+// authority-owned: none of them imports Codex host transport, task-lifecycle or presentation code, so
+// a bundle loads the authority surface without the host boundary. The journal event schemas for
+// host-produced delivery evidence are owned here because the journal stores and validates that
+// evidence, while its producers stay in the host boundary.
+// AUTHORITY_SURFACE names the primary export of each authority semantic the delivery contract lists.
+// It is a partition: every named export belongs to exactly one semantic, and each name must resolve
+// to a real export of this entry.
 export const AUTHORITY_SURFACE = Object.freeze({
   "run-identity-and-grant": [
     "reduceRunReadyHandoff",
     "reduceRun",
-    "planControl",
-    "createRunAuthorityAdapters",
     "validateJournal",
   ],
   "operation-identity": [
@@ -24,7 +27,6 @@ export const AUTHORITY_SURFACE = Object.freeze({
   ],
   "approved-scope-and-decomposition": [
     "createRunAuthorityAdapters",
-    "deriveWorkflowOperationIdentity",
   ],
   "issue-execution-and-dispatch-budgets": [
     "createIssueExecutionBudgetController",
@@ -54,7 +56,6 @@ export const AUTHORITY_SURFACE = Object.freeze({
   "cooperative-pause-graceful-stop-and-diagnosis": [
     "planControl",
     "createRecoverableOperatorPacket",
-    "reduceRun",
     "REASON_CODES",
     "assessRecoveryCompatibility",
   ],
