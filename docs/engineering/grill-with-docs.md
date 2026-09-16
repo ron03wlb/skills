@@ -55,6 +55,20 @@ The skill still maps the whole design, but its decision aperture controls what r
 
 Multiple plausible answers alone do not create a question. An existing design that meets accepted requirements stays settled; an unselected alternative with migration costs does not reopen it. The agent checks that a precedent fits the requirements, considers important failure cases and practical reversal, and carries concise evidence and verification assumptions in the handoff. These checks preserve design work while reducing the decisions you must make. Ordinary implementation effort without an existing data, consumer or operational transition is not a migration cost.
 
+## Optional Pi question dialogs
+
+In an interactive Pi host that exposes `ask_user_question`, independent ready frontier decisions can appear as a structured dialog. This is an optional presentation enhancement: without Pi, with no available dialog, or after a dialog loading or validation error, the same interview continues as text questions.
+
+To enable it in your Pi environment, run:
+
+```sh
+pi install npm:@juicesharp/rpiv-ask-user-question
+```
+
+Restart Pi afterwards. The extension requires Node.js 22+ and an interactive terminal or RPC/ACP host. It is not a repository prerequisite or shipped runtime dependency, and it needs no changes to the extension's user configuration file.
+
+A dialog asks one to four independent human-frontier decisions at once. Each question is single-choice and includes an `Explain` option alongside the concrete recommendation and viable alternatives; free text remains available for a clear alternative decision. Choosing `Explain` gives the context, evidence, trade-offs, and recommendation, then asks that same decision again without recording it. A cancelled dialog records none of its answers and keeps the planning lane and frontier ready for the same `/grill-with-docs` retry. Ambiguous free text stays open for clarification rather than being treated as approval.
+
 ## The paper trail
 
 The recording destination follows the kind of decision, independently of whether you needed to approve it.
