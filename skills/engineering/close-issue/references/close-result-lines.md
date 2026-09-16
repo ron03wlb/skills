@@ -9,4 +9,3 @@ A coordinator returns exactly one native final-answer line `Workflow close resul
 - `state: INTEGRATION_FAILED|INTEGRATION_UNKNOWN`: `integrationVerification: {state,issueId,candidate,targetHead,identity}`.
 
 Extra, malformed or unverified fields become `UNCLASSIFIED` diagnosis, never a persisted close result.
-
