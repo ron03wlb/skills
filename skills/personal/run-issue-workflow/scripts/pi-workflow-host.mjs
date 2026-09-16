@@ -136,7 +136,8 @@ const taskIdPart = (value) => {
 
 // The deterministic identity of one materialized operation. Two reducer rounds that authorize the same
 // operation produce the same id, which is what makes the host's recorded request hash the reservation
-// that prevents a second dispatch after a resume.
+// that prevents a second dispatch after a resume. `parseHostDispatchId` is the single reader of that
+// grammar, so the identity builder and the convergence accounting can never drift apart.
 export function hostActionIdentity(action) {
   if (!isRecord(action) || !isText(action.type)) throw new TypeError("A reducer action must name its type");
   const issue = () => taskIdPart(action.issueId);
@@ -248,6 +249,13 @@ const dispatchAttemptsByIssue = (journal) => {
 };
 
 const uniqueId = (value) => value.split(".").at(-1);
+
+// Reads back one dispatch materialization id. Returns null for every other host operation id, so a
+// caller cannot mistake a close or recovery lane for a dispatch attempt.
+export function parseHostDispatchId(id) {
+  const match = /^dispatch_([A-Za-z0-9_-]+)_([1-9][0-9]*)$/u.exec(uniqueId(id));
+  return match === null ? null : { issueId: match[1], attempt: Number(match[2]) };
+}
 
 // The reducer's legal action set is an input this owner may refuse but never amend. Every failure path
 // returns a stop instead of a partial plan, so a contradictory or unavailable action set can never
@@ -451,12 +459,10 @@ export function convergeBlockedRun({ facts, hostRun, at } = {}) {
   const attempts = dispatchAttemptsByIssue(facts?.journal);
   const unaccounted = [];
   for (const id of observed.generatedTaskIds) {
-    const match = /^dispatch_([A-Za-z0-9_-]+)_([1-9][0-9]*)$/u.exec(uniqueId(id));
-    if (!match) continue;
-    const issueId = match[1];
-    const attempt = Number(match[2]);
-    if ((attempts.get(issueId) ?? 0) < attempt) {
-      unaccounted.push(`${id} has no journaled dispatch attempt ${attempt}`);
+    const dispatch = parseHostDispatchId(id);
+    if (dispatch === null) continue;
+    if ((attempts.get(dispatch.issueId) ?? 0) < dispatch.attempt) {
+      unaccounted.push(`${id} has no journaled dispatch attempt ${dispatch.attempt}`);
     }
   }
   if (unaccounted.length > 0) {

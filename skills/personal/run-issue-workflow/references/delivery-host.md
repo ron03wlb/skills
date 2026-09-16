@@ -9,7 +9,10 @@ routing, close eligibility, or stop classification.
 
 - `spec.json` — one `dynamic` stage with `uses: "./helpers/controller.mjs"` and an explicit read/write
   policy: `defaults.readOnly: false` with the declared tool ceiling. Every declared ref is a `./` path
-  inside the bundle directory.
+  inside the bundle directory. Its only budget is `maxConcurrency: 3`, the host expression of the
+  preserved `max_parallel` default; every other host resource limit keeps pi-workflow's own default, so
+  the bundle never invents a delivery budget and never restates the journal-owned six-hour per-Issue
+  budget as a stage wall-clock cap. Healthy close contention may therefore exceed twelve hours.
 - `helpers/controller.mjs` — the trusted controller. It is transport only: it reads one reconciled
   round, asks `scripts/pi-workflow-host.mjs` what the Domain action reducer authorizes, and materializes
   exactly that.
@@ -24,9 +27,11 @@ Validate and launch by path:
 /workflow run <skill>/workflows/deliver-tracker-spec/spec.json "<round JSON>"
 ```
 
-The bundle loads the authority surface through `scripts/delivery-authority.mjs`. Its only outward
-reference is that bundle-local authority entry and the domain host half beside it; no workflow ref
-(`uses`, `helpers`, `workflows`) leaves the bundle directory.
+Trusted controller code reaches the domain through two Node imports beside the bundle directory:
+`scripts/pi-workflow-host.mjs` (the domain half of the host) and, through it,
+`scripts/delivery-authority.mjs` (the bundle-local authority entry). Neither is a pi-workflow ref: every
+declared ref (`uses`, `helpers`, `workflows`) is a `./` path inside the bundle directory, and no other
+production module may reach the authority surface directly.
 
 ## One round
 
@@ -39,7 +44,9 @@ The runtime task is one JSON object:
 - `facts` is the reconciled `dag-run-facts:v1` input. `inputPath` may point at the same evidence in a
   file instead of inlining it.
 - `recorded` lists the host operations the run already materialized, in recorded order.
-- `blockedHostRun` is a prior host run read back for convergence, or `null` on a fresh run.
+- `blockedHostRun` is a prior host run read back for convergence, or `null` on a fresh run. When the
+  field is absent and `cwd` names the project checkout, the controller reads the prior host run back
+  itself; more than one candidate is an ambiguity it refuses rather than guesses.
 
 The controller returns `{ control, analysis, refs }`. `control.status` is `dispatched`, `idle`,
 `terminal`, `awaiting_entry`, `superseded`, or `blocked`.
@@ -53,7 +60,7 @@ resumed host run re-issues a recorded operation rather than dispatching a second
 | --- | --- |
 | `dispatch_issue`, `recover_issue`, `repair_issue`, `upgrade_issue` | one generated `worker` task that follows `execute-issue` |
 | `close_issue`, `close_parent` | one generated `worker` task that follows `close-issue` |
-| `wait_repository_close_lease`, `wait_target_writer` | a host-side bounded wait on the reducer's own `timeoutMs`, consuming no generated agent |
+| `wait_repository_close_lease`, `wait_target_writer` | a host-side bounded wait on the reducer's own `timeoutMs`, attributed to the reducer's own lease owner and consuming no generated agent |
 | `settle_pause`, `settle_stop` | a domain-owned `pause.transitioned` / `stop.transitioned` journal append |
 | `reconcile_run`, `remediate_environment` | handed back to the entry as `pendingOperations`; the bundle has no reconciliation or environment adapter and does not invent one |
 
@@ -67,8 +74,11 @@ not accounted by the journal. It never escapes a contradiction by opening a seco
 
 ## Blocked-run convergence
 
-When a host run for this Spec and target is no longer terminal, the entry reads it back with
-`helpers/host-runs.mjs` and hands it to the controller as `blockedHostRun`. The domain half then decides:
+When a host run for this Spec and target is no longer terminal, the controller reads it back with
+`helpers/host-runs.mjs` and hands it to the domain half as `blockedHostRun`. A host run is only
+`DIVERGED` when its own record proves the host replay-invariant failure (`dynamic agent request
+changed`); an ordinary `failed` run stays replayable, and an `interrupted` run is `UNKNOWN`. The domain
+half then decides:
 
 - `NO_ACTION` — the host run is already terminal.
 - `CONTINUE_SAME_RUN` — the host run can re-issue its recorded operations in order; resume it.

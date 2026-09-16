@@ -4,6 +4,7 @@
 // controller. It is a single JSON object; large evidence lives in a file the object points at. Nothing
 // here decides authority: it validates the shape and returns it, or refuses the round.
 import { readFileSync } from "node:fs";
+import { blockedHostRunFor } from "./host-runs.mjs";
 
 export const ROUND_INPUT_SCHEMA = "delivery-host-round-input:v1";
 export const FACT_SCHEMA = "dag-run-facts:v1";
@@ -26,7 +27,10 @@ const checksum = (value) => JSON.stringify(value);
 
 // `text` is the exact runtime task string. An `inputPath` indirection keeps a large reconciled fact set
 // out of the workflow task line while still binding the round to one exact file.
-export function parseRoundInput(text, { readFile = (path) => readFileSync(path, "utf8") } = {}) {
+export function parseRoundInput(text, {
+  readFile = (path) => readFileSync(path, "utf8"),
+  resolveBlockedHostRun = blockedHostRunFor,
+} = {}) {
   if (!isText(text)) refuse("the runtime task is empty");
   const payload = parseJson(text, "the runtime task");
   if (!isRecord(payload)) refuse("the runtime task must be one JSON object");
@@ -44,7 +48,16 @@ export function parseRoundInput(text, { readFile = (path) => readFileSync(path, 
   if (!isRecord(facts.run) || !isText(facts.run.runId) || !isText(facts.run.specId) || !isText(facts.run.target)) {
     refuse("facts must bind a Run id, one Spec id and one target branch");
   }
-  const blockedHostRun = source.blockedHostRun ?? null;
+  // The re-entry authority reads a blocked or failed host run back itself when the round does not
+  // already name one. An explicit `null` means "this is a fresh run"; an absent field means "look".
+  let blockedHostRun = source.blockedHostRun ?? null;
+  if (source.blockedHostRun === undefined && isText(source.cwd)) {
+    const readBack = resolveBlockedHostRun({ cwd: source.cwd, specId: facts.run.specId, target: facts.run.target });
+    if (readBack.status === "AMBIGUOUS") {
+      refuse(`more than one host run matches this Spec and target: ${readBack.runIds.join(", ")}`);
+    }
+    blockedHostRun = readBack.status === "SELECTED" ? readBack.hostRun : null;
+  }
   if (blockedHostRun !== null && !isRecord(blockedHostRun)) refuse("blockedHostRun must be one host run record");
   const recorded = source.recorded ?? [];
   if (!Array.isArray(recorded) || !recorded.every((entry) => isRecord(entry) && isText(entry.id))) {

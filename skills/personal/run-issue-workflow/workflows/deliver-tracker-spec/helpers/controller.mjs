@@ -105,7 +105,14 @@ export default async function controller(ctx) {
     }
     if (item.execution === "wait") {
       // A domain close wait is a host-side bounded observation that consumes no generated agent and no
-      // concurrency slot. Its duration is the reducer's, never the host's.
+      // concurrency slot. Its duration, its owner and its pre-wait evidence are the reducer's, never the
+      // host's; the run log attributes the observation to that exact lease owner.
+      ctx.log("delivery close wait", {
+        operation: item.operation,
+        owner: item.owner,
+        timeoutMs: item.timeoutMs,
+        preWaitEvidence: item.preWaitEvidence,
+      });
       await boundedWait(item.timeoutMs);
       generated.push({ id: item.id, actionType: item.actionType, issueId: item.issueId, waited: true, timeoutMs: item.timeoutMs });
       continue;

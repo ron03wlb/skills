@@ -15,6 +15,7 @@ import {
   convergeBlockedRun,
   hostActionIdentity,
   hostControlSettlement,
+  parseHostDispatchId,
   planHostActions,
   planHostRound,
   recordHostAuthorityEvent,
@@ -601,14 +602,40 @@ test("the entry reads one blocked host run back for the exact Spec and target", 
     const selected = blockedHostRunFor({ cwd: root, specId: "12", target: "features/ron" });
     assert.equal(selected.schema, "pi-workflow-host-run-readback:v1");
     assert.equal(selected.status, "SELECTED");
+    // An ordinary failed host run is resumable, so it stays replayable.
     assert.deepEqual(selected.hostRun, {
       runId: "workflow_a",
       state: "FAILED",
-      dynamicDisposition: "DIVERGED",
+      dynamicDisposition: "REPLAYABLE",
       generatedTaskIds: ["delivery.dispatch_13_1"],
     });
 
     assert.equal(blockedHostRunFor({ cwd: root, specId: "nope", target: "features/ron" }).status, "NONE");
+
+    // Only the host's own replay-invariant failure makes a host run un-replayable.
+    write("workflow_e", {
+      id: "workflow_e",
+      status: "failed",
+      error: "dynamic agent request changed for delivery.dispatch_13_1; previous hash a, new hash b",
+      task: JSON.stringify({ facts: { ...facts([node("13")]), run: { ...facts([node("13")]).run, specId: "77" } } }),
+      tasks: [],
+    });
+    assert.equal(
+      blockedHostRunFor({ cwd: root, specId: "77", target: "features/ron" }).hostRun.dynamicDisposition,
+      "DIVERGED",
+    );
+
+    // An interrupted host run proves nothing about replayability.
+    write("workflow_f", {
+      id: "workflow_f",
+      status: "interrupted",
+      task: JSON.stringify({ facts: { ...facts([node("13")]), run: { ...facts([node("13")]).run, specId: "78" } } }),
+      tasks: [],
+    });
+    assert.equal(
+      blockedHostRunFor({ cwd: root, specId: "78", target: "features/ron" }).hostRun.dynamicDisposition,
+      "UNKNOWN",
+    );
     const ambiguous = selectBlockedHostRun(
       [...runs, { ...runs[0], runId: "workflow_d" }],
       { specId: "12", target: "features/ron" },
@@ -619,6 +646,36 @@ test("the entry reads one blocked host run back for the exact Spec and target", 
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the controller reads a blocked host run back itself when the round does not name one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "piwf-host-readback-"));
+  try {
+    const runDir = join(root, ".pi", "workflows", "workflow_a");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "run.json"), JSON.stringify({
+      id: "workflow_a",
+      status: "failed",
+      task: JSON.stringify({ facts: facts([node("13", [], { taskState: "DISPATCHED" })], [grant, dispatchEvent("13", 1)]) }),
+      tasks: [{ specId: "delivery.dispatch_13_1", status: "completed" }],
+    }));
+    const calls = [];
+    const result = await controller(fakeContext(calls, JSON.stringify({
+      facts: facts([node("13", [], { taskState: "DISPATCHED" })], [grant, dispatchEvent("13", 1)]),
+      cwd: root,
+    })));
+    assert.deepEqual(calls, []);
+    assert.equal(result.control.decision, "CONTINUE_SAME_RUN");
+    assert.equal(result.control.status, "idle");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the dispatch-id grammar has one reader", () => {
+  assert.deepEqual(parseHostDispatchId("delivery.dispatch_13_2"), { issueId: "13", attempt: 2 });
+  assert.equal(parseHostDispatchId("delivery.close_13"), null);
+  assert.equal(parseHostDispatchId("delivery.dispatch_13_0"), null);
 });
 
 test("the bundle keeps every declared reference bundle-local and declares its ceiling", () => {
@@ -633,7 +690,7 @@ test("the bundle keeps every declared reference bundle-local and declares its ce
   assert.equal(stage.type, "dynamic");
   assert.match(stage.dynamic.uses, /^\.\//u);
   assert.equal(stage.dynamic.mode, "graph-splice");
-  assert.equal(stage.dynamic.budget.maxConcurrency, 3);
+  assert.deepEqual(stage.dynamic.budget, { maxConcurrency: 3 });
   assert.equal(stage.dynamic.helpers, undefined);
   assert.equal(stage.dynamic.workflows, undefined);
   assert.ok(existsSync(join(bundle, stage.dynamic.uses.replace(/^\.\//u, ""))));

@@ -2,7 +2,7 @@
 //
 // `/run-issue-workflow <Spec-ID>` is the single reconciliation and re-entry authority. When a host run
 // for that Spec is no longer terminal, this reader finds it from the pi-workflow run records under the
-// project workflow root, and states whether the same host run can be continued or must be superseded.
+// project workflow root and states whether the same host run can be continued or must be superseded.
 // It never invents a run: zero candidates select none, and more than one candidate is an ambiguity the
 // entry must resolve rather than guessed away.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -10,9 +10,12 @@ import { join } from "node:path";
 
 export const HOST_RUN_READBACK_SCHEMA = "pi-workflow-host-run-readback:v1";
 
-// A host run's own record status is the only scheduling fact this reader consumes. The mapping to a
-// domain dynamic disposition is deliberately conservative: anything the record does not prove is
-// UNKNOWN, and the host's own recorded request-hash check remains the enforced replay guard.
+// The exact host replay-invariant failure E1 observed: a recorded controller operation re-issued with a
+// different request shape. Only matching evidence makes a host run un-replayable; an ordinary `failed`
+// run is resumable, which is what `/workflow resume` demonstrated.
+const REPLAY_DIVERGENCE = /dynamic agent request changed/iu;
+
+// A host run's own record status is the only scheduling fact this reader consumes.
 const RUN_STATES = Object.freeze({
   completed: "SUCCEEDED",
   stopped: "STOPPED",
@@ -22,14 +25,31 @@ const RUN_STATES = Object.freeze({
   blocked: "BLOCKED",
   pending: "RUNNING",
 });
-const DISPOSITIONS = Object.freeze({
-  failed: "DIVERGED",
-  interrupted: "UNKNOWN",
-});
 
 export const workflowRootFor = (cwd) => join(cwd, ".pi", "workflows");
 
 const defaultReadFile = (path) => readFileSync(path, "utf8");
+
+const textOf = (value) => (typeof value === "string" ? value : null);
+
+const evidenceOf = (record, dynamicState) => [
+  textOf(record?.error),
+  textOf(record?.failure),
+  textOf(record?.reason),
+  textOf(dynamicState?.error),
+  textOf(dynamicState?.reason),
+].filter((value) => value !== null);
+
+const stateFor = (status) => RUN_STATES[status] ?? "UNKNOWN";
+
+// A run is only DIVERGED when its own record proves the host replay-invariant failure. An interrupted
+// run proves nothing about replayability, so it stays UNKNOWN and the host's own recorded request-hash
+// check remains the enforced guard.
+const dispositionFor = (status, evidence) => {
+  if (evidence.some((value) => REPLAY_DIVERGENCE.test(value))) return "DIVERGED";
+  if (status === "interrupted") return "UNKNOWN";
+  return "REPLAYABLE";
+};
 
 export function readHostRuns({ workflowRoot, readFile = defaultReadFile, readdir = readdirSync, exists = existsSync } = {}) {
   if (typeof workflowRoot !== "string" || !workflowRoot) throw new TypeError("Host run read-back needs one workflow root");
@@ -44,17 +64,27 @@ export function readHostRuns({ workflowRoot, readFile = defaultReadFile, readdir
     } catch {
       // An unreadable run record is a host fact this reader cannot prove; it stays visible instead of
       // being silently dropped.
-      runs.push({ runId: entry, readable: false, status: null, task: null, generatedTaskIds: [] });
+      runs.push({ runId: entry, readable: false, status: null, task: null, generatedTaskIds: [], evidence: [] });
       continue;
+    }
+    const statePath = join(workflowRoot, entry, "dynamic", "state.json");
+    let dynamicState = null;
+    if (exists(statePath)) {
+      try {
+        dynamicState = JSON.parse(readFile(statePath));
+      } catch {
+        dynamicState = null;
+      }
     }
     runs.push({
       runId: typeof record?.id === "string" && record.id ? record.id : entry,
       readable: true,
-      status: typeof record?.status === "string" ? record.status : null,
-      task: typeof record?.task === "string" ? record.task : null,
+      status: textOf(record?.status),
+      task: textOf(record?.task),
       generatedTaskIds: Array.isArray(record?.tasks)
         ? record.tasks.filter((task) => task && typeof task.specId === "string").map((task) => task.specId)
         : [],
+      evidence: evidenceOf(record, dynamicState),
     });
   }
   return runs;
@@ -72,8 +102,6 @@ const taskBinding = (task) => {
     return null;
   }
 };
-
-const stateFor = (status) => RUN_STATES[status] ?? "UNKNOWN";
 
 // Selects the one host run that binds this exact Spec and target and is not terminal.
 export function selectBlockedHostRun(runs, { specId, target } = {}) {
@@ -98,7 +126,7 @@ export function selectBlockedHostRun(runs, { specId, target } = {}) {
     hostRun: Object.freeze({
       runId: run.runId,
       state: stateFor(run.status),
-      dynamicDisposition: DISPOSITIONS[run.status] ?? "REPLAYABLE",
+      dynamicDisposition: dispositionFor(run.status, run.evidence),
       generatedTaskIds: [...run.generatedTaskIds],
     }),
   });

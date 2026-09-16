@@ -5,7 +5,15 @@
   "defaults": {
     "agent": "scout",
     "readOnly": false,
-    "tools": ["read", "grep", "find", "ls", "bash", "edit", "write"]
+    "tools": [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "bash",
+      "edit",
+      "write"
+    ]
   },
   "artifactGraph": {
     "stages": [
@@ -15,18 +23,20 @@
         "dynamic": {
           "uses": "./helpers/controller.mjs",
           "mode": "graph-splice",
-          "permissions": { "approval": "auto" },
+          "permissions": {
+            "approval": "auto"
+          },
           "budget": {
-            "maxAgents": 64,
-            "maxConcurrency": 3,
-            "maxRuntimeMs": 21600000,
-            "maxGraphMutations": 512,
-            "maxHelperRuns": 32
+            "maxConcurrency": 3
           }
         },
         "output": {
-          "analysis": { "required": true },
-          "refs": { "required": true }
+          "analysis": {
+            "required": true
+          },
+          "refs": {
+            "required": true
+          }
         }
       }
     ]
