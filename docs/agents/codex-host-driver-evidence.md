@@ -87,4 +87,34 @@ node --test tests/ron-workflow/codex-workflow-tasks.test.mjs tests/ron-workflow/
 
 Issue 89 binds three previously separate repair boundaries into the effective workflow package. A settled `HOST_CLEANUP_BLOCKED` result is eligible for coordinator continuation only when its close-task, request, candidate, target, worktree, integration and supported reason evidence all match. The close request keeps one logical identity across same-Run control revisions, while current Pause and Stop authority is still re-read before action. An interrupted exact Windows helper session may continue once with only the original remaining process identities after its reservation, ordered progress and current holders agree; its result must be exact when present, while proven absence after owner exit becomes the retained `UNKNOWN` observation. Each valid protocol step receives its own bounded inspection timer, and a durable resume marker prevents another automatic process batch.
 
-Source tests are not treated as installed-workflow proof. The installation verifier re-reads the selected package manifest and SHA-256, exact candidate commit and both managed entry targets, then invokes the package-owned routing, identity and real Windows continuation qualification through that selected `installed-entry.mjs`. It rejects caller-authored PASS text, missing stages or another package identity. Runtime entry separately reports the package version, package root and manifest digest actually used, including compatible retained-Run reconciliation without replacing its Grant. The Issue completion receipt records final source commands, independent reviews and effective-entry evidence; those values are not duplicated here before installation.
+Source tests are not treated as installed-workflow proof. The installation verifier re-reads the selected package manifest and SHA-256, exact candidate commit and both managed entry targets, then invokes the package-owned routing, identity and WSL POSIX-cleanup qualification through that selected `installed-entry.mjs`. It rejects caller-authored PASS text, missing stages or another package identity. Runtime entry separately reports the package version, package root and manifest digest actually used, including compatible retained-Run reconciliation without replacing its Grant. The Issue completion receipt records final source commands, independent reviews and effective-entry evidence; those values are not duplicated here before installation.
+
+## Issue 91 WSL qualification
+
+Issue 91 runs the retained WSL sample as the selected package's own component fixture. From an installed package root (`<cacheDirectory>/versions/<packageVersionId>/skills/personal/run-issue-workflow`):
+
+```text
+node scripts/installed-entry.mjs --qualification-identity <packageVersionId>
+node scripts/installed-entry.mjs --qualify-repair-package <packageVersionId>
+node --test tests/ron-workflow/workflow-package-qualification.test.mjs tests/ron-workflow/workflow-installation.test.mjs
+```
+
+`--qualify-repair-package` runs the three package-owned stages exactly three times and atomically publishes the retained sample at `<cacheDirectory>/qualification/<packageVersionId>.json`: a complete file is written to a temporary sibling, then one POSIX `renameSync` publishes it, so an interrupted writer never leaves a partial sample. `--qualification-identity` reports the lightweight identity a reuse decision needs without replaying the stages; `readWorkflowInstallationEvidence` reuses a retained sample only while every bound input still matches it, otherwise it re-runs the qualification and rewrites. A non-Linux platform, an unreadable `/proc/sys/kernel/osrelease`, a missing `WSL_DISTRO_NAME`, or a failed POSIX-cleanup probe stays `UNKNOWN`, and `UNKNOWN` can never produce readiness or reuse a retained sample.
+
+The retained sample for the synthetic package `9191000000000000000000000000000000000000000000000000000000000000`, produced on Windows 11 WSL2 Ubuntu with Node v24.21.0, bound:
+
+- `fixtureRevision` `wsl-posix-v1` and `fixtureDigest` `sha256:00bf5564d60f66d2ca5e6e48df8daac0cdc633e1bf6659ec7010da0889702df7` over the installed `workflow-repair-qualification.mjs` bytes;
+- `runtime` `linux-x64`;
+- `capabilityIdentity` `sha256:7ef9050e4657910b6379e6b9d1ea4d6a1cf4d79778727b2a2c5c6f949ef9f03e` over `{platform: linux, arch: x64, node: v24.21.0, kernelRelease: 6.18.33.2-microsoft-standard-WSL2, wslDistro: Ubuntu, posixCleanup: true}`.
+
+It retained three observations, each replaying `settled-host-cleanup-routing`, `stable-close-identity` and `posix-worktree-cleanup`:
+
+| run | observed at | component-fixture interval |
+| --- | --- | --- |
+| 1 | 2026-09-16T01:33:15.970Z | 41.406 ms |
+| 2 | 2026-09-16T01:33:16.016Z | 46.254 ms |
+| 3 | 2026-09-16T01:33:16.053Z | 36.914 ms |
+
+Those intervals measure the component fixture only and are labelled component evidence. No p95, unattended-reliability or time-saving claim is derived from them.
+
+Every objective this component fixture cannot exercise is reported by the package as `{ "state": "unavailable", "reason": ... }`: native Codex task terminal recognition (target 60 s), live-task no-progress diagnosis (target 300 s), close acceptance (target 30 s), tracker mutation, and unattended delivery. No native Codex task execution, tracker mutation or unattended delivery was exercised by this sample, and none is inferred from a fixture, blocker, dispatch or heartbeat.
