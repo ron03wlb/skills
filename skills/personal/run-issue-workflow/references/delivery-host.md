@@ -5,6 +5,11 @@ pi-workflow bundle at `workflows/deliver-tracker-spec/` inside this skill packag
 scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair
 routing, close eligibility, or stop classification.
 
+This contract owns reducer-action materialization on the pi-workflow substrate. While the Codex-native
+coordinator is still present, [the coordinator lifecycle](coordinator-lifecycle.md) describes that
+separate substrate; where the two describe the same reducer action, this page governs the delivery host
+and the coordinator lifecycle governs only the retired path until Issue 102 removes it.
+
 ## Bundle
 
 - `spec.json` — one `dynamic` stage with `uses: "./helpers/controller.mjs"` and an explicit read/write
@@ -43,19 +48,25 @@ directly.
 The runtime task is one JSON object:
 
 ```json
-{ "facts": "<dag-run-facts:v1>", "recorded": [], "blockedHostRun": null, "gitCommonDir": "...", "at": "<ISO instant>", "stageId": "delivery" }
+{ "facts": "<dag-run-facts:v1>", "cwd": "<project checkout>", "gitCommonDir": "...", "at": "<ISO instant>", "stageId": "delivery" }
 ```
+
+Add `"blockedHostRun": null` to declare a fresh run that must not look for a prior host run, and
+`"recorded": [...]` to assert the recorded operations yourself.
 
 - `facts` is the reconciled `dag-run-facts:v1` input. `inputPath` may point at the same evidence in a
   file instead of inlining it.
-- `recorded` lists the host operations the run already materialized, in recorded order. When a blocked
-  host run is read back, its own recorded operations supply this list.
+- `recorded` lists the host operations the run already materialized, in recorded order. When the
+  controller reads a blocked host run back itself, that run's recorded operations supply this list; a
+  round that also names an explicit empty `recorded` is refused rather than allowed to discard them.
+  An explicit non-empty `recorded` is authoritative.
 - `blockedHostRun` is a prior host run read back for convergence, or `null` on a fresh run. When the
   field is absent and `cwd` names the project checkout, the controller reads the prior host run back
   itself; more than one candidate is an ambiguity it refuses rather than guesses.
 
 The controller returns `{ control, analysis, refs }`. `control.status` is `dispatched`, `idle`,
-`terminal`, `awaiting_entry`, `superseded`, or `blocked`.
+`terminal`, `awaiting_entry`, `superseded`, or `blocked`. The entry performs every item in
+`control.pendingOperations` before the next round; the projection is never authority.
 
 ## The reducer owns the actions
 
@@ -73,12 +84,16 @@ resumed host run re-issues a recorded operation rather than dispatching a second
 A generated task's tools are always a subset of the declared ceiling, and no lane borrows authority
 from its agent name alone.
 
-The round stops without dispatching anything when the reducer returns a contradictory or unavailable
-action set, when an action has no declared materialization, when a re-issued operation changed its
-recorded request shape or its recorded order, when a settled operation recurs, when a newer dispatch
-would bypass an unsettled recorded attempt, or when a dispatch attempt is not accounted by the journal.
-It never escapes a contradiction by opening a second host run, and the re-issue proof only governs a
-round that actually materializes something: an idle or blocked round dispatches nothing.
+An empty action set is not by itself a failure. When the reducer has classified the Run as paused,
+stopping, idle, or terminal it returns no action, and the round reports `idle` or `terminal` and
+dispatches nothing.
+
+The round reports `blocked` and dispatches nothing when the reducer returns a contradictory action set,
+when an action cannot be materialized, when a re-issued operation changed its recorded request shape or
+its recorded order, when a settled operation recurs, when a newer dispatch would bypass an unsettled
+recorded attempt, or when a dispatch attempt is not accounted by the journal. It never escapes a
+contradiction by opening a second host run, and the re-issue proof only governs a round that actually
+materializes something: an idle or blocked round dispatches nothing.
 
 ## Blocked-run convergence
 

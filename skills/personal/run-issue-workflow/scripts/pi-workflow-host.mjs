@@ -206,13 +206,14 @@ const materialization = (action) => {
       operation: policy.operation,
       execution: policy.execution,
       // A close wait is the reducer's bound, not the host's: carry its exact owner and timeout through
-      // instead of letting the host choose either.
-      ...(action.type.startsWith("wait_") ? {
+      // instead of letting the host choose either. The policy's own `execution` is the single
+      // discriminator; the host never re-derives it from the action name.
+      ...(policy.execution === "wait" ? {
         owner: { ...action.owner },
         timeoutMs: action.timeoutMs,
         preWaitEvidence: action.preWaitEvidence,
       } : {}),
-      ...(action.type.startsWith("settle_") ? { revision: action.revision } : {}),
+      ...(policy.execution === "settle" ? { revision: action.revision } : {}),
       ...(policy.tools === undefined ? {} : { tools: [...policy.tools] }),
     });
   }

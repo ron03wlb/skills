@@ -33,7 +33,8 @@ const blockedControl = ({ input, code, evidence, decision = "STOP" }) => ({
   refs: [],
 });
 
-const journalBlockedControl = (input, code, evidence) => (
+// Returns a blocked control only when the authority journal is unreachable; otherwise null.
+const blockedIfJournalUnavailable = (input, code, evidence) => (
   input.gitCommonDir === null ? blockedControl({ input, code, evidence }) : null
 );
 
@@ -58,7 +59,7 @@ export default async function controller(ctx) {
       // The superseding host run is journaled before it dispatches anything, so the blocked run's
       // recorded attempts can never be dispatched twice. The control projection carries only the
       // journal locator; the authority journal owns the superseded host run identity.
-      const blocked = journalBlockedControl(input, "supersession_journal_unavailable", [
+      const blocked = blockedIfJournalUnavailable(input, "supersession_journal_unavailable", [
         "A superseding host run needs the authority journal common directory.",
       ]);
       if (blocked) return blocked;
@@ -144,7 +145,7 @@ export default async function controller(ctx) {
         generated.push({ id: item.id, actionType: item.actionType, settledRevision: settlement.revision });
         continue;
       }
-      const blocked = journalBlockedControl(input, "control_settlement_journal_unavailable", [
+      const blocked = blockedIfJournalUnavailable(input, "control_settlement_journal_unavailable", [
         "A cooperative control settlement needs the authority journal common directory.",
       ]);
       if (blocked) return blocked;

@@ -705,6 +705,17 @@ test("the controller reads a blocked host run back itself when the round does no
       stageId: "delivery",
     })));
     assert.equal(divergent.control.stopCode, HOST_STOP_CODES.replayDivergence);
+
+    // An explicit empty recorded list must not discard what the read-back already proved.
+    await assert.rejects(
+      async () => controller(fakeContext([], JSON.stringify({
+        facts: facts([node("13"), node("14")]),
+        cwd: root,
+        stageId: "delivery",
+        recorded: [],
+      }))),
+      /explicit empty recorded list/u,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

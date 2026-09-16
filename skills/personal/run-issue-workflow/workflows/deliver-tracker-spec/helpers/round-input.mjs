@@ -65,6 +65,12 @@ export function parseRoundInput(text, {
       refuse(`more than one host run matches this Spec and target: ${readBack.runIds.join(", ")}`);
     }
     blockedHostRun = readBack.status === "SELECTED" ? readBack.hostRun : null;
+    if (readBack.status === "SELECTED" && Array.isArray(source.recorded)
+      && source.recorded.length === 0 && (readBack.recorded ?? []).length > 0) {
+      // An explicit empty list beside a read-back would silently disable the no-duplicate-dispatch
+      // proof, so it is refused instead of obeyed.
+      refuse("an explicit empty recorded list would discard the read-back's recorded host operations");
+    }
     if (readBack.status === "SELECTED" && source.recorded === undefined) {
       // Reading a host run back is only reconciliation if the recorded operations it already owns come
       // with it; otherwise the re-issue proof has nothing to prove against.

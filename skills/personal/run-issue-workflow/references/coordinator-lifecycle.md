@@ -1,5 +1,10 @@
 # Coordinator lifecycle
 
+> Superseded surface: this reference describes the Codex-native coordinator. Its reducer-action
+> materialization is superseded for the pi-workflow delivery host by
+> [the delivery host contract](delivery-host.md); this page governs only the retired path until
+> Issue 102 removes it.
+
 Read this reference only after the selected Run has a `READY` immediate-upstream handoff and a current DAG Run Grant. It solely owns runtime composition, reconciliation, Codex Issue lanes, legal reducer actions, target-writer waiting, and success criteria.
 
 ## Compose and control the Run
