@@ -2,7 +2,12 @@
 
 Five delivery-substrate assumptions (E1-E5) were probed on the installed packages, in this environment, before any controller design is frozen. Every verdict below comes from an observed run of the probe recorded with it; package documentation is used only to state the boundary being tested. The probes are throwaway: they ran in a scratch Git project outside this repository, and this Issue's only repository change is this document.
 
-Probe time: 2026-09-16 (Asia/Taipei). Target branch: `features/ron`.
+- Issue: [#98](https://github.com/ron03wlb/skills/issues/98), decomposition key `96/02` of Spec [#96](https://github.com/ron03wlb/skills/issues/96).
+- Target branch: `features/ron`; execution baseline: `3b387d3f427eb4fee2366b3de0e972a674c9de5b`.
+- Probe time: 2026-09-16 (Asia/Taipei).
+- Classification: this document is the Issue's own deliverable and ordinary Issue scope. It is not a workflow artifact; the completion note declares an explicit empty `workflowArtifacts` list.
+
+Run records cited below are read from `.pi/workflows/<run-id>/` in the probe project. Identifiers written only by the probe fixtures (`probe-state/*`) are convenience output, not durable evidence; where a claim rests on one, the retained `dynamic/controller.log`, `dynamic/events.jsonl`, `dynamic/state.json` or `run.json` field that carries it is named beside it.
 
 ## Environment
 
@@ -20,7 +25,7 @@ Pi documents `0.85.0` as blocked and does not state `0.85.1`. The probes below e
 
 ## Method
 
-- One bounded probe per assumption, each launched as a real workflow run through `pi -p --no-session "/workflow run ..."` and driven to terminal by an in-process Pi scheduler (`/workflow wait`) or by the detached supervisor.
+- One bounded probe per assumption, each launched as a real workflow run through `pi -p --no-session "/workflow run ..."` and driven either by an in-process Pi scheduler (`/workflow wait`) or by the detached supervisor. One probe never reached terminal: the E2 mutation-capable task failed artifact publication, the run was deliberately stopped with `/workflow stop`, and the worktree it retained was then re-addressed and removed. That stop is the condition E2 measures; no other probe was interrupted.
 - The probe fixtures are reproduced verbatim in this document, so every claimed result can be re-run from here.
 - Controller behaviour is selected by an external mode file (`probe-state/mode.txt`) so that the *same* recorded run can be resumed with a divergent re-issue.
 
@@ -278,8 +283,8 @@ cd /tmp/piwf-probe-98 && ./run-probe.sh probe-dynamic "Probe E1 fail-closed: div
 **Observed (run `workflow_mu3o65x1_ee15ba`, `replay`)**
 
 - Run reached `status: completed`, 3/3 tasks completed.
-- The controller was invoked 4 times (`probe-state/invocations.log`: 05:37:57.301Z, 05:38:10.328Z, 05:38:12.239Z, 05:38:21.737Z; `dynamic/controller.log` records the same 4 invocations), once per suspension/resume around each generated child.
-- `dynamic/events.jsonl` records exactly two generation events, in recorded order: seq 3 `task.generated adaptive.controller:agent:w1` (task `adaptive.w1`), seq 7 `task.generated adaptive.controller:agent:w2` (task `adaptive.w2`), each preceded by a `controller.status: suspended_waiting_children` and followed by `controller.status: running`. The re-issued op carries the same `opId` and `requestHash` as the original generation.
+- The controller was invoked 4 times, once per suspension/resume around each generated child; `dynamic/controller.log` durably records those four invocations for this run (the per-project `probe-state/invocations.log` written by the fixture is convenience output and is cleared between probe runs).
+- `dynamic/events.jsonl` records exactly two generation events in recorded order: seq 3 `task.generated adaptive.controller:agent:w1` (task `adaptive.w1`), then seq 7 `task.generated adaptive.controller:agent:w2` (task `adaptive.w2`). The order around each generation is `controller.status: running` (seq 2) → `task.generated` (seq 3) → `budget.used` → `controller.status: suspended_waiting_children` (seq 5) → `controller.status: running` (seq 6) after the resume, and the re-issued op carries the same `opId` and `requestHash` as the original generation.
 - `dynamic/state.json` projection: `status: complete`, `generatedTaskIds: ["adaptive.w1","adaptive.w2"]`, counters `agents: 2`.
 
 **Observed (negative control, run `workflow_mu3o7t2p_97bab2`, `diverge`)**
@@ -320,7 +325,7 @@ worktree { enabled: true,
 - The agent wrote `/tmp/piwf-probe-98/.pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2/probe-managed-worktree.txt` containing `managed-worktree-probe`. The target checkout did **not** contain that file, confirming the documented "no auto-merge; managed worktree output is recorded for human review".
 - Re-addressing from the target checkout succeeded: `git -C /tmp/piwf-probe-98 worktree list` listed the worktree on its `pi-workflow/...-task-2` branch, and the file was read back through that path.
 - Removal: `git -C /tmp/piwf-probe-98 worktree remove .pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2` failed with `fatal: '.../worktrees/task-2' contains modified or untracked files, use --force to delete it`; `git -C /tmp/piwf-probe-98 worktree remove --force .pi/workflows/workflow_mu3o9xvu_eeca35/worktrees/task-2` exited 0. Afterwards the registration count for `worktrees/task-2` was `0` and the directory was `ABSENT`; the topic branch `pi-workflow/workflow_mu3o9xvu_eeca35-task-2` remained.
-- Caveat: the task never settled. The driver reported `raw artifact ownership/link contract could not be established`, so the mutation-capable path failed at artifact publication and the run stayed `running` until `/workflow stop workflow_mu3o9xvu_eeca35` returned `Interrupted 2 task(s)`. The worktree outlived the interrupted run, which is what the close-stage re-addressing above exercised.
+- Caveat: the task never settled. The wait driver printed `raw artifact ownership/link contract could not be established`, so the mutation-capable path failed at artifact publication and the run stayed `running` until `/workflow stop workflow_mu3o9xvu_eeca35` returned `Interrupted 2 task(s)`; the run's own record retains `status: interrupted` with `tasks[1].status: running` and no error field, and the driver text is reproduced by re-running the E2 command. The worktree outlived the interrupted run, which is what the close-stage re-addressing above exercised. The E2 command above was re-run twice more from the same and from a separately bootstrapped project with the same result (see "Reproduction pass").
 
 **Verdict: `proven`** for the worktree lifecycle (created, retained after the run stopped, re-addressable from the target checkout, removable). The removal requires an explicit `--force` because the retained output is uncommitted, and the mutation-capable artifact-publication failure is recorded under AC-2.
 
@@ -351,7 +356,7 @@ workflow_mu3obh2c_3af021 {'adaptive.controller:agent:c1': 1, 'adaptive.controlle
 workflow_mu3ociqo_eacef0 {'adaptive.controller:agent:c1': 1, 'adaptive.controller:agent:c2': 1, 'adaptive.controller:agent:c3': 1, 'adaptive.controller:agent:c4': 1, 'adaptive.controller:agent:c5': 1}
 ```
 
-Each op id produced exactly one `task.generated` event and exactly one task record (`adaptive.w1`, `adaptive.w2`, `adaptive.c1`-`adaptive.c5`), even though the controller re-issued every recorded op on each of its resumptions (`workflow_mu3o95t3_e9dfc2`/`workflow_mu3o65x1_ee15ba` both re-ran the controller four times). Re-issue returned the recorded outcome; it did not create a second generation.
+Each op id produced exactly one `task.generated` event and exactly one task record (`adaptive.w1`, `adaptive.w2`, `adaptive.c1`-`adaptive.c5`), even though the controller re-issued every recorded op on each of its resumptions. The re-issue count is retained per run as the line count of `dynamic/controller.log`: four invocations for `workflow_mu3o65x1_ee15ba` and for `workflow_mu3ome9a_f91040` (both `completed`, 3/3 tasks), and five for `workflow_mu3o4k0x_b7dc4f` across its original attempt and two resumes (`completed` after repair). Re-issue returned the recorded outcome; it did not create a second generation.
 
 **Verdict: `proven`.** The host's recorded request-hash identity for a generated task is the reservation: a replayed generation for an already-recorded op id resolves to the existing generation instead of creating a duplicate.
 
@@ -395,7 +400,7 @@ Run `status: completed`, 6/6 tasks completed, controller counters `agents: 5`.
 - The cap is honoured exactly: three agents run at once, and `adaptive.c4` does not start until `adaptive.c1` completes.
 - The admitted unit is a *generated agent task*. `ctx.parallel` generated all five ops, but only three were admitted at a time; a generated agent that is waiting for a slot still holds one of the three.
 
-**Verdict: `proven`**, with the placement constraint stated explicitly: the host expresses "three at a time" as a generated-agent cap, and it exposes no separate wait class, so a domain "close wait" must stay outside the host's generated-agent set rather than being modelled as a fourth kind of agent. Close waits are therefore a domain-placement requirement that the measured host does not obstruct, not a host capability that was observed to exist by itself.
+**Verdict: `proven`.** The host expresses "three at a time" as a cap of exactly three generated agent tasks (measured 3 with 5 requested), and it provides no wait or lease primitive at all: the only admitted unit is a generated agent, so a domain close wait cannot be placed inside the host's slots because there is no host wait class for it to occupy. The close-wait clause is satisfied structurally by the absence of that primitive rather than by exercising a close wait; no host wait primitive exists to exercise, and a domain close wait must remain domain state outside the generated-agent set.
 
 ## E5 — host retry and `/workflow resume` do not bypass dispatch accounting
 
@@ -415,11 +420,11 @@ pi -p --no-session "/workflow wait <run-id> 780000"
 **Observed (run `workflow_mu3o4k0x_b7dc4f`)**
 
 - Original attempt (detached; see AC-2): `adaptive.w1` completed `2026-09-16T05:36:42.409Z -> 05:36:54.701Z`; `adaptive.w2` failed `launch_failed`; `adaptive.controller` failed `dynamic_failed`.
-- First resume: `Reset 2 task(s) and scheduled remaining work.` Only the two failed tasks were reset; the completed `adaptive.w1` kept its original `startedAt`/`completedAt`. The controller re-ran (`05:39:38.276Z -> 05:39:38.381Z`) and failed closed because `mode.txt` was `diverge` (same request-hash error as E1), and `adaptive.w2` re-ran and completed `05:39:38.452Z -> 05:39:49.800Z`.
+- First resume: `Reset 2 task(s) and scheduled remaining work.` Only the two failed tasks were reset; the completed `adaptive.w1` kept its original `tasks[].startedAt`/`completedAt` (`2026-09-16T05:36:42.409Z -> 05:36:54.701Z` in `run.json`). The controller re-ran and failed closed because `mode.txt` was `diverge` (same request-hash error as E1); its `run.json` task range is `05:39:38.276Z -> 05:39:38.381Z`, and `dynamic/controller.log` line 4 records that invocation at `05:39:38.357Z` with `mode=diverge`. `adaptive.w2` re-ran and completed `05:39:38.452Z -> 05:39:49.800Z`.
 - Second resume with `mode.txt` restored to `replay`: `Reset 1 task(s) and scheduled remaining work.` — only the failed controller re-ran; the run finished `completed`, 3/3 tasks, `Usage: 16230 tokens`.
-- Documented retry counters were readable at every step (`pi-workflow inspect <run-id>` prints `retries: output=N, launch=N, resumes=N, contextLimitFailures=N`), and each re-dispatch appears as a fresh task time range rather than a silent reuse of the previous one.
+- Documented retry counters were readable at every step (`pi-workflow inspect <run-id>` prints `retries: output=N, launch=N, resumes=N, contextLimitFailures=N`). For this run the final counters are `retries: output=0, launch=0, resumes=3, contextLimitFailures=0`: three resumptions were counted, and no transient launch or output retry ever occurred. Each re-dispatch appears as a fresh task time range rather than a silent reuse of the previous one; over the whole operation `dynamic/controller.log` holds five invocations.
 
-**Verdict: `proven`.** Resume re-dispatches only failed/unfinished work, records each re-dispatch, never re-dispatches already-completed work, and does not bypass the controller's fail-closed replay validation.
+**Verdict: `unproven`.** The `/workflow resume` half is observed to hold: resume re-dispatched only failed or unfinished work (`Reset 2 task(s)` then `Reset 1 task(s)`), left the completed `adaptive.w1` untouched, recorded every re-dispatch, and did not bypass the controller's fail-closed replay validation. The host-level-retry half was not exercised at all — the run's recorded counters stayed `launch=0, output=0`, so no transient launch or output retry ever happened and none could be observed. The assumption states both halves, so it is not proven as a whole; inducing a real transient retry is a separate experiment, listed under unexercised capabilities.
 
 ## AC-2 — what Pi `0.85.1` actually supports
 
@@ -433,13 +438,16 @@ pi -p --no-session "/workflow wait <run-id> 780000"
 | Managed worktrees | supported | E2 below: worktree created, retained, re-addressable from the target checkout, removable (`--force`). |
 | Mutation-capable task artifact publication | **blocked** | `workflow_mu3o9xvu_eeca35` reported `raw artifact ownership/link contract could not be established`; the task never settled and the run remained `running` until explicitly stopped. |
 
-**Verdict for the documented blocked combination:** Pi `0.85.1` does **not** support the dynamic controller, managed worktrees and the detached supervisor *together* end to end. The extension loads, the controller runs, and managed worktrees exist, but the standalone supervisor process cannot resolve `@earendil-works/pi-coding-agent` from `pi-workflow/dist`, so no child the supervisor must launch after detachment can start. The `0.85.x` block documented for `0.85.0` therefore still applies to `0.85.1` for every path that needs a child launch outside an in-process Pi scheduler.
+**Verdict for the requested combination:** in this environment, Pi `0.85.1` does **not** support the dynamic controller, managed worktrees and the detached supervisor *together* end to end. The extension loads, the controller runs, and managed worktrees exist, but any process other than the Pi extension host cannot launch a child. `@earendil-works/pi-coding-agent` is a bare import at `pi-workflow/dist/subagent-backend.js:149`, and no copy of it is reachable from that file's resolution path: there is no `@earendil-works` directory under `/home/ron/.pi/accounts/b/npm/node_modules`, `/home/ron/.pi` or `/home/ron`, while the only installed copy of the package is under `/home/ron/.nvm/versions/node/v24.21.0/lib/node_modules/`. A detached run therefore cannot finish once it needs a new child.
+
+Cause, and what it does not establish: the installed `docs/usage.md` blocks exactly Pi `0.85.0`, for a missing `@earendil-works/pi-server` dependency, and states nothing about `0.85.1`. The failure measured here is a different, unresolvable bare specifier in this npm-install layout, so this evidence does not show that the Pi version causes it, and it is not a compatibility claim about `0.85.1`. The operative fact for the design is narrower and fully observed: on this environment only an in-process Pi scheduler can launch children.
 
 ## Unexercised capabilities
 
 Named so they are not mistaken for proven:
 
 - Any detached run that must launch new children after detachment (blocked above; only pre-detachment launches were observed to complete).
+- Host-level transient retry of a launch or output attempt. The only run with a real failure followed by recovery used `/workflow resume`; its counters stayed `launch=0, output=0`, so no transient retry was induced or observed, which is why E5 is `unproven`. An attempted output-retry induction (a generated child told to reply `PROBE-INVALID-OUTPUT` instead of artifact sections) also produced no retry: the child honoured the workflow output contract and emitted valid sections, and the run finished `retries: output=0`.
 - Batch/`--all` supervision, `pi-workflow prune`, run retention, and topology-lease behaviour.
 - Nested dynamic workflows (`ctx.workflow`), dynamic helpers (`ctx.helper`), `dynamic.decisionLoop`, and `approval: "ask"` (which needs an interactive UI; the probes used `approval: "auto"`).
 - Loop stages, streaming foreach, and the bundled workflows' evidence gates (only `validate` was run on `deep-research`).
