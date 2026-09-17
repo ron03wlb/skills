@@ -4,6 +4,11 @@ import { validateModelPolicy, validateModelSetting } from "./issue-model-policy.
 import { validateDeliveryProgress, validateTaskOutcomeReceipt } from "./journal-event-schema.mjs";
 
 export const EVENT_SCHEMA = "dag-run-event:v1";
+// Mirrors the preparation-action vocabulary owned by run-preparation.mjs; the Run tests assert the two
+// stay equal, so a Grant can never approve an operation the preparation reducer would not recognize.
+export const PREPARATION_ACTIONS = Object.freeze(new Set([
+  "workflow-install", "task-create", "task-message", "local-close", "tracker-write",
+]));
 export const DEFAULT_MAX_PARALLEL = 3;
 export const ISSUE_EXECUTION_LIMIT_MS = 6 * 60 * 60 * 1000;
 export const ISSUE_EXECUTION_PHASES = Object.freeze([
@@ -70,7 +75,7 @@ const eventFields = new Map([
   ["action.failed", new Set(["type", "at", "issueId", "actionType", "progressIdentity", "attempt", "evidence"])],
   ["repair.recorded", new Set(["type", "at", "issueId", "wave", "candidate", "targetHead", "taskRef", "requestIdentity", "priorRepairWaves"])],
   ["runtime.observed", new Set(["type", "at", "workflowVersion"])],
-  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion", "modelPolicy"])],
+  ["grant.recorded", new Set(["type", "at", "runIdentity", "maxParallel", "workflowVersion", "modelPolicy", "approvals"])],
   ["control.reconciled", new Set(["type", "at", "revision", "requestRevision", "command", "requestId"])],
   ["control.revised", new Set(["type", "at", "revision", "command", "requestId"])],
   ["dispatch.recorded", new Set(["type", "at", "issueId", "attempt", "taskRef"])],
@@ -387,6 +392,25 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
   if (event.type === "grant.recorded") {
     if (storageRunId !== undefined && event.runIdentity.runId !== storageRunId) {
       throw new TypeError("The Grant runId must match its storage Run");
+    }
+    // The Run Grant is the Run's single approval boundary. `approvals` carries the human's approval of
+    // the declared Run operations the planning handoff left unapproved, in the planning owner's own
+    // {action, scope, authority} shape. run-preparation.mjs owns that vocabulary and its reduction; this
+    // module owns only the persisted event shape, so an unknown action fails closed there as UNKNOWN.
+    if (event.approvals !== undefined) {
+      const wellFormed = Array.isArray(event.approvals) && event.approvals.length > 0
+        && event.approvals.every((approval) => isRecord(approval)
+          && Object.keys(approval).length === 3
+          && PREPARATION_ACTIONS.has(approval.action)
+          && typeof approval.scope === "string" && approval.scope.length > 0
+          && typeof approval.authority === "string" && approval.authority.length > 0);
+      if (!wellFormed) {
+        throw new TypeError("Grant approvals must name one declared operation with its exact scope and human authority");
+      }
+      const keys = event.approvals.map(({ action, scope }) => JSON.stringify([action, scope]));
+      if (new Set(keys).size !== keys.length) {
+        throw new TypeError("Grant approvals must not repeat one declared operation");
+      }
     }
     const previous = events.findLast(({ type }) => type === "grant.recorded");
     if (previous) {

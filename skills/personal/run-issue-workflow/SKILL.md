@@ -28,6 +28,8 @@ Before cleanup, writer acquisition, Grant creation or renewal, task action, or l
 
 After successful `READY` reduction and reconciliation, create one read-back DAG Run Grant or reuse the exact existing Grant for that identity. Record `max_parallel`, default three, in the append-only journal. Renewal cannot change identity or parallelism. The Grant authorizes only this Run's `execute-issue` and `close-issue` calls, never scope expansion, external-prerequisite execution, push, deployment, or ambiguity repair.
 
+One prompt is the whole approval surface. When the reduction reports `run_preparation_pending`, ask the human exactly once for the reported questions, then record exactly those `{action, scope, authority}` entries on this Run's Grant (`grant.recorded.approvals`); the planning handoff's own approvals are reused first, and that Grant is the Run's single approval boundary for the declared operations it covers. Record the one Grant before the confirming read-back, dispatch only once the reduction is `READY`, and never ask again for an operation the same Run already approved: re-prompting for unchanged approved work is a defect, not diligence.
+
 ## 3. Run the delivery host
 
 The delivery host is the pi-workflow bundle at `workflows/deliver-tracker-spec/` inside this skill package. Read [the delivery host contract](references/delivery-host.md) only when starting, resuming, reconciling, or materializing a host round. The bundle owns scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair routing, close eligibility, or stop classification.

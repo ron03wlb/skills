@@ -547,10 +547,16 @@ export function createGitHubWorkflowSources({
         snapshot.spec,
         snapshot.issues.map((issue) => issue.node_id),
       );
+    // The Run Grant is this Run's single approval boundary. The planning owner's handoff approvals stay
+    // authoritative and are reused first; a Grant may additionally carry the human's approval of the
+    // declared operations that handoff left unapproved, so `/run-issue-workflow` asks the human once at
+    // Start instead of returning them to the planning owner. The latest Grant owns the current approval set.
+    const currentGrant = journal.findLast((event) => event.type === "grant.recorded");
+    const approvals = [...(supplied?.approvals ?? []), ...(currentGrant?.approvals ?? [])];
     let preparation = declaration
       ? assessRunPreparation({
           ...declaration,
-          approvals: supplied?.approvals,
+          approvals,
           trackerPublication: {
             required: declaration.trackerPublication?.required,
             observed: "READ_WRITE_READBACK",
@@ -567,7 +573,7 @@ export function createGitHubWorkflowSources({
         ...declaration,
         sql: [],
         preparedSql: [],
-        approvals: supplied?.approvals,
+        approvals,
         trackerPublication: {
           required: declaration.trackerPublication?.required,
           observed: "READ_WRITE_READBACK",

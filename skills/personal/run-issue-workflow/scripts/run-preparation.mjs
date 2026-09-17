@@ -1,6 +1,9 @@
 import { deriveExecuteIssueOperationIdentity } from "./delivery-authority.mjs";
 
-const actions = new Set(["workflow-install", "task-create", "task-message", "local-close", "tracker-write"]);
+// The planning-owner vocabulary for one Run's operation inventory. run-journal.mjs mirrors it so a
+// persisted Grant approval can never name an operation this reducer would not recognize.
+export const PREPARATION_ACTIONS = new Set(["workflow-install", "task-create", "task-message", "local-close", "tracker-write"]);
+const actions = PREPARATION_ACTIONS;
 const key = value => JSON.stringify([value.action, value.scope]);
 const validAction = value => actions.has(value?.action) && typeof value.scope === "string" && value.scope.length > 0;
 const sha = value => typeof value === "string" && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value);
