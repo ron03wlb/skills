@@ -15,12 +15,21 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTS=("$HOME/.claude/skills" "$HOME/.agents/skills")
 
+# Collect the repo's skills once, link into every destination. `deprecated/`
+# is retired, and `misc/` is kept around but rarely used and not promoted (see
+# each bucket's own README): neither belongs in a daily-driver skill
+# directory, so both are skipped here, same as everywhere else non-promoted
+# skills are kept out. `in-progress/` IS still linked: it's public on purpose,
+# feedback wanted, and this local install is exactly where that feedback loop
+# runs.
+
 # Skills whose local entry is owned by a dedicated installer instead of this dev
 # linker. `run-issue-workflow` is published as immutable package versions by
 # `skills/personal/run-issue-workflow/scripts/install-workflow.mjs`, and its
 # installation evidence requires every managed entry to resolve to the selected
 # package version. Linking the working copy here silently replaces that entry and
-# breaks the installation receipt, so this script never writes it anywhere.
+# breaks the installation receipt, so this script never writes it, in any
+# destination.
 RESERVED=("run-issue-workflow")
 
 is_reserved() {
@@ -31,14 +40,13 @@ is_reserved() {
   return 1
 }
 
-# Collect the repo's skills once, link into every destination.
 names=()
 srcs=()
 while IFS= read -r -d '' skill_md; do
   src="$(dirname "$skill_md")"
   names+=("$(basename "$src")")
   srcs+=("$src")
-done < <(find "$REPO/skills" -name SKILL.md -not -path '*/node_modules/*' -not -path '*/deprecated/*' -print0)
+done < <(find "$REPO/skills" -name SKILL.md -not -path '*/node_modules/*' -not -path '*/deprecated/*' -not -path '*/misc/*' -print0)
 
 for DEST in "${DESTS[@]}"; do
   # If $DEST is a symlink that resolves into this repo, we'd end up writing the
