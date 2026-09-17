@@ -933,11 +933,13 @@ export function createGitHubWorkflowSources({
           taskState:
             task?.state === "RUNNING"
               ? "EXECUTING"
-              : task?.state === "RESUMABLE"
-                ? "NONE"
-                : task
-                  ? "UNKNOWN"
-                  : "NONE",
+              : task?.state === "DISPATCHED"
+                ? "DISPATCHED"
+                : task?.state === "RESUMABLE"
+                  ? "NONE"
+                  : task
+                    ? "UNKNOWN"
+                    : "NONE",
           completionState: completion
             ? "COMPLETE"
             : latest?.record.kind === "implementation_blocked"

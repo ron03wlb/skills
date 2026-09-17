@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { HOST_TERMINAL_RUN_STATES } from "../../../scripts/pi-workflow-host.mjs";
+import { HOST_TERMINAL_RUN_STATES, parseHostDispatchId } from "../../../scripts/pi-workflow-host.mjs";
 
 export const HOST_RUN_READBACK_SCHEMA = "pi-workflow-host-run-readback:v1";
 
@@ -165,4 +165,124 @@ export function blockedHostRunFor({ cwd, specId, target, stageId, ...readers } =
     readHostRuns({ workflowRoot: workflowRootFor(cwd), ...readers }),
     { specId, target, stageId },
   );
+}
+
+export const HOST_LANE_EVIDENCE_SCHEMA = "pi-workflow-host-lane-evidence:v1";
+
+// A generated lane's specId is exactly `${stageId}.${materializationId}`; the materialization id is the
+// lane's own task reference, so the mapping back to a lane is exact rather than slugged. The stage's own
+// controller task shares that prefix, so it is named and excluded instead of being mistaken for a lane.
+const laneIdOf = (specId, stageId) => (
+  typeof specId === "string" && specId !== `${stageId}.controller`
+    && specId.startsWith(`${stageId}.`) && specId.length > stageId.length + 1
+    ? specId.slice(stageId.length + 1)
+    : null
+);
+
+// pi-workflow task status -> the task evidence the Run reducer reads, and the lane evidence the lane
+// planner reads. A live lane is active and executing. A materialized lane that is not active stays
+// DISPATCHED, because a settled native terminal without a completion publication is still the same lane
+// and must never be re-dispatched. Only a settled-failed lane is inactive, and it carries the exact host
+// evidence that proves it inactive so the planner replaces it through the journaled supersession path.
+const EVIDENCE_BY_TASK_STATUS = Object.freeze({
+  running: { task: "RUNNING", lane: "ACTIVE" },
+  pending: { task: "DISPATCHED", lane: "RESUMABLE" },
+  completed: { task: "DISPATCHED", lane: null },
+  blocked: { task: "DISPATCHED", lane: null },
+  failed: { task: "TRANSIENT_FAILURE", lane: "INACTIVE" },
+  skipped: { task: "TRANSIENT_FAILURE", lane: "INACTIVE" },
+  interrupted: { task: "TRANSIENT_FAILURE", lane: "INACTIVE" },
+});
+
+const laneEvidenceFor = (task, hostRunId, stageId) => {
+  const laneId = laneIdOf(task?.specId, stageId);
+  if (laneId === null || typeof task?.status !== "string") return null;
+  const evidence = EVIDENCE_BY_TASK_STATUS[task.status];
+  if (!evidence) return null;
+  const detail = [textOf(task.statusDetail), textOf(task.error), textOf(task.failure)].filter((value) => value !== null);
+  // A dispatch materialization id names its own Issue and attempt, so the lane is attributed by identity
+  // rather than by guessing from titles, paths or order.
+  const dispatch = parseHostDispatchId(laneId);
+  return Object.freeze({
+    laneId,
+    hostRunId,
+    issueId: dispatch === null ? null : dispatch.issueId,
+    attempt: dispatch === null ? 0 : dispatch.attempt,
+    capability: dispatch === null ? "other" : "dispatch",
+    status: task.status,
+    taskState: evidence.task,
+    laneState: evidence.lane,
+    inactiveEvidence: evidence.lane === "INACTIVE"
+      ? Object.freeze([
+        `Host run ${hostRunId} task ${task.specId} settled with status ${task.status}`,
+        ...detail,
+      ])
+      : null,
+  });
+};
+
+// Every lane this Spec and target ever materialized, across every host run, in a stable run/id order.
+// The entry hands `observed` to the controller as `lanes.observed` and answers `tasks.read` from the same
+// read, so the reducer and the lane planner can never disagree about one lane. A lane whose identity does
+// not name its Issue and attempt is reported as unattributed instead of being attributed by guesswork.
+export function readHostLaneEvidence({ cwd, specId, target, stageId, ...readers } = {}) {
+  if (typeof stageId !== "string" || !stageId) throw new TypeError("Host lane evidence needs one stage id");
+  const lanes = [];
+  const unattributed = [];
+  const runs = readHostRuns({ workflowRoot: workflowRootFor(cwd), ...readers }).filter((run) => {
+    const binding = taskBinding(run.task);
+    return binding && binding.specId === specId && binding.target === target;
+  });
+  for (const run of runs) {
+    for (const task of run.rawTasks) {
+      const evidence = laneEvidenceFor(task, run.runId, stageId);
+      if (evidence === null) continue;
+      if (evidence.issueId === null) unattributed.push(evidence.laneId);
+      else lanes.push(evidence);
+    }
+  }
+  return Object.freeze({
+    schema: HOST_LANE_EVIDENCE_SCHEMA,
+    specId,
+    target,
+    stageId,
+    lanes: Object.freeze(lanes),
+    unattributed: Object.freeze(unattributed),
+  });
+}
+
+// The lane planner's observed entries for one logical DAG Run. An observed lane that proves no liveness
+// stays UNKNOWN, which stops the planner instead of letting it guess at ownership.
+export function observedLanesFor(evidence, { runId } = {}) {
+  if (evidence?.schema !== HOST_LANE_EVIDENCE_SCHEMA) throw new TypeError("Observed lanes need one host lane evidence read");
+  if (typeof runId !== "string" || !runId) throw new TypeError("Observed lanes need one DAG Run id");
+  return Object.freeze(evidence.lanes.map((lane) => Object.freeze({
+    runId,
+    issueId: lane.issueId,
+    laneRef: lane.laneId,
+    attempt: lane.attempt,
+    state: lane.laneState ?? "UNKNOWN",
+    ...(lane.inactiveEvidence === null ? {} : { inactiveEvidence: lane.inactiveEvidence }),
+  })));
+}
+
+// The adapter `createGitHubWorkflowSources` and the reconciliation reader consume. A lane that no host
+// run ever materialized reads as absent, which is the exact evidence a lost-ack attempt needs: the Run
+// re-issues the recorded attempt instead of duplicating it.
+export function createHostTaskReader({ cwd, specId, target, stageId, ...readers } = {}) {
+  const evidence = readHostLaneEvidence({ cwd, specId, target, stageId, ...readers });
+  const byLane = new Map(evidence.lanes.map((lane) => [lane.laneId, lane]));
+  return Object.freeze({
+    evidence,
+    read: (taskRef) => {
+      const lane = byLane.get(taskRef?.threadId);
+      if (!lane) return null;
+      return Object.freeze({
+        state: lane.taskState,
+        hostRunId: lane.hostRunId,
+        hostStatus: lane.status,
+        statusDetail: lane.inactiveEvidence === null ? null : lane.inactiveEvidence[0],
+      });
+    },
+  });
 }
