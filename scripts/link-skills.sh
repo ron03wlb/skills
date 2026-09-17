@@ -15,6 +15,22 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DESTS=("$HOME/.claude/skills" "$HOME/.agents/skills")
 
+# Skills whose local entry is owned by a dedicated installer instead of this dev
+# linker. `run-issue-workflow` is published as immutable package versions by
+# `skills/personal/run-issue-workflow/scripts/install-workflow.mjs`, and its
+# installation evidence requires every managed entry to resolve to the selected
+# package version. Linking the working copy here silently replaces that entry and
+# breaks the installation receipt, so this script never writes it anywhere.
+RESERVED=("run-issue-workflow")
+
+is_reserved() {
+  local candidate="$1" name
+  for name in "${RESERVED[@]}"; do
+    [ "$name" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
 # Collect the repo's skills once, link into every destination.
 names=()
 srcs=()
@@ -44,6 +60,12 @@ for DEST in "${DESTS[@]}"; do
   for i in "${!names[@]}"; do
     name="${names[$i]}"
     src="${srcs[$i]}"
+
+    if is_reserved "$name"; then
+      echo "reserved $name -> owned by its installer, not linked ($DEST)"
+      continue
+    fi
+
     target="$DEST/$name"
 
     if [ -e "$target" ] && [ ! -L "$target" ]; then
