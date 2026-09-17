@@ -102,7 +102,11 @@ const taskBinding = (task) => {
     const facts = parsed?.facts;
     if (facts?.schema !== "dag-run-facts:v1") return null;
     if (typeof facts.run?.specId !== "string" || typeof facts.run?.target !== "string") return null;
-    return { specId: facts.run.specId, target: facts.run.target };
+    return {
+      specId: facts.run.specId,
+      target: facts.run.target,
+      runId: typeof facts.run.runId === "string" && facts.run.runId ? facts.run.runId : null,
+    };
   } catch {
     return null;
   }
@@ -225,13 +229,17 @@ const laneEvidenceFor = (task, hostRunId, stageId) => {
 // The entry hands `observed` to the controller as `lanes.observed` and answers `tasks.read` from the same
 // read, so the reducer and the lane planner can never disagree about one lane. A lane whose identity does
 // not name its Issue and attempt is reported as unattributed instead of being attributed by guesswork.
-export function readHostLaneEvidence({ cwd, specId, target, stageId, ...readers } = {}) {
+export function readHostLaneEvidence({ cwd, specId, target, stageId, runId = null, ...readers } = {}) {
   if (typeof stageId !== "string" || !stageId) throw new TypeError("Host lane evidence needs one stage id");
   const lanes = [];
   const unattributed = [];
   const runs = readHostRuns({ workflowRoot: workflowRootFor(cwd), ...readers }).filter((run) => {
     const binding = taskBinding(run.task);
-    return binding && binding.specId === specId && binding.target === target;
+    if (!binding || binding.specId !== specId || binding.target !== target) return false;
+    // Lane evidence belongs to one Run. A lane materialized for another Run of the same Spec and target
+    // is never evidence for this one; an unreadable binding stays included, because hiding a lane is
+    // worse than observing one that belongs to a superseded Run.
+    return runId === null || binding.runId === null || binding.runId === runId;
   });
   for (const run of runs) {
     for (const task of run.rawTasks) {
@@ -269,8 +277,8 @@ export function observedLanesFor(evidence, { runId } = {}) {
 // The adapter `createGitHubWorkflowSources` and the reconciliation reader consume. A lane that no host
 // run ever materialized reads as absent, which is the exact evidence a lost-ack attempt needs: the Run
 // re-issues the recorded attempt instead of duplicating it.
-export function createHostTaskReader({ cwd, specId, target, stageId, ...readers } = {}) {
-  const evidence = readHostLaneEvidence({ cwd, specId, target, stageId, ...readers });
+export function createHostTaskReader({ cwd, specId, target, stageId, runId = null, ...readers } = {}) {
+  const evidence = readHostLaneEvidence({ cwd, specId, target, stageId, runId, ...readers });
   const byLane = new Map(evidence.lanes.map((lane) => [lane.laneId, lane]));
   return Object.freeze({
     evidence,

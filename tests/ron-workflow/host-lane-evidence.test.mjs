@@ -20,8 +20,9 @@ const stageId = "delivery";
 const laneId = "dispatch_I_child_1";
 const taskSpecId = `${stageId}.${laneId}`;
 
-const roundTask = (boundSpecId, boundTarget) => JSON.stringify({
-  facts: { schema: "dag-run-facts:v1", run: { specId: boundSpecId, target: boundTarget } },
+const dagRunId = "workflow-op-v1-dag";
+const roundTask = (boundSpecId, boundTarget, boundRunId = dagRunId) => JSON.stringify({
+  facts: { schema: "dag-run-facts:v1", run: { specId: boundSpecId, target: boundTarget, runId: boundRunId } },
 });
 
 const project = ({ runs }) => {
@@ -33,7 +34,7 @@ const project = ({ runs }) => {
     writeFileSync(join(runDirectory, "run.json"), JSON.stringify({
       id: run.runId,
       status: run.status,
-      task: roundTask(run.specId ?? specId, run.target ?? target),
+      task: roundTask(run.specId ?? specId, run.target ?? target, run.dagRun ?? dagRunId),
       tasks: run.tasks,
     }));
   }
@@ -148,6 +149,26 @@ test("an unreadable run record stays visible instead of being dropped", () => {
     writeFileSync(join(workflowRootFor(fixture.directory), "run-broken", "run.json"), "{ not json");
     const evidence = readHostLaneEvidence({ cwd: fixture.directory, specId, target, stageId });
     assert.deepEqual(evidence.lanes, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("lane evidence belongs to one Run and never borrows another Run's lane", () => {
+  const fixture = project({
+    runs: [
+      { runId: "host-run-old", status: "running", dagRun: "workflow-op-v1-old", tasks: [task("running")] },
+      { runId: "host-run-current", status: "running", tasks: [task("pending")] },
+    ],
+  });
+  try {
+    const scoped = readHostLaneEvidence({ cwd: fixture.directory, specId, target, stageId, runId: dagRunId });
+    assert.deepEqual(scoped.lanes.map(({ hostRunId }) => hostRunId), ["host-run-current"]);
+    // Unscoped reads stay conservative: an unreadable binding is never used to hide a lane.
+    const unscoped = readHostLaneEvidence({ cwd: fixture.directory, specId, target, stageId });
+    assert.equal(unscoped.lanes.length, 2);
+    const reader = createHostTaskReader({ cwd: fixture.directory, specId, target, stageId, runId: dagRunId });
+    assert.equal(reader.read({ threadId: laneId }).state, "DISPATCHED");
   } finally {
     fixture.cleanup();
   }

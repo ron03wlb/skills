@@ -15,7 +15,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
-import { createRunAuthorityAdapters, reduceRunReadyHandoff } from "./delivery-authority.mjs";
+import { createRunAuthorityAdapters, deriveRunOperationIdentity, reduceRunReadyHandoff } from "./delivery-authority.mjs";
 import { createRunStore } from "./run-store.mjs";
 import { planHostRound } from "./pi-workflow-host.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
@@ -49,18 +49,26 @@ export async function startRun({ cwd = process.cwd(), specId, approval = null, c
 
   const request = { specId };
   const tracker = await sources.sources.tracker.read(request);
+  // The Run identity is derived from the selected authority before any read, so lane evidence can be
+  // scoped to this Run and never borrow a lane materialized for another Run of the same Spec.
+  const runId = deriveRunOperationIdentity({
+    repositoryId: `github:${repositoryName}`,
+    specId: tracker.spec.node_id,
+    approvedPublicationIdentity: tracker.authority.approvedScopeHash,
+  }).key;
   taskReader = createHostTaskReader({
     cwd: repository,
     specId: tracker.spec.node_id,
     target: tracker.authority.target,
     stageId: RUN_ENTRY_STAGE_ID,
+    runId,
   });
 
   // Re-entry reuses the exact existing Grant: the human's one approval is already recorded, so the
   // confirming read-back must never append a second one.
-  const runId = (await adapters.reconcile({ request, tracker, journal: [] })).runIdentity.runId;
   let journal = store.listRunIds().includes(runId) ? store.readEvents(runId) : [];
   let current = await adapters.reconcile({ request: { specId, runIdentity: { ...tracker.authority, runId } }, tracker, journal });
+  if (current.runIdentity.runId !== runId) throw new Error("Run identity differs from the selected authority");
   let ready = reduceRunReadyHandoff(await adapters.handoff.read({ request, tracker, current }));
   const result = {
     schema: RUN_ENTRY_SCHEMA,
