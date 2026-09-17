@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmdirSync, mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, join, sep } from "node:path";
-import { CODEX_HOST_RELEASE_CAPABILITY } from "../../../personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
+import { CODEX_HOST_RELEASE_CAPABILITY } from "../../../personal/run-issue-workflow/scripts/host-release-capability.mjs";
 import { withCloseIssueLeases } from "./close-lease.mjs";
 import { openWindowsCleanupSession } from "./windows-cleanup-session.mjs";
 

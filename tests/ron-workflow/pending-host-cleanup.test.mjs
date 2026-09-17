@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 import { assessPendingHostCleanup } from "../../skills/engineering/close-issue/scripts/pending-host-cleanup.mjs";
-import { CODEX_HOST_RELEASE_CAPABILITY } from "../../skills/personal/run-issue-workflow/scripts/codex-host-bridge.mjs";
+import { CODEX_HOST_RELEASE_CAPABILITY } from "../../skills/personal/run-issue-workflow/scripts/host-release-capability.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 
 test("unavailable release preserves real integrated Git state, failures and both lease release paths", async () => {

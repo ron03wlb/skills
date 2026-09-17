@@ -12,9 +12,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { planCloseContinuation } from "./delivery-authority.mjs";
+import { closeRequestIdentityFor, planCloseContinuation } from "./delivery-authority.mjs";
 import { createAutomaticHostCleanupPacket } from "./github-workflow-sources.mjs";
-import { closeRequestIdentityFor } from "./run-coordinator.mjs";
 
 export const workflowQualificationSchema = "workflow-repair-qualification:v1";
 export const workflowFixtureRevision = "wsl-posix-v1";

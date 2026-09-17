@@ -87,9 +87,9 @@ export function validateNativeObservationEnvelope(envelope) {
   }
   requireText(envelope.requestIdentity, "native observation requestIdentity");
   assertExact(envelope.producer, producerFields, "native observation producer");
-  if (envelope.producer.name !== "codex-host-driver"
+  if (envelope.producer.name !== "pi-workflow-host"
     || !revision.test(envelope.producer.revision) || !revision.test(envelope.producer.packageVersion)) {
-    throw new TypeError("Native observation producer is not the trusted host adapter");
+    throw new TypeError("Native observation producer is not the delivery host");
   }
   requireInstantOrNull(envelope.observedAt, "native observation observedAt");
   if (envelope.observedAt === null) throw new TypeError("Native observation requires its producer time");
@@ -216,7 +216,7 @@ export function validateTaskOutcomeReceipt(receipt) {
   requireText(receipt.taskRef.threadId, "task outcome threadId");
   requireText(receipt.taskRef.hostId, "task outcome hostId");
   assertExact(receipt.producer, producerFields, "task outcome producer");
-  if (receipt.producer.name !== "codex-workflow-tasks") throw new TypeError("Task outcome producer is not the trusted workflow adapter");
+  if (receipt.producer.name !== "pi-workflow-host") throw new TypeError("Task outcome producer is not the delivery host");
   if (!revision.test(receipt.producer.revision) || !revision.test(receipt.producer.packageVersion)) {
     throw new TypeError("Task outcome producer revision and package version must be exact digests or unavailable");
   }

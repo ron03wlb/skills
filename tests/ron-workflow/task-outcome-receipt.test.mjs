@@ -19,7 +19,7 @@ const input = {
   requestIdentity: "dispatch:2",
   taskRef: { threadId: "thread-90", hostId: "local" },
   producer: {
-    name: "codex-workflow-tasks",
+    name: "pi-workflow-host",
     revision: "a".repeat(40),
     packageVersion: "b".repeat(64),
   },
@@ -61,7 +61,7 @@ test("task outcome receipt rejects payload fields and oversize locator text befo
   const receipt = createTaskOutcomeReceipt(input);
   assert.throws(() => validateTaskOutcomeReceipt({ ...receipt, workerOutput: "do this" }), /unknown field workerOutput/u);
   assert.throws(() => createTaskOutcomeReceipt({ ...input,
-    producer: { ...input.producer, name: "codex-host" } }), /trusted workflow adapter/iu);
+    producer: { ...input.producer, name: "codex-host" } }), /delivery host/iu);
   assert.throws(() => createTaskOutcomeReceipt({ ...input, evidence: [{
     kind: "tracker-completion", locator: "github-issue://I_issue/comment/IC_done",
     digest: "sha256:" + "7".repeat(64),

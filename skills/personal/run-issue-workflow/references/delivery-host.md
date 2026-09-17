@@ -5,10 +5,10 @@ pi-workflow bundle at `workflows/deliver-tracker-spec/` inside this skill packag
 scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair
 routing, close eligibility, or stop classification.
 
-This contract owns reducer-action materialization on the pi-workflow substrate. While the Codex-native
-coordinator is still present, [the coordinator lifecycle](coordinator-lifecycle.md) describes that
-separate substrate; where the two describe the same reducer action, this page governs the delivery host
-and the coordinator lifecycle governs only the retired path until Issue 102 removes it.
+This contract owns reducer-action materialization on the pi-workflow substrate. The Codex-native
+coordinator was removed with the host boundary in Issue 102; [the coordinator lifecycle](coordinator-lifecycle.md)
+keeps only its retired compact-outcome and no-repair boundaries for historical reconciliation. This page
+governs the delivery host everywhere the two once overlapped.
 
 ## Bundle
 

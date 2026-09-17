@@ -111,10 +111,10 @@ test("moved workflow detail has an exact conditional owner-local reference and s
       entry: "skills/personal/run-issue-workflow/SKILL.md",
       references: [
         "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
-        "skills/personal/run-issue-workflow/references/coordinator-lifecycle.md",
+        "skills/personal/run-issue-workflow/references/delivery-host.md",
         "skills/personal/run-issue-workflow/references/recovery.md",
       ],
-      trigger: /read \[the Run-ready handoff contract\]\(references\/run-ready-handoff\.md\).*Only `READY` may continue.*read \[the coordinator lifecycle\]\(references\/coordinator-lifecycle\.md\) only when.*Read \[Run recovery\]\(references\/recovery\.md\) only after/isu,
+      trigger: /read \[the Run-ready handoff contract\]\(references\/run-ready-handoff\.md\).*Only `READY` may continue.*read \[the delivery host contract\]\(references\/delivery-host\.md\) only when.*Read \[Run recovery\]\(references\/recovery\.md\) only after/isu,
     },
     {
       entry: "skills/engineering/execute-issue/SKILL.md",
@@ -3278,72 +3278,10 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.equal(existsSync("skills/personal/run-issue-workflow/scripts/gitlab-to-tickets-adapters.mjs"), true);
   assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md"),
     /tracker-only `to-tickets@v2`.*gitlab-to-tickets-entry\.mjs.*read-only `inspect`.*`Blocking representation`.*package-installation repair.*configuration `UNKNOWN`.*never calls `invoke`/isu);
-  assert.match(read("skills/personal/run-issue-workflow/SKILL.md"), /run-authority-adapters\.mjs.*run-workflow\.mjs/isu);
+  assert.match(read("skills/personal/run-issue-workflow/SKILL.md"), /run-authority-adapters\.mjs.*pi-workflow-host\.mjs/isu);
   assert.match(read("skills/engineering/verify-target-before-push/SKILL.md"), /references\/aggregate-verification-interfaces\.md/u);
   assert.match(read("skills/engineering/push-target/SKILL.md"), /references\/push-delivery-interfaces\.md/u);
   assert.match(read("skills/engineering/ask-matt/SKILL.md"), /grill-with-docs.*to-spec.*to-tickets.*run-issue-workflow.*verify-target-before-push.*push-target/isu);
-});
-
-test("installed route keeps payload and recovery detail behind one cross-seam consumer fixture", () => {
-  const verify = read("skills/engineering/verify-target-before-push/SKILL.md");
-  const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/aggregate-verification-interfaces.md");
-  const recoveryPath = "skills/engineering/verify-target-before-push/references/aggregate-recovery-interfaces.md";
-  const push = read("skills/engineering/push-target/SKILL.md");
-  const pushInterfaces = read("skills/engineering/push-target/references/push-delivery-interfaces.md");
-  const coreTests = read("tests/ron-workflow/run-issue-workflow-core.test.mjs");
-  const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
-  const installedScenario = endToEndTests.slice(
-    endToEndTests.indexOf('test("installed route'),
-    endToEndTests.indexOf('test("installed route proves real close leaf concurrency'),
-  );
-
-  assert.equal(existsSync(recoveryPath), true, "aggregate recovery must have one owner-local reference");
-  const recoveryInterfaces = read(recoveryPath);
-  assert.doesNotMatch(verify, /In clean temporary worktrees at the exact affected execution baseline/iu);
-  assert.match(recoveryInterfaces, /In clean temporary worktrees at the exact affected execution baseline/iu);
-  assert.doesNotMatch(verify, /For every member require the completion note's exact Issue identity/iu);
-  assert.match(aggregateInterfaces, /For every member require the completion note's exact Issue identity/iu);
-  assert.doesNotMatch(push, /member Issue and candidate identities.*Successor verification evidence/isu);
-  assert.match(pushInterfaces, /member Issue and candidate identities.*Successor verification evidence/isu);
-
-  assert.doesNotMatch(coreTests, /test\("installed route keeps concurrent Spec operations/iu);
-  for (const requiredSeam of ["createWorkflowControlStore", "runToSpec", "runReadyHandoffFromProducer", "producerHandoffAdapter", "Promise.all"]) {
-    assert.match(installedScenario, new RegExp(requiredSeam.replace(".", "\\."), "u"), `installed scenario omits ${requiredSeam}`);
-  }
-  assert.match(installedScenario, /reasonCode: "TARGET_MOVED"[^]*targetReconfirmed/iu);
-  assert.doesNotMatch(installedScenario, /runReadyHandoff:\s*readyHandoffFor/iu);
-});
-
-test("installed route proof uses real close leaves and filesystem stores across repositories", () => {
-  const endToEndTests = read("tests/ron-workflow/run-issue-workflow-end-to-end.test.mjs");
-  const start = endToEndTests.indexOf(
-    'test("installed route proves real close leaf concurrency and same-command resume recovery"',
-  );
-  const end = endToEndTests.indexOf('test("end-to-end closeout contention', start);
-
-  assert.notEqual(start, -1, "the installed real-close scenario must exist");
-  assert.ok(end > start, "the installed real-close scenario must have one bounded fixture");
-  const scenario = endToEndTests.slice(start, end);
-  for (const requiredSeam of [
-    "createStoreFixture",
-    "symlinkSync",
-    "realpathSync",
-    "pathToFileURL",
-    "createInstalledRunStore",
-    "createInstalledWorkflowRuntime",
-    "acquireInstalledCloseIssueLeases",
-    "Promise.all",
-    "maxParallel",
-    "repository_close_lease_wait_coordinator_lost",
-    "retryCount",
-    "operationId",
-  ]) {
-    assert.match(scenario, new RegExp(requiredSeam, "u"), `installed real-close proof omits ${requiredSeam}`);
-  }
-  assert.match(scenario, /different targets.*same Git common directory/isu);
-  assert.match(scenario, /different Git common directories.*overlap/isu);
-  assert.match(scenario, /same command.*fresh evidence/isu);
-  assert.doesNotMatch(scenario, /\.acquireRepositoryCloseLease\(/u);
 });
 
 test("router exposes the Issue worktree flow and independent controls", () => {
@@ -3411,129 +3349,96 @@ test("router exposes the Issue worktree flow and independent controls", () => {
   }
 });
 
-test("Codex-native workflow coordinator is explicit personal only", () => {
+test("delivery host is explicit personal only", () => {
   const skillPath = "skills/personal/run-issue-workflow/SKILL.md";
   const metadataPath = "skills/personal/run-issue-workflow/agents/openai.yaml";
-  const runtimePath = "skills/personal/run-issue-workflow/scripts/run-workflow.mjs";
+  const hostPath = "skills/personal/run-issue-workflow/scripts/pi-workflow-host.mjs";
+  const lanePath = "skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
   const authorityAdaptersPath = "skills/personal/run-issue-workflow/scripts/run-authority-adapters.mjs";
   const corePath = "skills/personal/run-issue-workflow/scripts/run-core.mjs";
-  const coordinatorPath = "skills/personal/run-issue-workflow/scripts/run-coordinator.mjs";
   const operatorPath = "skills/personal/run-issue-workflow/OPERATOR.md";
-  assert.equal(existsSync(skillPath), true);
-  assert.equal(existsSync(metadataPath), true);
-  assert.equal(existsSync(runtimePath), true);
-  assert.equal(existsSync(authorityAdaptersPath), true);
-  assert.equal(existsSync(corePath), true);
-  assert.equal(existsSync(coordinatorPath), true);
-  assert.equal(existsSync(operatorPath), true);
+  const specPath = "skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/spec.json";
+  const workerPath = "skills/personal/run-issue-workflow/agents/worker.md";
+  for (const path of [skillPath, metadataPath, hostPath, lanePath, authorityAdaptersPath, corePath, operatorPath, specPath, workerPath]) {
+    assert.equal(existsSync(path), true, `${path} must exist`);
+  }
+  for (const retired of [
+    "scripts/run-workflow.mjs",
+    "scripts/run-coordinator.mjs",
+    "scripts/run-batch.mjs",
+    "scripts/codex-host-driver.js",
+    "scripts/codex-host-bridge.mjs",
+    "scripts/codex-workflow-tasks.mjs",
+    "scripts/codex-task-discovery.mjs",
+    "scripts/codex-close-receipts.mjs",
+    "scripts/run-panel.mjs",
+    "scripts/run-panel-bridge.mjs",
+    "references/codex-host-driver.md",
+  ]) {
+    assert.equal(existsSync(`skills/personal/run-issue-workflow/${retired}`), false, `${retired} must be retired`);
+  }
+  assert.equal(existsSync("docs/agents/workflow-host.json"), false, "the consumer host configuration must be retired");
 
   const skill = readRunIssueWorkflowContract();
   const skillEntry = read(skillPath);
   const lifecycle = read("skills/personal/run-issue-workflow/references/coordinator-lifecycle.md");
   const metadata = read(metadataPath);
-  const runtime = read(runtimePath);
+  const host = read(hostPath);
+  const lane = read(lanePath);
+  const specJson = read(specPath);
   const authorityAdapters = read(authorityAdaptersPath);
   const core = read(corePath);
-  const coordinator = read(coordinatorPath);
   const operator = read(operatorPath);
   const journal = read("skills/personal/run-issue-workflow/scripts/run-journal.mjs");
   const executionBudget = read("skills/personal/run-issue-workflow/scripts/issue-execution-budget.mjs");
   const storeSource = read("skills/personal/run-issue-workflow/scripts/run-store.mjs");
   const leaseHealth = read("skills/personal/run-issue-workflow/scripts/lease-health.mjs");
-  const hostEvidence = read("docs/agents/codex-host-driver-evidence.md");
+
   assert.match(skill, /^disable-model-invocation:\s*true$/mu);
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(skill, /READY.*INCOMPLETE.*UNKNOWN/isu);
   assert.match(skill, /Pause.*Resume.*Stop/isu);
-  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*producer handoff.*READY.*concurrent.*bounded.*writer.*panel/isu);
-  assert.match(skill, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
-  assert.match(skill, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
-  assert.match(skill, /DAG Run Grant.*`max_parallel`.*default three/isu);
-  assert.match(skill, /repository-owned.*`run-authority-adapters\.mjs`.*owning sources.*checkpoint.*handoff.*tracker.*Decomposition.*target.*shared writer.*callers.*never.*invent `handoff\.read`/isu);
-  assert.match(skill, /Fresh Single-Issue.*`to-spec`.*publication.*handoff.*Fresh Multi-Issue.*`to-tickets`.*upstream publication.*upstream handoff.*operation receipt.*`decomposition:v1`.*digest.*mapping.*blocker edges.*frozen.*profile-v1.*record identities/isu);
-  assert.match(skill, /`READY` requires.*Spec.*target.*Planning Seal.*classification.*approved-scope identity.*producer.*handoff.*transaction.*tracker.*identities.*known target state.*decomposition identity.*current Multi-Issue.*operation.*tracker read-back/isu);
-  assert.match(skill, /current Single-Issue handoff.*exact transaction identity.*publication read-back/isu);
-  assert.match(skill, /`INCOMPLETE` requires.*exact consistent.*transaction.*profile.*Planning Seal.*classification.*approved-scope identity.*baseline.*transaction identity.*first unsatisfied stage.*current producer.*never owns target dirt.*frozen.*initially-clean state.*plan path.*generated-content identity.*exact `\/<producer> <Spec-ID>` retry command.*next owner.*retry predicates.*before any Run mutation/isu);
-  assert.match(skill, /`UNKNOWN` covers.*missing.*unreadable.*malformed.*contradictory.*multiple.*stale.*drifted.*legacy plan-only.*dirty-target-without-owner.*identity-ambiguous.*stable reason code.*exact observed checkpoint and handoff producer.*Spec.*target.*Planning Seal.*classification.*scope.*record.*decomposition.*no-automatic-transition.*recovery predicates/isu);
-  assert.match(skill, /both `READY` and actionable `INCOMPLETE`.*live selected reconciliation.*mismatch.*`UNKNOWN`.*conflicting field.*observed handoff value.*expected selected value.*never return a retry command for stale producer authority/isu);
-  assert.match(skill, /does not revalidate.*producer generation.*generated-content hashes.*whole-commit.*v1 record semantics.*producer review.*tests.*aggregate coverage.*retry correctness/isu);
-  assert.match(skill, /before `onSelected`.*non-`READY`.*read-only cleanup preview.*cannot apply cleanup.*engine or target writer.*Grant.*panel.*task.*leaf.*tracker or Git/isu);
-  assert.match(core, /RUN_READY_FACT_SCHEMA.*run-ready-handoff-facts:v1.*RUN_READY_RESULT_SCHEMA.*run-ready-handoff:v1.*reduceRunReadyHandoff/isu);
-  assert.match(runtime, /authoritySources.*createRunAuthorityAdapters.*createCoordinator.*authorityAdapters\.handoff/isu);
-  assert.match(authorityAdapters, /sources\.tracker.*sources\.reconciliation.*sources\.target.*sources\.checkpoint.*sources\.handoff.*sources\.writer.*observeTargetMutationWriter.*RUN_READY_FACT_SCHEMA/isu);
-  assert.match(authorityAdapters, /provesInactiveWriter.*closeWriterReclaimable.*targetState: current\.authorityReadBack\.target\.state.*targetOwnership: current\.authorityReadBack\.target\.ownership/isu);
-  assert.match(coordinator, /handoff\.read\(\{.*tracker: trackerResult\.snapshot.*current.*reduceRunReadyHandoff\(runReadyFacts\).*planningSeal.*state !== "READY".*runReadyStop.*onSelected/isu);
-  assert.match(coordinator, /\["READY", "INCOMPLETE"\]\.includes.*selected_authority_conflict.*retryCommand: null.*selectedAuthorityConflict.*field: mismatch.*observed.*expected/isu);
-  assert.match(core, /targetOwnership.*EXACT_PRODUCER/isu);
-  assert.match(core, /currentProfile.*checkpoint\.profileVersion.*v2.*frozenProfile.*checkpoint\.planPath.*checkpoint\.generatedContentIdentity/isu);
-  assert.match(core, /handoffPlanningSeal.*handoffApprovedScopeHash.*handoffUpstreamPublicationIdentity.*handoffUpstreamHandoffIdentity.*handoffDecompositionDigest/isu);
-  assert.match(core, /operationReceipt.*transactionIdentity.*stageReceipts.*decompositionReadBack.*readyStateReadBack.*decompositionMapping.*blockerEdges/isu);
-  assert.match(core, /currentProfile.*classification === "SINGLE".*publicationReadBack.*handoff\.transactionIdentity.*handoff\.publicationIdentity.*handoff\.trackerIdentity/isu);
-  assert.match(lifecycle, /saved Git project.*executable Issue.*sidebar-visible child Codex task.*`worktree` environment.*recorded target branch/isu);
-  assert.match(lifecycle, /`execute-issue` verifies and adopts that same worktree.*prerequisite lane is adopted instead/isu);
-  assert.match(skill, /Never create a duplicate live lane/iu);
-  assert.match(skill, /`execute-issue` owns its dedicated Issue worktree/iu);
-  assert.match(skill, /`implementation_complete` triggers serialized `close-issue`/iu);
+  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*READY.*pi-workflow host.*compact task outcomes.*bounded recovery\/writer waits/isu);
+  assert.match(skillEntry, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
+  assert.match(skillEntry, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
+  assert.match(skillEntry, /DAG Run Grant.*`max_parallel`.*default three/isu);
+  assert.match(skillEntry, /pi-workflow bundle.*`workflows\/deliver-tracker-spec\/`/isu);
+  assert.match(skillEntry, /Read \[the delivery host contract\]\(references\/delivery-host\.md\) only when/isu);
+  assert.match(skillEntry, /`pi-workflow-host\.mjs` plans exactly the legal actions the Domain action reducer returns/isu);
+  assert.match(skillEntry, /Each executable Issue owns one lane.*isolated worker.*dedicated Issue worktree/isu);
+  assert.match(skillEntry, /implementation lane follows `execute-issue`.*close lane follows `close-issue`/isu);
+  assert.match(skillEntry, /`implementation_complete`.*serialize `close-issue`/isu);
   assert.match(skillEntry, /Release dependants only after the candidate is reachable from the Issue target branch.*exact worktree is absent.*Issue is closed/isu);
-  assert.match(lifecycle, /reacquire.*candidate reachability from the Issue target branch.*Only candidate reachability from the Issue target branch.*release dependants/isu);
-  assert.match(skill, /node success.*release dependants/iu);
-  assert.match(skill, /All-child node success triggers.*parent-only close/iu);
-  assert.match(skill, /close_parent.*evidence-bound parent-only `close-issue` leaf.*real leaf owns.*repository-then-target lease order/isu);
-  assert.match(skill, /close_issue.*current target state and exact HEAD.*exact tracker identity.*candidate commit.*completion evidence ID\/body hash.*registered worktree identity/isu);
-  assert.match(skill, /close_parent.*current target state and exact HEAD.*exact parent tracker state and identity.*every child's exact close authority evidence/isu);
-  assert.match(skill, /published blocker edges alone.*ready frontier.*never infer.*path.*symbol.*module/isu);
-  assert.match(skill, /at most three dispatch attempts.*Technical.*failed integration bypass blind dispatch retries.*isolated diagnosis.*Scope conflicts.*authority mismatch.*contradictory evidence/isu);
-  assert.match(skill, /accepted retry follow-up.*same Run, Issue, and next attempt.*without sending the prompt again/isu);
-  assert.match(skill, /5, 15, and 30 second.*tracker.*probe.*retry budget/isu);
-  assert.match(skill, /restart.*selector-known Run identity and node set.*preserve.*affected nodes.*anonymous outage/isu);
-  assert.match(skill, /`Selector\.open\(\)`.*Unable to establish loopback connection.*`gradle-loopback-safe`.*one.*process-local.*cycle/isu);
-  assert.match(skill, /On every entry.*reacquire/isu);
-  assert.match(skill, /stale engine writer.*exact reconciled `INACTIVE` owner evidence.*active operation.*fenced and stop/isu);
-  assert.match(skill, /accepted `close-issue` follow-up.*task history.*already in flight.*never send the same close request again/isu);
-  assert.match(skill, /manual `implementation_complete`.*no journaled task reference.*adopt one uniquely matching.*Zero or multiple.*structured diagnosis.*never creates or guesses/isu);
-  assert.match(skill, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer.*coordinator only observes.*never acquires, releases, reclaims, or delegates/isu);
-  assert.match(skill, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*every currently legal Issue dispatch.*repository-close-wait\.started.*repository-close-wait\.settled.*execution slot or retry/isu);
-  assert.match(skill, /tracker identity\/state.*target HEAD\/state.*candidate commit\/reachability.*completion evidence ID\/body SHA-256\/state.*registered worktree identity\/state.*control revision/isu);
-  assert.match(skill, /healthy target-writer contention retains.*`WAITING_FOR_TARGET_WRITER`.*`target-writer-wait\.\*`/isu);
-  assert.match(skill, /cumulative six-hour execution budget.*implementation retry.*conflict repair.*verification.*independent review.*retry.*task replacement.*transport restart.*explicit re-entry.*Verified healthy dependency or writer waiting is excluded/isu);
-  assert.match(skill, /At the cumulative six-hour boundary.*`execution\.exhausted`.*`execution_timeout`.*stop scheduling new execution, repair, retry, or close.*original task.*worktree.*candidate.*receipts.*late native outcomes.*Do not force-kill/isu);
-  assert.match(lifecycle, /`execution\.started`.*`execution\.observed`.*monotonic clock.*native `durationMs`.*`execution\.uncertain`.*never remove proved elapsed/isu);
-  assert.match(lifecycle, /`ISSUE_EXECUTION_LIMIT_MS`.*six hours.*smaller.*15-second.*remaining budget.*`execution\.exhausted`.*Other independent nodes retain their legal actions/isu);
-  assert.match(operator, /cumulative six-hour execution budget.*healthy dependency and writer waits are excluded.*beyond twelve hours.*`execution_timeout`.*does not force-kill.*claim cancellation/isu);
+  assert.match(skillEntry, /parent-only close after all-child node success/isu);
+  assert.match(skillEntry, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer/isu);
+  assert.match(skillEntry, /six-hour execution budget/isu);
+  assert.match(skillEntry, /Explicit Spec or batch selection includes matching completed Runs.*cached `SUCCEEDED`.*no execution, verification or close replay/isu);
+
+  assert.match(host, /HOST_ACTION_POLICY.*dispatch_issue.*close_issue/isu);
+  assert.match(host, /planHostActions.*planHostRound/isu);
+  assert.match(lane, /planIssueLane.*assertLaneTools.*assertLanePromptScope/isu);
+  assert.match(specJson, /deliver-tracker-spec/iu);
+  assert.match(specJson, /"worktreePolicy":\s*"on"/u);
+
+  assert.match(core, /RUN_READY_FACT_SCHEMA.*run-ready-handoff-facts:v1.*RUN_READY_RESULT_SCHEMA.*run-ready-handoff:v1.*reduceRunReadyHandoff/isu);
+  assert.match(authorityAdapters, /sources\.tracker.*sources\.reconciliation.*sources\.target.*sources\.checkpoint.*sources\.handoff.*sources\.writer.*observeTargetMutationWriter.*RUN_READY_FACT_SCHEMA/isu);
+  assert.match(core, /targetOwnership.*EXACT_PRODUCER/isu);
   assert.match(journal, /ISSUE_EXECUTION_LIMIT_MS\s*=\s*6 \* 60 \* 60 \* 1000.*execution\.started.*execution\.observed.*execution\.uncertain.*execution\.exhausted/isu);
   for (const evidence of [/monotonicNow/u, /nativeDurationMs/u, /MONOTONIC_OR_NATIVE_ELAPSED_UNAVAILABLE/u,
     /recordExhaustion/u, /remainingMs/u]) assert.match(executionBudget, evidence);
   assert.match(core, /executionTimeout: "execution_timeout".*executionBudget.*EXHAUSTED.*do not authorize execution, repair, retry, or close dispatch/isu);
   assert.match(storeSource, /BOUNDED_OBSERVATION_RECOVERY_DELAYS_MS.*5000, 15000, 30000.*createBoundedObservationFault/isu);
   assert.match(leaseHealth, /sameLeaseOwner.*OWNER_CHANGED.*HEARTBEAT_AGE_OR_CLOCK_UNKNOWN.*PROCESS_CONFIRMED_ABSENT.*PROCESS_LIVENESS_UNKNOWN.*EXACT_OWNER_GENERATION_HEALTHY/isu);
-  assert.match(lifecycle, /beyond twelve hours.*5\/15\/30-second.*`OWNER_HEALTH_UNKNOWN`.*`UNKNOWN` is not `INACTIVE`.*never permits release, reclaim, cancellation, or duplicate close dispatch/isu);
-  assert.match(hostEvidence, /Issue 87.*six hours.*15 seconds.*twelve virtual hours.*no real Windows six-hour execution or twelve-hour contention soak/isu);
-  assert.match(skill, /unknown repository-close or target-writer ownership.*coordinator loss.*changed immutable authority.*Recoverable blocker.*smallest human action.*same `\/run-issue-workflow` retry/isu);
   assert.match(core, /REPOSITORY_CLOSE_WAIT_TIMEOUT_MS\s*=\s*30_000/iu);
   assert.match(core, /WAITING_FOR_REPOSITORY_CLOSE_LEASE/iu);
   assert.match(core, /wait_repository_close_lease/iu);
   assert.match(core, /WAITING_FOR_TARGET_WRITER.*wait_target_writer.*TARGET_WRITER_WAIT_TIMEOUT_MS/isu);
   assert.match(core, /createRecoverableOperatorPacket.*Recoverable blocker.*owningSource.*observedEvidence.*smallestHumanAction.*preservedStages.*retryCommand/isu);
-  assert.match(coordinator, /repository-close-wait\.started.*repository-close-wait\.settled.*target-writer-wait\.started.*target-writer-wait\.settled/isu);
-  assert.doesNotMatch(coordinator, /acquireRepositoryCloseLease|acquireTargetMutationWriter|reclaimTargetMutationWriter/iu);
-  for (const outcome of ["OWNER_CHANGED", "OWNER_HEALTH_UNKNOWN", "CONTROL_CHANGED", "COORDINATOR_INACTIVE", "EVIDENCE_CHANGED"]) {
-    assert.match(coordinator, new RegExp(`outcome: "${outcome}"`, "u"));
-  }
-  for (const evidence of [
-    /tracker evidence/iu,
-    /registered worktree evidence from Git/iu,
-    /`implementation_complete`/u,
-    /Codex task lifecycle/iu,
-    /append-only run journal/iu,
-  ]) assert.match(skill, evidence);
-  assert.match(skill, /Re-entry.*without duplicate/isu);
-  assert.match(skill, /`run-workflow\.mjs`.*single composition.*first valid.*status projection.*opens.*panel.*without a second Start/isu);
-  assert.match(skill, /Pause.*Resume.*Stop.*same active engine writer.*Refresh.*read-only/isu);
-  assert.match(skill, /paused coordinator.*same bridge active.*Resume.*Stop.*same panel/isu);
-  assert.match(skill, /exact explicit.*unique no-argument selection.*reconciled identity validation.*cleanup preview.*applies.*terminal-Run sweep.*selected Run.*protected from deletion.*Zero or ambiguous.*only.*preview.*no cleanup mutation.*cleanupPreview: true.*without deletion/isu);
-  assert.match(skill, /bridge.*closes.*status.*journal.*cleanup preview.*cleanup result.*inspectable/isu);
-  assert.match(lifecycle, /panel-open failure.*continues through available text controls.*same writer.*without that control capability.*panel_unavailable.*before task action/isu);
-  assert.match(skillEntry, /Explicit Spec or batch selection includes matching completed Runs.*original Grants.*cached `SUCCEEDED`.*no execution, verification or close replay/isu);
+
+  assert.match(lifecycle, /Retired surface/iu);
+  assert.match(lifecycle, /\[compact recovery outcome and progress diagnosis contract\]\(recovery\.md#compact-outcomes-and-progress-diagnosis\)/u);
+  assert.match(lifecycle, /coordinator[^.]*never repair/iu);
+
   const recovery = read("skills/personal/run-issue-workflow/references/recovery.md");
   const diagnosis = read("docs/agents/references/workflow-stop-diagnosis.md");
   assert.match(diagnosis, /Skill-caused stop.*exact `SKILL.md`.*quote.*instruction.*referenced rule.*observed condition.*interpretation/isu);
@@ -3542,20 +3447,19 @@ test("Codex-native workflow coordinator is explicit personal only", () => {
     assert.match(reader, /docs\/agents\/references\/workflow-stop-diagnosis\.md/u);
     assert.doesNotMatch(reader, /\.\.\/.*run-issue-workflow\/references\/recovery\.md/u);
   }
-  assert.match(recovery, /pending owning results settle.*live native Promise.*driver.*elapsed time.*cannot.*failed delivery/isu);
+  assert.match(recovery, /pending owning results settle.*owning host run.*elapsed time.*cannot.*failed delivery/isu);
+
   assert.match(operator, /GRILL.*Spec.*`\/to-tickets`.*`\/run-issue-workflow <main Issue>`/isu);
   assert.match(operator, /Single-Issue.*Multi-Issue.*no-argument.*unique non-terminal Run/isu);
-  assert.match(operator, /Fresh Single-Issue.*`to-spec`.*Fresh Multi-Issue.*`to-tickets`.*upstream publication.*operation receipt.*Decomposition.*digest.*mapping.*blocker edges.*frozen.*profile-v1.*`READY`.*`INCOMPLETE`.*exact `\/to-spec <Spec-ID>` or `\/to-tickets <Spec-ID>`.*`UNKNOWN`.*stable diagnosis/isu);
-  assert.match(operator, /Neither state applies cleanup.*writer.*Grant.*panel.*task or leaf.*cleanup preview.*read-only/isu);
-  assert.match(operator, /Pause.*Resume.*Stop.*Refresh/isu);
-  assert.match(operator, /healthy repository close-lease contention.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*healthy target-writer contention.*`WAITING_FOR_TARGET_WRITER`.*Issue execution.*`max_parallel`.*no Issue execution slot or retry.*reacquires/isu);
+  assert.match(operator, /Pause.*Resume.*Stop/isu);
   assert.match(operator, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer/isu);
-  assert.match(operator, /Unknown owner.*coordinator loss.*changed immutable authority.*owning source.*smallest human action.*same `\/run-issue-workflow`/isu);
+  assert.match(operator, /cumulative six-hour execution budget.*beyond twelve hours.*`execution_timeout`.*does not force-kill/isu);
+  assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
+
   assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
   assert.match(read("CONTEXT.md"), /real `close-issue` leaf alone acquires the repository close lease and then.*Target mutation serialization.*coordinator observes both.*never acquires, releases, reclaims, or delegates/isu);
   assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*repository-close or target-writer wait starts and settlements/isu);
-  assert.match(operator, /exact Run.*identity is reconciled.*retention sweep.*selected Run is protected.*Zero or ambiguous no-argument.*only previews.*cleanupPreview: true.*without deletion/isu);
-  assert.match(operator, /status-succeeded\.json.*status-diagnosed\.json/isu);
+
   for (const name of ["status-succeeded", "status-diagnosed", "status-waiting"]) {
     assert.equal(existsSync(`skills/personal/run-issue-workflow/examples/${name}.json`), true);
   }

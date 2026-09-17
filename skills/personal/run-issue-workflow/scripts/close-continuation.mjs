@@ -1,5 +1,32 @@
 import { createHash } from "node:crypto";
 
+const canonicalize = (value) => {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort()
+      .map((key) => [key, canonicalize(value[key])]));
+  }
+  return value;
+};
+
+const closeRequestAuthority = (evidence) => {
+  const { targetHead, targetState, trackerState, parentTrackerState, candidateReachable, worktreeState, integrationVerification, integrationRecheck, controlRevision, ...authority } = evidence;
+  if (authority.authorityEvidence) {
+    const { targetHead: ignored, ...fixed } = authority.authorityEvidence;
+    authority.authorityEvidence = fixed;
+  }
+  if (authority.childCloseStates) authority.childCloseStates = authority.childCloseStates.map(closeRequestAuthority);
+  return authority;
+};
+
+// The stable close-request authority identity: current target/tracker/worktree progress,
+// integration read-back and controlRevision are request context but excluded from the authority
+// identity, so a later RESUME revision under the unchanged Run Grant cannot invalidate an already
+// accepted close owner.
+export const closeRequestIdentityFor = (evidence) => `sha256:${createHash("sha256")
+  .update(JSON.stringify(canonicalize(closeRequestAuthority(evidence))))
+  .digest("hex")}`;
+
 export const completedCloseCleanup = evidence => evidence.worktreeState === "ABSENT" && evidence.candidateReachable === true
   || evidence.runIdentity?.classification === "MULTI" && evidence.issueId === evidence.runIdentity.specId
     && Array.isArray(evidence.childCloseStates) && evidence.childCloseStates.length > 0

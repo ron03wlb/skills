@@ -14,7 +14,7 @@ Run the installed `scripts/inspect-model-inputs.mjs <repository> <Spec-ID>` read
 
 Supported efforts are `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; floors still apply. Stronger settings need a concrete reason. Assessment categories are coordinator judgments supported by exact contract quotations, not transport keyword inference. Missing evidence, unsupported settings and lower floors fail before native dispatch.
 
-Supply an exact coordinator JSON file as the installed entry's fourth positional argument; use an empty third argument when no Run ID is supplied:
+Supply the exact model-routing decision in the delivery host's round input facts:
 
 ```json
 {

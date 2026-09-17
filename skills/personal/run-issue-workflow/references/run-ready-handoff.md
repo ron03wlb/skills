@@ -1,6 +1,6 @@
 # Run-ready handoff
 
-Read this reference only after selecting one exact Run and before cleanup, writer acquisition, Grant creation or renewal, panel open, task action, or leaf mutation. It solely owns immediate-upstream producer reduction and grants no producer-repair authority.
+Read this reference only after selecting one exact Run and before cleanup, writer acquisition, Grant creation or renewal, host round, lane action, or leaf mutation. It solely owns immediate-upstream producer reduction and grants no producer-repair authority.
 
 ## Owning-source facts
 
@@ -18,4 +18,4 @@ Reduce the facts with `run-core.mjs`:
 
 Compare both `READY` and actionable `INCOMPLETE` authority with the live selected reconciliation. Any mismatch becomes `UNKNOWN` with the exact conflicting field, observed handoff value, and expected selected value; never return a retry command for stale producer authority.
 
-This boundary does not revalidate producer generation, generated-content hashes, whole-commit checkpoint eligibility, v1 record semantics, producer review or tests, aggregate coverage, or producer retry correctness. Those remain upstream. The coordinator consumes the result before `onSelected`, so non-`READY` results may perform only the read-only cleanup preview and cannot apply cleanup, acquire an engine or target writer, append a Grant, open the panel, create or message a task, invoke a leaf, or mutate tracker or Git state.
+This boundary does not revalidate producer generation, generated-content hashes, whole-commit checkpoint eligibility, v1 record semantics, producer review or tests, aggregate coverage, or producer retry correctness. Those remain upstream. The delivery host consumes the result before any lane materialization, so non-`READY` results may perform only the read-only cleanup preview and cannot apply cleanup, acquire an engine or target writer, append a Grant, dispatch a lane, create or message a worker, invoke a leaf, or mutate tracker or Git state.

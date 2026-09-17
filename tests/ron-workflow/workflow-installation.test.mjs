@@ -21,8 +21,8 @@ import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts
 import { runWorkflowCommand } from "../../skills/personal/run-issue-workflow/scripts/workflow-command.mjs";
 
 const hostAssets = [
-  "scripts/codex-host-driver.js",
-  "references/codex-host-driver.md",
+  "workflows/deliver-tracker-spec/spec.json",
+  "scripts/pi-workflow-host.mjs",
 ];
 function copyHostAssets(repository) {
   for (const path of hostAssets) {

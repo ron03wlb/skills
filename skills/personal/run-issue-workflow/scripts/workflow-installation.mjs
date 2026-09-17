@@ -616,8 +616,8 @@ function installUnlocked({
   for (const required of [
     `${skillPath}/SKILL.md`,
     `${skillPath}/scripts/installed-entry.mjs`,
-    `${skillPath}/scripts/codex-host-driver.js`,
-    `${skillPath}/references/codex-host-driver.md`,
+    `${skillPath}/workflows/deliver-tracker-spec/spec.json`,
+    `${skillPath}/scripts/pi-workflow-host.mjs`,
   ]) {
     if (!files.some(({ path }) => path === required))
       throw new Error(`Workflow package lacks ${required}`);

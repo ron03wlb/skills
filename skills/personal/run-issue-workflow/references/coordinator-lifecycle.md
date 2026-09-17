@@ -1,76 +1,19 @@
 # Coordinator lifecycle
 
-> Superseded surface: this reference describes the Codex-native coordinator. Its reducer-action
-> materialization is superseded for the pi-workflow delivery host by
-> [the delivery host contract](delivery-host.md); this page governs only the retired path until
-> Issue 102 removes it.
+> Retired surface: the Codex-native coordinator was removed with the host boundary in Issue 102. Its
+> reducer-action materialization is governed by [the delivery host contract](delivery-host.md), which is
+> the surviving authority. This page keeps only the retired coordinator's compact-outcome and no-repair
+> boundaries for historical reconciliation; nothing here is an active launch or control path.
 
-Read this reference only after the selected Run has a `READY` immediate-upstream handoff and a current DAG Run Grant. It solely owns runtime composition, reconciliation, Codex Issue lanes, legal reducer actions, target-writer waiting, and success criteria.
+The retired coordinator composed `run-workflow.mjs`, `run-coordinator.mjs`, `run-batch.mjs`, the Codex
+host bridge, the Codex task lifecycle adapter, and the loopback panel. That whole boundary is gone. The
+surviving delivery host is the pi-workflow bundle at `workflows/deliver-tracker-spec/`, whose controller
+asks `scripts/pi-workflow-host.mjs` what the Domain action reducer authorizes and materializes exactly
+that; one executable Issue owns one isolated worker lane and one dedicated Issue worktree.
 
-## Compose and control the Run
-
-`run-workflow.mjs` is the single composition interface. Supply `authoritySources` containing canonical repository identity; owning-source Tracker/Decomposition, Git/worktree/completion-note reconciliation, Workflow checkpoint, handoff, target, and writer-liveness readers; plus Codex task, browser, shared leaf, and cleanup evidence. It rejects direct Tracker, `reconcile`, or `handoff.read` injection and builds internal adapters. Each runtime owns its active guard; each journal owns its `max_parallel`; separate Runs share no process-global guard, queue, coordinator, or execution-slot pool. After `READY` and the first valid status projection, the runtime opens the authenticated loopback panel and continues without a second Start.
-
-Pause, Resume, and Stop append revisioned controls through the same active engine writer; Refresh is read-only. A paused coordinator keeps the same bridge active so Resume or Stop remains available in the same panel. Closing the panel changes no Run state. When the coordinator returns, the bridge closes before the writer is released, while the returned final status, journal, cleanup preview, and cleanup result remain inspectable. A panel-open failure preserves its observation and continues through available text controls with the same writer; without that control capability, report `panel_unavailable` before task action. Never persist or return the bridge token.
-
-After exact explicit or unique no-argument selection and reconciled identity validation, invocation reads normalized retention evidence, produces the auditable cleanup preview, and applies the eligible terminal-Run sweep before acquiring a Run writer. The selected Run is always protected from deletion, including when evidence contradicts its reconciled identity. Zero or ambiguous no-argument selection produces only the read-only preview and takes no cleanup mutation. A `cleanupPreview: true` request performs the same proof and selection without deletion. Cleanup never runs because of Stop, closeout, or panel closure. Use [OPERATOR.md](../OPERATOR.md) for invocation and inspection; examples are not authority.
-
-## Reconcile live evidence
-
-On every entry and after every material transition, reacquire tracker evidence; registered worktree evidence from Git and candidate reachability from the Issue target branch; latest valid `implementation_complete`, `implementation_blocked`, and partial close evidence; Codex task lifecycle; and the append-only run journal, engine writer, repository close-lease owner, and exact shared target-writer owner and liveness. Normalize those facts for `run-core.mjs` and rebuild the disposable projection with `run-store.mjs`. Only `reduceRun` legal actions authorize progress.
-
-Re-entry adopts valid manual completion or node success, a settled task with valid completion evidence, an existing clean candidate, partial close progress, and unchanged completed nodes without duplicate tasks or leaf actions. Coordinator loss is fail-closed until explicit re-entry reacquires every source. Reclaim a stale engine writer only from exact reconciled `INACTIVE` owner evidence with no unaccounted active operation; otherwise leave it fenced and stop.
-
-Treat an exact accepted `close-issue` follow-up proven by the Issue lane's task history as already in flight only when its `requestIdentity` matches the SHA-256 identity derived from the current close request evidence. Wait and reacquire evidence; never send the same close request again from coordinator memory. If valid manual `implementation_complete` has no journaled task reference, adopt one uniquely matching existing lane. Zero or multiple matches return a structured diagnosis; closeout never creates or guesses a duplicate lane.
-
-## Bind one Codex Issue lane
-
-Resolve the repository's exact saved Git project. Each executable Issue maps to one sidebar-visible child Codex task whose `worktree` environment starts from its recorded target branch. `execute-issue` verifies and adopts that same worktree and owns its topic, implementation, verification, review and completion note. An already-proven prerequisite lane is adopted instead of creating another task/worktree. Product edits never belong in the shared checkout.
-
-Before first dispatch, reread tasks and journal and adopt one uniquely matching lane whose Issue, Run, project, and prompt identity are proven. Only with none present create one child task whose prompt binds the Issue, Spec, Run, target, decomposition identity, and Grant. Require `threadId` and `hostId`, then append `dispatch.recorded`; a setup-only client reference never permits a duplicate. Use bounded `wait_threads`, read a settled task only for exact evidence, and use `send_message_to_thread` for same-task retry or serialized closeout. Never create a duplicate live lane.
-
-Each native observation produces only a `workflow-task-outcome:v1` allowlist before journal publication. The receipt binds the exact Run/Issue/operation/request/task, producer source commit and installed package ID, execution phase, disposition, candidate when native evidence has one, locator digests, pending/accepted effect identities, failure fingerprint, verified-progress instants, native revision digest, and observation budgets. The receipt is at most 16 KiB; one encoded host response is at most 1 MiB; an exceptional history diagnosis is at most 256 KiB across four reads. Overflow reports `NATIVE_RESPONSE_BUDGET_EXCEEDED` with the owning operation and missing-evidence locator, never a truncated success. Worker prose, credentials, tool output, and raw cursors are not journal fields.
-
-Normal active reconciliation uses one `read_thread` status snapshot with outputs omitted. Normal terminal `wait_threads` settlement and a matching valid `implementation_complete` use the journaled receipt and do not read full history. Full history is reserved for an exact anomaly, `needs_attention`, native failure, conflicting binding, lost acceptance read-back, or an existing close/repair/recovery owner. Tracker completion publication, native terminal observation, receipt journal publication, source validation, reducer eligibility, follow-up dispatch intent/native acceptance, lease acquisition, and final close completion retain separate timestamps and dispositions; none is inferred from another.
-
-Task and delivery no-progress behavior is owned by the [compact recovery outcome and progress diagnosis contract](recovery.md#compact-outcomes-and-progress-diagnosis). This coordinator only routes its exact attributed outcome; it never cancels or replaces the active owner.
-
-For every initial dispatch, retry, execution repair, or conflict repair, append one `execution.started` interval bound to the exact Issue, phase identity, and task reference. While the same coordinator owns the interval, append nondecreasing `execution.observed` values from a monotonic clock; after process re-entry, settle from exact native `durationMs`. If neither basis is available, append `execution.uncertain` without inventing time. A later exact native settlement may resolve that uncertainty, but retry, replacement, restart, re-entry, and material-wave changes never remove proved elapsed. `run-store.mjs` preserves these events in the original Run journal.
-
-Sum those intervals against `ISSUE_EXECUTION_LIMIT_MS`, exactly six hours. Execution-owned implementation, merge-conflict repair, verification, and independent review count; healthy dependency, repository-close, and target-writer waits do not. Bound each native task wait by the smaller of its normal 15-second event slice and the Issue's remaining budget. At or beyond the boundary append one `execution.exhausted`, report `execution_timeout`, retain the active owner and all worktree/candidate/receipt evidence, and schedule no new execution, repair, retry, or close action for that Issue. Never force-kill or describe the native task as cancelled. Other independent nodes retain their legal actions.
-
-Dispatch at most `max_parallel` execution or remediation actions. Closeout, repository-close waiting, and target-writer waiting consume no execution slot. The real `close-issue` leaf alone acquires the repository close lease and then the target writer; the coordinator only observes availability and never acquires, releases, reclaims, or delegates either lease.
-
-Healthy repository close-lease contention enters bounded `WAITING_FOR_REPOSITORY_CLOSE_LEASE` only after every currently legal Issue dispatch. Append paired `repository-close-wait.started` and `repository-close-wait.settled` events with the pre-wait Run identity, Grant, tracker identity/state, target HEAD/state, candidate commit/reachability, completion evidence ID/body SHA-256/state, registered worktree identity/state, and control revision. Healthy target-writer contention retains the compatible `WAITING_FOR_TARGET_WRITER` and `target-writer-wait.*` path. Neither wait consumes an Issue execution slot or retry, and neither consumes cumulative execution time or mutates another owner. Healthy exact-generation contention remains waitable beyond twelve hours; elapsed time is never expiry or reclaim proof. If exact owner/generation health becomes `UNKNOWN`, retain ownership and use the same durable 5/15/30-second bounded observation-fault policy as host reads. A restored heartbeat settles that fault. Exhaustion records `OWNER_HEALTH_UNKNOWN`; `UNKNOWN` is not `INACTIVE` and never permits release, reclaim, cancellation, or duplicate close dispatch. After release, reacquire and compare every field; changed or unavailable evidence records `EVIDENCE_CHANGED` and returns a Recoverable blocker.
-
-## Execute reducer actions
-
-Treat `status.run.controlRevision` as authority for one action batch. Before every mutating action, reread the journal; revision drift abandons remaining actions and returns to reconciliation. An action already started is not cancelled.
-
-- `reconcile_run`: reacquire all owning sources; it is read-only until a valid Grant exists.
-- `dispatch_issue`: create or continue the one lane and let it invoke `execute-issue`; journal the attempt and task.
-- `remediate_environment`: apply one exact recognized adapter for that attempt and fingerprint, journal it, and rerun the failed command in the same lane.
-- `wait_repository_close_lease` or `wait_target_writer`: observe the exact healthy owner for one bounded scheduling slice and continue across windows without a fixed human timeout. Re-entry resumes a pending wait; a later Stop/Pause revision settles it. On absence, compare immutable Grant/scope/candidate evidence and refresh current target HEAD, dirt and ordered close progress before `RELEASED`. Unknown ownership and authority drift preserve the affected lane.
-- `close_issue`: require valid completion, send the same lane one evidence-bound `close-issue` request under the unchanged Grant, and wait. The request includes current target state and exact HEAD plus the Issue's exact tracker identity, candidate commit, completion evidence ID/body hash, and registered worktree identity. The real leaf alone acquires and releases the repository close lease followed by the target writer.
-- `close_parent`: after all children have node success, invoke one evidence-bound parent-only `close-issue` leaf. The request includes current target state and exact HEAD, exact parent tracker state and identity, and every child's exact close authority evidence. The real leaf owns the same repository-then-target lease order, and the coordinator rereads parent state only after settlement.
-- `settle_pause` and `settle_stop`: append only the reducer-authorized transition after workers, closeout waits, and real close leaves settle; they grant no cancellation, lease mutation, or cleanup.
-
-For either close path, derive `requestIdentity` from the complete current close-authority evidence. Current target/tracker/worktree progress, integration read-back, and `controlRevision` remain request context but are excluded from the authority identity: a later `RESUME` revision under the unchanged Run Grant must not invalidate an already accepted close owner. The Issue lane's accepted request and settled response, and the parent leaf's settled response, must echo that exact identity. A missing or mismatched identity fails closed as `close_request_evidence_changed`; reacquire and reconcile live evidence before any new request.
-
-Valid `implementation_complete` triggers serialized `close-issue`; it is not node success. Only candidate reachability from the Issue target branch, absence of the exact worktree, and closed Issue state release dependants. All-child node success triggers the parent-only close path. A Single-Issue Run succeeds on sole-node success; a Multi-Issue Run succeeds only after the parent reads back closed. Target dirt blocks integration while independent Issue worktrees continue. Issue-scoped contradictory evidence isolates that Issue and its dependants. Run identity or Grant drift stops the Run.
-
-## Explicit batch and recovery
-
-`run-batch.mjs` observes every selected Run before allocating shared capacity, rotates one action per Run and counts existing native execution activity. Cooperative snapshot/step calls preserve the same Grant and yield before waiting on workers. Text controls select an exact Run ID; no cross-Run Grant or persistent scheduling service exists.
-
-Legacy `repair_issue` records retain their original task and candidate-bound wave. Current technical and conflict failures use `recover_issue` with isolated ownership. Native request read-back prevents duplicate delivery after interruption. The operation budget is ten across execution and re-entry, and a new completion must prove the replacement candidate’s verification and clean independent review before another close request. A known same-scope conflict is not a new permission request.
-
-Use the single authoritative [recovery disposition table](recovery.md#compact-outcomes-and-progress-diagnosis). Unknown input normalizes to its explicit `UNCLASSIFIED` diagnosis route; no row grants coordinator repair authority.
-
-The coordinator must never repair product or workflow source. It only classifies the evidence, dispatches the exact authorized owner, observes that owner, and resumes the same Run from the next unsatisfied stage when the required evidence settles.
-
-## Task source boundaries and recovery
-
-All fresh execution and continuation prompts pin Matt/Ron owners/runtime and references to the selected immutable package, including shared `docs/` references. Explicitly required generic host support skills use the current session catalog. This boundary does not authorize arbitrary sources or hide missing dependencies. Re-entry preserves the original accepted creation intent; corrected continuation wording never rewrites its history.
-
-`recover_issue` uses the existing Run journal and task adapter. Persist the exact phase/failure intent, prove original writer settlement, adopt one separate repair task, then dispatch one exact request. Read-only diagnosis reserves no material wave. Before `REPAIR`, join the proved execution count and prior journal waves; maintenance carries its own scoped cumulative count. Current source reconciliation accepts replacement completion only with original failure, old completion digest, task transfer and Git ancestry. Return closeout to the original close owner after this evidence passes. Pending native setup is not a completed task reference. Preserve active results and Pause/Stop across restarts.
+The retired coordinator's compact-outcome and no-repair boundaries remain the authoritative wording for
+any historical journal it produced: each native observation journals a compact allowlisted `task.outcome`
+receipt and normal completion does not read full task history; the task and delivery no-progress behavior
+is owned by the [compact recovery outcome and progress diagnosis contract](recovery.md#compact-outcomes-and-progress-diagnosis). The coordinator never repaired product or workflow source: it only classified
+evidence, dispatched the exact authorized owner, observed that owner, and resumed the same Run from the
+next unsatisfied stage when the required evidence settled.
