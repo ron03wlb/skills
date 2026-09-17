@@ -65,10 +65,26 @@ test("one Run Grant records the human's approval of a declared operation and ref
   assert.throws(() => appendGrant([]), /declared operation/u);
 });
 
-// `handoffIdentity` selects which field of the composite to-tickets handoff carries its own
-// decomposition record identity: the documented flat `decompositionIdentity`, or the producer's own
-// `publicationIdentity` that a hand-encoded GitHub publication used instead.
-const runReadyWithSpelling = async (handoffIdentity) => {
+// Every encoding a composite producer handoff is allowed to use for its own publication identity and for
+// the upstream records it consumed. All of them must reach one flat Run-ready shape.
+const ENCODINGS = {
+  "flat decomposition identity": (record) => record,
+  "producer publication identity": (record) => {
+    delete record.decompositionIdentity;
+    record.publicationIdentity = "IC_dec";
+    return record;
+  },
+  "nested upstream records": (record) => {
+    delete record.decompositionIdentity;
+    record.publicationIdentity = "IC_dec";
+    record.upstream = { publicationIdentity: record.upstreamPublicationIdentity, handoffIdentity: record.upstreamHandoffIdentity };
+    delete record.upstreamPublicationIdentity;
+    delete record.upstreamHandoffIdentity;
+    return record;
+  },
+};
+
+const runReadyWithEncoding = async (encode) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "grant-run-ready-")));
   const git = (...args) => runWorkflowCommand("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   try {
@@ -123,7 +139,7 @@ const runReadyWithSpelling = async (handoffIdentity) => {
     checkpoints.advanceCheckpoint({ identity: checkpointIdentity, stage: "ready_state.read_back", receipt: readyStateReadBack });
     checkpoints.advanceCheckpoint({ identity: checkpointIdentity, stage: "handoff.completed",
       receipt: { handoffIdentity: "IC_hand", handoffDigest: bodyDigest("handoff") } });
-    const handoff = {
+    const handoff = encode({
       kind: "producer_handoff",
       specId: "I_1",
       target: "main",
@@ -131,6 +147,7 @@ const runReadyWithSpelling = async (handoffIdentity) => {
       classification: "MULTI",
       approvedScopeHash: bodyDigest(specBody),
       producerCommand: "to-tickets",
+      decompositionIdentity: "IC_dec",
       decompositionDigest,
       decompositionMapping: decomposition.decompositionMapping,
       blockerEdges: decomposition.blockerEdges,
@@ -140,9 +157,8 @@ const runReadyWithSpelling = async (handoffIdentity) => {
       recordIdentities: ["IC_pub", "IC_dec"],
       checkpointIdentity,
       transactionIdentity: transaction.transactionId,
-      [handoffIdentity]: "IC_dec",
       preparation: { approvals: [{ ...requiredActions[0], authority: "human:prior" }], preparedSql: [] },
-    };
+    });
     const fixtures = {
       1: {
         node_id: "I_1",
@@ -188,11 +204,10 @@ const runReadyWithSpelling = async (handoffIdentity) => {
         store: { observeRepositoryCloseLease: () => ({ state: "ABSENT" }), observeTargetMutationWriter: () => ({ state: "ABSENT" }) },
       });
       const current = await adapters.reconcile({ request: {}, tracker, journal });
-      const facts = await adapters.handoff.read({ request: {}, tracker, current });
-      return reduceRunReadyHandoff(facts);
+      return reduceRunReadyHandoff(await adapters.handoff.read({ request: {}, tracker, current }));
     };
     const before = await readyFacts([]);
-    assert.equal(before.state, "INCOMPLETE", handoffIdentity);
+    assert.equal(before.state, "INCOMPLETE");
     assert.equal(before.reasonCode, "run_preparation_pending");
     assert.equal(before.nextOwner, "to-tickets");
     return await readyFacts([grantDraft([{ ...missing, authority: "human:start" }])]);
@@ -201,9 +216,9 @@ const runReadyWithSpelling = async (handoffIdentity) => {
   }
 };
 
-test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE into READY for either composite handoff spelling", async () => {
-  for (const handoffIdentity of ["decompositionIdentity", "publicationIdentity"]) {
-    const reduced = await runReadyWithSpelling(handoffIdentity);
-    assert.equal(reduced.state, "READY", `${handoffIdentity}: ${JSON.stringify(reduced.evidence)}`);
+test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE into READY for every composite handoff encoding", async () => {
+  for (const [encoding, encode] of Object.entries(ENCODINGS)) {
+    const reduced = await runReadyWithEncoding(encode);
+    assert.equal(reduced.state, "READY", `${encoding}: ${JSON.stringify(reduced.evidence)}`);
   }
 });

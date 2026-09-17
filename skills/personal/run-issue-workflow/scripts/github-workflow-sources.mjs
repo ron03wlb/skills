@@ -157,14 +157,16 @@ export function createAutomaticHostCleanupPacket({
 
 // The composite producer handoff names its own publication: for `to-spec` that is the publication
 // comment, for `to-tickets` it is the decomposition record. The canonical payload nests the authority
-// fields under `authority`; the GitHub encoding may carry them flat, and a composite handoff may spell
-// its own publication identity as `decompositionIdentity` or as the producer's own `publicationIdentity`.
-// Consumers read one flat shape, and the value still has to equal the tracker read-back's decomposition
-// identity in the Run-ready reducer, so no identity check is weakened here.
+// fields under `authority` and the consumed upstream records under `upstream`; the GitHub encoding may
+// carry the authority fields flat, and a composite handoff may spell its own publication identity as
+// `decompositionIdentity` or as the producer's own `publicationIdentity`. Consumers read one flat
+// shape, and every value still has to equal the tracker and checkpoint read-back in the Run-ready
+// reducer, so no identity check is weakened here.
 const normalizeWorkflowHandoff = (snapshot) => {
   const record = snapshot.handoff.record;
-  const authority = record.authority !== null && typeof record.authority === "object"
-    && !Array.isArray(record.authority) ? record.authority : record;
+  const objectOf = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+  const authority = objectOf(record.authority) ?? record;
+  const upstream = objectOf(record.upstream) ?? {};
   const classification = authority.classification ?? record.classification;
   const publicationIdentity = record.publicationIdentity ?? authority.publicationIdentity ?? null;
   let decompositionIdentity = record.decompositionIdentity;
@@ -180,6 +182,8 @@ const normalizeWorkflowHandoff = (snapshot) => {
     approvedScopeHash: authority.approvedScopeHash ?? record.approvedScopeHash,
     publicationIdentity,
     decompositionIdentity,
+    upstreamPublicationIdentity: record.upstreamPublicationIdentity ?? upstream.publicationIdentity ?? null,
+    upstreamHandoffIdentity: record.upstreamHandoffIdentity ?? upstream.handoffIdentity ?? null,
     identity: snapshot.handoff.identity,
   };
 };
