@@ -46,6 +46,7 @@ const frontmatterOf = (text) => {
 export function resolveLaneAgent({
   cwd,
   homeDir,
+  env = process.env,
   name = LANE_AGENT_NAME,
   canonicalSource = LANE_AGENT_SOURCE_FILE,
   exists = existsSync,
@@ -53,9 +54,15 @@ export function resolveLaneAgent({
 } = {}) {
   if (typeof cwd !== "string" || !cwd) throw new TypeError("Lane agent resolution needs the project checkout");
   if (typeof homeDir !== "string" || !homeDir) throw new TypeError("Lane agent resolution needs the user home directory");
+  // `pi-workflow` resolves a user-scoped agent from its own pi-agent directory, which honours
+  // `PI_CODING_AGENT_DIR`. Proving resolution against a hardcoded `~/.pi/agent` would pass while the
+  // generated agent still cannot be created, so the user root mirrors the harness exactly.
+  const userRoot = typeof env?.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR.trim() !== ""
+    ? env.PI_CODING_AGENT_DIR.trim()
+    : join(homeDir, ".pi", "agent");
   const candidates = [
     { scope: "project", path: join(cwd, ".pi", "agents", `${name}.md`) },
-    { scope: "user", path: join(homeDir, ".pi", "agent", "agents", `${name}.md`) },
+    { scope: "user", path: join(userRoot, "agents", `${name}.md`) },
   ];
   const found = candidates.find((candidate) => exists(candidate.path));
   if (!found) {

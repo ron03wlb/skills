@@ -328,17 +328,18 @@ test("the lane agent resolves only from the roots pi-workflow itself searches", 
   const project = laneProject({ project: true });
   const userOnly = laneProject({ project: false, user: true });
   const missing = laneProject({ project: false });
+  const noEnv = {};
   try {
-    const fromProject = resolveLaneAgent({ cwd: project.directory, homeDir: project.homeDir });
+    const fromProject = resolveLaneAgent({ cwd: project.directory, homeDir: project.homeDir, env: noEnv });
     assert.equal(fromProject.resolved, true);
     assert.equal(fromProject.scope, "project");
     assert.deepEqual(fromProject.ceiling, ["read", "grep", "find", "ls", "bash", "edit", "write"]);
 
-    const fromUser = resolveLaneAgent({ cwd: userOnly.directory, homeDir: userOnly.homeDir });
+    const fromUser = resolveLaneAgent({ cwd: userOnly.directory, homeDir: userOnly.homeDir, env: noEnv });
     assert.equal(fromUser.resolved, true);
     assert.equal(fromUser.scope, "user");
 
-    const unresolved = resolveLaneAgent({ cwd: missing.directory, homeDir: missing.homeDir, canonicalSource: "agents/worker.md" });
+    const unresolved = resolveLaneAgent({ cwd: missing.directory, homeDir: missing.homeDir, env: noEnv, canonicalSource: "agents/worker.md" });
     assert.equal(unresolved.resolved, false);
     assert.equal(unresolved.stop.code, LANE_STOP_CODES.agentUnresolved);
     assert.ok(unresolved.stop.evidence.some((line) => line.includes(join(missing.homeDir, ".pi", "agent", "agents", "worker.md"))));
@@ -347,6 +348,22 @@ test("the lane agent resolves only from the roots pi-workflow itself searches", 
     project.cleanup();
     userOnly.cleanup();
     missing.cleanup();
+  }
+});
+
+test("the user agent root follows the harness pi-agent directory, not a hardcoded home path", () => {
+  const project = laneProject({ project: false });
+  const accounted = laneProject({ project: false, user: true });
+  try {
+    // A definition under the supplied home must not satisfy a harness pointed at another pi-agent directory.
+    assert.equal(resolveLaneAgent({ cwd: accounted.directory, homeDir: accounted.homeDir, env: { PI_CODING_AGENT_DIR: join(accounted.directory, "absent") } }).resolved, false);
+    assert.equal(resolveLaneAgent({ cwd: accounted.directory, homeDir: accounted.homeDir, env: { PI_CODING_AGENT_DIR: join(accounted.homeDir, ".pi", "agent") } }).resolved, true);
+    const blank = resolveLaneAgent({ cwd: project.directory, homeDir: project.homeDir, env: { PI_CODING_AGENT_DIR: "  " } });
+    assert.equal(blank.resolved, false);
+    assert.ok(blank.stop.evidence.some((line) => line.includes(join(project.homeDir, ".pi", "agent", "agents", "worker.md"))));
+  } finally {
+    project.cleanup();
+    accounted.cleanup();
   }
 });
 
@@ -421,6 +438,10 @@ test("every declared lane names a skill, an agent and a managed worktree", () =>
 
 test("the controller refuses a lane whose worker agent does not resolve", async () => {
   const project = laneProject({ project: false });
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  // The harness user agent root is environment-selected, so this case pins it instead of inheriting
+  // whatever the machine running the suite happens to have provisioned.
+  process.env.PI_CODING_AGENT_DIR = join(project.directory, "absent-agent-root");
   try {
     const calls = [];
     const result = await controller(fakeContext(calls, JSON.stringify({
@@ -431,6 +452,8 @@ test("the controller refuses a lane whose worker agent does not resolve", async 
     assert.deepEqual(calls, []);
     assert.equal(result.control.stopCode, LANE_STOP_CODES.agentUnresolved);
   } finally {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
     project.cleanup();
   }
 });
