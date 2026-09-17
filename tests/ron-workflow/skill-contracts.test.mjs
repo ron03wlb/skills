@@ -3357,7 +3357,7 @@ test("delivery host is explicit personal only", () => {
   const authorityAdaptersPath = "skills/personal/run-issue-workflow/scripts/run-authority-adapters.mjs";
   const corePath = "skills/personal/run-issue-workflow/scripts/run-core.mjs";
   const operatorPath = "skills/personal/run-issue-workflow/OPERATOR.md";
-  const specPath = "skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/spec.json";
+  const specPath = "skills/personal/run-issue-workflow/deliver-tracker-spec.json";
   const workerPath = "skills/personal/run-issue-workflow/agents/worker.md";
   for (const path of [skillPath, metadataPath, hostPath, lanePath, authorityAdaptersPath, corePath, operatorPath, specPath, workerPath]) {
     assert.equal(existsSync(path), true, `${path} must exist`);

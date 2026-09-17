@@ -83,7 +83,7 @@ Recorded commands and identities (re-runnable):
 $ node --test tests/ron-workflow/*.test.mjs
 ℹ tests 315  ℹ pass 307  ℹ fail 0  ℹ skipped 8 (Windows-only fixtures)
 
-$ pi -p --no-session "/workflow validate skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/spec.json"
+$ pi -p --no-session "/workflow validate skills/personal/run-issue-workflow/deliver-tracker-spec.json"
 Workflow spec valid: deliver-tracker-spec
 
 $ npm run check-plugin-version

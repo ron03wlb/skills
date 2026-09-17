@@ -21,7 +21,8 @@ import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts
 import { runWorkflowCommand } from "../../skills/personal/run-issue-workflow/scripts/workflow-command.mjs";
 
 const hostAssets = [
-  "workflows/deliver-tracker-spec/spec.json",
+  "deliver-tracker-spec.json",
+  "workflows/deliver-tracker-spec/helpers/controller.mjs",
   "scripts/pi-workflow-host.mjs",
 ];
 function copyHostAssets(repository) {

@@ -22,7 +22,7 @@
         "id": "delivery",
         "type": "dynamic",
         "dynamic": {
-          "uses": "./helpers/controller.mjs",
+          "uses": "./workflows/deliver-tracker-spec/helpers/controller.mjs",
           "mode": "graph-splice",
           "permissions": {
             "approval": "auto"

@@ -411,7 +411,7 @@ test("every declared lane names a skill, an agent and a managed worktree", () =>
   }
   const spec = JSON.parse(readFileSync(resolve(
     import.meta.dirname,
-    "../../skills/personal/run-issue-workflow/workflows/deliver-tracker-spec/spec.json",
+    "../../skills/personal/run-issue-workflow/deliver-tracker-spec.json",
   ), "utf8"));
   assert.equal(spec.defaults.agent, LANE_AGENT_NAME);
   assert.deepEqual(spec.defaults.tools, [...LANE_TOOL_CEILING]);

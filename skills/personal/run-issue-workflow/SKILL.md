@@ -32,7 +32,7 @@ One prompt is the whole approval surface. When the reduction reports `run_prepar
 
 ## 3. Run the delivery host
 
-The delivery host is the pi-workflow bundle at `workflows/deliver-tracker-spec/` inside this skill package. Read [the delivery host contract](references/delivery-host.md) only when starting, resuming, reconciling, or materializing a host round. The bundle owns scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair routing, close eligibility, or stop classification.
+The delivery host is the pi-workflow bundle whose launch spec `deliver-tracker-spec.json` sits at this skill package's root and whose stage controller lives in `workflows/deliver-tracker-spec/`. Read [the delivery host contract](references/delivery-host.md) only when starting, resuming, reconciling, or materializing a host round. The bundle owns scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair routing, close eligibility, or stop classification.
 
 The bundle's controller reaches the domain halves beside it: the owning-source adapter (`run-authority-adapters.mjs`) reduces tracker, reconciliation, target, checkpoint, handoff, and writer facts, and `pi-workflow-host.mjs` plans exactly the legal actions the Domain action reducer returns. Each executable Issue owns one lane: one isolated worker and one dedicated Issue worktree. An implementation lane follows `execute-issue`; a close lane follows `close-issue`; no worker can grant itself scope, a DAG Run Grant, or close authority.
 

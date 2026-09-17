@@ -38,6 +38,10 @@ const bundle = resolve(
   import.meta.dirname,
   "../../skills/personal/run-issue-workflow/workflows/deliver-tracker-spec",
 );
+// pi-workflow refuses a launched bundle whose module graph escapes the directory holding its spec, and the
+// stage controller reaches the package's `scripts/` and `agents/` halves, so the launch spec sits at the
+// package root and names the bundle-local controller below it.
+const packageRoot = resolve(import.meta.dirname, "../../skills/personal/run-issue-workflow");
 const preservedContractSkills = [
   "execute-issue",
   "close-issue",
@@ -811,8 +815,8 @@ test("the dispatch-id grammar has one reader", () => {
   assert.equal(parseHostDispatchId("delivery.dispatch_13_0"), null);
 });
 
-test("the bundle keeps every declared reference bundle-local and declares its ceiling", () => {
-  const spec = JSON.parse(readFileSync(join(bundle, "spec.json"), "utf8"));
+test("the launch spec keeps every declared reference inside its package and declares its ceiling", () => {
+  const spec = JSON.parse(readFileSync(join(packageRoot, "deliver-tracker-spec.json"), "utf8"));
   assert.equal(spec.schemaVersion, 1);
   assert.equal(spec.name, "deliver-tracker-spec");
   assert.deepEqual(spec.defaults.tools, [...HOST_TOOL_CEILING]);
@@ -821,11 +825,12 @@ test("the bundle keeps every declared reference bundle-local and declares its ce
   assert.equal(stages.length, 1);
   const [stage] = stages;
   assert.equal(stage.type, "dynamic");
-  assert.match(stage.dynamic.uses, /^\.\//u);
+  assert.equal(stage.dynamic.uses, "./workflows/deliver-tracker-spec/helpers/controller.mjs");
   assert.equal(stage.dynamic.mode, "graph-splice");
   assert.deepEqual(stage.dynamic.budget, { maxConcurrency: 3 });
   assert.equal(stage.dynamic.helpers, undefined);
   assert.equal(stage.dynamic.workflows, undefined);
-  assert.ok(existsSync(join(bundle, stage.dynamic.uses.replace(/^\.\//u, ""))));
+  assert.ok(existsSync(join(packageRoot, stage.dynamic.uses.replace(/^\.\//u, ""))));
+  assert.ok(existsSync(join(bundle, "helpers", "controller.mjs")));
   for (const output of Object.keys(stage.output)) assert.ok(["analysis", "refs"].includes(output));
 });

@@ -616,7 +616,8 @@ function installUnlocked({
   for (const required of [
     `${skillPath}/SKILL.md`,
     `${skillPath}/scripts/installed-entry.mjs`,
-    `${skillPath}/workflows/deliver-tracker-spec/spec.json`,
+    `${skillPath}/deliver-tracker-spec.json`,
+    `${skillPath}/workflows/deliver-tracker-spec/helpers/controller.mjs`,
     `${skillPath}/scripts/pi-workflow-host.mjs`,
   ]) {
     if (!files.some(({ path }) => path === required))

@@ -1,7 +1,8 @@
 # Delivery host contract
 
 `/run-issue-workflow <Spec-ID>` remains the sole Start and re-entry authority. Its delivery host is the
-pi-workflow bundle at `workflows/deliver-tracker-spec/` inside this skill package. The bundle owns
+pi-workflow bundle whose launch spec `deliver-tracker-spec.json` sits at this skill package's root and whose
+stage controller lives in `workflows/deliver-tracker-spec/`. The bundle owns
 scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair
 routing, close eligibility, or stop classification.
 
@@ -12,9 +13,10 @@ governs the delivery host everywhere the two once overlapped.
 
 ## Bundle
 
-- `spec.json` — one `dynamic` stage with `uses: "./helpers/controller.mjs"` and an explicit read/write
-  policy: `defaults.readOnly: false` with the declared tool ceiling. Every declared ref is a `./` path
-  inside the bundle directory. Its only budget is `maxConcurrency: 3`, the host expression of the
+- `deliver-tracker-spec.json` — one `dynamic` stage with `uses:
+  "./workflows/deliver-tracker-spec/helpers/controller.mjs"` and an explicit read/write policy:
+  `defaults.readOnly: false` with the declared tool ceiling. The launch spec sits at the package root,
+  which is the bundle root `pi-workflow` enforces, and every declared ref is a `./` path inside it. Its only budget is `maxConcurrency: 3`, the host expression of the
   preserved `max_parallel` default; every other host resource limit keeps pi-workflow's own default, so
   the bundle never invents a delivery budget and never restates the journal-owned six-hour per-Issue
   budget as a stage wall-clock cap. Healthy close contention may therefore exceed twelve hours.
@@ -35,17 +37,18 @@ governs the delivery host everywhere the two once overlapped.
 Validate and launch by path:
 
 ```text
-/workflow validate <skill>/workflows/deliver-tracker-spec/spec.json
-/workflow run <skill>/workflows/deliver-tracker-spec/spec.json "<round JSON>"
+/workflow validate <skill>/deliver-tracker-spec.json
+/workflow run <skill>/deliver-tracker-spec.json "<round JSON>"
 ```
 
-Trusted controller code reaches the domain through two Node imports beside the bundle directory:
+Trusted controller code reaches the domain through two Node imports beside the stage directory:
 `scripts/pi-workflow-host.mjs` (the domain half of the host) and, through it,
-`scripts/delivery-authority.mjs` (the bundle-local authority entry). Neither is a pi-workflow ref: every
-declared ref (`uses`, `helpers`, `workflows`) is a `./` path inside the bundle directory. The enforced
-import rule is narrower than "nobody else may import the entry": production modules of this package may
-import `delivery-authority.mjs`, but they may not import one of the owner modules inside its closure
-directly.
+`scripts/delivery-authority.mjs` (the bundle-local authority entry). `pi-workflow` refuses a launched
+bundle whose module graph escapes the directory holding its spec, and that graph reaches `scripts/` and
+`agents/`, so the bundle root is the package root: the launch spec lives there and its one declared stage
+names `./workflows/deliver-tracker-spec/helpers/controller.mjs`. The enforced import rule is narrower than
+"nobody else may import the entry": production modules of this package may import `delivery-authority.mjs`,
+but they may not import one of the owner modules inside its closure directly.
 
 ## The Issue lane
 
