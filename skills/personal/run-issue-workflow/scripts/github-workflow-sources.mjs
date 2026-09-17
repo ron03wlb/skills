@@ -155,6 +155,35 @@ export function createAutomaticHostCleanupPacket({
   };
 }
 
+// The composite producer handoff names its own publication: for `to-spec` that is the publication
+// comment, for `to-tickets` it is the decomposition record. The canonical payload nests the authority
+// fields under `authority`; the GitHub encoding may carry them flat, and a composite handoff may spell
+// its own publication identity as `decompositionIdentity` or as the producer's own `publicationIdentity`.
+// Consumers read one flat shape, and the value still has to equal the tracker read-back's decomposition
+// identity in the Run-ready reducer, so no identity check is weakened here.
+const normalizeWorkflowHandoff = (snapshot) => {
+  const record = snapshot.handoff.record;
+  const authority = record.authority !== null && typeof record.authority === "object"
+    && !Array.isArray(record.authority) ? record.authority : record;
+  const classification = authority.classification ?? record.classification;
+  const publicationIdentity = record.publicationIdentity ?? authority.publicationIdentity ?? null;
+  let decompositionIdentity = record.decompositionIdentity;
+  if (decompositionIdentity === undefined) decompositionIdentity = authority.decompositionIdentity;
+  if (decompositionIdentity === undefined && classification === "MULTI") decompositionIdentity = publicationIdentity;
+  if (decompositionIdentity === undefined) decompositionIdentity = null;
+  return {
+    ...record,
+    specId: authority.specId ?? record.specId,
+    target: authority.target ?? record.target,
+    planningSeal: authority.planningSeal ?? record.planningSeal,
+    classification,
+    approvedScopeHash: authority.approvedScopeHash ?? record.approvedScopeHash,
+    publicationIdentity,
+    decompositionIdentity,
+    identity: snapshot.handoff.identity,
+  };
+};
+
 export function createGitHubWorkflowSources({
   repository,
   repositoryName,
@@ -1991,10 +2020,7 @@ export function createGitHubWorkflowSources({
           preparation = { state: "INCOMPLETE", reason: error.message };
       }
     }
-    const handoff = {
-      ...snapshot.handoff.record,
-      identity: snapshot.handoff.identity,
-    };
+    const handoff = normalizeWorkflowHandoff(snapshot);
     return {
       runIdentity: selectedIdentity,
       grant: { runIdentity: selectedIdentity, maxParallel: 3 },
@@ -2208,10 +2234,7 @@ export function createGitHubWorkflowSources({
       },
       checkpoint: { read: async ({ tracker }) => checkpointRead(tracker) },
       handoff: {
-        read: async ({ tracker }) => ({
-          ...tracker.handoff.record,
-          identity: tracker.handoff.identity,
-        }),
+        read: async ({ tracker }) => normalizeWorkflowHandoff(tracker),
       },
       writer: {
         readHealth: async ({ current, leaseKind, owner }) =>

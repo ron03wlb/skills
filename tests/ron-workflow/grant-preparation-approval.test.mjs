@@ -22,7 +22,7 @@ const runIdentity = {
   runId: "workflow-op-v1-fixture",
   specId: "I_1",
   target: "main",
-  approvedScopeHash: "sha256:" + "a".repeat(64),
+  approvedScopeHash: `sha256:${"a".repeat(64)}`,
   classification: "MULTI",
   decompositionIdentity: "IC_dec",
 };
@@ -65,7 +65,10 @@ test("one Run Grant records the human's approval of a declared operation and ref
   assert.throws(() => appendGrant([]), /declared operation/u);
 });
 
-test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE into READY without the planning owner", async () => {
+// `handoffIdentity` selects which field of the composite to-tickets handoff carries its own
+// decomposition record identity: the documented flat `decompositionIdentity`, or the producer's own
+// `publicationIdentity` that a hand-encoded GitHub publication used instead.
+const runReadyWithSpelling = async (handoffIdentity) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "grant-run-ready-")));
   const git = (...args) => runWorkflowCommand("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   try {
@@ -128,7 +131,6 @@ test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE int
       classification: "MULTI",
       approvedScopeHash: bodyDigest(specBody),
       producerCommand: "to-tickets",
-      decompositionIdentity: "IC_dec",
       decompositionDigest,
       decompositionMapping: decomposition.decompositionMapping,
       blockerEdges: decomposition.blockerEdges,
@@ -138,7 +140,7 @@ test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE int
       recordIdentities: ["IC_pub", "IC_dec"],
       checkpointIdentity,
       transactionIdentity: transaction.transactionId,
-      publicationIdentity: "IC_dec",
+      [handoffIdentity]: "IC_dec",
       preparation: { approvals: [{ ...requiredActions[0], authority: "human:prior" }], preparedSql: [] },
     };
     const fixtures = {
@@ -166,10 +168,10 @@ test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE int
       }
       const path = args[1];
       const issue = fixtures[Number(path.match(/issues\/(\d+)/u)[1])];
-      const response = path.includes("/comments") ? issue.comments
-        : path.endsWith("/parent") ? fixtures[1]
-        : path.includes("/dependencies/blocked_by") || path.includes("/events?") ? []
-        : issue;
+      let response = issue;
+      if (path.includes("/comments")) response = issue.comments;
+      else if (path.endsWith("/parent")) response = fixtures[1];
+      else if (path.includes("/dependencies/blocked_by") || path.includes("/events?")) response = [];
       return JSON.stringify([response]);
     };
     const owner = createGitHubWorkflowSources({
@@ -186,16 +188,22 @@ test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE int
         store: { observeRepositoryCloseLease: () => ({ state: "ABSENT" }), observeTargetMutationWriter: () => ({ state: "ABSENT" }) },
       });
       const current = await adapters.reconcile({ request: {}, tracker, journal });
-      const ready = await adapters.handoff.read({ request: {}, tracker, current });
-      return { ready, reduced: reduceRunReadyHandoff(ready) };
+      const facts = await adapters.handoff.read({ request: {}, tracker, current });
+      return reduceRunReadyHandoff(facts);
     };
-    const before = (await readyFacts([])).reduced;
-    assert.equal(before.state, "INCOMPLETE");
+    const before = await readyFacts([]);
+    assert.equal(before.state, "INCOMPLETE", handoffIdentity);
     assert.equal(before.reasonCode, "run_preparation_pending");
     assert.equal(before.nextOwner, "to-tickets");
-    const after = await readyFacts([grantDraft([{ ...missing, authority: "human:start" }])]);
-    assert.equal(after.reduced.state, "READY", JSON.stringify(after.reduced.evidence));
+    return await readyFacts([grantDraft([{ ...missing, authority: "human:start" }])]);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("a Grant carrying the missing approvals turns Run-ready from INCOMPLETE into READY for either composite handoff spelling", async () => {
+  for (const handoffIdentity of ["decompositionIdentity", "publicationIdentity"]) {
+    const reduced = await runReadyWithSpelling(handoffIdentity);
+    assert.equal(reduced.state, "READY", `${handoffIdentity}: ${JSON.stringify(reduced.evidence)}`);
   }
 });
