@@ -63,8 +63,8 @@ exercise is recorded `unavailable`, never inferred from a fixture, blocker, disp
 | classification | `unavailable` — no live Run was scheduled |
 | diagnosis | exercised by component tests; delivery-time value `unavailable` |
 | repair | exercised by component tests; delivery-time value `unavailable` |
-| verification | exercised (recorded in the bounded evidence report below) |
-| installation | exercised (package version `1.2.3`, `install-workflow.mjs` + qualification fixtures) |
+| verification | exercised by component tests (recorded in the bounded evidence report below); delivery-time value `unavailable` |
+| installation | exercised by component tests (package version `1.2.3`, `install-workflow.mjs`); delivery-time value `unavailable` — the retired WSL qualification fixtures are superseded per ADR-0078, not exercised |
 | continuation | `unavailable` — no live Run was scheduled |
 | completion publication | `unavailable` — no live Run was scheduled |
 | terminal observation | `unavailable` — no live Run was scheduled |
