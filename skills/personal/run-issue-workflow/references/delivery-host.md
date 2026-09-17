@@ -172,3 +172,9 @@ half then decides:
 
 Zero matching host runs select none, and more than one is an ambiguity the entry must resolve rather
 than guess.
+
+## Cutover and measurement evidence
+
+The substrate cutover read-back, the carried Issue #91 recovery/delivery matrix, the per-phase
+measurement ontology, and the bounded reproducible-evidence report are published in
+[the delivery measurement reference](delivery-measurement.md).
