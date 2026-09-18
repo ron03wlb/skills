@@ -7,10 +7,10 @@
 
 The retired coordinator composed `run-workflow.mjs`, `run-coordinator.mjs`, `run-batch.mjs`, the Codex
 host bridge, the Codex task lifecycle adapter, and the loopback panel. That whole boundary is gone. The
-surviving delivery host is the pi-workflow bundle launched from `deliver-tracker-spec.json` at the package
-root, whose stage controller lives in `workflows/deliver-tracker-spec/` and
-asks `scripts/pi-workflow-host.mjs` what the Domain action reducer authorizes and materializes exactly
-that; one executable Issue owns one isolated worker lane and one dedicated Issue worktree.
+surviving delivery host is the authority layer that asks `scripts/pi-workflow-host.mjs` what the Domain
+action reducer authorizes, plus the replaceable execution material that materializes exactly that; the
+delivery path materializes one native subagent lane per authorized action, and one executable Issue owns
+one isolated worker lane and one dedicated Issue worktree.
 
 The retired coordinator's compact-outcome and no-repair boundaries remain the authoritative wording for
 any historical journal it produced: each native observation journals a compact allowlisted `task.outcome`

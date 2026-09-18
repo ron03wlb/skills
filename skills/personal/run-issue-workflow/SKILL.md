@@ -1,12 +1,12 @@
 ---
 name: run-issue-workflow
-description: Reconcile and deliver explicitly selected Tracker Specs through the pi-workflow delivery host.
+description: Reconcile and deliver explicitly selected Tracker Specs through one delivery authority and its native Issue lanes.
 disable-model-invocation: true
 ---
 
 # Run Issue Workflow
 
-Run one bounded Tracker Spec as a DAG on the pi-workflow delivery host, or an explicitly selected batch with an independent Run and Grant for each Spec. This skill is the sole Start and explicit re-entry authority. It coordinates existing `execute-issue` and `close-issue` leaves without replacing their contracts.
+Run one bounded Tracker Spec as a DAG through one delivery authority, or an explicitly selected batch with an independent Run and Grant for each Spec. This skill is the sole Start and explicit re-entry authority. It coordinates existing `execute-issue` and `close-issue` leaves without replacing their contracts.
 
 ## 1. Select and bind one Run
 
@@ -32,9 +32,9 @@ One prompt is the whole approval surface. When the reduction reports `run_prepar
 
 ## 3. Run the delivery host
 
-The delivery host is the pi-workflow bundle whose launch spec `deliver-tracker-spec.json` sits at this skill package's root and whose stage controller lives in `workflows/deliver-tracker-spec/`. Read [the delivery host contract](references/delivery-host.md) only when starting, resuming, reconciling, or materializing a host round. The bundle owns scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair routing, close eligibility, or stop classification.
+The delivery host is one delivery authority plus the replaceable execution material that performs its actions. The Domain action reducer fixes every legal action, and the per-Run journal owns grants, budgets, retries, repair waves, and outcomes; execution material beneath them is one native subagent lane per authorized action, and no single materialization is required. Read [the delivery host contract](references/delivery-host.md) only when starting, resuming, reconciling, or materializing a delivery round. Execution material owns the Run's scheduling facts and durable lane records only: it never decides scope, grants, budgets, retries, repair routing, close eligibility, or stop classification.
 
-The bundle's controller reaches the domain halves beside it: the owning-source adapter (`run-authority-adapters.mjs`) reduces tracker, reconciliation, target, checkpoint, handoff, and writer facts, and `pi-workflow-host.mjs` plans exactly the legal actions the Domain action reducer returns. Each executable Issue owns one lane: one isolated worker and one dedicated Issue worktree. An implementation lane follows `execute-issue`; a close lane follows `close-issue`; no worker can grant itself scope, a DAG Run Grant, or close authority.
+That authority layer reaches the domain halves beside it: the owning-source adapter (`run-authority-adapters.mjs`) reduces tracker, reconciliation, target, checkpoint, handoff, and writer facts, and `pi-workflow-host.mjs` plans exactly the legal actions the Domain action reducer returns. Each executable Issue owns one lane: one isolated worker and one dedicated Issue worktree. An implementation lane follows `execute-issue`; a close lane follows `close-issue`; no worker can grant itself scope, a DAG Run Grant, or close authority.
 
 The happy path is ordered:
 
@@ -55,4 +55,4 @@ Read [Run recovery](references/recovery.md) only after a worker, tracker, enviro
 
 Normal completion does not read full task history: the journal stores a compact allowlisted `task.outcome` receipt. Stop at reconciled `SUCCEEDED`, `STOPPED`, or a state with no legal action and no pending owning result. Keep healthy waits and pending calls with their original owner. For a real gate, use the recovery diagnosis; check existing human authority before interpreting a Skill as requiring another approval. Re-entry resumes only the next legal action from fresh evidence.
 
-This personal coordinator uses the pi-workflow delivery host and the shared installed package. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.
+This personal coordinator uses the delivery host's own authority layer and one replaceable materialization at a time, with the shared installed package. It never becomes a background daemon, global scheduler, public plugin surface, aggregate push gate, deployment path, external-prerequisite runner, or self-modifying workflow.
