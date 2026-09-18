@@ -17,6 +17,11 @@
 //   * Refuse ambiguity (AC-4). A second lane for one Issue, an unresolved creation intent, unknown
 //     ownership, a lane whose tools or prompt would widen the declared ceiling, or an action with no
 //     worker lane stops without mutating the journal or the repository, naming the owning source.
+//   * Carry the lane discipline (AC-2). Every produced lane prompt states the rules a lane works under:
+//     it reads the repository, the tracker and Git only and never scans the host filesystem, and it stops
+//     and asks the coordinator when a harness fact is genuinely absent. The composition happens here,
+//     before the one-contract-skill and tool-ceiling guards, so those guards bind the exact prompt the
+//     lane is launched with.
 //
 // Which action consumes a dispatch attempt, and which does not, is the published delivery contract's
 // rule rather than this module's invention: `dispatch_issue` consumes one attempt and therefore carries
@@ -83,6 +88,28 @@ const laneStop = (code, evidence, laneRef = null) => Object.freeze({
   stop: stop(code, evidence),
 });
 
+// The standing rules every produced lane carries. Two lanes of this Run spent their time scanning the
+// host filesystem because their Acceptance Criteria named harness prerequisites, so the discipline is
+// composed into the prompt the runner hands over instead of being left to a caller's wording. The rules
+// name no contract skill: the prompt still invokes exactly the one skill its action declares.
+export const LANE_STANDING_RULES_HEADING = "Standing rules for this lane";
+export const LANE_STANDING_RULES = Object.freeze([
+  "Read the repository, the tracker and Git only; never scan or walk the host filesystem.",
+  "Work only inside this lane's own dedicated Issue worktree; the shared checkout is read-only to you.",
+  "Stop and ask the coordinator when a harness fact you need is genuinely absent.",
+  "Invoke exactly the one contract skill this lane names; never grant yourself scope, a DAG Run Grant, or close authority.",
+]);
+
+// One lane prompt: the authorized action's own prompt plus the standing rules, in one text, so the
+// scope guards below read exactly what the worker receives.
+export function composeLanePrompt({ prompt, standingRules = LANE_STANDING_RULES } = {}) {
+  if (!isText(prompt)) throw new TypeError("A lane prompt must be text");
+  if (!Array.isArray(standingRules) || standingRules.length === 0 || !standingRules.every(isText)) {
+    throw new TypeError("Lane standing rules must be one non-empty string list");
+  }
+  return [prompt, "", `${LANE_STANDING_RULES_HEADING}:`, ...standingRules.map((rule) => `- ${rule}`)].join("\n");
+}
+
 // Every authority-journal append the lane runner performs goes through the single journal writer.
 export function recordLaneReservation({ gitCommonDir, runId, event } = {}) {
   requireText(gitCommonDir, "reservation journal common directory");
@@ -139,7 +166,9 @@ const laneBrief = (materialization) => {
       skill: requireText(materialization.skill, "Lane skill"),
       agent: requireText(materialization.agent, "Lane agent"),
       tools: Object.freeze([...materialization.tools]),
-      prompt: requireText(materialization.prompt, "Lane prompt"),
+      // The prompt the worker receives is the composed one; the recorded request identity stays the
+      // authority's own recorded request, so a re-issue proof still compares like with like.
+      prompt: composeLanePrompt({ prompt: requireText(materialization.prompt, "Lane prompt") }),
       worktreePolicy: materialization.worktreePolicy,
       requestIdentity: materialization.requestIdentity ?? null,
       attempt: Number.isInteger(materialization.attempt) ? materialization.attempt : null,
@@ -284,6 +313,7 @@ export function dispatchNativeLane({
         tools: [...lane.tools],
         worktreePolicy: lane.worktreePolicy,
         prompt: lane.prompt,
+        standingRules: Object.freeze([...LANE_STANDING_RULES]),
         requestIdentity: lane.requestIdentity,
         attempt,
       }),
@@ -361,6 +391,7 @@ export function dispatchNativeLane({
       tools: [...lane.tools],
       worktreePolicy: lane.worktreePolicy,
       prompt: lane.prompt,
+      standingRules: Object.freeze([...LANE_STANDING_RULES]),
       requestIdentity: lane.requestIdentity,
       reservedAt: at,
       attempt,

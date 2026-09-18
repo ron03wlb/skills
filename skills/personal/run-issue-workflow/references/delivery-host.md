@@ -57,6 +57,35 @@ able to settle a mutation-capable lane in its own managed worktree, because a la
 without a settled terminal outcome can never be closed; readiness reads that capability as a required
 surface (`scripts/lane-settlement-capability.mjs`).
 
+### The composed native round
+
+The Start entry composes that material, and it composes the native round rather than a host run.
+`scripts/run-entry.mjs` emits one round read and one round plan and hands back the ports the round loop
+owns:
+
+- **Read.** One round read carries this round's journal, the `dag-run-facts:v1` set that owns the same
+  journal, and one native lane-evidence read of the lanes the journal recorded. It is rebuilt from
+  owning sources every round, so a restart resumes at the next legal action instead of replaying a plan.
+- **Plan.** `scripts/native-round-loop.mjs` reduces that read, and the entry plans its first round
+  through the same planner, so no second planning path exists. The planner asks
+  `scripts/pi-workflow-host.mjs` for the legal actions and materializes them through
+  `scripts/native-lane-runner.mjs`; it never materializes an action the reducer did not return.
+- **Append.** The loop's journal writes — dispatch reservations and the close-lane dispatch intent — go
+  through the entry's single writer port, so the existing journal keeps ownership of grants, budgets,
+  attempts and outcomes.
+- **Launch.** A worker launch is the coordinator's port alone. The entry never dispatches a lane.
+
+Two properties are the composition's, not the materialization's. Every produced lane prompt carries the
+standing discipline that the lane reads the repository, the tracker and Git only, never scans the host
+filesystem, and stops to ask the coordinator when a harness fact is genuinely missing; the existing
+one-contract-skill and tool-ceiling guards bind that composed prompt. And the release frontier is
+re-derived on every round from the published blocker edges and the three release conditions — the blocker
+is closed in the tracker, its candidate is reachable from the target, and its worktree is absent — while
+the producer's one-shot `ready_state.read_back` projection is carried only as superseded evidence and is
+never consulted. A recorded close lane keeps close authority serialized: its invocation is journaled
+before the lane exists, and a later round reads that lane back instead of materializing a second close
+owner.
+
 ## The Issue lane
 
 One executable Issue owns exactly one lane: one isolated worker and one dedicated Issue worktree. Every
@@ -91,7 +120,8 @@ so it carries no new dispatch reservation.
 A lane's tools are always a subset of the declared ceiling and of the ceiling its agent definition
 declares for itself. Its prompt invokes exactly one contract skill — an implementation lane never
 closes, and a close lane never implements — so no worker can grant itself scope, a DAG Run Grant, or
-close authority.
+close authority. The runner composes the same standing discipline into every prompt it produces, and both
+scope checks then read that composed text.
 
 ## One lane per authorized action
 
@@ -124,7 +154,8 @@ performs something: an empty or refused action set launches nothing.
 
 ## Optional materialization: the `pi-workflow` bundle
 
-`@gwab/pi-workflow` is one optional materialization of these same facts, never a requirement. ADR-0080
+`@gwab/pi-workflow` is one optional materialization of these same facts, never a requirement, and no
+module of the default path imports it or the bundle. ADR-0080
 retired it from the delivery path because `@gwab/pi-workflow@0.13.8` could not settle a mutation-capable
 managed-worktree lane — `establishRawOwner` requires `realpath(task.cwd) === project` while its worktree
 module makes the worktree `task.cwd` and its dynamic generated-task runtime forces that worktree for any

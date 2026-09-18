@@ -4,16 +4,27 @@
 // the coordinator invokes so a Start is deterministic instead of improvised per session: it reduces the
 // immediate-upstream handoff, records the one read-back DAG Run Grant — carrying the human's single
 // approval of the declared Run operations the planning handoff left unapproved, and no approvals member
-// at all when the handoff already approved every one of them — and emits the one round input the delivery
-// host is launched with.
+// at all when the handoff already approved every one of them — and composes the round its execution
+// material consumes.
+//
+// The composition is the native one (AC-1). The entry emits the round read `native-round-loop.mjs`
+// consumes, plans its first round through that loop's own planner, and hands back the ports the loop
+// needs. Authorized actions are materialized through `native-lane-runner.mjs` (the loop's planner calls
+// it), lanes are observed through `native-lane-evidence.mjs` from the native subagent run record, the
+// tracker completion note and Git, and the producer's `ready_state.read_back` projection is carried only
+// as the one-shot projection the loop records as superseded — the release frontier is re-derived from
+// the published blocker edges and the three conditions on every round. Nothing on this path reads a
+// pi-workflow host run or imports the bundle: the `pi-workflow` materialization stays in the repository
+// as one optional materialization of the same facts, and the default path requires nothing from it.
 //
 // The Grant also binds the exact package version its host runs from. This entry selects that version from
 // the installation cache that owns it and hands the same cache and version to its own composition, so a
 // Run never starts against an installation its own evidence cannot resolve, and its maintenance path
 // reads back the package the Run actually started from.
 //
-// It never dispatches a lane, creates a worker, applies cleanup, acquires a lease, rewrites the journal,
-// or mutates the tracker. Its only write is the one Grant the selected Run authorizes.
+// It never dispatches a lane, creates a worker, applies cleanup, acquires the target writer, rewrites the
+// journal, or mutates the tracker. Its only write is the one Grant the selected Run authorizes; the loop
+// writes the dispatch reservations and close-lane intents it owns through the append port below.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -22,15 +33,36 @@ import { fileURLToPath } from "node:url";
 
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
 import { createRunAuthorityAdapters, deriveRunOperationIdentity, reduceRunReadyHandoff } from "./delivery-authority.mjs";
+import { LANE_TOOL_CEILING } from "./issue-lane.mjs";
+import { SUBAGENT_RUN_STATES, readNativeLaneEvidence, readSubagentRunRecord } from "./native-lane-evidence.mjs";
+import { createNativeLaneGit } from "./native-lane-runner.mjs";
+import { planNativeRound } from "./native-round-loop.mjs";
+import { hostActionIdentity } from "./pi-workflow-host.mjs";
 import { createRunStore } from "./run-store.mjs";
-import { planHostRound } from "./pi-workflow-host.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
-import { createHostTaskReader, observedLanesFor } from "../workflows/deliver-tracker-spec/helpers/host-runs.mjs";
 
 export const RUN_ENTRY_SCHEMA = "pi-workflow-run-entry:v1";
-export const RUN_ENTRY_STAGE_ID = "delivery";
 export const RUN_ENTRY_MAX_PARALLEL = 3;
+export const NATIVE_ROUND_READ_SCHEMA = "native-round-read:v1";
+export const NATIVE_RUN_COMPOSITION_SCHEMA = "native-run-composition:v1";
+export const COMPLETION_NOTE_KIND = "implementation_complete";
+// The one convention this composition reads a lane's native identity with: the runner pins the launch
+// envelope to the task reference the journal recorded for the lane, so that recorded lane reference *is*
+// the lane's native subagent run identity. The port is injectable, so a harness whose native run ids are
+// chosen elsewhere supplies its own reader instead of being guessed at.
+export const NATIVE_LANE_RUN_IDENTITY_RULE = "a recorded lane's native run identity is the lane reference the journal recorded for it";
+
+const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+const isText = (value) => typeof value === "string" && value.length > 0;
+const requireText = (value, label) => {
+  if (!isText(value)) throw new TypeError(`${label} is required`);
+  return value;
+};
+const requireFunction = (value, label) => {
+  if (typeof value !== "function") throw new TypeError(`${label} must be a port`);
+  return value;
+};
 
 const git = (repository, ...args) => execFileSync("git", ["-C", repository, ...args], { encoding: "utf8" }).trim();
 
@@ -52,8 +84,295 @@ export function resolveCheckout(cwd) {
   return { repository, repositoryName: match[1], gitCommonDir };
 }
 
-// One Start. Returns the round input when the Run reduces to READY, and a diagnosis otherwise; it never
-// returns a round for a state the Run authority refuses.
+// ---------------------------------------------------------------------------------------------
+// AC-1 — the composed native read, plan and journal ports
+// ---------------------------------------------------------------------------------------------
+
+// One recorded lane per dispatch reservation. `native-lane-runner.mjs` journals the reservation before
+// the launch envelope exists, and both name the lane by the same task reference, so the composition
+// reads exactly one native run record per lane and never enumerates a directory or a home tree.
+export function recordedLanesFromJournal({ journal } = {}) {
+  if (!Array.isArray(journal)) throw new TypeError("Recorded lanes need the authority journal");
+  const lanes = [];
+  for (const event of journal) {
+    if (event?.type !== "dispatch.recorded") continue;
+    const laneRef = event.taskRef?.threadId;
+    if (!isText(event.issueId) || !isText(laneRef)) continue;
+    if (!Number.isInteger(event.attempt) || event.attempt < 1) continue;
+    lanes.push(Object.freeze({
+      laneRef,
+      issueId: event.issueId,
+      attempt: event.attempt,
+      runId: laneRef,
+      worktree: null,
+      topic: null,
+    }));
+  }
+  return Object.freeze(lanes);
+}
+
+// The native subagent run-record reader. It resolves the one documented pointer for the lane it is given
+// (`<agent root>/subagent-runs/<runId>.json`) and nothing else: a lane this reader cannot read reports its
+// own path, and no source is searched for.
+export function createNativeRunReader({ homeDir = homedir(), runsRoot = null, readRecord = readSubagentRunRecord } = {}) {
+  requireFunction(readRecord, "Native run record reader");
+  return ({ runId }) => readRecord({
+    runId: requireText(runId, "Native lane run identity"),
+    ...(runsRoot === null ? { homeDir } : { runsRoot }),
+  });
+}
+
+// Native lane liveness -> the task state the reconciliation reads. Only the lane's own run record is
+// evidence: a lane that was never materialized reads as no task, so the reducer re-issues the recorded
+// attempt instead of treating a lost launch as a live lane; a lane that finished its work leaves the
+// recorded request readable; and an unreadable or unrecognised record reads UNKNOWN, which the
+// reconciliation refuses rather than retrying blindly.
+const TASK_STATE_BY_LANE_STATE = Object.freeze({
+  ACTIVE: "RUNNING",
+  RESUMABLE: "RESUMABLE",
+  INACTIVE: "RESUMABLE",
+});
+
+export function laneTaskStateFor({ taskRef, journal, readRecordedLanes, readSubagentRun } = {}) {
+  const laneRef = taskRef?.threadId;
+  if (!isText(laneRef)) return null;
+  const lane = readRecordedLanes({ journal }).find((candidate) => candidate.laneRef === laneRef);
+  if (lane === undefined) return null;
+  const run = readSubagentRun({ runId: lane.runId, laneRef: lane.laneRef, issueId: lane.issueId, attempt: lane.attempt });
+  if (!isRecord(run) || !SUBAGENT_RUN_STATES.includes(run.state)) {
+    return Object.freeze({ state: "UNKNOWN", laneRef, evidence: [`The native run record for lane ${laneRef} is not one readable native run read.`] });
+  }
+  if (run.state === "ABSENT") return null;
+  if (run.state !== "PRESENT") {
+    return Object.freeze({ state: "UNKNOWN", laneRef, nativeRunId: run.runId ?? null, evidence: [...(run.evidence ?? [])] });
+  }
+  const state = TASK_STATE_BY_LANE_STATE[run.laneState];
+  if (state === undefined) {
+    return Object.freeze({ state: "UNKNOWN", laneRef, nativeRunId: run.runId ?? null, status: run.status ?? null, evidence: [...(run.evidence ?? [])] });
+  }
+  return Object.freeze({
+    state,
+    laneRef,
+    nativeRunId: run.runId ?? null,
+    status: run.status ?? null,
+    settled: run.settled === true,
+    terminal: run.terminal === true,
+    evidence: [`Lane ${laneRef} native run ${run.runId ?? laneRef} records status ${run.status ?? "unknown"}, so its task state reads ${state}.`],
+  });
+}
+
+// The lane-task adapter `createGitHubWorkflowSources` and the reconciliation read. It is the same
+// closed-over lane list the round read uses, so the reducer's node facts and the lane planner's evidence
+// can never disagree about one lane.
+export function createNativeLaneTaskReader({ readJournal, readRecordedLanes, readSubagentRun } = {}) {
+  requireFunction(readJournal, "Lane task reader journal port");
+  requireFunction(readRecordedLanes, "Lane task reader recorded-lane port");
+  requireFunction(readSubagentRun, "Lane task reader native run port");
+  return Object.freeze({
+    read: (taskRef) => laneTaskStateFor({
+      taskRef,
+      journal: readJournal(),
+      readRecordedLanes,
+      readSubagentRun,
+    }),
+  });
+}
+
+// The close lane's own liveness. A close lane consumes no dispatch reservation, so the only durable facts
+// about it are the invocation the loop recorded before the lane existed and the lane's own deterministic
+// identity. The probe answers ACTIVE while that lane's native run is still live, ABSENT when the native
+// read proves it gone, and UNKNOWN — which stops the round instead of putting a second close owner on one
+// Issue — when the read proves neither.
+export function closeLaneLivenessFor({ request, readSubagentRun } = {}) {
+  const issueId = request?.issueId;
+  let laneRef;
+  try {
+    laneRef = hostActionIdentity({ type: "close_issue", issueId });
+  } catch (error) {
+    return Object.freeze({ state: "UNKNOWN", evidence: [`The close lane reference for Issue ${String(issueId)} is not derivable: ${error.message}`] });
+  }
+  let run;
+  try {
+    run = readSubagentRun({ runId: laneRef, laneRef, issueId, attempt: 1 });
+  } catch (error) {
+    return Object.freeze({ state: "UNKNOWN", evidence: [`The native run record for close lane ${laneRef} could not be read: ${error.message}`] });
+  }
+  if (!isRecord(run) || !SUBAGENT_RUN_STATES.includes(run.state) || run.state === "UNREADABLE") {
+    return Object.freeze({ state: "UNKNOWN", evidence: [`The native run record for close lane ${laneRef} is unreadable.`] });
+  }
+  if (run.state === "PRESENT" && run.terminal !== true) {
+    return Object.freeze({
+      state: "ACTIVE",
+      evidence: [`Close lane ${laneRef} still owns its recorded invocation: its native run ${run.runId ?? laneRef} records status ${run.status ?? "unknown"}.`],
+    });
+  }
+  return Object.freeze({
+    state: "ABSENT",
+    evidence: [run.state === "ABSENT"
+      ? `No native run record exists for close lane ${laneRef}, so no close lane owns the recorded invocation.`
+      : `Close lane ${laneRef} reached a terminal native status ${run.status ?? "unknown"}, so it no longer owns the recorded invocation.`],
+  });
+}
+
+// One fresh tracker read per Issue the recorded lanes name, so the synchronous native evidence reader
+// reads the tracker notes it needs without an asynchronous port inside it.
+const readNativeIssueReads = async ({ lanes, sources }) => {
+  const reads = new Map();
+  for (const issueId of new Set(lanes.map((lane) => lane.issueId))) {
+    const issue = await sources.readIssue(issueId);
+    const completion = [...(issue.records ?? [])].reverse().find(({ record }) => (
+      record?.kind === COMPLETION_NOTE_KIND && record.issueId === issueId
+    )) ?? null;
+    reads.set(issueId, Object.freeze({
+      state: isText(issue.state) ? issue.state.toUpperCase() : null,
+      completion: completion === null ? null : Object.freeze({ identity: completion.identity, record: completion.record }),
+    }));
+  }
+  return reads;
+};
+
+// The composed native path for one logical DAG Run: the fresh round read the native round loop consumes,
+// the single journal writer it appends through, and the identities its lane planning needs. The launch
+// port is not here — only the coordinator can materialize a worker, and this entry never dispatches.
+export function createNativeRunComposition({
+  repository,
+  repositoryName,
+  specId,
+  runId,
+  store,
+  sources,
+  adapters,
+  homeDir = homedir(),
+  // The producer's `ready_state.read_back` projection as this Run's own read-back produced it. It is a
+  // one-shot projection bound to its publication, so it is carried as that read and never as authority:
+  // the loop records it as superseded and re-derives the release frontier from its own fresh reads.
+  readReadyState = () => null,
+  laneGit = createNativeLaneGit(),
+  readSubagentRun = createNativeRunReader({ homeDir }),
+  readRecordedLanes = ({ journal }) => recordedLanesFromJournal({ journal }),
+  agentCeiling = LANE_TOOL_CEILING,
+  now = () => new Date().toISOString(),
+} = {}) {
+  const repositoryPath = requireText(repository, "The composition needs the project checkout");
+  const repositoryId = `github:${requireText(repositoryName, "The composition needs the repository name")}`;
+  requireText(specId, "The composition needs the selected Spec id");
+  requireText(runId, "The composition needs the logical DAG Run id");
+  if (!isRecord(store) || typeof store.readEvents !== "function" || typeof store.acquireWriter !== "function") {
+    throw new TypeError("The composition needs the Run store");
+  }
+  if (!isRecord(sources) || !isRecord(adapters)) throw new TypeError("The composition needs the owning sources and authority adapters");
+  if (typeof sources.readIssue !== "function") throw new TypeError("The composition needs the owning source's Issue read for the tracker completion note");
+  requireFunction(readRecordedLanes, "Recorded-lane port");
+  requireFunction(readSubagentRun, "Native run read port");
+  requireFunction(readReadyState, "Ready-state projection port");
+  if (!isRecord(laneGit)) throw new TypeError("The composition needs one Git reader for lane evidence");
+  if (!Array.isArray(agentCeiling) || !agentCeiling.every(isText)) throw new TypeError("The composition needs the agent tool ceiling");
+
+  const readJournal = () => store.readEvents(runId);
+
+  // One round read: this round's journal, this round's tracker and Git facts, and this round's native lane
+  // evidence. Nothing is remembered between rounds, so a restart resumes at the next legal action.
+  const readRound = async ({ at = now() } = {}) => {
+    requireText(at, "A round read needs its timestamp");
+    const tracker = await sources.sources.tracker.read({ specId });
+    const journal = readJournal();
+    const current = await adapters.reconcile({
+      request: { specId, runIdentity: { ...tracker.authority, runId } },
+      tracker,
+      journal,
+    });
+    if (current.runIdentity.runId !== runId) throw new Error("Run identity differs from the selected authority");
+    const facts = { ...current.facts, journal };
+    const lanes = readRecordedLanes({ journal, facts });
+    const nativeIssues = await readNativeIssueReads({ lanes, sources });
+    const laneEvidence = readNativeLaneEvidence({
+      lanes,
+      readRun: (lane) => readSubagentRun(lane),
+      readIssue: ({ issueId }) => nativeIssues.get(issueId) ?? Object.freeze({ state: null, completion: null }),
+      git: laneGit,
+      repository: repositoryPath,
+      target: current.runIdentity.target,
+    });
+    return Object.freeze({
+      schema: NATIVE_ROUND_READ_SCHEMA,
+      readAt: at,
+      journal,
+      facts,
+      laneEvidence,
+      readyState: readReadyState(),
+      closeLane: (request) => closeLaneLivenessFor({ request, readSubagentRun }),
+    });
+  };
+
+  // The loop's single journal append. The reservation is durable before the launch envelope exists, which
+  // is what makes a lost launch response readable instead of repeatable.
+  const append = (event) => {
+    const writer = store.acquireWriter(runId);
+    try {
+      return writer.append(event);
+    } finally {
+      writer.release();
+    }
+  };
+
+  return Object.freeze({
+    schema: NATIVE_RUN_COMPOSITION_SCHEMA,
+    specId,
+    runId,
+    repositoryId,
+    agentCeiling: Object.freeze([...agentCeiling]),
+    laneIdentityRule: NATIVE_LANE_RUN_IDENTITY_RULE,
+    taskReader: createNativeLaneTaskReader({ readJournal, readRecordedLanes, readSubagentRun }),
+    readRound,
+    append,
+    // The loop's third port. A worker launch is the coordinator's alone, so the composition names its
+    // owner instead of pretending to have one.
+    launchOwner: "coordinator",
+  });
+}
+
+// The plan the coordinator materializes: the native round plan's disposition, its legal action set, the
+// lanes and read-backs this round owns, and any fail-closed stop.
+const planSummary = (plan) => Object.freeze({
+  disposition: plan.disposition,
+  controlRevision: plan.controlRevision,
+  maxParallel: plan.maxParallel,
+  legalActions: [...plan.legalActions],
+  // The three-condition release re-derivation this round made, and what it did with the producer's
+  // one-shot projection: recorded as superseded, never consulted.
+  frontier: plan.frontier === null ? null : Object.freeze({
+    target: plan.frontier.target,
+    ready: [...plan.frontier.ready],
+    gated: [...plan.frontier.gated],
+    unproven: [...plan.frontier.unproven],
+  }),
+  readyState: Object.freeze({
+    consulted: plan.readyState.consulted,
+    projection: plan.readyState.projection,
+  }),
+  authorizedActions: [...new Set([...plan.lanes.map((lane) => lane.id), ...plan.readBacks.map((item) => item.id)])],
+  lanes: plan.lanes.map((lane) => Object.freeze({
+    id: lane.id,
+    actionType: lane.actionType,
+    issueId: lane.issueId,
+    skill: lane.skill,
+    decision: lane.decision,
+    laneRef: lane.laneRef,
+    closeInvocation: lane.closeInvocation,
+  })),
+  readBacks: plan.readBacks.map((item) => Object.freeze({
+    id: item.id,
+    actionType: item.actionType,
+    issueId: item.issueId,
+    laneRef: item.laneRef,
+    decision: item.decision,
+  })),
+  deferred: plan.deferred.map((item) => Object.freeze({ id: item.id, reason: item.reason })),
+  stop: plan.stop ?? null,
+});
+
+// One Start. Returns the round read, the planned round and the native loop's ports when the Run reduces
+// to READY, and a diagnosis otherwise; it never returns a round for a state the Run authority refuses.
 export async function startRun({
   cwd = process.cwd(),
   specId,
@@ -64,12 +383,23 @@ export async function startRun({
   // The owning-source composition is injectable so a caller can prove which installation this Start
   // bound its sources to; production always composes the GitHub sources.
   createSources = createGitHubWorkflowSources,
+  // The native composition's own ports are injectable for the same reason: a caller proves which lane
+  // list and which native run records the Start read, and a harness that chooses its own native run ids
+  // supplies its own reader.
+  readSubagentRun = null,
+  readRecordedLanes = null,
+  laneGit = null,
+  agentCeiling = LANE_TOOL_CEILING,
+  now = () => new Date().toISOString(),
 } = {}) {
   if (typeof specId !== "string" || specId === "") throw new TypeError("A Run entry needs one Spec id");
   const { repository, repositoryName, gitCommonDir } = resolveCheckout(cwd);
   const store = createRunStore({ gitCommonDir });
   const selection = selectWorkflowVersion({ cacheDirectory });
   const selectedVersion = selection.state === "AVAILABLE" ? selection.version : undefined;
+  // The lane-task adapter the reconciliation reads is the native one, and it is built from the same
+  // recorded lanes the round read uses. It is late-bound because the sources that consume it are
+  // constructed before the Run identity — and therefore the composition — is known.
   let taskReader = null;
   const tasks = { read: (taskRef, options) => (taskReader === null ? null : taskReader.read(taskRef, options)) };
   // The composition reads the same trusted cache and package version back for its own maintenance
@@ -94,20 +424,34 @@ export async function startRun({
     specId: tracker.spec.node_id,
     approvedPublicationIdentity: tracker.authority.approvedScopeHash,
   }).key;
-  taskReader = createHostTaskReader({
-    cwd: repository,
+  // The Run's own handoff read-back owns the producer's one-shot ready-state projection; the composition
+  // reads it per round so every round carries the same read instead of a remembered one.
+  let handoffFacts = null;
+  const composition = createNativeRunComposition({
+    repository,
+    repositoryName,
     specId: tracker.spec.node_id,
-    target: tracker.authority.target,
-    stageId: RUN_ENTRY_STAGE_ID,
     runId,
+    store,
+    sources,
+    adapters,
+    homeDir,
+    readReadyState: () => handoffFacts?.checkpoint?.stageReceipts?.readyStateReadBack ?? null,
+    agentCeiling,
+    now,
+    ...(laneGit === null ? {} : { laneGit }),
+    ...(readSubagentRun === null ? {} : { readSubagentRun }),
+    ...(readRecordedLanes === null ? {} : { readRecordedLanes }),
   });
+  taskReader = composition.taskReader;
 
   // Re-entry reuses the exact existing Grant: the human's one approval is already recorded, so the
   // confirming read-back must never append a second one.
   let journal = store.listRunIds().includes(runId) ? store.readEvents(runId) : [];
   let current = await adapters.reconcile({ request: { specId, runIdentity: { ...tracker.authority, runId } }, tracker, journal });
   if (current.runIdentity.runId !== runId) throw new Error("Run identity differs from the selected authority");
-  let ready = reduceRunReadyHandoff(await adapters.handoff.read({ request, tracker, current }));
+  handoffFacts = await adapters.handoff.read({ request, tracker, current });
+  let ready = reduceRunReadyHandoff(handoffFacts);
   const result = {
     schema: RUN_ENTRY_SCHEMA,
     specId: tracker.spec.node_id,
@@ -123,9 +467,7 @@ export async function startRun({
     // reduction, so a handoff that approved every declared operation is never asked again and its Grant
     // carries no approvals member rather than an empty one.
     const approvalGap = ready.state !== "READY" && ready.reasonCode === "run_preparation_pending";
-    const preparation = approvalGap
-      ? (await adapters.handoff.read({ request, tracker, current })).preparation
-      : null;
+    const preparation = approvalGap ? handoffFacts.preparation : null;
     const questions = Array.isArray(preparation?.questions) ? preparation.questions : [];
     if (questions.length > 0) result.questions = questions;
     if (approvalGap && questions.length > 0 && approval === null) {
@@ -153,7 +495,8 @@ export async function startRun({
       }
       journal = store.readEvents(runId);
       current = await adapters.reconcile({ request: { specId, runIdentity: current.runIdentity }, tracker, journal });
-      ready = reduceRunReadyHandoff(await adapters.handoff.read({ request, tracker, current }));
+      handoffFacts = await adapters.handoff.read({ request, tracker, current });
+      ready = reduceRunReadyHandoff(handoffFacts);
       result.recordedGrant = { approvedActions: questions.map(({ action }) => action) };
       result.ready = { state: ready.state, reasonCode: ready.reasonCode, nextOwner: ready.nextOwner };
     }
@@ -163,40 +506,43 @@ export async function startRun({
     return { ...result, outcome: "NOT_READY", diagnosis: ready };
   }
 
-  const evidence = taskReader.evidence;
-  if (evidence.unattributed.length > 0) {
-    // A materialized lane this reader cannot attribute to its Issue and attempt is an ambiguity a human
-    // resolves; dispatching past it could put two lanes on one Issue.
+  // AC-1: the default path composes the native round loop. The round read is the exact input
+  // `native-round-loop.mjs` consumes, its first round is planned by that loop's own planner, and the
+  // ports below let the coordinator run the loop and materialize through the native lane runner.
+  const at = now();
+  const round = await composition.readRound({ at });
+  if (round.laneEvidence.unattributed.length > 0) {
+    // A materialized lane this composition cannot attribute to its Issue and attempt is an ambiguity a
+    // human resolves; dispatching past it could put two lanes on one Issue.
     return {
       ...result,
       outcome: "LANE_EVIDENCE_UNATTRIBUTED",
-      diagnosis: { reasonCode: "lane_evidence_unattributed", evidence: [...evidence.unattributed] },
+      diagnosis: { reasonCode: "lane_evidence_unattributed", evidence: [...round.laneEvidence.unattributed] },
     };
   }
-  const facts = { ...current.facts, journal };
-  const plan = planHostRound({ facts });
-  const round = {
-    facts,
-    cwd: repository,
-    homeDir,
-    gitCommonDir,
-    at: new Date().toISOString(),
-    stageId: RUN_ENTRY_STAGE_ID,
-    lanes: { observed: observedLanesFor(evidence, { runId }), creationIntents: [] },
-    blockedHostRun: null,
-    recorded: [],
-  };
+  const plan = planNativeRound({
+    round,
+    at,
+    agentCeiling: composition.agentCeiling,
+    repositoryId: composition.repositoryId,
+    approvedPublicationIdentity: tracker.authority.approvedScopeHash,
+  });
   return {
     ...result,
     outcome: "READY",
-    plan: {
-      disposition: plan.disposition,
-      controlRevision: plan.controlRevision,
-      authorizedActions: [...plan.authorizedActions],
-      stop: plan.stop ?? null,
-    },
-    observedLanes: round.lanes.observed.length,
+    plan: planSummary(plan),
+    observedLanes: round.laneEvidence.lanes.length,
     round,
+    nativeLoop: {
+      schema: NATIVE_RUN_COMPOSITION_SCHEMA,
+      readRound: composition.readRound,
+      append: composition.append,
+      repositoryId: composition.repositoryId,
+      approvedPublicationIdentity: tracker.authority.approvedScopeHash,
+      agentCeiling: composition.agentCeiling,
+      laneIdentityRule: composition.laneIdentityRule,
+      launchOwner: composition.launchOwner,
+    },
   };
 }
 

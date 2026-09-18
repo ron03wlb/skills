@@ -9,14 +9,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { LANE_STOP_CODES, LANE_TOOL_CEILING } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
+import { LANE_STOP_CODES, LANE_TOOL_CEILING, assertLanePromptScope } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import {
+  LANE_STANDING_RULES,
+  LANE_STANDING_RULES_HEADING,
   NATIVE_LANE_RUN_SCHEMA,
   NATIVE_LANE_SETTLEMENT_SCHEMA,
   NATIVE_LANE_STOP_CODES,
   RESERVATION_RULES,
   candidateDurability,
+  composeLanePrompt,
   createNativeLaneGit,
   dispatchNativeLane,
   settleNativeLane,
@@ -568,6 +571,44 @@ test("the durability guard names the branch a close owner must find", () => {
   });
   assert.equal(reachable.proven, true);
   assert.match(reachable.evidence[0], /is reachable from the recorded topic branch/u);
+});
+
+test("every produced lane carries the standing discipline inside the guards that bind its prompt", () => {
+  const appends = [];
+  const created = dispatch({ appends });
+  assert.equal(created.decision, "CREATE");
+  // The rules are composed into the prompt the worker receives, and the launch envelope reports them.
+  assert.match(created.launch.prompt, new RegExp(`${LANE_STANDING_RULES_HEADING}:`, "u"));
+  for (const rule of LANE_STANDING_RULES) assert.equal(created.launch.prompt.includes(rule), true, rule);
+  assert.deepEqual(created.launch.standingRules, [...LANE_STANDING_RULES]);
+  // The composed prompt is the prompt the one-skill scope guard reads: it still invokes exactly its own
+  // contract skill and no other, so the discipline cannot widen a lane's authority.
+  assert.equal((created.launch.prompt.match(/\$[a-z][a-z0-9-]*/gu) ?? []).length, 1);
+  assert.deepEqual(assertLanePromptScope({ prompt: created.launch.prompt, skill: "execute-issue" }), null);
+
+  // A caller-supplied prompt still cannot smuggle a second contract skill in through the action's own
+  // text, and a close lane composes the same rules for its own skill.
+  const closeLane = dispatch({
+    appends,
+    observed: [],
+    materialization: materialization({
+      id: "close_I_116",
+      actionType: "close_issue",
+      skill: "close-issue",
+      attempt: null,
+      prompt: "Use $close-issue to close Issue I_116 against its recorded local target.",
+    }),
+  });
+  assert.equal(closeLane.decision, "LAUNCH");
+  assert.equal(closeLane.launch.skill, "close-issue");
+  for (const rule of LANE_STANDING_RULES) assert.equal(closeLane.launch.prompt.includes(rule), true, rule);
+  assert.equal((closeLane.launch.prompt.match(/\$[a-z][a-z0-9-]*/gu) ?? []).length, 1);
+  assert.equal(LANE_STANDING_RULES.every((rule) => !/\$/u.test(rule)), true, "a standing rule names no contract skill");
+
+  // The composition itself refuses a malformed rule list instead of producing a lane with rules nobody
+  // declared.
+  assert.throws(() => composeLanePrompt({ prompt: "Use $execute-issue.", standingRules: [] }), /standing rules/u);
+  assert.throws(() => composeLanePrompt({ prompt: "" }), /prompt must be text/u);
 });
 
 test("a lane runner refuses a malformed round", () => {
