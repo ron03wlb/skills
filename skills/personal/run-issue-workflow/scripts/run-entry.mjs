@@ -26,12 +26,17 @@
 // journal, or mutates the tracker. Its only write is the one Grant the selected Run authorizes; the loop
 // writes the dispatch reservations and close-lane intents it owns through the append port below.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createGitHubWorkflowSources } from "./github-workflow-sources.mjs";
+import { createGitLabWorkflowSources } from "./gitlab-workflow-sources.mjs";
+import {
+  configurationMatchesOrigin,
+  validateConfiguration,
+} from "./gitlab-producer-transport.mjs";
 import { createRunAuthorityAdapters, deriveRunOperationIdentity, reduceRunReadyHandoff } from "./delivery-authority.mjs";
 import { LANE_TOOL_CEILING } from "./issue-lane.mjs";
 import { SUBAGENT_RUN_STATES, readNativeLaneEvidence, readSubagentRunRecord } from "./native-lane-evidence.mjs";
@@ -47,6 +52,13 @@ export const RUN_ENTRY_MAX_PARALLEL = 3;
 export const NATIVE_ROUND_READ_SCHEMA = "native-round-read:v1";
 export const NATIVE_RUN_COMPOSITION_SCHEMA = "native-run-composition:v1";
 export const COMPLETION_NOTE_KIND = "implementation_complete";
+export const TRACKER_SELECTION_SCHEMA = "tracker-run-selection:v1";
+export const GITLAB_BINDING_PATH = "docs/agents/gitlab-producer.json";
+// The exact repair a GitLab origin without a binding receives. It is the producer owner's configure
+// action, presented inside setup's one approved plan — never a hand-written binding, and never a silent
+// fall back to the GitHub composition.
+export const MISSING_GITLAB_BINDING_REPAIR =
+  `${GITLAB_BINDING_PATH} is missing for the GitLab origin. Run the installed gitlab-producer-entry.mjs configure <repository> — the GitLab producer owner, which /setup-matt-pocock-skills presents inside its one approved plan — then retry. The Run never falls back to a GitHub composition.`;
 // The one convention this composition reads a lane's native identity with: the runner pins the launch
 // envelope to the task reference the journal recorded for the lane, so that recorded lane reference *is*
 // the lane's native subagent run identity. The port is injectable, so a harness whose native run ids are
@@ -83,6 +95,52 @@ export function resolveCheckout(cwd) {
   const gitCommonDir = realpathSync(resolve(repository, git(repository, "rev-parse", "--git-common-dir")));
   return { repository, repositoryName: match[1], gitCommonDir };
 }
+
+const trackerSelectionConflict = (message) => Object.assign(new Error(message), { code: "WORKFLOW_TRACKER_SELECTION" });
+const gitHubOrigin = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+)$/u;
+
+// AC-1: one exact, fail-closed composition selection from the repository's own configured tracker
+// evidence. A present, origin-matching GitLab binding selects the GitLab composition; a GitLab origin
+// without that binding stops with the exact missing-binding repair instead of falling back to GitHub; a
+// binding that does not match the origin, or contradictory evidence, stops with the observed values. The
+// GitHub selection is the unchanged `resolveCheckout` answer for a github.com origin with no GitLab
+// binding, so no existing GitHub Run changes behavior.
+export function resolveTrackerSelection({ cwd = process.cwd() } = {}) {
+  const repository = realpathSync(cwd);
+  const origin = git(repository, "remote", "get-url", "origin").replace(/\.git$/u, "");
+  const gitCommonDir = realpathSync(resolve(repository, git(repository, "rev-parse", "--git-common-dir")));
+  const bindingPath = join(repository, GITLAB_BINDING_PATH);
+  let binding = null;
+  if (existsSync(bindingPath)) {
+    let parsed;
+    try {
+      parsed = JSON.parse(readFileSync(bindingPath, "utf8"));
+      binding = validateConfiguration(parsed);
+    } catch (error) {
+      throw trackerSelectionConflict(`Tracker evidence is unreadable: ${bindingPath} is not a valid GitLab producer binding (${error.message}). Repair that binding through its owning producer entry instead of falling back to another composition.`);
+    }
+  }
+  const gitHub = origin.match(gitHubOrigin);
+  if (gitHub !== null) {
+    if (binding !== null) {
+      throw trackerSelectionConflict(`Contradictory tracker evidence: the origin ${origin} is a GitHub repository while ${GITLAB_BINDING_PATH} binds the GitLab project ${binding.baseUrl}/${binding.project}. Remove the binding or point the origin at it; no composition is selected.`);
+    }
+    return Object.freeze({ schema: TRACKER_SELECTION_SCHEMA, repository, gitCommonDir, origin, bindingPath, tracker: "github",
+      repositoryName: gitHub[1], configuration: null });
+  }
+  if (binding === null) {
+    throw trackerSelectionConflict(`Tracker evidence is incomplete: the origin ${origin} is not a GitHub repository and ${MISSING_GITLAB_BINDING_REPAIR}`);
+  }
+  if (!configurationMatchesOrigin({ configuration: binding, origin })) {
+    throw trackerSelectionConflict(`Contradictory tracker evidence: the origin ${origin} does not match the configured GitLab project ${binding.baseUrl}/${binding.project} in ${GITLAB_BINDING_PATH}. Rebind the project through its owning producer entry; no composition is selected.`);
+  }
+  return Object.freeze({ schema: TRACKER_SELECTION_SCHEMA, repository, gitCommonDir, origin, bindingPath, tracker: "gitlab",
+    repositoryName: null, configuration: binding });
+}
+
+// The selected composition's owner. A Run binds exactly one of them, and the selection above is the
+// only thing that chooses: a GitLab binding never reaches the GitHub composition and vice versa.
+export const trackerSourceFactory = (tracker) => (tracker === "gitlab" ? createGitLabWorkflowSources : createGitHubWorkflowSources);
 
 // ---------------------------------------------------------------------------------------------
 // AC-1 — the composed native read, plan and journal ports
@@ -236,7 +294,7 @@ const readNativeIssueReads = async ({ lanes, sources }) => {
 // port is not here — only the coordinator can materialize a worker, and this entry never dispatches.
 export function createNativeRunComposition({
   repository,
-  repositoryName,
+  repositoryId: selectedRepositoryId,
   specId,
   runId,
   store,
@@ -254,7 +312,9 @@ export function createNativeRunComposition({
   now = () => new Date().toISOString(),
 } = {}) {
   const repositoryPath = requireText(repository, "The composition needs the project checkout");
-  const repositoryId = `github:${requireText(repositoryName, "The composition needs the repository name")}`;
+  // The repository identity is the selected owning source's own identity — `github:<owner>/<repo>` or
+  // `gitlab:<host>/<project>` — so the Run identity and the Run's tracker evidence cannot disagree.
+  const repositoryId = requireText(selectedRepositoryId, "The composition needs the selected repository identity");
   requireText(specId, "The composition needs the selected Spec id");
   requireText(runId, "The composition needs the logical DAG Run id");
   if (!isRecord(store) || typeof store.readEvents !== "function" || typeof store.acquireWriter !== "function") {
@@ -380,9 +440,13 @@ export async function startRun({
   cacheDirectory = installationCacheDirectoryFor(),
   homeDir = homedir(),
   commandRunner = runWorkflowCommand,
+  // The selected owning source's own transport, injectable for the same reason `commandRunner` is: a
+  // caller proves which installed producer owner the composition read the configured project through.
+  transport = null,
   // The owning-source composition is injectable so a caller can prove which installation this Start
-  // bound its sources to; production always composes the GitHub sources.
-  createSources = createGitHubWorkflowSources,
+  // bound its sources to; production selects the composition from the repository's own configured
+  // tracker evidence, and one Run binds exactly one of them.
+  createSources = null,
   // The native composition's own ports are injectable for the same reason: a caller proves which lane
   // list and which native run records the Start read, and a harness that chooses its own native run ids
   // supplies its own reader.
@@ -393,7 +457,9 @@ export async function startRun({
   now = () => new Date().toISOString(),
 } = {}) {
   if (typeof specId !== "string" || specId === "") throw new TypeError("A Run entry needs one Spec id");
-  const { repository, repositoryName, gitCommonDir } = resolveCheckout(cwd);
+  const trackerSelection = resolveTrackerSelection({ cwd });
+  const { repository, gitCommonDir } = trackerSelection;
+  const selectedCreateSources = createSources ?? trackerSourceFactory(trackerSelection.tracker);
   const store = createRunStore({ gitCommonDir });
   const selection = selectWorkflowVersion({ cacheDirectory });
   const selectedVersion = selection.state === "AVAILABLE" ? selection.version : undefined;
@@ -404,23 +470,26 @@ export async function startRun({
   const tasks = { read: (taskRef, options) => (taskReader === null ? null : taskReader.read(taskRef, options)) };
   // The composition reads the same trusted cache and package version back for its own maintenance
   // evidence, so selection and delivery can never name two different installations.
-  const sources = createSources({
+  const sources = await selectedCreateSources({
     repository,
-    repositoryName,
+    repositoryName: trackerSelection.repositoryName,
+    configuration: trackerSelection.configuration,
     store,
     tasks,
     workflowVersion: selectedVersion,
     installationCacheDirectory: cacheDirectory,
     commandRunner,
+    ...(transport === null ? {} : { transport }),
   });
   const adapters = createRunAuthorityAdapters({ sources: sources.sources, store, tasks });
 
   const request = { specId };
   const tracker = await sources.sources.tracker.read(request);
+  const repositoryId = await sources.sources.repository.readIdentity({ request });
   // The Run identity is derived from the selected authority before any read, so lane evidence can be
   // scoped to this Run and never borrow a lane materialized for another Run of the same Spec.
   const runId = deriveRunOperationIdentity({
-    repositoryId: `github:${repositoryName}`,
+    repositoryId,
     specId: tracker.spec.node_id,
     approvedPublicationIdentity: tracker.authority.approvedScopeHash,
   }).key;
@@ -429,7 +498,7 @@ export async function startRun({
   let handoffFacts = null;
   const composition = createNativeRunComposition({
     repository,
-    repositoryName,
+    repositoryId,
     specId: tracker.spec.node_id,
     runId,
     store,

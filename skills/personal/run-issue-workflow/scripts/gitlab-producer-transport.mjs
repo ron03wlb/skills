@@ -21,6 +21,16 @@ export function validateConfiguration(configuration) {
   return configuration;
 }
 
+// The one origin rule the producer and the Run composition share. A configured project matches the
+// checkout origin through its HTTPS URL, its scp-style SSH form, or its ssh:// URL, and through nothing
+// else; an SSH remote's host and path alone are never inferred into a binding.
+export const configurationMatchesOrigin = ({ configuration, origin }) => {
+  validateConfiguration(configuration);
+  const { baseUrl, project } = configuration;
+  const host = new URL(baseUrl).hostname;
+  return [`${baseUrl}/${project}`, `git@${host}:${project}`, `ssh://git@${host}/${project}`].includes(origin);
+};
+
 export function configurationFromRemote(repository) {
   const remote = gitRead(repository, "remote", "get-url", "origin");
   if (!/^https?:\/\//u.test(remote)) throw conflict("For SSH remotes, explicitly supply the GitLab HTTPS baseUrl and project in the configuration file.");
@@ -76,8 +86,7 @@ export async function connectGitLabProducer({ repository, configuration, transpo
   validateConfiguration(configuration);
   const { baseUrl, project } = configuration;
   const origin = gitRead(repository, "remote", "get-url", "origin").replace(/\.git$/u, "");
-  const host = new URL(baseUrl).hostname;
-  if (![`${baseUrl}/${project}`, `git@${host}:${project}`, `ssh://git@${host}/${project}`].includes(origin)) throw conflict("Configured project does not match checkout origin");
+  if (!configurationMatchesOrigin({ configuration, origin })) throw conflict("Configured project does not match checkout origin");
   const request = transport ?? createGlabTransport({ repository, configuration });
   const remote = await request({ path: `projects/${encodeURIComponent(project)}` });
   if (!Number.isSafeInteger(remote.id) || remote.id < 1 || remote.path_with_namespace !== project || remote.web_url !== `${baseUrl}/${project}`) throw conflict("GitLab project identity differs");

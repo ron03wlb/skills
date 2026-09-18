@@ -124,10 +124,20 @@ const requireGitObject = (value, label) => {
 
 // One generated task id must survive the host's task-id grammar: it is spliced as
 // `<dynamic-stage-id>.<id>`, so it may not contain a path separator or whitespace.
+// The lane-identity grammar is reversible. An identity written entirely in the safe alphabet
+// (`[A-Za-z0-9_-]`) — which is every GitHub node id — round-trips byte for byte through `taskIdPart` and
+// `parseHostDispatchId`, while any other character is escaped instead of flattened. A GitLab Issue's
+// identity is its web URL, so a flattening sanitiser would make two different Issues share one lane id
+// and no lane could ever be attributed to its Issue again.
+export const LANE_ID_ESCAPE = "~";
+const laneIdEscape = (character) => `${LANE_ID_ESCAPE}${character.codePointAt(0).toString(16)}${LANE_ID_ESCAPE}`;
+const laneIdUnescape = (value) => String(value ?? "").replace(/~([0-9a-f]{1,6})~/gu,
+  (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)));
+export const unescapeLaneIdPart = (value) => laneIdUnescape(value);
 const taskIdPart = (value) => {
   const text = String(value ?? "");
   if (!text) throw new TypeError("A materialized task id needs a non-empty identity");
-  return text.replace(/[^A-Za-z0-9_-]/gu, "_").slice(0, 96);
+  return text.replace(/[^A-Za-z0-9_-]/gu, laneIdEscape).slice(0, 96);
 };
 
 // The deterministic identity of one materialized operation. Two reducer rounds that authorize the same
@@ -253,8 +263,8 @@ const uniqueId = (value) => value.split(".").at(-1);
 // Reads back one dispatch materialization id. Returns null for every other host operation id, so a
 // caller cannot mistake a close or recovery lane for a dispatch attempt.
 export function parseHostDispatchId(id) {
-  const match = /^dispatch_([A-Za-z0-9_-]+)_([1-9][0-9]*)$/u.exec(uniqueId(id));
-  return match === null ? null : { issueId: match[1], attempt: Number(match[2]) };
+  const match = /^dispatch_([A-Za-z0-9_~-]+)_([1-9][0-9]*)$/u.exec(uniqueId(id));
+  return match === null ? null : { issueId: laneIdUnescape(match[1]), attempt: Number(match[2]) };
 }
 
 // The reducer's legal action set is an input this owner may refuse but never amend. Every failure path
