@@ -38,6 +38,7 @@ const executeGh = (command, args, options) => new Promise((resolveResult, reject
   child.stdin.end(options.input);
 });
 export const isRejectedStatus = status => [400, 401, 403, 404, 405, 406, 411, 413, 414, 415, 422].includes(status);
+const isSuccessStatus = status => status !== null && status >= 200 && status < 300;
 function responseEnvelope(output) {
   const match = String(output ?? "").match(/^HTTP\/\S+ (\d{3})[^\r\n]*\r?\n([\s\S]*?)\r?\n\r?\n([\s\S]*)$/u);
   if (!match) return { httpStatus: null, requestId: null, body: null };
@@ -45,20 +46,62 @@ function responseEnvelope(output) {
   return { httpStatus: Number(match[1]), requestId, body: match[3] };
 }
 
+// The exact length of one JSON value, so a packed page body is never guessed from its own text.
+function jsonValueLength(text) {
+  let depth = 0; let quoted = false; let escaped = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if (character === "[" || character === "{") depth += 1;
+    else if (character === "]" || character === "}") { depth -= 1; if (depth === 0) return index + 1; }
+  }
+  return -1;
+}
+
+// `gh api <path> --paginate --slurp --include` packs one `HTTP/…` envelope per page inside the slurp array,
+// separated by a newline and a comma:
+//   [HTTP/2.0 200 OK\n<headers>\n\n[<page one>]\n,HTTP/2.0 200 OK\n<headers>\n\n[<page two>]]
+// Every page therefore carries its own attributable status, including pages whose body is not an array.
+function paginatedResponse(output) {
+  const text = String(output ?? "").trimEnd();
+  if (!text.startsWith("[HTTP/") || !text.endsWith("]")) return null;
+  const pages = []; const rows = [];
+  let rest = text.slice(1, -1);
+  while (rest.length > 0) {
+    const envelope = responseEnvelope(rest);
+    if (envelope.httpStatus === null || envelope.body === null) return null;
+    const length = jsonValueLength(envelope.body);
+    if (length < 1) return null;
+    pages.push({ httpStatus: envelope.httpStatus, requestId: envelope.requestId });
+    rows.push(JSON.parse(envelope.body.slice(0, length)));
+    const remainder = envelope.body.slice(length);
+    if (remainder === "") break;
+    const separator = remainder.match(/^\r?\n?,/u);
+    if (!separator) return null;
+    rest = remainder.slice(separator[0].length);
+  }
+  return pages.length ? { pages, rows } : null;
+}
+
 const executableArgs = (command, args, repository, input) => ({ command, args, options: {
   cwd: repository, input: input === undefined ? undefined : JSON.stringify(input), encoding: "utf8",
   windowsHide: true, maxBuffer: 32 * 1024 * 1024, stdio: ["pipe", "pipe", "pipe"],
 } });
 
-// The one transport over the configured `gh`. Reads use the required `--paginate --slurp` capability and
-// are flattened to a single array; writes carry `--include` so a terminal HTTP rejection is observed.
+// The one transport over the configured `gh`. Reads use the required `--paginate --slurp` capability, carry
+// `--include` so every read outcome is attributable, and are still flattened to a single array; writes carry
+// `--include` so a terminal HTTP rejection is observed.
 export function createGhTransport({ repository, execute = executeGh }) {
   return async request => {
     if (request?.graphql) return graphql(execute, repository, request.graphql);
     const { method = "GET", path, body } = request ?? {};
     if (typeof path !== "string" || !path || path.startsWith("/") || path.includes("..") || /[\s\\]/u.test(path)) throw conflict("Unsupported GitHub API path");
     const args = ["api", path];
-    if (method === "GET") args.push("--paginate", "--slurp");
+    if (method === "GET") args.push("--paginate", "--slurp", "--include");
     else args.push("--method", method, "--include");
     if (body !== undefined) args.push("--input", "-", "--header", "Content-Type: application/json");
     let envelope = { httpStatus: null, requestId: null };
@@ -66,15 +109,22 @@ export function createGhTransport({ repository, execute = executeGh }) {
       const exec = executableArgs("gh", args, repository, body);
       const output = await execute(exec.command, exec.args, exec.options);
       if (method === "GET") {
-        const parsed = JSON.parse(output);
-        if (!Array.isArray(parsed)) throw new Error("Unexpected GitHub response");
-        return parsed.flat();
+        const response = paginatedResponse(output);
+        if (!response) throw new Error("Unexpected GitHub response");
+        const failed = response.pages.find(page => !isSuccessStatus(page.httpStatus)) ?? null;
+        envelope = failed ?? response.pages[response.pages.length - 1];
+        if (failed) throw new Error("Unexpected HTTP response");
+        return response.rows.flat();
       }
       envelope = responseEnvelope(output);
-      if (envelope.httpStatus === null || envelope.httpStatus < 200 || envelope.httpStatus >= 300) throw new Error("Unexpected HTTP response");
+      if (!isSuccessStatus(envelope.httpStatus)) throw new Error("Unexpected HTTP response");
       return JSON.parse(envelope.body);
     } catch (error) {
-      if (method !== "GET" && error.stdout !== undefined) envelope = responseEnvelope(error.stdout);
+      // A rejected read reports the same page envelopes on stdout; the last page is the one that failed.
+      if (error.stdout !== undefined) {
+        const observed = method === "GET" ? paginatedResponse(error.stdout)?.pages.at(-1) ?? null : responseEnvelope(error.stdout);
+        if (observed) envelope = observed;
+      }
       // Provider stderr can contain credentials or request content. Keep it out of receipts and logs.
       throw Object.assign(new Error(`GitHub ${method} request failed${envelope.httpStatus === null ? " without a verified HTTP result" : ` (HTTP ${envelope.httpStatus})`}.`),
         { code: "GITHUB_PRODUCER_TRANSPORT", httpStatus: envelope.httpStatus, requestId: envelope.requestId,

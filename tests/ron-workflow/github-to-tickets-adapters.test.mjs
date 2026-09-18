@@ -7,7 +7,7 @@ import { join, resolve } from "node:path";
 import { createGitHubToTicketsAdapters } from "../../skills/personal/run-issue-workflow/scripts/github-to-tickets-adapters.mjs";
 import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
 import { inspectGitHubToTickets, invokeGitHubToTickets } from "../../skills/personal/run-issue-workflow/scripts/github-to-tickets-entry.mjs";
-import { digest } from "../../skills/personal/run-issue-workflow/scripts/github-producer-transport.mjs";
+import { digest, createGhTransport } from "../../skills/personal/run-issue-workflow/scripts/github-producer-transport.mjs";
 import { bodyDigest, readWorkflowRecords } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
 import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint,
@@ -47,7 +47,7 @@ function fixture(t) {
   const parents = new Map();
   const dependencies = new Map();
   const calls = [];
-  const failures = { rejectNextDependency: false, unresolvedNativeProbe: false, failAfterWrite: false, rejectNextParentRead: false };
+  const failures = { rejectNextDependency: false, unresolvedNativeProbe: false, failAfterWrite: false, rejectNextParentRead: false, unverifiedParentRead: false };
   const issue = (number, values = {}) => ({ id: 5000000000 + number, node_id: `I_${number}`, number,
     title: values.title ?? "Approved parent", body: values.body ?? parentBody,
     labels: (values.labels ?? []).map(name => ({ name })), state: values.state ?? "open",
@@ -64,7 +64,7 @@ function fixture(t) {
   };
   const touch = current => { current.updated_at = `2026-09-12T00:00:${String(++sequence % 60).padStart(2, "0")}Z`; };
   const rowsOf = numbers => numbers.map(number => structuredClone(issues.get(number)));
-  const transport = async request => {
+  const respond = async request => {
     calls.push(structuredClone(request));
     if (request.graphql) {
       const found = [...issues.values()].find(row => row.node_id === request.graphql.variables?.id);
@@ -106,6 +106,11 @@ function fixture(t) {
           result = created;
         } else result = rows.map(row => structuredClone(row));
       } else if (sub === "/parent") {
+        if (failures.unverifiedParentRead) {
+          failures.unverifiedParentRead = false;
+          throw Object.assign(new Error("fixture parent read without a verified result"), { code: "GITHUB_PRODUCER_TRANSPORT",
+            httpStatus: null, outcome: "UNRESOLVED", requestId: null });
+        }
         if (failures.rejectNextParentRead) {
           failures.rejectNextParentRead = false;
           throw Object.assign(new Error("fixture parent read failure"), { code: "GITHUB_PRODUCER_TRANSPORT",
@@ -145,6 +150,33 @@ function fixture(t) {
     if (method === "GET") return Array.isArray(result) ? structuredClone(result) : [structuredClone(result)];
     return structuredClone(result);
   };
+  const transport = respond;
+  // The identical fixture API rendered the way the configured `gh` writes stdout: a `--include` envelope for
+  // every request, wrapped in the slurp array for paginated reads, and a non-zero exit that still reports the
+  // rejected envelope on stdout. Only an unanswered request carries no HTTP result at all.
+  const ghExecute = respond => async (_command, args, options) => {
+    if (args[1] === "graphql") {
+      const variables = {}; let query = "";
+      for (let index = 3; index < args.length; index += 2) {
+        const [key, ...rest] = args[index].split("=");
+        if (key === "query") query = rest.join("="); else variables[key] = rest.join("=");
+      }
+      return JSON.stringify({ data: await respond({ graphql: { query, variables } }) });
+    }
+    if (!args.includes("--include")) throw new Error(`Unexpected probe invocation ${args.join(" ")}`);
+    const render = (status, value) =>
+      `HTTP/2.0 ${status}\nx-github-request-id: FIXTURE-REQUEST\ncontent-type: application/json; charset=utf-8\n\n${JSON.stringify(value)}`;
+    try {
+      const result = await respond({ path: args[1], method: args.includes("--method") ? args[args.indexOf("--method") + 1] : "GET",
+        body: options.input === undefined ? undefined : JSON.parse(options.input) });
+      return args.includes("--slurp") ? `[${render("200 OK", result)}]` : render("201 Created", result);
+    } catch (error) {
+      if (error.httpStatus === undefined) throw new Error(error.message);
+      const rejected = render(`${error.httpStatus} Rejected`, { message: error.message, status: String(error.httpStatus) });
+      throw Object.assign(new Error(error.message), { stdout: args.includes("--slurp") ? `[${rejected}]` : rejected });
+    }
+  };
+  const ghTransport = () => createGhTransport({ repository, execute: ghExecute(respond) });
   const execute = (_command, args) => {
     if (args[0] === "api" && args[1] === "--paginate" && args[2] === "--slurp") return JSON.stringify([{ full_name: REPOSITORY }]);
     if (args[0] === "api" && args[1] === "user") return JSON.stringify({ id: 7, login: "ron03wlb" });
@@ -194,7 +226,7 @@ function fixture(t) {
   };
   const options = { repository, configuration: { schema: "github-producer:v1", repository: REPOSITORY },
     transport, execute, specId: parentNumber, target: "target", upstreamHandoffIdentity: handoff.identity };
-  return { repository, seal, gitCommonDir, store, issues, comments, parents, dependencies, calls, failures, transport,
+  return { repository, seal, gitCommonDir, store, issues, comments, parents, dependencies, calls, failures, transport, respond, ghTransport,
     execute, writes, writeBinding, addChild, addRecord, issue, options, publication, publicationRecord, handoff, handoffRecord,
     specIdentity, approvedScopeHash, parentBody };
 }
@@ -379,6 +411,68 @@ test("body representation publishes no native relation and refuses a native-bloc
     children: [nativeChildren.first, nativeChildren.second],
     preflight: nativePreflight }),
   { code: "GITHUB_PRODUCER_CONFLICT" }, "body representation cannot retain native blocking relations");
+});
+
+test("the full decomposition path completes through the real transport over a gh-shaped CLI", async t => {
+  const f = fixture(t);
+  // Every read below goes through the real transport: unenveloped GET output is what made the absent-parent
+  // read unverified, so this test fails whenever a rejection cannot be attributed to its exact status.
+  const context = await start(f, { transport: f.ghTransport() });
+  assert.equal(context.adapter.blockingRepresentation, "native");
+  const children = await publishChildren(f, context, "native");
+  assert.equal(f.parents.get(children.firstRead.nativeIssueNumber), parentNumber, "the native parent relation is published");
+  assert.deepEqual(f.dependencies.get(children.secondRead.nativeIssueNumber), [children.firstRead.nativeIssueNumber],
+    "the native blocking relation is published");
+  const decomposition = await context.adapter.tracker.publishDecomposition({ identity: context.identity,
+    decompositionMapping: children.mapping, blockerEdges: children.edges, children: [children.first, children.second],
+    preflight: await preflightFor(context, children.keys) });
+  assert.equal(recordOf(f.comments.get(parentNumber).at(-1).body).kind, "decomposition:v1");
+  await context.adapter.checkpoint.advance({ identity: context.identity, stage: "decomposition.read_back", receipt: decomposition });
+  const ready = await context.adapter.tracker.writeReadyState({ identity: context.identity });
+  assert.deepEqual(ready.frontier, [children.firstRead.trackerIdentity]);
+  await context.adapter.checkpoint.advance({ identity: context.identity, stage: "ready_state.read_back", receipt: ready });
+  const handoff = await context.adapter.handoff.append({ identity: context.identity });
+  assert.equal(f.issues.get(children.firstRead.nativeIssueNumber).labels.some(label => label.name === readyLabel), true);
+  assert.deepEqual((await context.adapter.handoff.read({ identity: context.identity })), handoff);
+  const written = recordOf(f.comments.get(parentNumber).at(-1).body);
+  assert.equal(written.kind, "producer_handoff");
+  assert.equal(written.decompositionIdentity, decomposition.decompositionIdentity);
+  assert.deepEqual(readWorkflowRecords(f.comments.get(parentNumber)).at(-1).record, written,
+    "the composite handoff reads back through the installed record reader");
+});
+
+test("a child without a native parent is readable in both blocking representations", async t => {
+  for (const representation of ["native", "body"]) {
+    const f = fixture(t);
+    const context = await start(f, { blockingRepresentation: representation });
+    const key = "169/01";
+    const child = { key, title: "First child", body: childBody({ key, seal: f.seal }) };
+    const existing = f.addChild(180, { title: child.title, body: child.body });
+    assert.equal(f.parents.has(existing.number), false, "the fixture child has no native parent yet");
+    const published = await context.adapter.tracker.publishChild({ identity: context.identity, child,
+      preflight: await preflightFor(context, [key]) });
+    assert.ok(f.calls.some(call => typeof call.path === "string" && call.path.endsWith(`/issues/${existing.number}/parent`)),
+      "the absent-parent read was exercised");
+    assert.equal(published.trackerIdentity, existing.node_id, "the parentless child reads back by its key");
+    assert.equal(published.key, key);
+    assert.deepEqual(published.blockers, []);
+    assert.equal(published.parent ?? null, representation === "native" ? parentIdentity : null);
+    assert.equal(f.parents.get(existing.number) ?? null, representation === "native" ? parentNumber : null,
+      "only the native representation publishes the parent relation");
+  }
+});
+
+test("a parent read without a verified HTTP result is never read as an absent native parent", async t => {
+  const f = fixture(t);
+  const context = await start(f, { blockingRepresentation: "body" });
+  const key = "169/01";
+  const child = { key, title: "First child", body: childBody({ key, seal: f.seal }) };
+  f.failures.unverifiedParentRead = true;
+  const preflight = await preflightFor(context, [key]);
+  await assert.rejects(() => context.adapter.tracker.publishChild({ identity: context.identity, child, preflight }),
+  error => error.code === "GITHUB_PRODUCER_TRANSPORT" && error.httpStatus === null && error.outcome === "UNRESOLVED",
+  "an unverified read result is never tolerated as an absent native parent");
+  assert.equal(f.parents.size, 0, "no parent relation is fabricated from an unverified read");
 });
 
 test("External blockers require one complete read-only preflight before child or relation mutation", async t => {

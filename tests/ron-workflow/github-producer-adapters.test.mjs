@@ -10,6 +10,10 @@ import { createGhTransport, proveGhCapability } from "../../skills/personal/run-
 import { bodyDigest, readWorkflowRecords } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 
 const REPOSITORY = "ron03wlb/skills";
+// `gh api --paginate --slurp --include` renders one HTTP envelope per page, separated by a newline and a comma.
+const ghPage = (status, requestId, body) =>
+  `HTTP/2.0 ${status}\nx-github-request-id: ${requestId}\ncontent-type: application/json; charset=utf-8\n\n${JSON.stringify(body)}`;
+const ghPages = (...pages) => `[${pages.join("\n,")}]`;
 const publication = { title: "Account display", body: "# Settled Spec\n\n完整帳號 `00123`\n", classification: "SINGLE" };
 const recordOf = body => JSON.parse(body.match(/^```workflow-record\n([\s\S]+)\n```$/u)[1]);
 
@@ -329,12 +333,12 @@ test("the live read-only capability probe proves the required CLI surface and id
   assert.equal(observation.repository, match[1]);
 });
 
-test("reads use --paginate --slurp and flatten pages; writes send JSON over stdin without leaking stderr", async () => {
+test("reads use --paginate --slurp --include and flatten pages; writes send JSON over stdin without leaking stderr", async () => {
   let read = null;
-  const reader = createGhTransport({ repository: process.cwd(), execute: async (_command, args, options) => { read = { args, options }; return JSON.stringify([[{ node_id: "I_1" }], [{ node_id: "I_2" }]]); } });
+  const reader = createGhTransport({ repository: process.cwd(), execute: async (_command, args, options) => { read = { args, options }; return ghPages(ghPage("200 OK", "READ-1", [{ node_id: "I_1" }]), ghPage("200 OK", "READ-2", [{ node_id: "I_2" }])); } });
   const rows = await reader({ path: `repos/${REPOSITORY}/issues?state=all` });
   assert.deepEqual(rows.map(row => row.node_id), ["I_1", "I_2"]);
-  assert.deepEqual(read.args, ["api", `repos/${REPOSITORY}/issues?state=all`, "--paginate", "--slurp"]);
+  assert.deepEqual(read.args, ["api", `repos/${REPOSITORY}/issues?state=all`, "--paginate", "--slurp", "--include"]);
 
   let write = null;
   const writer = createGhTransport({ repository: process.cwd(), execute: async (_command, args, options) => {
@@ -346,4 +350,53 @@ test("reads use --paginate --slurp and flatten pages; writes send JSON over stdi
   assert.deepEqual(write.args.slice(0, 4), ["api", `repos/${REPOSITORY}/issues`, "--method", "POST"]);
   assert.ok(write.args.includes("--input"));
   assert.equal(write.options.input, JSON.stringify({ title: "x" }));
+});
+
+test("a read of an absent parent reports its exact 404 and matches the bytes gh returns on this host", async () => {
+  // The exact stdout gh produced for `gh api repos/ron03wlb/skills/issues/116/parent --paginate --slurp --include`.
+  const absentParent = '[HTTP/2.0 404 Not Found\nAccess-Control-Allow-Origin: *\nContent-Type: application/json; charset=utf-8\nX-Github-Request-Id: 443B:29A405:E24272:1137798:6AACAB5F\n\n{"message":"No parent issue found","documentation_url":"https://docs.github.com/rest/issues/sub-issues#get-parent-issue","status":"404"}]';
+  const reader = createGhTransport({ repository: process.cwd(), execute: async () => {
+    throw Object.assign(new Error("gh: No parent issue found (HTTP 404)"), { stdout: absentParent, stderr: "gh: No parent issue found (HTTP 404)\n" });
+  } });
+  await assert.rejects(() => reader({ path: `repos/${REPOSITORY}/issues/116/parent` }),
+    error => error.code === "GITHUB_PRODUCER_TRANSPORT" && error.httpStatus === 404 && error.outcome === "REJECTED"
+      && error.requestId === "443B:29A405:E24272:1137798:6AACAB5F" && error.message === "GitHub GET request failed (HTTP 404).");
+
+  const laterPage = createGhTransport({ repository: process.cwd(), execute: async () => {
+    throw Object.assign(new Error("gh: Server Error (HTTP 500)"), {
+      stdout: ghPages(ghPage("200 OK", "PAGE-1", [{ node_id: "I_1" }]), ghPage("500 Internal Server Error", "PAGE-2", { message: "Server Error" })) });
+  } });
+  await assert.rejects(() => laterPage({ path: `repos/${REPOSITORY}/issues?state=all` }),
+    error => error.httpStatus === 500 && error.outcome === "UNRESOLVED" && error.requestId === "PAGE-2",
+    "the failing page, never the last successful one, owns the reported outcome");
+});
+
+test("a read without a verified HTTP result stays unresolved and unrecorded", async () => {
+  const reader = createGhTransport({ repository: process.cwd(), execute: async () => {
+    throw Object.assign(new Error("dial tcp: i/o timeout"), { stderr: "gh: dial tcp: i/o timeout\n" });
+  } });
+  await assert.rejects(() => reader({ path: `repos/${REPOSITORY}/issues/116/parent` }),
+    error => error.code === "GITHUB_PRODUCER_TRANSPORT" && error.httpStatus === null && error.outcome === "UNRESOLVED"
+      && error.requestId === null && error.message === "GitHub GET request failed without a verified HTTP result.");
+
+  const truncated = createGhTransport({ repository: process.cwd(), execute: async () => {
+    throw Object.assign(new Error("gh: unexpected EOF"), { stdout: '[HTTP/2.0 404 Not Found\nContent-Type: application/json\n\n{"message":"No parent' });
+  } });
+  await assert.rejects(() => truncated({ path: `repos/${REPOSITORY}/issues/116/parent` }),
+    error => error.httpStatus === null && error.outcome === "UNRESOLVED",
+    "an unreadable read outcome is never read as a 404");
+});
+
+test("a live read-only GET reports an attributable rejection instead of an unverified result", async t => {
+  let ghAvailable = true; let remote = "";
+  try { execFileSync("gh", ["--version"], { stdio: "ignore" }); } catch { ghAvailable = false; }
+  try { remote = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }); } catch { ghAvailable = false; }
+  const match = remote.trim().match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/u);
+  if (!ghAvailable || !match) { t.skip("gh or a github.com origin is unavailable"); return; }
+  const reader = createGhTransport({ repository: process.cwd() });
+  const rows = await reader({ path: `repos/${match[1]}/issues?state=all&per_page=100` });
+  assert.ok(rows.length > 100, "a live read passes the one-page cap by flattening every page into one array");
+  await assert.rejects(() => reader({ path: `repos/${match[1]}/issues/999999999` }),
+    error => error.code === "GITHUB_PRODUCER_TRANSPORT" && error.httpStatus === 404 && error.outcome === "REJECTED"
+      && /^[A-Za-z0-9:_-]+$/u.test(error.requestId));
 });

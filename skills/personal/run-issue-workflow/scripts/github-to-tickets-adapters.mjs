@@ -364,9 +364,11 @@ export async function createGitHubToTicketsAdapters(options) {
   };
 
   // Native relation reads address Issues by their repository number; identities stay immutable node IDs.
+  // An absent native parent is the one attributable read rejection this seam tolerates; an unverified
+  // read result stays an error so it is never mistaken for an absent relation.
   const nativeParentRow = childNumber => api(`repos/${repositoryName}/issues/${childNumber}/parent`).then(
     rows => rows[0] ?? null, error => {
-      if (error.code === "GITHUB_PRODUCER_TRANSPORT" && error.httpStatus === 404) return null;
+      if (error.code === "GITHUB_PRODUCER_TRANSPORT" && error.outcome === "REJECTED" && error.httpStatus === 404) return null;
       throw error;
     });
   const nativeParent = async childNumber => {
