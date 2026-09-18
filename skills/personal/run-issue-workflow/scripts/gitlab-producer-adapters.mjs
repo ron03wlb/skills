@@ -205,7 +205,11 @@ export async function createGitLabProducerAdapters(options) {
       }
       const issue = await mutateOnce(connection, { key: operation.key, payload: { title: publication.title, body }, retryRejected,
         observe: async () => {
-          const matches = (await list(`/issues?scope=all&state=all&search=${encodeURIComponent(marker)}&in=description`))
+          // GitLab never indexes the reservation marker's HTML comment, so the write this call just made is
+          // observable only by listing the project's issues and filtering them here — the server is never
+          // asked to search for a marker it cannot return. The GitHub sibling reads its reservation back the
+          // same way.
+          const matches = (await list("/issues?scope=all&state=all"))
             .filter(item => item.description?.includes(marker)).map(validateIssue);
           if (matches.length > 1) throw conflict("Duplicate Spec reservations");
           if (matches[0]) {

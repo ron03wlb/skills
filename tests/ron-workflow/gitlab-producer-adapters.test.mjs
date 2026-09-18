@@ -25,7 +25,7 @@ function fixture(t, project = "group/sub/project") {
     web_url: `${projectUrl}/-/issues/${iid}`, title: publication.title, description, labels: ["existing-label"], state: "opened",
     updated_at: "2026-09-01T00:00:00Z", author: { id: 7 } });
   issues.set(169, issue(169)); issues.set(170, issue(170));
-  const failures = { afterWrite: null, beforeWrite: null, beforePut: null, afterPut: null, afterNote: null };
+  const failures = { afterWrite: null, beforeWrite: null, beforePut: null, afterPut: null, afterNote: null, hideMarkersFromSearch: false };
   const transport = async request => {
     const { method = "GET", path, body } = request; calls.push(structuredClone(request));
     if (path === `projects/${encodeURIComponent(project)}`) return { id: 31, path_with_namespace: project, web_url: projectUrl };
@@ -43,7 +43,16 @@ function fixture(t, project = "group/sub/project") {
     if (route === "/projects/31/labels") result = [{ name: "ready-for-agent" }, { name: "existing-label" }];
     else if (route === "/projects/31/issues") {
       if (method === "POST") { const created = { ...issue(++sequence), title: body.title, description: body.description }; issues.set(created.iid, created); result = created; }
-      else result = [...issues.values()].filter(row => row.description.includes(url.searchParams.get("search") ?? ""));
+      else {
+        const search = url.searchParams.get("search");
+        result = [...issues.values()].filter(row => {
+          if (search === null) return true;
+          // The instance keeps a reservation marker in its description but never returns it from a search:
+          // the marker is an HTML comment, which GitLab excludes from search results.
+          if (failures.hideMarkersFromSearch && search.includes("gitlab-spec-reservation")) return false;
+          return row.description.includes(search);
+        });
+      }
     } else {
       const match = route.match(/^\/projects\/31\/issues\/(\d+)(?:\/notes(?:\/(\d+))?)?$/u);
       if (!match) throw new Error(`Unexpected fixture request ${method} ${path}`);
@@ -140,6 +149,29 @@ test("primary reserves once, reuses the same native Issue after publication and 
   const again = await adapter.tracker.reserve({ proposedSpecIdentity: "accepted-draft-A" });
   assert.equal(again.nativeIssueId, reserved.nativeIssueId);
   assert.equal(f.writes().filter(call => call.path === "projects/31/issues").length, 1);
+});
+
+test("a lost reservation response is resolved by client-side read-back instead of a second Issue", async t => {
+  const f = fixture(t);
+  // The created Issue stays observable through the listed rows while any marker search returns nothing, and
+  // the lost POST response forces the reservation to prove its own write by read-back rather than by retry.
+  f.failures.hideMarkersFromSearch = true;
+  f.failures.afterWrite = "POST";
+  const adapter = await createGitLabProducerAdapters({ ...f.options, specId: undefined });
+  const reserved = await adapter.tracker.reserve({ mode: "primary", proposedSpecIdentity: "proposed-spec-lost" });
+  assert.equal(f.issues.size, 3);
+  assert.equal(f.writes().filter(call => call.path === "projects/31/issues").length, 1);
+  const created = [...f.issues.values()].find(row => row.description.includes("gitlab-spec-reservation:"));
+  assert.equal(reserved.trackerIdentity, created.web_url);
+  assert.equal(reserved.nativeIssueId, created.id);
+  assert.equal(reserved.issue.state, "opened");
+  // The reservation read-back never asks the server to search for the marker it cannot return.
+  assert.deepEqual(f.calls.filter(call => (call.method ?? "GET") === "GET" && call.path.includes("search")), []);
+  const operationKey = reserved.body.match(/gitlab-spec-reservation:([a-z0-9-]+)/u)[1];
+  const receipt = JSON.parse(readFileSync(join(f.git("rev-parse", "--absolute-git-dir"), "matt-workflow-control",
+    "gitlab-producer-reservations", `${operationKey}.json`), "utf8"));
+  assert.equal(receipt.trackerIdentity, created.web_url);
+  assert.equal(receipt.nativeIssueId, created.id);
 });
 
 test("lost response after PUT or note POST is reconciled without duplication", async t => {
