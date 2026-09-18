@@ -263,7 +263,8 @@ export async function createGitLabProducerAdapters(options) {
       },
     });
     const record = { schema, kind: "spec_publication", repositoryId, operationKey: input.operationId, authority: authority(input),
-      trackerIdentity: specId(), transactionIdentity: tx.transactionId, version: result.version, labels };
+      trackerIdentity: specId(), transactionIdentity: tx.transactionId, version: result.version, labels,
+      ...(publication.preparation ? { preparation: publication.preparation } : {}) };
     await appendRecord(record, retryRejected);
     return publicationRead(input);
   });

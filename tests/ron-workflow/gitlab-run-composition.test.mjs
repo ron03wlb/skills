@@ -21,6 +21,7 @@ import { createGlabTransport } from "../../skills/personal/run-issue-workflow/sc
 import { createGitLabWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/gitlab-workflow-sources.mjs";
 import { bodyDigest, renderWorkflowRecord } from "../../skills/personal/run-issue-workflow/scripts/gitlab-workflow-records.mjs";
 import { planNativeRound } from "../../skills/personal/run-issue-workflow/scripts/native-round-loop.mjs";
+import { reduceRunReadyHandoff } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
 import { createNativeRunComposition, startRun } from "../../skills/personal/run-issue-workflow/scripts/run-entry.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { runWorkflowCommand } from "../../skills/personal/run-issue-workflow/scripts/workflow-command.mjs";
@@ -78,7 +79,7 @@ const buildInstallation = (cacheDirectory) => {
 // dependant gated by the published body graph. The child bodies are byte-identical across the two
 // fixtures — the canonical `## Parent` cell that stands in for a native hierarchy link is inert for the
 // GitHub composition — so the derived facts can be compared fact for fact.
-const fixture = async (t, { tracker, classification = "MULTI", realTransport = false }) => {
+const fixture = async (t, { tracker, classification = "MULTI", realTransport = false, declaration = true, manualPrerequisites = null }) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), `run-sources-${tracker}-`)));
   const repository = join(root, "repo");
   const agentRoot = join(root, "agent");
@@ -94,7 +95,12 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
   const childBody = (label) => `## Parent\n${specId}\n\n## Target\n${TARGET}\n\nfixture ${label} child\n`;
   const blockerBody = childBody("blocker");
   const dependantBody = childBody("dependant");
-  const approvedScopeHash = bodyDigest(SPEC_BODY);
+  // The Spec body both tracker fixtures read; `manualPrerequisites` supplies the exact section text the
+  // readers reduce when the publication declares no `preparation` at all.
+  const specBody = manualPrerequisites === null
+    ? SPEC_BODY
+    : `${SPEC_BODY.trimEnd()}\n\n## Manual prerequisites\n\n${manualPrerequisites}\n`;
+  const approvedScopeHash = bodyDigest(specBody);
 
   git(repository, "init", "-b", TARGET);
   git(repository, "config", "user.name", "Fixture");
@@ -158,7 +164,9 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
     authority: { specId, target: TARGET, planningSeal: seal, classification, approvedScopeHash, decompositionIdentity: null },
     trackerIdentity: specId,
     transactionIdentity: transaction.transactionId,
-    preparation: { requiredActions: REQUIRED_ACTIONS, trackerPublication: { required: "READ_WRITE_READBACK" }, sql: [] },
+    ...(declaration
+      ? { preparation: { requiredActions: REQUIRED_ACTIONS, trackerPublication: { required: "READ_WRITE_READBACK" }, sql: [] } }
+      : {}),
   };
   const handoffRecord = {
     kind: "producer_handoff",
@@ -211,7 +219,7 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
     return Number(String(identityValue).slice(2));
   };
   const issues = new Map([
-    [1, { identity: specId, body: SPEC_BODY, closed: false, notes: [], stateChanges: [] }],
+    [1, { identity: specId, body: specBody, closed: false, notes: [], stateChanges: [] }],
     [2, { identity: blockerId, body: blockerBody, closed: false, notes: [], stateChanges: [] }],
     [3, { identity: dependantId, body: dependantBody, closed: false, notes: [], stateChanges: [] }],
   ]);
@@ -709,4 +717,39 @@ test("the composed GitLab read drives the real glab transport with only its proc
     assert.equal(error.message.includes("404 Not Found"), false, "a provider body never leaks into the mapped error");
     return true;
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// AC-2 — an explained negative declaration declares nothing, and both readers agree on it
+// ---------------------------------------------------------------------------------------------
+
+// A publication that declares no `preparation` makes the Spec body's `## Manual prerequisites` section
+// the only declaration either reader can reduce, so both are driven by the same two bodies: the section
+// that opens with `N/A` and continues with an explanation, and the section that declares a real one.
+test("an explained negative declaration declares nothing while a real prerequisite still does, in both readers", async (t) => {
+  const negative = "N/A. No human-applied artifact and no human-prepared environment: this fixture's environment is already prepared by its own repository.";
+  const required = "Apply migration 0042 to the fixture database and export FIXTURE_TOKEN in the fixture environment before the Run.";
+  const reason = "The declared Manual prerequisite needs its planning-owned environment and attestation handoff before Run-ready";
+  const read = async (tracker, manualPrerequisites) => {
+    const f = await fixture(t, { tracker, classification: "SINGLE", declaration: false, manualPrerequisites });
+    const facts = await readFacts(f);
+    const preparation = facts.current.runReadyAuthority.preparation ?? null;
+    return { tracker, preparation, ready: reduceRunReadyHandoff(await f.adapters.handoff.read({ request: f.request, tracker: facts.tracker, current: facts.current })) };
+  };
+  const both = ["gitlab", "github"];
+  const observed = {};
+  for (const tracker of both) observed[tracker] = { negative: await read(tracker, negative), required: await read(tracker, required) };
+  // Both readers must answer the explained `N/A` the same way: no declaration at all, and no reduction
+  // into the planning-owned preparation gap. The reduction's own state is not the subject here — this
+  // fixture's handoff binds loosely to the composition — so the proof is the declaration each reader
+  // derives plus the absence of that exact reason code.
+  assert.deepEqual(both.map((tracker) => [tracker, observed[tracker].negative.preparation]), [["gitlab", null], ["github", null]],
+    "an explained negative declaration declares nothing in either reader");
+  assert.deepEqual(both.map((tracker) => [tracker, observed[tracker].negative.ready.reasonCode === "run_preparation_pending"]), [["gitlab", false], ["github", false]],
+    "neither reader turns an explained negative declaration into the planning-owned preparation gap");
+  // A section that declares a real prerequisite is still read as declared, in both readers.
+  assert.deepEqual(both.map((tracker) => [tracker, observed[tracker].required.preparation?.state, observed[tracker].required.ready.reasonCode, observed[tracker].required.ready.nextOwner]),
+    [["gitlab", "INCOMPLETE", "run_preparation_pending", "to-spec"], ["github", "INCOMPLETE", "run_preparation_pending", "to-spec"]],
+    "a section declaring a real prerequisite keeps its planning-owned gap in both readers");
+  assert.deepEqual(both.map((tracker) => observed[tracker].required.preparation.reason), [reason, reason]);
 });

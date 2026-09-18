@@ -63,6 +63,12 @@ const automaticHostCleanupReasons = new Set([
 ]);
 const worktreePath = (path) =>
   existsSync(path) ? realpathSync.native(path) : resolve(path);
+// A `## Manual prerequisites` section declares nothing when it opens with one of the three negative
+// declarations, even when an explanation continues after it; a section that declares a real
+// prerequisite still declares one. Both tracker readers keep this one rule.
+const negativeManualPrerequisite = /^(?:N\/A|None|Not applicable)(?![a-z0-9])/iu;
+const declaresManualPrerequisite = (section) =>
+  !negativeManualPrerequisite.test(section);
 // A completion's `verification[]` mixes candidate verification with explicitly labelled
 // control runs. Only candidate entries prove the change; a control reports its own
 // observed result and never stands in for the candidate's passing evidence.
@@ -645,9 +651,7 @@ export function createGitHubWorkflowSources({
             /^## Manual prerequisites?\s*\n([\s\S]*?)(?=^## |$(?![\s\S]))/mu,
           )?.[1]
           ?.trim();
-        return (
-          section && !/^(?:N\/A|None|Not applicable)[.\s]*$/iu.test(section)
-        );
+        return section && declaresManualPrerequisite(section);
       })
     )
       preparation = {

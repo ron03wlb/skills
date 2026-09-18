@@ -98,6 +98,40 @@ async function complete(f, context) {
   const handoff = await adapter.handoff.append({ identity });
   return adapter.checkpoint.advance({ identity, stage: "handoff.completed", receipt: handoff });
 }
+// Every producer record this fixture's tracker holds for one Issue, in the order they were appended.
+const producerRecords = (f, iid) => f.notes.get(iid).map(note => JSON.parse(note.body.match(/^```workflow-record\n([\s\S]+)\n```$/u)[1]));
+
+test("a GitLab publication carries the declared preparation or no member at all", async t => {
+  const declared = {
+    requiredActions: [
+      { action: "local-close", scope: "integrate and clean owned worktrees" },
+      { action: "tracker-write", scope: "GitHub Issues, notes and labels for this Spec and its Run" },
+    ],
+    trackerPublication: { required: "READ_WRITE_READBACK" },
+    sql: [],
+  };
+  // A publication the planning owner declared nothing for appends no `preparation` member, exactly as GitHub's does.
+  const bare = fixture(t); const bareContext = await prepared(bare);
+  await complete(bare, bareContext);
+  const [barePublication] = producerRecords(bare, 169);
+  assert.equal(barePublication.kind, "spec_publication");
+  assert.equal(Object.hasOwn(barePublication, "preparation"), false);
+  assert.equal(bare.git("status", "--porcelain"), "");
+
+  // A declared operation inventory is carried on the `spec_publication` record the Run reader reduces.
+  const f = fixture(t);
+  const context = await prepared(f, { publication: { ...publication, preparation: declared } });
+  assert.equal((await complete(f, context)).state, "COMPLETED");
+  const [publicationRecord, handoffRecord] = producerRecords(f, 169);
+  assert.deepEqual(publicationRecord.preparation, declared);
+  assert.equal(handoffRecord.kind, "producer_handoff");
+  assert.deepEqual(handoffRecord.preparation, null, "the handoff keeps its own, separate preparation packet");
+
+  // The carrier contract the record satisfies, read back from the reference as the GitHub one states it.
+  const reference = readFileSync("skills/personal/run-issue-workflow/references/gitlab-producer-adapters.md", "utf8");
+  assert.match(reference, /`spec_publication\.preparation`, which carries the actual required operation inventory, required tracker publication semantics and exact declared SQL prerequisites/u);
+  assert.match(reference, /`producer_handoff\.preparation`, which carries read-back existing human approvals and any exact prerequisite candidate\/attestation\/task\/worktree packet/u);
+});
 
 test("revision completes exact v2 evidence and restart retry makes no duplicate writes", async t => {
   const f = fixture(t); const ctx = await prepared(f);
