@@ -1,6 +1,6 @@
 # GitLab Decomposition producer binding
 
-This binding supplies the upstream, checkpoint, tracker, and handoff adapters for current `to-tickets@v2` publication and approved revisions. It consumes one completed GitLab `to-spec@v2` publication and handoff, reconciles canonical child Issues, publishes the `decomposition:v1` record, projects `ready-for-agent`, and appends the composite handoff. It does not approve or reclassify a Spec, create labels, execute children, close Issues, or provide an automatic GitLab Run host.
+This binding supplies the upstream, checkpoint, tracker, and handoff adapters for current `to-tickets@v2` publication and approved revisions. It consumes one completed GitLab `to-spec@v2` publication and handoff, reconciles canonical child Issues, publishes the `decomposition:v1` record, projects `ready-for-agent`, and appends the composite handoff. It does not approve or reclassify a Spec, create labels, execute children, close Issues, or host a Run itself: the installed Run entry composes the GitLab **Tracker Run sources** for a repository whose configured binding matches its origin, and it reads dependency authority from the `decomposition:v1` body graph this binding publishes.
 
 ## Inspect the installed binding
 

@@ -7,6 +7,14 @@ authorizes, and no single materialization is required. The delivery path materia
 lane per authorized action, and the `pi-workflow` bundle stays one optional materialization of the same
 facts.
 
+The tracker half of the authority layer is one selected composition per Run. The Start entry selects
+exactly one **Tracker Run sources** composition from the repository's configured tracker evidence — GitHub,
+or GitLab for an origin-matching `docs/agents/gitlab-producer.json` — and fails closed on missing,
+mismatching or contradictory evidence instead of falling back. Every composition answers the same surface
+and reuses the same authority, journal, budgets, lanes, Run store and Git journal, so the domain halves
+above never learn which tracker they read, and a GitLab Run derives its identity as
+`gitlab:<host>/<project>` exactly as its producer does.
+
 This contract owns reducer-action materialization. The Codex-native coordinator was removed with the host
 boundary in Issue 102; [the coordinator lifecycle](coordinator-lifecycle.md) keeps only its retired
 compact-outcome and no-repair boundaries for historical reconciliation. This page governs the delivery

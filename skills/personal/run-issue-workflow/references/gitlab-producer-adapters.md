@@ -1,6 +1,6 @@
 # GitLab Spec producer binding
 
-This binding supplies the planning, checkpoint, tracker and handoff adapters for `to-spec@v2` publication, including exact accepted-document Planning Seals. It supports primary reservation and revision of the same existing Spec. It does not classify a Spec, grant approval, decompose children, or provide an automatic GitLab Run host. Those operations keep their existing owners.
+This binding supplies the planning, checkpoint, tracker and handoff adapters for `to-spec@v2` publication, including exact accepted-document Planning Seals. It supports primary reservation and revision of the same existing Spec. It does not classify a Spec, grant approval, decompose children, or host a Run itself: the automatic Run host is the installed Run entry, which composes the sibling **Tracker Run sources** for the repository's configured tracker whenever this binding is present and matches the origin. Those operations keep their existing owners.
 
 ## Configure once, inspect without mutation
 
@@ -94,4 +94,8 @@ For a publication body failure, `mutation-read` identifies the exact local state
 
 A response lost after an applied write is resolved only by exact owner read-back. If a retained intent has no matching result, stop as `GITLAB_PRODUCER_UNKNOWN`; never blindly resend, delete the intent, or infer failure from absence. In particular, legacy intents without attempt/result evidence stay `UNRESOLVED`, even with `retryRejected:true`. Preserve the draft, original request, checkpoint and intent; report that terminal provider evidence is missing to the publication owner. This entry does not import human assertions or synthesize a rejection for old requests. A crashed producer lock also stops without automatic reclamation. Legacy checkpoint receipts and per-Run adapters are preserved without migration.
 
-Producer handoff completion does not imply GitLab automatic Run support. The installed Codex Run entry still has its own host, package and tracker-reader requirements. A consumer can inspect the producer independently of those requirements.
+Producer handoff completion is not itself Run-ready, but a configured GitLab project is: with the exact binding this entry writes, `/run-issue-workflow <Spec-ID>` selects the Run entry's GitLab **Tracker Run sources** and delivers the Spec the same way it delivers a GitHub one. The Run entry keeps its own host, recorded package and workflow-record-reader requirements, so a consumer can still inspect the producer independently of them; this binding never runs a Run itself.
+
+## Workflow records a lane writes
+
+A lane delivering an Issue on a configured GitLab tracker writes its own `workflow-record` notes with the installed `scripts/gitlab-workflow-records.mjs` renderer and append helper. [GitLab payload encoding](gitlab-payloads.md) is that encoding: native note identity plus body SHA-256, Developer-or-higher author trust, exactly one record per note, and a read-back rule that never reports an unresolved write as success. This binding writes no lane record, and the Run host reads notes without mutating the tracker.

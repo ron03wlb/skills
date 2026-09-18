@@ -68,7 +68,7 @@ Repository configuration is the one write setup owns; every other action in the 
 
 **A producer says its adapter is missing. Will re-running setup install it?**
 
-No. Setup writes tracker, label and domain-document configuration, and inspects installed workflow capabilities. A missing concrete producer adapter needs its owning package's installation or explicit repository binding. GitLab tracker-only Spec and Decomposition publication use separate entries in the personal coordinator; the latter also reads the repository-owned `Blocking representation`. Automatic Run host support remains a separate capability. An interface document marked present is not evidence that a concrete GitLab implementation is configured.
+No. Setup writes tracker, label and domain-document configuration, and inspects installed workflow capabilities. A missing concrete producer adapter needs its owning package's installation or explicit repository binding. GitLab tracker-only Spec and Decomposition publication use separate entries in the personal coordinator; the latter also reads the repository-owned `Blocking representation`. For a GitLab tracker the approved plan also binds the project through that producer owner, and with that binding in place the Run entry composes its GitLab tracker sources, so the repository reaches Run-ready from the one bootstrap. An interface document marked present is not evidence that a concrete GitLab implementation is configured.
 
 **Do I have to use GitHub?**
 

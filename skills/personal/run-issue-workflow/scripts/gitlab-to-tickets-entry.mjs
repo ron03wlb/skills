@@ -30,8 +30,11 @@ export async function inspectGitLabToTickets({ repository, transport }) {
   return { state: "PRESENT", owningSource: fileURLToPath(new URL("./gitlab-to-tickets-adapters.mjs", import.meta.url)),
     configuration: configurationPath, trackerConfiguration: representation.owningSource,
     repositoryId: connected.repositoryId, projectId: connected.projectId, publicationMode: "READ_WRITE_READBACK",
+    // `automaticRunHost` is the configured tracker's own capability: the published `decomposition:v1` body
+    // graph is the only dependency authority the installed Run entry's GitLab composition reads, so a
+    // Community-Edition project is a first-class tracker for a Run.
     support: { producer: "to-tickets@v2", blockingRepresentation: representation.blockingRepresentation,
-      nativeParentRelation: false, parentFallback: "canonical-body", automaticRunHost: false } };
+      nativeParentRelation: false, parentFallback: "canonical-body", automaticRunHost: true } };
 }
 
 export async function invokeGitLabToTickets({ repository, input, transport }) {

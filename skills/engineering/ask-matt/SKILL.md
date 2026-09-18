@@ -42,4 +42,4 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 
 Use `/setup-matt-pocock-skills` when tracker, labels, or domain-doc layout is not configured.
 
-For missing GitLab publication adapters, distinguish the installed [Spec binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) from the [Decomposition binding](../../personal/run-issue-workflow/references/gitlab-to-tickets-adapters.md). Setup only inspects them; repository binding, package installation, and automatic Run hosting remain separately authorized.
+For missing GitLab publication adapters, distinguish the installed [Spec binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) from the [Decomposition binding](../../personal/run-issue-workflow/references/gitlab-to-tickets-adapters.md). Setup inspects them and, in its one approved plan, binds the project; the GitLab Run composition stays the Run entry's.

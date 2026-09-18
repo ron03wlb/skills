@@ -24,9 +24,12 @@ export async function inspectGitLabProducer({ repository, transport }) {
   if (!existsSync(path)) return { state: "MISSING", owningSource: path, nextAction: "Explicitly run gitlab-producer-entry.mjs configure for this repository." };
   const configuration = JSON.parse(readFileSync(path, "utf8"));
   const connected = await connectGitLabProducer({ repository, configuration, transport });
+  // `automaticRunHost` is the configured tracker's own capability, read beside it: this binding plus the
+  // installed Run entry's GitLab Tracker Run sources make the project Run-ready, exactly as the GitHub
+  // composition already does for a GitHub repository.
   return { state: "PRESENT", owningSource: fileURLToPath(new URL("./gitlab-producer-adapters.mjs", import.meta.url)),
     configuration: path, repositoryId: connected.repositoryId, projectId: connected.projectId, publicationMode: "READ_WRITE_READBACK",
-    support: { producer: "to-spec@v2", modes: ["primary", "revision"], planning: "registered-documents-and-tracker-only", automaticRunHost: false } };
+    support: { producer: "to-spec@v2", modes: ["primary", "revision"], planning: "registered-documents-and-tracker-only", automaticRunHost: true } };
 }
 
 export async function invokeGitLabProducer({ repository, input, transport }) {
@@ -46,10 +49,22 @@ export async function invokeGitLabProducer({ repository, input, transport }) {
 }
 
 if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
-  const [action, repository] = process.argv.slice(2);
+  const [action, repository, ...rest] = process.argv.slice(2);
+  // An SSH remote cannot describe its own HTTPS origin, so the human's two explicit values are passed to
+  // this owner — which validates them and writes the binding — instead of being written by hand.
+  const flag = (name) => {
+    const index = rest.indexOf(name);
+    return index === -1 ? null : rest[index + 1] ?? null;
+  };
+  const explicitOrigin = flag("--base-url");
+  const explicitProject = flag("--project");
   try {
-    if (!repository) throw conflict("Usage: gitlab-producer-entry.mjs <configure|inspect|invoke> <repository>; invoke reads one JSON request from stdin.");
-    const result = action === "configure" ? await configureGitLabProducer({ repository })
+    if (!repository) throw conflict("Usage: gitlab-producer-entry.mjs <configure|inspect|invoke> <repository>; configure also accepts --base-url <origin> --project <path> for an SSH remote, and invoke reads one JSON request from stdin.");
+    if (action === "configure" && (explicitOrigin === null) !== (explicitProject === null)) {
+      throw conflict("configure needs both --base-url and --project, or neither");
+    }
+    const result = action === "configure" ? await configureGitLabProducer({ repository,
+      configuration: explicitOrigin === null ? undefined : { schema: "gitlab-producer:v1", baseUrl: explicitOrigin, project: explicitProject } })
       : action === "inspect" ? await inspectGitLabProducer({ repository })
         : action === "invoke" ? await invokeGitLabProducer({ repository, input: JSON.parse(readFileSync(0, "utf8")) })
           : (() => { throw conflict("Unknown producer entry action"); })();

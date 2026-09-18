@@ -11,7 +11,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
-- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, and the lane worker agent the selected substrate resolves
+- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, the GitLab **Tracker project binding** that makes a configured GitLab project Run-ready, and the lane worker agent the selected substrate resolves
 
 This is a prompt-driven skill, not a deterministic script. Explore, settle the sections with the user, present one bounded plan, and write only after it is accepted.
 
@@ -37,6 +37,7 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - `docs/agents/`: does this skill's prior output already exist?
 - `.scratch/`: a sign that a local-markdown issue tracker convention is already in use
 - Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) This decides whether Section B runs at all.
+- `docs/agents/gitlab-producer.json`: is a **Tracker project binding** already present, and does it match `git remote get-url origin`? A missing binding for a GitLab origin, a binding that does not match the origin, and a GitHub origin carrying a GitLab binding are each stated as observed, because the Run entry selects its tracker composition from exactly this evidence and fails closed on it.
 - Monorepo signals: a `pnpm-workspace.yaml`, a `workspaces` field in `package.json`, or a populated `packages/*` with its own `src/`. These are present only in a genuinely large multi-package repo; their absence means single-context, which is almost every repo.
 
 Read [installed-workflow-diagnostics.md](./installed-workflow-diagnostics.md) and inspect only the current harness's resolved installed surfaces. Report each installed workflow seam with its owning source, observed evidence, and `PRESENT`, `MISSING`, or `UNKNOWN` state, together with the re-derived criterion it supports and the prerequisite that criterion depends on. This diagnostic is read-only and non-authorizing: never create or repair a skill, adapter, transaction, receipt, writer lease, or tracker object, never probe an owner's seam on its behalf, and never use aggregate setup health as another skill's gate.
@@ -72,9 +73,13 @@ The defaults are the five canonical roles, each label string equal to its name: 
 
 Offer **multi-context** (a root `CONTEXT-MAP.md` pointing to per-context `CONTEXT.md` files) only when exploration found monorepo signals. Then confirm which layout they want.
 
+**Section D: Tracker project binding.** Only for a GitLab tracker. When `docs/agents/gitlab-producer.json` is present and matches the origin, the plan lists the binding as already satisfied and reads it back; when it is missing, the plan lists one owner-orchestrated action that creates it. Ask nothing here that exploration already answered; the section settles which owner action the plan carries, not whether an owner exists.
+
 ### 3. Present one bounded plan and take one acceptance
 
-Show the user a draft of one bounded plan: the section answers, every owner action with its owning source, its exact effect, its recovery rule and its read-back check, and the observed state of every prerequisite the plan depends on. Then show:
+Show the user a draft of one bounded plan: the section answers, every owner action with its owning source, its exact effect, its recovery rule and its read-back check, and the observed state of every prerequisite the plan depends on. **A GitLab project binding action is listed before every write in that plan** — it binds the project the rest of the GitLab trackers work against, so presenting it after a write would offer an action the plan cannot legally perform. Its owning source is the installed personal coordinator's `gitlab-producer-entry.mjs`; its exact effect is `configure <repository>`, which validates the origin and the authenticated identity and writes one credential-free local JSON file; its read-back is that same entry's `inspect <repository>`, whose `repositoryId` must equal `gitlab:<host>/<project>`; its recovery is the entry's own failure output, never a hand-written binding. For an SSH remote it asks the human for the HTTPS origin and the complete project path, because the owner requires an explicit binding there, and it passes those two values to the owner rather than writing the file itself. A missing or foreign installed entry is package-installation repair, not a binding setup writes by hand.
+
+Then show:
 
 - The `## Agent skills` block to add to whichever of `CLAUDE.md` / `AGENTS.md` is being edited (see step 4 for selection rules)
 - The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and `docs/agents/triage-labels.md` (the last only when `triage` is installed)
@@ -124,6 +129,8 @@ Then write the docs files using the seed templates in this skill folder as a sta
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
 
 Repository configuration is the one write this skill owns, so it performs that write itself. Every other action the accepted plan contains stays with its existing owner: call that owner in dependency order and read its receipt back through the owner's own authoritative surface. Label creation, package installation, managed entries, producer bindings and tracker effects each have their owner, and setup never reproduces their package building, installation, binding, tracker mutation, recovery or receipt logic, never substitutes a passing diagnostic for a missing receipt, and preserves a successful partial effect rather than repeating it. Changed owner evidence stops with the exact blocker and the next owner named.
+
+The GitLab **Tracker project binding** is the plan action that names its own owner most precisely: `configure` is the only call that creates or reuses the binding and `inspect` is the only call that reads it back, the binding write touches no tracker object, and read-only diagnostics keep their prohibition on both — a diagnostic that called `configure` would bind a project nobody approved. `invoke` is never a binding call in either mode.
 
 ### 5. Done
 

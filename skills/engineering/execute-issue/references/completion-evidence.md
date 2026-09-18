@@ -23,7 +23,7 @@ Write one compact tracker completion note containing:
 - `standards: clean`, `spec: clean`, exact verification commands/results per [verification entries](#verification-entries), `repairWaveCount`, and any Material plan deviations; for a repair, the exact `recovery` lineage fields from [technical recovery](technical-recovery.md);
 - `worktree: clean` and `implementation_complete`.
 
-For the installed Codex GitHub host, serialize this same owner-verified payload using [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). The encoding adds no new completion authority.
+For the installed Codex GitHub host, serialize this same owner-verified payload using [GitHub payload encoding](../../../personal/run-issue-workflow/references/github-payloads.md). For a configured GitLab project, serialize it with [GitLab payload encoding](../../../personal/run-issue-workflow/references/gitlab-payloads.md), whose installed renderer, native note identity and read-back rule are the GitLab half of the same encoding. Either encoding adds no new completion authority.
 
 ## Verification entries
 

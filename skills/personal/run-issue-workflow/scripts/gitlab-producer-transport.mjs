@@ -33,7 +33,7 @@ export const configurationMatchesOrigin = ({ configuration, origin }) => {
 
 export function configurationFromRemote(repository) {
   const remote = gitRead(repository, "remote", "get-url", "origin");
-  if (!/^https?:\/\//u.test(remote)) throw conflict("For SSH remotes, explicitly supply the GitLab HTTPS baseUrl and project in the configuration file.");
+  if (!/^https?:\/\//u.test(remote)) throw conflict("For SSH remotes, supply the GitLab HTTPS origin and complete project path to this owning entry: gitlab-producer-entry.mjs configure <repository> --base-url <origin> --project <path>.");
   const url = new URL(remote);
   if (url.username || url.password || url.search || url.hash) throw conflict("Origin contains credentials or unsupported URL components");
   return validateConfiguration({ schema: "gitlab-producer:v1", baseUrl: url.origin, project: url.pathname.slice(1).replace(/\.git$/u, "") });
