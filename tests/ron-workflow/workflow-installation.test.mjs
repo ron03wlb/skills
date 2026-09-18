@@ -90,130 +90,134 @@ test("Run renewal preserves its journaled workflow version across coordinator re
   }
 });
 
-test("managed entry evidence binds reviewed candidate, immutable manifest and retained qualification", () => {
+// One retained installation of the reviewed candidate: the exact trusted layout the installation owner
+// verifies, with a package-owned installed entry that answers only the capability probe. The retired live
+// qualification is fatal here, so a read that falls back to it is visible in the recorded spawns.
+const installedEntryFixture = `
+const version = process.argv[3];
+const mode = process.argv[2];
+const fault = process.env.WORKFLOW_QUALIFICATION_FAULT ?? null;
+const capability = { platform: process.platform, arch: process.arch, node: process.version,
+  kernelRelease: "6.18.33.2-microsoft-standard-WSL2", wslDistro: "Ubuntu", posixCleanup: true };
+if (mode === "--qualification-identity") {
+  if (fault === "unknown-capability") { process.stderr.write("capability unknown\\n"); process.exitCode = 1; }
+  else if (fault === "unreadable-capability") process.stdout.write("not json");
+  else if (fault === "incomplete-capability") process.stdout.write(JSON.stringify({ state: "READY", capability: { platform: process.platform } }));
+  else process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, capability }));
+} else if (mode === "--qualify-repair-package") {
+  process.stderr.write("the retired live qualification must never be required again\\n");
+  process.exitCode = 1;
+}
+export const installed = true;
+`;
+
+function buildInstalledWorkflow() {
   const root = mkdtempSync(join(tmpdir(), "workflow-effective-evidence-"));
   const sourceRepository = join(root, "source"),
     cacheDirectory = join(root, ".codex", "workflow-packages");
   const codexEntry = join(root, ".codex", "skills", "run-issue-workflow");
   const agentsEntry = join(root, ".agents", "skills", "run-issue-workflow");
-  try {
-    mkdirSync(
-      join(sourceRepository, "skills/personal/run-issue-workflow/scripts"),
-      { recursive: true },
-    );
-    writeFileSync(
-      join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"),
-      "Reviewed workflow\n",
-    );
-    writeFileSync(
-      join(
-        sourceRepository,
-        "skills/personal/run-issue-workflow/scripts/installed-entry.mjs",
-      ),
-      `
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-const version = process.argv[3];
-const mode = process.argv[2];
-const fault = process.env.WORKFLOW_QUALIFICATION_FAULT ?? null;
-const baseInputs = { packageVersionId: version, fixtureRevision: "wsl-posix-v1",
-  fixtureDigest: "sha256:" + "1".repeat(64), runtime: process.platform + "-" + process.arch,
-  capabilityIdentity: "sha256:" + "2".repeat(64) };
-const signatures = { "settled-host-cleanup-routing": "HOST_CLEANUP_BLOCKED was terminal",
-  "stable-close-identity": "controlRevision changed request identity",
-  "posix-worktree-cleanup": "ordinary POSIX cleanup required process recovery" };
-const command = JSON.stringify([process.execPath, process.argv[1], "--qualify-repair-package", version]);
-const stageResults = () => Object.keys(signatures).map(stage => ({ stage, failureSignature: signatures[stage], command,
-  result: fault === "failed" && stage === "posix-worktree-cleanup" ? "FAIL" : "PASS", ...baseInputs }));
-if (mode === "--qualification-identity") {
-  if (fault === "unknown-capability") { process.stderr.write("capability unknown\\n"); process.exitCode = 1; }
-  else process.stdout.write(JSON.stringify({ state: "READY", boundInputs: baseInputs }));
-} else if (mode === "--qualify-repair-package") {
-  if (fault === "unknown-capability") { process.stderr.write("capability unknown\\n"); process.exitCode = 1; }
-  else {
-    const qualifiedInputs = { ...baseInputs,
-      ...(fault === "fixture-revision" ? { fixtureRevision: "other-v1" } : {}),
-      ...(fault === "capability-mismatch" ? { capabilityIdentity: "sha256:" + "3".repeat(64) } : {}) };
-    let observations = [1, 2, 3].map(run => ({ run,
-      stages: stageResults().map(stage => ({ ...stage, ...qualifiedInputs,
-        ...(fault === "wrong-version" && stage.stage === "stable-close-identity" ? { packageVersionId: "f".repeat(64) } : {}) })),
-      observedAt: new Date().toISOString(), durationMs: run }));
-    if (fault === "subset") observations = observations.slice(0, 1);
-    if (fault === "two-runs") observations = observations.slice(0, 2);
-    const result = { schema: "workflow-repair-qualification:v1", boundInputs: qualifiedInputs, observations };
-    const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-    const cache = resolve(packageRoot, "../..");
-    const directory = join(cache, "qualification");
-    mkdirSync(directory, { recursive: true });
-    const retained = join(directory, version + ".json");
-    const temporary = retained + "." + process.pid;
-    writeFileSync(temporary, JSON.stringify(result) + "\\n");
-    renameSync(temporary, retained);
-    process.stdout.write(JSON.stringify(result));
-  }
+  mkdirSync(
+    join(sourceRepository, "skills/personal/run-issue-workflow/scripts"),
+    { recursive: true },
+  );
+  writeFileSync(
+    join(sourceRepository, "skills/personal/run-issue-workflow/SKILL.md"),
+    "Reviewed workflow\n",
+  );
+  writeFileSync(
+    join(
+      sourceRepository,
+      "skills/personal/run-issue-workflow/scripts/installed-entry.mjs",
+    ),
+    installedEntryFixture,
+  );
+  copyHostAssets(sourceRepository);
+  mkdirSync(join(sourceRepository, "docs/agents/references"), {
+    recursive: true,
+  });
+  writeFileSync(
+    join(sourceRepository, "docs/agents/run-preparation.md"),
+    "Preparation owner\n",
+  );
+  writeFileSync(
+    join(
+      sourceRepository,
+      "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+    ),
+    "Maintenance owner\n",
+  );
+  writeFileSync(
+    join(
+      sourceRepository,
+      "docs/agents/references/workflow-stop-diagnosis.md",
+    ),
+    "Diagnosis owner\n",
+  );
+  const git = (...args) =>
+    execFileSync("git", ["-C", sourceRepository, ...args], {
+      encoding: "utf8",
+    }).trim();
+  git("init", "-b", "main");
+  git("config", "user.name", "Fixture");
+  git("config", "user.email", "fixture@example.invalid");
+  git("add", ".");
+  git("-c", "commit.gpgsign=false", "commit", "-m", "reviewed candidate");
+  const candidate = git("rev-parse", "HEAD");
+  const version = installWorkflow({
+    sourceRepository,
+    sourceCommit: candidate,
+    cacheDirectory,
+    skillDirectory: codexEntry,
+  }).version;
+  installWorkflow({
+    sourceRepository,
+    sourceCommit: candidate,
+    cacheDirectory,
+    skillDirectory: agentsEntry,
+  });
+  const spawned = [];
+  const commandRunner = (name, args, options) => {
+    spawned.push([name, ...args]);
+    return runWorkflowCommand(name, args, options);
+  };
+  const read = () =>
+    readWorkflowInstallationEvidence({
+      cacheDirectory,
+      skillDirectories: [codexEntry, agentsEntry],
+      expectedSourceCommit: candidate,
+      commandRunner,
+    });
+  return {
+    root,
+    cacheDirectory,
+    candidate,
+    version,
+    codexEntry,
+    agentsEntry,
+    spawned,
+    commandRunner,
+    read,
+    remove: () => rmSync(root, { recursive: true, force: true }),
+  };
 }
-export const installed = true;
-`,
-    );
-    copyHostAssets(sourceRepository);
-    mkdirSync(join(sourceRepository, "docs/agents/references"), {
-      recursive: true,
-    });
-    writeFileSync(
-      join(sourceRepository, "docs/agents/run-preparation.md"),
-      "Preparation owner\n",
-    );
-    writeFileSync(
-      join(
-        sourceRepository,
-        "docs/agents/references/approved-pre-run-workflow-maintenance.md",
-      ),
-      "Maintenance owner\n",
-    );
-    writeFileSync(
-      join(
-        sourceRepository,
-        "docs/agents/references/workflow-stop-diagnosis.md",
-      ),
-      "Diagnosis owner\n",
-    );
-    const git = (...args) =>
-      execFileSync("git", ["-C", sourceRepository, ...args], {
-        encoding: "utf8",
-      }).trim();
-    git("init", "-b", "main");
-    git("config", "user.name", "Fixture");
-    git("config", "user.email", "fixture@example.invalid");
-    git("add", ".");
-    git("-c", "commit.gpgsign=false", "commit", "-m", "reviewed candidate");
-    const candidate = git("rev-parse", "HEAD");
-    const first = installWorkflow({
-      sourceRepository,
-      sourceCommit: candidate,
-      cacheDirectory,
-      skillDirectory: codexEntry,
-    });
-    installWorkflow({
-      sourceRepository,
-      sourceCommit: candidate,
-      cacheDirectory,
-      skillDirectory: agentsEntry,
-    });
-    const spawned = [];
-    const commandRunner = (name, args, options) => {
-      spawned.push([name, ...args]);
-      return runWorkflowCommand(name, args, options);
-    };
-    const read = () =>
-      readWorkflowInstallationEvidence({
-        cacheDirectory,
-        skillDirectories: [codexEntry, agentsEntry],
-        expectedSourceCommit: candidate,
-        commandRunner,
-      });
+
+test("installed readiness reads the version, manifest, resolved entries and capability probe alone", () => {
+  const fixture = buildInstalledWorkflow();
+  const {
+    cacheDirectory,
+    candidate,
+    version,
+    codexEntry,
+    agentsEntry,
+    spawned,
+    commandRunner,
+    read,
+    remove,
+  } = fixture;
+  try {
     const evidence = read();
-    assert.equal(evidence.schema, "codex-workflow-effective-evidence:v2");
+    assert.equal(evidence.schema, "codex-workflow-effective-evidence:v3");
     assert.equal(evidence.candidate, candidate);
     assert.match(evidence.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(
@@ -221,86 +225,43 @@ export const installed = true;
       [codexEntry, agentsEntry],
     );
     assert.ok(
-      evidence.entries.every(
-        (item) => item.packageVersionId === first.version.id,
-      ),
+      evidence.entries.every((item) => item.packageVersionId === version.id),
     );
-    assert.equal(evidence.boundInputs.packageVersionId, first.version.id);
-    assert.equal(evidence.boundInputs.fixtureRevision, "wsl-posix-v1");
+    assert.deepEqual(evidence.capability, {
+      platform: process.platform,
+      arch: process.arch,
+      node: process.version,
+      kernelRelease: "6.18.33.2-microsoft-standard-WSL2",
+      wslDistro: "Ubuntu",
+      posixCleanup: true,
+    });
     assert.equal(
-      evidence.boundInputs.runtime,
-      `${process.platform}-${process.arch}`,
+      "qualificationObservations" in evidence,
+      false,
+      "the receipt carries no retained component-fixture observations",
     );
-    assert.match(
-      evidence.boundInputs.capabilityIdentity,
-      /^sha256:[a-f0-9]{64}$/u,
-    );
-    assert.deepEqual(
-      evidence.qualificationObservations.map((observation) => observation.run),
-      [1, 2, 3],
-    );
-    const stages = evidence.qualificationObservations.flatMap(
-      (observation) => observation.stages,
-    );
-    assert.equal(stages.length, 9);
-    assert.deepEqual([...new Set(stages.map((stage) => stage.stage))].sort(), [
-      "posix-worktree-cleanup",
-      "settled-host-cleanup-routing",
-      "stable-close-identity",
-    ]);
-    assert.ok(
-      stages.every(
-        (stage) =>
-          stage.result === "PASS" &&
-          stage.packageVersionId === first.version.id,
-      ),
+    assert.equal(spawned.length, 1, "one capability probe proves the read");
+    assert.match(spawned[0].join(" "), /--qualification-identity/u);
+    assert.equal(
+      spawned.some((argv) => argv.includes("--qualify-repair-package")),
+      false,
+      "reaching a verdict never requires a live failed-stage qualification run",
     );
     assert.equal(
-      spawned.length,
-      2,
-      "one identity probe and one qualification run prove the first read",
+      fs.existsSync(join(cacheDirectory, "qualification")),
+      false,
+      "a read neither writes nor reads retained qualification samples",
     );
-    const retainedPath = join(
-      cacheDirectory,
-      "qualification",
-      `${first.version.id}.json`,
+    assert.throws(
+      () =>
+        readWorkflowInstallationEvidence({
+          cacheDirectory,
+          skillDirectories: [codexEntry, agentsEntry],
+          expectedSourceCommit: "f".repeat(40),
+          commandRunner,
+        }),
+      /candidate differs from the reviewed source commit/u,
     );
-    assert.equal(fs.existsSync(retainedPath), true);
-    const reused = read();
-    assert.equal(
-      spawned.length,
-      3,
-      "a matching retained sample is reused after one identity probe",
-    );
-    assert.deepEqual(
-      reused.qualificationObservations,
-      evidence.qualificationObservations,
-    );
-    const faultPatterns = new Map([
-      ["subset", /exactly three retained/u],
-      ["two-runs", /exactly three retained/u],
-      ["wrong-version", /failed-stage result is malformed/u],
-      ["failed", /failed-stage result is malformed/u],
-      ["fixture-revision", /bound to another package, fixture or capability/u],
-      [
-        "capability-mismatch",
-        /bound to another package, fixture or capability/u,
-      ],
-      ["unknown-capability", /capability identity did not pass/u],
-    ]);
-    for (const [fault, expected] of faultPatterns) {
-      process.env.WORKFLOW_QUALIFICATION_FAULT = fault;
-      fs.rmSync(retainedPath, { force: true });
-      try {
-        assert.throws(
-          () => read(),
-          expected,
-          `the ${fault} fault must never produce readiness`,
-        );
-      } finally {
-        delete process.env.WORKFLOW_QUALIFICATION_FAULT;
-      }
-    }
     assert.throws(
       () =>
         readWorkflowInstallationEvidence({
@@ -311,30 +272,206 @@ export const installed = true;
         }),
       /complete managed workflow entry set/u,
     );
-    fs.renameSync(agentsEntry, `${agentsEntry}.preserved`);
+  } finally {
+    remove();
+  }
+});
+
+test("a retained qualification sample neither grants nor withholds readiness", () => {
+  const fixture = buildInstalledWorkflow();
+  const { cacheDirectory, version, spawned, read, remove } = fixture;
+  try {
+    const withoutSample = read();
+    const retainedPath = join(
+      cacheDirectory,
+      "qualification",
+      `${version.id}.json`,
+    );
+    mkdirSync(join(cacheDirectory, "qualification"), { recursive: true });
+    const matching = {
+      schema: "workflow-repair-qualification:v1",
+      boundInputs: {
+        packageVersionId: version.id,
+        fixtureRevision: "wsl-posix-v1",
+        fixtureDigest: `sha256:${"1".repeat(64)}`,
+        runtime: `${process.platform}-${process.arch}`,
+        capabilityIdentity: `sha256:${"2".repeat(64)}`,
+      },
+      observations: [1, 2, 3].map((run) => ({
+        run,
+        durationMs: run,
+        observedAt: new Date().toISOString(),
+        stages: [],
+      })),
+    };
+    for (const [description, sample] of [
+      [
+        "a sample bound to another package",
+        {
+          ...matching,
+          boundInputs: {
+            ...matching.boundInputs,
+            packageVersionId: "e".repeat(64),
+          },
+        },
+      ],
+      [
+        "a malformed sample",
+        { ...matching, observations: matching.observations.slice(0, 1) },
+      ],
+      [
+        "a complete retained sample for the installed version",
+        matching,
+      ],
+    ]) {
+      writeFileSync(retainedPath, `${JSON.stringify(sample)}\n`, {
+        mode: 0o600,
+      });
+      const retainedBytes = readFileSync(retainedPath, "utf8");
+      const withSample = read();
+      assert.deepEqual(
+        withSample,
+        withoutSample,
+        `${description} must not change the verdict`,
+      );
+      assert.equal(
+        "qualificationObservations" in withSample,
+        false,
+        `${description} must never be read into the receipt`,
+      );
+      assert.equal(
+        readFileSync(retainedPath, "utf8"),
+        retainedBytes,
+        `${description} stays untouched`,
+      );
+    }
+    assert.equal(
+      spawned.length,
+      4,
+      "every read still reaches its verdict through one capability probe",
+    );
+    assert.equal(
+      spawned.some((argv) => argv.includes("--qualify-repair-package")),
+      false,
+    );
+  } finally {
+    remove();
+  }
+});
+
+test("an unprovable capability yields one attributable blocker and no live qualification run", () => {
+  const fixture = buildInstalledWorkflow();
+  const { spawned, read, remove } = fixture;
+  try {
+    for (const [fault, state] of [
+      ["unknown-capability", "UNKNOWN"],
+      ["incomplete-capability", "UNPROVEN"],
+      ["unreadable-capability", "UNKNOWN"],
+    ]) {
+      process.env.WORKFLOW_QUALIFICATION_FAULT = fault;
+      let thrown = null;
+      try {
+        read();
+      } catch (error) {
+        thrown = error;
+      } finally {
+        delete process.env.WORKFLOW_QUALIFICATION_FAULT;
+      }
+      assert.notEqual(thrown, null, `the ${fault} fault must not reach a verdict`);
+      // One attributable blocker: the owning source and the smallest human action, in one error.
+      assert.equal(thrown.surface, "installed workflow capability probe");
+      assert.equal(thrown.code, "installed_workflow_capability_unproven");
+      assert.equal(thrown.state, state);
+      assert.equal(typeof thrown.reason, "string");
+      assert.match(thrown.owner, /installed-entry\.mjs --qualification-identity$/u);
+      assert.match(thrown.message, /smallest human action/u);
+      assert.ok(
+        thrown.message.includes(thrown.action),
+        "the blocker's action is the action it reports",
+      );
+      assert.match(
+        thrown.action,
+        /installed-entry\.mjs --qualification-identity/u,
+        "the smallest human action names the owning source",
+      );
+      assert.match(thrown.action, /re-read the installed evidence/u);
+    }
+    assert.equal(
+      spawned.some((argv) => argv.includes("--qualify-repair-package")),
+      false,
+      "an unprovable capability never falls back to a live qualification run",
+    );
+  } finally {
+    remove();
+  }
+});
+
+test("a foreign, misdirected or missing managed entry still withholds READY", () => {
+  const fixture = buildInstalledWorkflow();
+  const {
+    root,
+    cacheDirectory,
+    candidate,
+    codexEntry,
+    agentsEntry,
+    spawned,
+    commandRunner,
+    remove,
+  } = fixture;
+  const readEntries = (skillDirectories) =>
+    readWorkflowInstallationEvidence({
+      cacheDirectory,
+      skillDirectories,
+      expectedSourceCommit: candidate,
+      commandRunner,
+    });
+  try {
+    const preserved = `${agentsEntry}.preserved`;
+    fs.renameSync(agentsEntry, preserved);
     mkdirSync(join(root, "foreign"));
     fs.symlinkSync(
       join(root, "foreign"),
       agentsEntry,
       process.platform === "win32" ? "junction" : "dir",
     );
-    try {
-      assert.throws(
-        () =>
-          readWorkflowInstallationEvidence({
-            cacheDirectory,
-            skillDirectories: [codexEntry, agentsEntry],
-            expectedSourceCommit: candidate,
-            commandRunner,
-          }),
-        /managed entry/u,
-      );
-    } finally {
-      fs.rmSync(agentsEntry);
-      fs.renameSync(`${agentsEntry}.preserved`, agentsEntry);
-    }
+    assert.throws(
+      () => readEntries([codexEntry, agentsEntry]),
+      /managed entry/u,
+    );
+    fs.rmSync(agentsEntry);
+    const otherVersion = join(
+      cacheDirectory,
+      "versions",
+      "f".repeat(64),
+      "skills/personal/run-issue-workflow",
+    );
+    mkdirSync(otherVersion, { recursive: true });
+    fs.symlinkSync(
+      otherVersion,
+      agentsEntry,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    assert.throws(
+      () => readEntries([codexEntry, agentsEntry]),
+      /managed entry/u,
+    );
+    fs.rmSync(agentsEntry);
+    assert.throws(
+      () => readEntries([codexEntry, agentsEntry]),
+      /managed entry/u,
+    );
+    fs.renameSync(preserved, agentsEntry);
+    assert.equal(
+      readEntries([codexEntry, agentsEntry]).schema,
+      "codex-workflow-effective-evidence:v3",
+    );
+    assert.equal(
+      spawned.length,
+      1,
+      "a withheld installation boundary never reaches the capability probe",
+    );
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    remove();
   }
 });
 
