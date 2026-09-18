@@ -167,126 +167,54 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   }
 }
 
-const qualificationBoundInputFields = [
-  "capabilityIdentity",
-  "fixtureDigest",
-  "fixtureRevision",
-  "packageVersionId",
-  "runtime",
+// Readiness reads one capability probe from the installed package: the lightweight identity probe owned
+// by the selected `installed-entry.mjs`. It proves the platform capability readiness depends on — a
+// Linux runtime under WSL with ordinary POSIX worktree cleanup — without replaying the retired
+// component fixture or any failed-stage qualification run [ADR-0078, ADR-0079].
+const capabilityDescriptorFields = [
+  "arch",
+  "kernelRelease",
+  "node",
+  "platform",
+  "posixCleanup",
+  "wslDistro",
 ];
-const qualificationObservationFields = [
-  "durationMs",
-  "observedAt",
-  "run",
-  "stages",
-];
-const qualificationStageFields = [
-  "capabilityIdentity",
-  "command",
-  "failureSignature",
-  "fixtureDigest",
-  "fixtureRevision",
-  "packageVersionId",
-  "result",
-  "runtime",
-  "stage",
-];
-const requiredQualificationStages = [
-  "posix-worktree-cleanup",
-  "settled-host-cleanup-routing",
-  "stable-close-identity",
-];
-const qualificationStageSignatures = new Map([
-  [
-    "posix-worktree-cleanup",
-    "ordinary POSIX cleanup required process recovery",
-  ],
-  ["settled-host-cleanup-routing", "HOST_CLEANUP_BLOCKED was terminal"],
-  ["stable-close-identity", "controlRevision changed request identity"],
-]);
+const capabilitySurface = "installed workflow capability probe";
+const capabilityStopCode = "installed_workflow_capability_unproven";
 const sortedKeys = (value) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? Object.keys(value).sort()
     : [];
 const sameKeys = (value, fields) =>
   JSON.stringify(sortedKeys(value)) === JSON.stringify(fields);
-const sameBoundInputs = (left, right) =>
-  qualificationBoundInputFields.every(
-    (field) => left?.[field] === right?.[field],
+// The complete descriptor the probe must prove: the runtime it ran on, the WSL kernel and distro it read,
+// and the ordinary POSIX worktree cleanup it observed. An echoed or partial payload is not a proof.
+const provenCapability = (capability) =>
+  sameKeys(capability, capabilityDescriptorFields) &&
+  capability.posixCleanup === true &&
+  ["platform", "arch", "node"].every(
+    (field) => typeof capability[field] === "string" && capability[field].length > 0,
   );
 
-// Retained evidence is reusable only while every bound input still matches the exact installed
-// package, fixture bytes, runtime and proven capability; anything else is re-proven or rejected.
-function validateQualificationObservations({
-  qualification,
-  boundInputs,
-  command,
-}) {
-  if (qualification?.schema !== "workflow-repair-qualification:v1") {
-    throw new Error("Installed workflow qualification used an unknown schema");
-  }
-  if (
-    !sameKeys(qualification.boundInputs, qualificationBoundInputFields) ||
-    !sameBoundInputs(qualification.boundInputs, boundInputs)
-  ) {
-    throw new Error(
-      "Installed workflow qualification is bound to another package, fixture or capability",
-    );
-  }
-  const observations = Array.isArray(qualification.observations)
-    ? qualification.observations
-    : [];
-  if (observations.length !== 3) {
-    throw new TypeError(
-      "Evidence requires exactly three retained qualification observations",
-    );
-  }
-  const runs = new Set();
-  for (const observation of observations) {
-    if (
-      !sameKeys(observation, qualificationObservationFields) ||
-      !Number.isInteger(observation.run) ||
-      observation.run < 1 ||
-      observation.run > observations.length ||
-      runs.has(observation.run) ||
-      !Number.isFinite(observation.durationMs) ||
-      observation.durationMs < 0 ||
-      typeof observation.observedAt !== "string" ||
-      !Number.isFinite(Date.parse(observation.observedAt))
-    ) {
-      throw new Error(
-        "Installed workflow qualification observation is malformed or duplicated",
-      );
-    }
-    const stages = Array.isArray(observation.stages) ? observation.stages : [];
-    const observedStages = new Set(stages.map((stage) => stage?.stage));
-    if (
-      stages.length !== requiredQualificationStages.length ||
-      observedStages.size !== requiredQualificationStages.length ||
-      requiredQualificationStages.some((stage) => !observedStages.has(stage))
-    ) {
-      throw new TypeError(
-        "Evidence requires the complete original failed-stage set",
-      );
-    }
-    for (const stage of stages) {
-      if (
-        !sameKeys(stage, qualificationStageFields) ||
-        stage.failureSignature !==
-          qualificationStageSignatures.get(stage.stage) ||
-        stage.command !== command ||
-        !/^(?:PASS(?:ED)?|SUCCEEDED)\b/u.test(stage.result ?? "") ||
-        !sameBoundInputs(stage, boundInputs)
-      ) {
-        throw new Error(
-          "Installed workflow failed-stage result is malformed, duplicated or bound to another package",
-        );
-      }
-    }
-    runs.add(observation.run);
-  }
-  return observations;
-}
+// A capability that cannot be proven yields exactly one attributable blocker: its owning source and the
+// smallest human action there, never a verdict readiness can be claimed from [ADR-0055].
+const capabilityBlocker = ({ entryPath, reason, state }) => {
+  const owner = `${entryPath} --qualification-identity`;
+  const action = `Run ${owner} on the selected substrate, repair the capability its owning source reports as unproven, and re-read the installed evidence; readiness is never claimed from an unproven probe.`;
+  return Object.assign(
+    new Error(
+      `${capabilitySurface} is unproven; ${owner} owns it: ${reason}; smallest human action: ${action}`,
+    ),
+    {
+      code: capabilityStopCode,
+      state,
+      surface: capabilitySurface,
+      owner,
+      reason,
+      action,
+    },
+  );
+};
 
 export function readWorkflowInstallationEvidence({
   cacheDirectory,
@@ -347,16 +275,7 @@ export function readWorkflowInstallationEvidence({
     "--qualification-identity",
     selected.version.id,
   ];
-  const qualificationArgv = [
-    entryPath,
-    "--qualify-repair-package",
-    selected.version.id,
-  ];
-  const qualificationCommand = JSON.stringify([
-    process.execPath,
-    ...qualificationArgv,
-  ]);
-  const invoke = (argv, label) => {
+  const invoke = (argv) => {
     let output;
     try {
       output = commandRunner(process.execPath, argv, {
@@ -367,59 +286,48 @@ export function readWorkflowInstallationEvidence({
       });
     } catch (error) {
       const reason = error.stderr?.toString().trim() || error.message;
-      throw new Error(`Installed workflow ${label} did not pass: ${reason}`);
+      throw capabilityBlocker({
+        entryPath,
+        state: "UNKNOWN",
+        reason: `the package-owned capability probe did not pass: ${reason}`,
+      });
     }
     try {
       return JSON.parse(output);
     } catch (error) {
-      throw new Error(
-        `Installed workflow ${label} returned unreadable evidence: ${error.message}`,
-        { cause: error },
-      );
+      throw capabilityBlocker({
+        entryPath,
+        state: "UNKNOWN",
+        reason: `the package-owned capability probe returned unreadable evidence: ${error.message}`,
+      });
     }
   };
-  const identity = invoke(identityArgv, "capability identity");
-  if (
-    identity?.state !== "READY" ||
-    !sameKeys(identity.boundInputs, qualificationBoundInputFields)
-  ) {
-    throw new Error(
-      `Installed workflow capability is unavailable: ${identity?.reason ?? "the identity probe returned no bound inputs"}`,
-    );
+  const identity = invoke(identityArgv);
+  if (identity?.state !== "READY") {
+    throw capabilityBlocker({
+      entryPath,
+      state: "UNKNOWN",
+      reason:
+        identity?.reason ??
+        "the package-owned capability probe reported no proven capability",
+    });
   }
-  const retainedPath = join(
-    cacheDirectory,
-    "qualification",
-    `${selected.version.id}.json`,
-  );
-  let observations = null;
-  if (existsSync(retainedPath)) {
-    try {
-      observations = validateQualificationObservations({
-        qualification: readJson(retainedPath),
-        boundInputs: identity.boundInputs,
-        command: qualificationCommand,
-      });
-    } catch {
-      // A retained file that no longer matches is re-proven below, never reused.
-      observations = null;
-    }
-  }
-  if (observations === null) {
-    observations = validateQualificationObservations({
-      qualification: invoke(qualificationArgv, "failed-stage qualification"),
-      boundInputs: identity.boundInputs,
-      command: qualificationCommand,
+  const capability = identity.capability;
+  if (!provenCapability(capability)) {
+    throw capabilityBlocker({
+      entryPath,
+      state: "UNPROVEN",
+      reason:
+        "the package-owned capability probe returned no complete proven capability descriptor",
     });
   }
   return {
-    schema: "codex-workflow-effective-evidence:v2",
+    schema: "codex-workflow-effective-evidence:v3",
     candidate: selected.version.sourceCommit,
     packageVersion: selected.version,
     manifestSha256: selected.manifestSha256,
     entries,
-    boundInputs: identity.boundInputs,
-    qualificationObservations: observations,
+    capability,
   };
 }
 
