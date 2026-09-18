@@ -3248,6 +3248,7 @@ test("installed route diagnostics expose owning seams without setup authority", 
     "deterministic operation identity",
     "repository close lease",
     "per-Run execution capacity",
+    "lane settlement",
     "public skill surfaces",
   ]) {
     assert.match(diagnostics, new RegExp(seam, "iu"), `missing installed ${seam} diagnostic`);
@@ -3262,6 +3263,18 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.match(setupDocs, /deterministic operation identity.*repository close lease.*per-Run execution capacity/isu);
   assert.match(setupDocs, /missing or unknown seam.*owning source/isu);
   assert.match(setupMetadata, /short_description: "[^"]*diagnos[^"]*workflow[^"]*"/iu);
+
+  // Lane settlement is a required readiness surface: the probe must be able to detect a substrate that
+  // cannot settle a mutation-capable lane, so `READY` is never claimed from a read-only-lane probe set.
+  const laneSettlementProbe = "skills/personal/run-issue-workflow/scripts/lane-settlement-capability.mjs";
+  assert.equal(existsSync(laneSettlementProbe), true, "lane settlement readiness needs its owning probe");
+  assert.match(diagnostics, /lane settlement.*selected delivery substrate.*lane-settlement-capability\.mjs.*delivered through the Run host/isu);
+  assert.match(diagnostics, /lane settlement.*mutation-capable lane.*no settled terminal outcome.*`MISSING`.*never proof for this seam.*unreadable lane evidence is `UNKNOWN`.*`READY` only while this seam is `PRESENT`/isu);
+  assert.match(diagnostics, /`MISSING` or `UNKNOWN`.*not-ready.*smallest human action/isu);
+  assert.match(diagnostics, /settles a mutation-capable managed-worktree lane.*readiness may claim `READY` only while this seam is `PRESENT`/isu);
+  assert.match(setup, /per-Run execution capacity.*lane settlement.*producer\/Run adapter seams/isu);
+  assert.match(setupDocs, /per-Run execution capacity, lane settlement on the selected delivery substrate, and Run composition/isu);
+  assert.match(setupDocs, /required seam that is missing or unknown leaves readiness not-ready.*read-only lane is never proof/isu);
 
   assert.match(read("skills/engineering/to-spec/SKILL.md"), /references\/spec-publication-interfaces\.md/u);
   assert.match(read("skills/engineering/to-tickets/SKILL.md"), /references\/decomposition-publication-interfaces\.md/u);
