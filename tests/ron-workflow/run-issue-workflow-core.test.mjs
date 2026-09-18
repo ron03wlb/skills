@@ -714,6 +714,38 @@ test("Run-ready handoff accepts either current MULTI upstream binding shape and 
   }
 });
 
+test("Run-ready handoff reads the composite decomposition digest from the member or the handoff's own receipt", () => {
+  // Issue 137: the GitHub handoff record binds `decompositionDigest` as its own member, while the GitLab
+  // record omits the member and binds the same digest inside the decomposition read-back receipt it
+  // already carries. The composite check reads either binding, and still fails closed when neither
+  // carries a sha256 digest or when the one it reads disagrees with the tracker's read-back.
+  const receiptShaped = currentMultiRunReadyFacts();
+  delete receiptShaped.handoff.decompositionDigest;
+  assert.equal(receiptShaped.handoff.operationReceipt.decompositionReadBack.decompositionDigest,
+    receiptShaped.decompositionDigest);
+
+  const receiptResult = reduceRunReadyHandoff(receiptShaped);
+  assert.equal(receiptResult.state, "READY");
+  assert.equal(receiptResult.reasonCode, null);
+
+  const driftedReceipt = currentMultiRunReadyFacts();
+  delete driftedReceipt.handoff.decompositionDigest;
+  driftedReceipt.checkpoint.stageReceipts.decompositionReadBack.decompositionDigest = `sha256:${"9".repeat(64)}`;
+
+  const missingDigest = currentMultiRunReadyFacts();
+  delete missingDigest.handoff.decompositionDigest;
+  missingDigest.checkpoint.stageReceipts.decompositionReadBack.decompositionDigest = null;
+
+  const malformedMember = currentMultiRunReadyFacts();
+  malformedMember.handoff.decompositionDigest = "decomposition";
+
+  for (const input of [driftedReceipt, missingDigest, malformedMember]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, "composite_handoff_identity_conflict");
+  }
+});
+
 test("Run-ready handoff rejects a current to-spec handoff that drifts from its transaction or publication", () => {
   const changedTransaction = currentSingleRunReadyFacts();
   changedTransaction.handoff.transactionIdentity = `sha256:${"9".repeat(64)}`;

@@ -451,6 +451,13 @@ export function reduceRunReadyHandoff(input) {
   if (currentProfile && authority.classification === "MULTI") {
     const operationReceipt = handoff.operationReceipt;
     const stageReceipts = checkpoint.stageReceipts;
+    // The handoff binds the decomposition digest as its own record member where the producer writes one
+    // (the GitHub shape) and otherwise inside the decomposition read-back receipt it already carries (the
+    // GitLab shape, which omits the member). Either binding must be a sha256 digest equal to the tracker's
+    // current read-back; a member that is present but not a digest still fails closed.
+    const handoffDecompositionDigest = handoff.decompositionDigest === undefined
+      ? operationReceipt?.decompositionReadBack?.decompositionDigest
+      : handoff.decompositionDigest;
     const currentCompositeMatches = isText(handoff.upstreamPublicationIdentity)
       && isText(handoff.upstreamHandoffIdentity)
       && handoff.upstreamPublicationIdentity === upstreamBindings?.publicationIdentity
@@ -460,8 +467,8 @@ export function reduceRunReadyHandoff(input) {
       && isRecord(stageReceipts)
       && sameFact(operationReceipt.decompositionReadBack, stageReceipts.decompositionReadBack)
       && sameFact(operationReceipt.readyStateReadBack, stageReceipts.readyStateReadBack)
-      && sha256Pattern.test(handoff.decompositionDigest)
-      && handoff.decompositionDigest === input.decompositionDigest
+      && sha256Pattern.test(handoffDecompositionDigest)
+      && handoffDecompositionDigest === input.decompositionDigest
       && stageReceipts.decompositionReadBack?.decompositionIdentity === authority.decompositionIdentity
       && stageReceipts.decompositionReadBack?.decompositionDigest === input.decompositionDigest
       && sameFact(stageReceipts.readyStateReadBack?.frontier, input.readyFrontier)
