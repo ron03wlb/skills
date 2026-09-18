@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Compose GitLab Runs through sibling tracker sources
+
+`/run-issue-workflow` gains a second **Tracker Run sources** composition beside the GitHub one: `gitlab-workflow-sources.mjs` answers the same owning-source surface (`tracker`, `repository`, `reconciliation`, `target`, `checkpoint`, `handoff`, `writer`, `selector`, plus the composition-level Issue and model-input reads), and the Start entry resolves the repository's tracker configuration to select the composition instead of assuming a GitHub origin. It reuses the domain authority (`delivery-authority.mjs`, the reducer, the journal, budgets, lanes, and leaves), the `glab`-based producer transport, the existing `gitlab:<host>/<project>` repository identity, the existing `workflow-record` kinds and fence with native note identity plus Developer-or-higher author verification, and the provider-neutral Git target, writer, and selector facts. The GitHub composition and every existing GitHub Run stay untouched, so no consumer, package, or installed entry migrates. This is human-confirmed: option 1A of the 2026-09-18 `/grill-with-docs` session (Pi session `01a0b305-e696-7438-a36c-970cf101dc40`).
+
+Blocker authority for a GitLab Run comes only from the published `decomposition:v1` record's body graph; this composition publishes no tracker relation and never probes native capability. That is inherited from [ADR-0065](0065-keep-blocker-authority-portable-across-trackers.md) and [ADR-0073](0073-use-body-parent-evidence-without-gitlab-issue-hierarchy.md), and it is what makes a Community-Edition self-managed instance a first-class tracker rather than a degraded one.
+
+Considered options, all rejected: rewriting the GitHub composition into a provider-neutral core with two provider modules — a consumer migration across a 2,283-line module and its suites for no behavior gain; extending the existing GitLab producer adapters into the Run host — mixing producer transaction ownership with Run read ownership, which [ADR-0059](0059-give-each-workflow-seam-one-owner.md) forbids per seam and which both producer bindings contradict by declaring "not a Run host"; and a separate `run-issue-workflow-gitlab` skill or managed entry — a new installation boundary needing reinstall and version machinery under [ADR-0079](0079-amend-the-setup-bootstrap-for-the-pi-workflow-substrate.md).
+
+Reversal or validation: reverting to a single provider-neutral composition requires evidence that the duplication now costs more than a consumer migration. The sibling composition is one module plus its own suite, and the GitHub Run path is provably unchanged by this decision.

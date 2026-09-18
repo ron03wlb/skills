@@ -308,6 +308,14 @@ _Avoid_: Self-modifying run, product-worktree skill repair, silent coordinator p
 The delivery execution owner of one **DAG Run**, layered into the authority that decides and the replaceable material that performs. Its authority layer is `/run-issue-workflow`'s sole Start and re-entry authority, the **Domain action reducer** that fixes every legal action, the per-Run journal that owns grants, budgets, retries, repair waves, and outcomes, and the **Issue lane** guards. Its execution material owns the Run's scheduling, durable task records, and Issue worker lifecycle only as the reducer authorizes, through one native subagent lane in its own managed Issue worktree per authorized action, while a `pi-workflow` bundle stays one optional materialization of those same facts rather than the required scheduler. That material dispatches and observes only the workers the **DAG Run Grant** authorizes and never decides authority, scope, retries, budgets, close eligibility, or stop classification, and **DAG run reconciliation** rebuilds state from owning sources rather than treating a host record as authority.
 _Avoid_: pi-workflow as the required materialization, one required scheduler, Codex-native coordinator, Orca runtime, standalone Node task client, host record as authority
 
+**Tracker Run sources**:
+The tracker-specific owning-source composition one repository binds for **DAG Run** delivery: tracker read, repository identity, reconciliation, target, checkpoint, handoff, and target-writer health, plus the composition-level Issue and model-input reads. Every composition answers that same surface for its own tracker, and one Run binds exactly one of them; the Run's reducer, journal, budgets, lanes, and leaves stay tracker-independent, so adding a tracker adds a composition rather than a second delivery owner.
+_Avoid_: Provider-neutral universal adapter, producer adapter reused as the Run host, per-Run tracker switch, mixed-tracker composition
+
+**Tracker project binding**:
+The repository-owned, credential-free statement of one configured remote tracker project — a GitLab origin and complete project path, or the analogous provider input — that publication producers and **Tracker Run sources** both read. It carries no credentials, Spec identities, or receipts, it is written by its owning producer entry rather than by a consumer, and it never replaces the tracker prose configuration.
+_Avoid_: Credential store, per-Run configuration, tracker prose file, guessed from a remote
+
 **Domain action reducer**:
 The single deterministic owner of a **DAG Run**'s legal actions, computed from reconciled tracker, Git, worktree, completion, and journal evidence. The **Delivery workflow host**'s execution material carries out only the actions this reducer returns and never invents, reorders, or reclassifies them.
 _Avoid_: Host-side scheduler policy, model-decided dispatch, duplicated action planning
