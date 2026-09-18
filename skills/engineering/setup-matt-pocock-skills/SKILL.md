@@ -11,13 +11,22 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
-- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, and separately installed producer/Run adapter seams
+- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, and the lane worker agent the selected substrate resolves
 
 This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
 
+## Boundaries
+
+Setup is the single approved operational bootstrap of [ADR-0072](../../../docs/adr/0072-make-setup-an-approved-operational-bootstrap.md) as amended by [ADR-0079](../../../docs/adr/0079-amend-the-setup-bootstrap-for-the-pi-workflow-substrate.md). It:
+
+- resolves its preflight and presents **one bounded plan**, and performs **no mutation before one explicit human acceptance**; a changed source, target, binding, external effect or recovery action needs a new acceptance, while an operation the human already accepted is never re-asked;
+- **sequences the existing owners** in dependency order and reads every receipt back through its authoritative surface, and never reproduces their package building, installation, binding, tracker mutation, recovery or receipt logic (ADR-0059);
+- reduces readiness **truthfully**: `READY` only while every required seam in [installed-workflow-diagnostics.md](./installed-workflow-diagnostics.md) reads `PRESENT`, otherwise one attributable not-ready verdict per unproven prerequisite naming its owning source and the smallest human action there. Setup neither repairs another owner's seam nor claims that owner's verdict as its own;
+- never replaces its own running bytes, creates or closes product Issues, starts or grants a product Run, pushes, deploys, or performs database work.
+
 ## Process
 
-### 1. Explore
+### 1. Explore and preflight
 
 Look at the current repo to understand its starting state. Read whatever exists; don't assume:
 
@@ -30,11 +39,11 @@ Look at the current repo to understand its starting state. Read whatever exists;
 - Is the `triage` skill installed? (a `triage` skill folder alongside this one, or `triage` in your available skills.) This decides whether Section B runs at all.
 - Monorepo signals: a `pnpm-workspace.yaml`, a `workspaces` field in `package.json`, or a populated `packages/*` with its own `src/`. These are present only in a genuinely large multi-package repo; their absence means single-context, which is almost every repo.
 
-Read [installed-workflow-diagnostics.md](./installed-workflow-diagnostics.md) and inspect only the current harness's resolved installed surfaces. Report each installed workflow seam with its owning source, observed evidence, and `PRESENT`, `MISSING`, or `UNKNOWN` state. This diagnostic is read-only and non-authorizing: never create or repair a skill, adapter, transaction, receipt, writer lease, or tracker object, and never use aggregate setup health as another skill's gate.
+Read [installed-workflow-diagnostics.md](./installed-workflow-diagnostics.md) and inspect only the current harness's resolved installed surfaces. Report each installed workflow seam with its owning source, observed evidence, and `PRESENT`, `MISSING`, or `UNKNOWN` state, together with the re-derived criterion it supports and the prerequisite that criterion depends on. This diagnostic is read-only and non-authorizing: never create or repair a skill, adapter, transaction, receipt, writer lease, or tracker object, never probe an owner's seam on its behalf, and never use aggregate setup health as another skill's gate.
 
 ### 2. Present findings and ask
 
-Summarise what's present and what's missing. Then take the sections in order. One section, one answer, then the next.
+Summarise what's present and what's missing. Then take the sections in order. One section, one answer, then the next. Those answers settle the plan's contents; they mutate nothing.
 
 Lead each section with the recommended answer so the user can accept it in a word. Give a one-line explainer only when the choice genuinely branches; skip the section entirely when exploration already settled it (Section B when `triage` isn't installed, Section C when there's no monorepo).
 
@@ -63,16 +72,16 @@ The defaults are the five canonical roles, each label string equal to its name: 
 
 Offer **multi-context** (a root `CONTEXT-MAP.md` pointing to per-context `CONTEXT.md` files) only when exploration found monorepo signals. Then confirm which layout they want.
 
-### 3. Confirm and edit
+### 3. Present one bounded plan and take one acceptance
 
-Show the user a draft of:
+Show the user a draft of one bounded plan: the section answers, every owner action with its owning source, its exact effect, its recovery rule and its read-back check, and the observed state of every prerequisite the plan depends on. Then show:
 
 - The `## Agent skills` block to add to whichever of `CLAUDE.md` / `AGENTS.md` is being edited (see step 4 for selection rules)
 - The contents of `docs/agents/issue-tracker.md`, `docs/agents/domain.md`, and `docs/agents/triage-labels.md` (the last only when `triage` is installed)
 
-Let them edit before writing.
+Let them edit before writing, and perform no mutation of any kind before that one explicit acceptance. An unchanged accepted plan is never re-asked; a changed source, target, binding, external effect or recovery action requires a fresh acceptance of the changed plan.
 
-### 4. Write
+### 4. Write, and sequence the owners
 
 **Pick the file to edit:**
 
@@ -114,6 +123,8 @@ Then write the docs files using the seed templates in this skill folder as a sta
 
 For "other" issue trackers, write `docs/agents/issue-tracker.md` from scratch using the user's description.
 
+Repository configuration is the one write this skill owns, so it performs that write itself. Every other action the accepted plan contains stays with its existing owner: call that owner in dependency order and read its receipt back through the owner's own authoritative surface. Label creation, package installation, managed entries, producer bindings and tracker effects each have their owner, and setup never reproduces their package building, installation, binding, tracker mutation, recovery or receipt logic, never substitutes a passing diagnostic for a missing receipt, and preserves a successful partial effect rather than repeating it. Changed owner evidence stops with the exact blocker and the next owner named.
+
 ### 5. Done
 
-Tell the user the repository configuration is complete and which engineering skills will now read from these files. Report the read-only installed workflow diagnostic separately, including the exact owning source and smallest human action for each missing or unknown seam. Mention they can edit `docs/agents/*.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch. Never imply that a passing diagnostic authorized publication, execution, integration, aggregate verification, or push.
+Tell the user the repository configuration is complete and which engineering skills will now read from these files. Then report readiness as one verdict: `READY` only while every required seam reads `PRESENT`, and otherwise a not-ready verdict with exactly one attributable blocker per unproven prerequisite, the owning source, and the smallest human action at that owner — for lane settlement, that is the selected substrate's own lane record read through its owning probe, and setup neither repairs it nor claims its verdict. Report the read-only installed workflow diagnostic separately, including the exact owning source and smallest human action for each missing or unknown seam. Mention they can edit `docs/agents/*.md` directly later; re-running this skill is only necessary if they want to switch issue trackers or restart from scratch. Never imply that a passing diagnostic authorized publication, execution, integration, aggregate verification, or push.

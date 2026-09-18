@@ -25,6 +25,8 @@ It writes into the repo you run it in:
 
 All of it is committed markdown. There is no user-level or global mode: the config lives in the repo, so every repo gets its own copy.
 
+The readiness prerequisites setup reports are a separate list. Each one is a read-only probe of an owner that is not setup, so no row of this table is a prerequisite for them and none of them writes anything here.
+
 ## The three decisions
 
 It leads each section with the recommended answer, and skips whatever exploration already settled. Most runs are two confirmations and done.
@@ -50,9 +52,17 @@ The first three ship as templates in the skill and work out of the box. Local ma
 
 ## Installed workflow diagnostics
 
-After configuration, setup reads the current harness's resolved installations and reports the configured tracker, triage labels when applicable, required public skill surfaces, operation-scoped producer store, producer handoff, concrete GitLab Spec and Decomposition producers when applicable, target reader, shared target writer, deterministic operation identity, repository close lease, per-Run execution capacity, lane settlement on the selected delivery substrate, and Run composition. For hosted trackers it compares every configured triage label with the provider's read-only label listing; the local-file adapter validates its `Status:` mappings because it has no separate label registry. A missing or unknown seam names its owning source, observed evidence, and the smallest human action there, such as repairing tracker access, installing a substrate release that settles a mutation-capable lane, or updating the package that owns the adapter. A required seam that is missing or unknown leaves readiness not-ready; a settled read-only lane is never proof that a mutation-capable lane settles.
+After configuration, setup reads the current harness's resolved installations and reports the configured tracker, triage labels when applicable, required public skill surfaces, operation-scoped producer store, producer handoff, concrete GitLab Spec and Decomposition producers when applicable, target reader, shared target writer, deterministic operation identity, repository close lease, per-Run execution capacity, lane settlement on the selected delivery substrate, and Run composition, plus the lane worker agent the selected substrate resolves. For hosted trackers it compares every configured triage label with the provider's read-only label listing; the local-file adapter validates its `Status:` mappings because it has no separate label registry. A missing or unknown seam names its owning source, observed evidence, and the smallest human action there, such as repairing tracker access, installing a substrate release that settles a mutation-capable lane, or updating the package that owns the adapter. A required seam that is missing or unknown leaves readiness not-ready; a settled read-only lane is never proof that a mutation-capable lane settles.
+
+The diagnostic carries the re-derived bootstrap criteria for the substrate ADR-0080 selects. Each criterion names the prerequisite it depends on and the owning source that proves or repairs it, so readiness is never claimed from a probe set that cannot detect the failure class the selected substrate exhibits. The prerequisites the retired `pi-workflow` materialization needed are retired or replaced rather than reused: the delivered bundle root, `@earendil-works/pi-coding-agent` resolution from that package, and the target repository ignoring its run area are gone from the criteria, while the lane worker agent is re-derived against the root the selected substrate actually declares, and `gh api --paginate --slurp` stays as the tracker publication capability with setup as the owner that repairs it. Setup reports the seam the substrate owns rather than probing it on the substrate's behalf.
 
 The diagnostic is deliberately read-only. It does not install or repair a separately owned coordinator, create a producer transaction, derive or adopt an operation identity, create a Run, acquire either closeout lease, mutate the tracker, or authorize publication, execution, integration, aggregate verification, or push. Aggregate setup health is orientation for the human; every later skill reads its own authority at its own boundary.
+
+## One plan, one acceptance, one owner per seam
+
+Setup resolves its preflight and presents one bounded plan: the section answers, every owner action with its owning source, its exact effect, its recovery rule and its read-back check, and the observed state of every prerequisite the plan depends on. It performs no mutation of any kind before one explicit human acceptance, and a changed source, target, binding, external effect or recovery action requires a fresh acceptance, while an operation already accepted is never re-asked.
+
+Repository configuration is the one write setup owns; every other action in the accepted plan stays with its existing owner. Setup calls each owner in dependency order, reads every receipt back through that owner's own authoritative surface, and never reproduces their package building, installation, binding, tracker mutation, recovery or receipt logic. A missing or unproven prerequisite is reported as the not-ready verdict described above, not repaired inside setup.
 
 ## Common questions
 
@@ -96,12 +106,16 @@ Installed workflow diagnostics distinguish a resolvable package version and curr
 
 ## It's working if
 
-- `docs/agents/issue-tracker.md` and `docs/agents/domain.md` exist, plus `triage-labels.md` if `triage` is installed.
-- An `## Agent skills` section appears in the instruction file your harness actually reads, with a one-line summary pointing at each of those files.
-- The tracker it proposed matches the remote you really use, and the label strings match labels that really exist in your tracker.
-- Installed workflow diagnostics name the owning source and smallest action for every missing or unknown public skill or adapter seam without changing it.
-- Afterwards, `/to-tickets` publishes without asking you where issues live, and `/triage` applies labels rather than inventing them.
-- Nothing in the skill files themselves changed. If setup edited a `SKILL.md`, something went wrong.
+- `docs/agents/issue-tracker.md` and `docs/agents/domain.md` exist, plus `triage-labels.md` if `triage` is installed — **prerequisite**: the configured tracker's read-only configuration and label read, owned by `docs/agents/issue-tracker.md` and the provider it names.
+- An `## Agent skills` section appears in the instruction file your harness actually reads, with a one-line summary pointing at each of those files — **prerequisite**: the instruction file the harness reads, owned by the repository itself.
+- The tracker it proposed matches the remote you really use, and the label strings match labels that really exist in your tracker — **prerequisite**: the provider's read-only label listing, owned by the configured tracker.
+- Every required seam reads `PRESENT`, including lane settlement on the selected delivery substrate, which reads `PRESENT` only from the owning probe's `PROVEN` verdict — **prerequisite**: the substrate's own lane record, owned by the selected substrate and read through its owning probe, never re-derived by setup.
+- The lane's worker agent resolves at the root the selected substrate declares — **prerequisite**: that substrate's own agent configuration, owned by the substrate, with `agents/worker.md` as the canonical definition.
+- `gh api --paginate --slurp` is proven for the configured tracker before any publication — **prerequisite**: the GitHub producer's capability probe, repaired at setup, which is why an unproven one names this skill as the owner.
+- Installed workflow diagnostics name the owning source and smallest action for every missing or unknown public skill or adapter seam without changing it — **prerequisite**: the installed workflow package and the harness's resolved inventory, owned by the package installation and the harness.
+- Setup reports a not-ready verdict with one attributable blocker per unproven prerequisite instead of claiming `READY` — **prerequisite**: each seam owner's own verdict, which setup reads and never upgrades. Setup reports the bootstrap's readiness; the selected Run's own entry re-reads its authority at its own boundary, so that verdict is never the Run's.
+- Afterwards, `/to-tickets` publishes without asking you where issues live, and `/triage` applies labels rather than inventing them — **prerequisite**: the configuration files this run wrote, owned by setup, and the tracker read behind them, owned by the configured provider.
+- Nothing in the skill files themselves changed. If setup edited a `SKILL.md`, something went wrong — **prerequisite**: this run's own read-only boundary, owned by setup.
 
 ## Where it fits
 
