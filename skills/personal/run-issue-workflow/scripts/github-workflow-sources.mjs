@@ -63,6 +63,31 @@ const automaticHostCleanupReasons = new Set([
 ]);
 const worktreePath = (path) =>
   existsSync(path) ? realpathSync.native(path) : resolve(path);
+// A completion's `verification[]` mixes candidate verification with explicitly labelled
+// control runs. Only candidate entries prove the change; a control reports its own
+// observed result and never stands in for the candidate's passing evidence.
+const controlVerificationLabel = /^\s*control(?: run)?\s*[:\u2014\u2013-]\s/iu;
+const isControlVerification = (item) =>
+  typeof item.command === "string" && controlVerificationLabel.test(item.command);
+const isReadableVerification = (item) =>
+  typeof item.command === "string" &&
+  item.command.length > 0 &&
+  typeof item.result === "string" &&
+  item.result.length > 0;
+const isPassingVerification = (item) =>
+  typeof item.result === "string" &&
+  /^(?:PASS(?:ED)?|SUCCEEDED)\b/iu.test(item.result);
+const isCompleteVerificationEvidence = (items) =>
+  Array.isArray(items) &&
+  items.length > 0 &&
+  items.every(
+    (item) =>
+      isReadableVerification(item) &&
+      (isControlVerification(item) || isPassingVerification(item)),
+  ) &&
+  items.some(
+    (item) => !isControlVerification(item) && isPassingVerification(item),
+  );
 
 export const isAutomaticHostCleanupReason = (reasonCode) =>
   automaticHostCleanupReasons.has(reasonCode);
@@ -1176,15 +1201,7 @@ export function createGitHubWorkflowSources({
             record.standards !== "clean" ||
             record.spec !== "clean" ||
             record.worktreeState !== "clean" ||
-            !Array.isArray(record.verification) ||
-            record.verification.length === 0 ||
-            !record.verification.every(
-              (item) =>
-                typeof item.command === "string" &&
-                item.command.length > 0 &&
-                typeof item.result === "string" &&
-                /^(?:PASS(?:ED)?|SUCCEEDED)\b/iu.test(item.result),
-            ) ||
+            !isCompleteVerificationEvidence(record.verification) ||
             !Array.isArray(record.manualAttestations) ||
             (record.workflowArtifacts !== undefined &&
               !Array.isArray(record.workflowArtifacts))
