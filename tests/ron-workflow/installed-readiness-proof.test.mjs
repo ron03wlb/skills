@@ -245,6 +245,11 @@ test("the proof reports every required seam and one READY verdict from the insta
       capabilitySeam.owner,
       /installed-entry\.mjs --qualification-identity$/u,
     );
+    // The seam's owning source names the probe exactly once, with its own flag.
+    assert.equal(
+      capabilitySeam.owner.match(/--qualification-identity/gu).length,
+      1,
+    );
     // One capability probe proves the read; the retired live qualification is never invoked and no
     // retained sample is read or written.
     assert.equal(spawned.length, 1);
@@ -378,6 +383,8 @@ test("an installed version that is not the reviewed source commit returns one ow
       0,
       "no capability probe runs for a version the reviewed commit does not bind",
     );
+    // AC-2: re-running the proof over the same unchanged unbound version repeats the verdict.
+    assert.deepEqual(read("f".repeat(40)), report);
   } finally {
     remove();
   }
@@ -392,13 +399,15 @@ test("an unprovable capability returns one attributable blocker naming its ownin
       ["unreadable-capability", "UNKNOWN"],
       ["incomplete-capability", "MISSING"],
     ]) {
-      process.env.WORKFLOW_QUALIFICATION_FAULT = fault;
-      let report = null;
-      try {
-        report = read();
-      } finally {
-        delete process.env.WORKFLOW_QUALIFICATION_FAULT;
-      }
+      const readUnderFault = () => {
+        process.env.WORKFLOW_QUALIFICATION_FAULT = fault;
+        try {
+          return read();
+        } finally {
+          delete process.env.WORKFLOW_QUALIFICATION_FAULT;
+        }
+      };
+      const report = readUnderFault();
       assert.equal(
         report.verdict,
         "NOT_READY",
@@ -420,6 +429,18 @@ test("an unprovable capability returns one attributable blocker naming its ownin
       );
       assert.match(report.blocker.action, /re-read the installed evidence/u);
       assert.match(report.blocker.reason, /\S/u);
+      // The failing capability seam names the same owning source as its blocker, exactly once.
+      const capabilitySeam = report.seams.find(
+        ({ seam: seamName }) => seamName === "installed-capability-probe",
+      );
+      assert.equal(capabilitySeam.owner, report.blocker.owner, fault);
+      assert.equal(
+        capabilitySeam.owner.match(/--qualification-identity/gu).length,
+        1,
+        `${fault}: the owning source names the probe once`,
+      );
+      // AC-2: re-running the proof over the same unchanged unprovable capability repeats the verdict.
+      assert.deepEqual(readUnderFault(), report, fault);
       assert.equal(
         spawned.some((argv) => argv.includes("--qualify-repair-package")),
         false,
@@ -438,8 +459,11 @@ test("an unprovable capability returns one attributable blocker naming its ownin
 test("the documented command re-runs unchanged to the same verdict", () => {
   const fixture = buildInstalledWorkflow();
   const { cacheDirectory, candidate, remove } = fixture;
-  const run = (expectedSourceCommit, ...extra) =>
-    execFileSync(
+  const run = (expectedSourceCommit, ...extra) => {
+    const [flags, options] = extra.length > 0 && typeof extra.at(-1) === "object"
+      ? [extra.slice(0, -1), extra.at(-1)]
+      : [extra, {}];
+    return execFileSync(
       process.execPath,
       [
         proofPath,
@@ -447,10 +471,11 @@ test("the documented command re-runs unchanged to the same verdict", () => {
         cacheDirectory,
         "--expected-source-commit",
         expectedSourceCommit,
-        ...extra,
+        ...flags,
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", ...options },
     );
+  };
   try {
     const human = run(candidate);
     assert.match(human, /seam selected-package-version: PRESENT/u);
@@ -470,16 +495,57 @@ test("the documented command re-runs unchanged to the same verdict", () => {
       ["PRESENT", "PRESENT", "PRESENT", "PRESENT"],
     );
     let failure = null;
+    let repeatedFailure = null;
     try {
       run("f".repeat(40), "--json");
     } catch (error) {
       failure = error;
     }
+    try {
+      run("f".repeat(40), "--json");
+    } catch (error) {
+      repeatedFailure = error;
+    }
     assert.notEqual(failure, null, "a not-ready read exits non-zero");
     assert.equal(failure.status, 1);
     assert.match(failure.stderr, /installed_package_version_unproven/u);
     assert.match(failure.stderr, /Smallest human action:/u);
-    assert.equal(JSON.parse(failure.stdout).verdict, "NOT_READY");
+    const notReady = JSON.parse(failure.stdout);
+    assert.equal(notReady.verdict, "NOT_READY");
+    assert.equal(
+      repeatedFailure?.status,
+      1,
+      "the not-ready verdict repeats at the documented command as well",
+    );
+    assert.equal(repeatedFailure?.stdout, failure.stdout);
+    assert.equal(repeatedFailure?.stderr, failure.stderr);
+    // The same command against an unprovable capability reports the seam's owning source once, and that
+    // owning source is the blocker's own owner string.
+    let faultedFailure = null;
+    try {
+      run(candidate, "--json", {
+        env: { ...process.env, WORKFLOW_QUALIFICATION_FAULT: "unknown-capability" },
+      });
+    } catch (error) {
+      faultedFailure = error;
+    }
+    assert.notEqual(faultedFailure, null, "an unprovable capability exits non-zero");
+    assert.equal(faultedFailure.status, 1);
+    assert.match(
+      faultedFailure.stderr,
+      /installed_workflow_capability_unproven/u,
+    );
+    const faulted = JSON.parse(faultedFailure.stdout);
+    assert.equal(faulted.verdict, "NOT_READY");
+    assert.equal(
+      faulted.blocker.code,
+      "installed_workflow_capability_unproven",
+    );
+    const faultedSeam = faulted.seams.find(
+      ({ seam }) => seam === "installed-capability-probe",
+    );
+    assert.equal(faultedSeam.owner, faulted.blocker.owner);
+    assert.equal(faultedSeam.owner.match(/--qualification-identity/gu).length, 1);
   } finally {
     remove();
   }

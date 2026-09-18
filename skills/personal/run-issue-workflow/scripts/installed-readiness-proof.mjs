@@ -155,6 +155,8 @@ const probePathOf = (evidence) => {
     : null;
 };
 
+// The capability seam's owning source. A path is suffixed with the flag it is invoked with; the stop's
+// own owner string already carries the flag, so it is kept verbatim and never suffixed again.
 const probeOwner = (entryPath) =>
   entryPath === null
     ? "installed-entry.mjs --qualification-identity (not invoked; the read stopped before the probe)"
@@ -262,7 +264,12 @@ export function readInstalledReadinessProof({
     }),
     seamRow({
       seam: INSTALLED_READINESS_SEAMS[3],
-      owner: probeOwner(probeEntryPath ?? (capabilityStop ? stop.owner : null)),
+      owner:
+        probeEntryPath !== null
+          ? probeOwner(probeEntryPath)
+          : capabilityStop
+            ? stop.owner
+            : probeOwner(null),
       state: capabilityProven
         ? "PRESENT"
         : capabilityStop && stop.state === "UNPROVEN"
