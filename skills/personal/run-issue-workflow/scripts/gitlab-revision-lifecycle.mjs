@@ -29,6 +29,15 @@ export function selectRevisionLifecycle({ snapshot, issue, repositoryId }) {
       && record.target === authority.target && record.planningSeal === pub.record.authority.planningSeal)
       .filter(dec => [pub.identity, pub.record.authority.approvedScopeHash, dec.identity].includes(operation.approvedPublicationIdentity))
       .map(dec => ({ publication: pub, decomposition: dec })));
+    // A Single-Issue Spec publishes no decomposition, so one of its own earlier publications cannot be
+    // proven through the MULTI lifecycle. Excluding the note keeps this selector in step with the GitHub
+    // module (Issue 132): it is neither current completion evidence nor provable historical evidence, and
+    // a foreign or unprovable identity still stops below.
+    const ownPreviousPublication = previous.some(item => item.record.kind === "spec_publication"
+      && item.record.repositoryId === repositoryId
+      && item.record.authority?.specId === authority.specId && item.record.authority.target === authority.target
+      && [item.identity, item.record.authority.approvedScopeHash].includes(operation.approvedPublicationIdentity));
+    if (authority.classification === "SINGLE" && ownPreviousPublication) return null;
     const proven = one(matches, "Previous lifecycle publication");
     const handoff = one(previous.filter(({ record }) => record.kind === "producer_handoff" && record.producerCommand === "to-tickets"
       && record.specId === authority.specId && record.target === authority.target
@@ -51,6 +60,10 @@ export function selectRevisionLifecycle({ snapshot, issue, repositoryId }) {
     if (current.includes(operation.approvedPublicationIdentity)) return true;
     if (item.record.kind !== "implementation_blocked") return true;
     const previous = priorAuthority(item);
+    // A record that binds a superseded publication of a Single-Issue Spec is neither current completion
+    // evidence nor provable historical evidence, so it does not bind this Run's authority; its candidate,
+    // topic and worktree stay discoverable from Git for the lane the Run does dispatch.
+    if (previous === null) return false;
     // Only a pre-execution scope-revision blocker can be historical automatically.
     // A candidate, lane or other failure still needs its owning recovery workflow.
     if (item.record.reasonCode !== "scope_revision_required"
