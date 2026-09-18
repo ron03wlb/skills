@@ -2,9 +2,15 @@
 //
 // `/run-issue-workflow <Spec-ID>` is the sole Start and re-entry authority. This module is the one entry
 // the coordinator invokes so a Start is deterministic instead of improvised per session: it reduces the
-// immediate-upstream handoff, records exactly one read-back DAG Run Grant — carrying the human's single
-// approval of the declared Run operations the planning handoff left unapproved — and emits the one round
-// input the delivery host is launched with.
+// immediate-upstream handoff, records the one read-back DAG Run Grant — carrying the human's single
+// approval of the declared Run operations the planning handoff left unapproved, and no approvals member
+// at all when the handoff already approved every one of them — and emits the one round input the delivery
+// host is launched with.
+//
+// The Grant also binds the exact package version its host runs from. This entry selects that version from
+// the installation cache that owns it and hands the same cache and version to its own composition, so a
+// Run never starts against an installation its own evidence cannot resolve, and its maintenance path
+// reads back the package the Run actually started from.
 //
 // It never dispatches a lane, creates a worker, applies cleanup, acquires a lease, rewrites the journal,
 // or mutates the tracker. Its only write is the one Grant the selected Run authorizes.
@@ -19,6 +25,7 @@ import { createRunAuthorityAdapters, deriveRunOperationIdentity, reduceRunReadyH
 import { createRunStore } from "./run-store.mjs";
 import { planHostRound } from "./pi-workflow-host.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
+import { runWorkflowCommand } from "./workflow-command.mjs";
 import { createHostTaskReader, observedLanesFor } from "../workflows/deliver-tracker-spec/helpers/host-runs.mjs";
 
 export const RUN_ENTRY_SCHEMA = "pi-workflow-run-entry:v1";
@@ -26,6 +33,15 @@ export const RUN_ENTRY_STAGE_ID = "delivery";
 export const RUN_ENTRY_MAX_PARALLEL = 3;
 
 const git = (repository, ...args) => execFileSync("git", ["-C", repository, ...args], { encoding: "utf8" }).trim();
+
+// An installed package lives at <cache>/versions/<version-id>/skills/personal/run-issue-workflow, the
+// same layout installed-entry.mjs reads its own cache from, so the entry resolves the installation it was
+// launched from instead of trusting an unset or ambient cache path. Version selection then has the one
+// cache directory the Run's Grant and its composition must agree on.
+export function installationCacheDirectoryFor(entryUrl = import.meta.url) {
+  const packageRoot = resolve(dirname(fileURLToPath(entryUrl)), "../../../..");
+  return resolve(packageRoot, "../..");
+}
 
 export function resolveCheckout(cwd) {
   const repository = realpathSync(cwd);
@@ -38,13 +54,35 @@ export function resolveCheckout(cwd) {
 
 // One Start. Returns the round input when the Run reduces to READY, and a diagnosis otherwise; it never
 // returns a round for a state the Run authority refuses.
-export async function startRun({ cwd = process.cwd(), specId, approval = null, cacheDirectory, homeDir = homedir() } = {}) {
+export async function startRun({
+  cwd = process.cwd(),
+  specId,
+  approval = null,
+  cacheDirectory = installationCacheDirectoryFor(),
+  homeDir = homedir(),
+  commandRunner = runWorkflowCommand,
+  // The owning-source composition is injectable so a caller can prove which installation this Start
+  // bound its sources to; production always composes the GitHub sources.
+  createSources = createGitHubWorkflowSources,
+} = {}) {
   if (typeof specId !== "string" || specId === "") throw new TypeError("A Run entry needs one Spec id");
   const { repository, repositoryName, gitCommonDir } = resolveCheckout(cwd);
   const store = createRunStore({ gitCommonDir });
+  const selection = selectWorkflowVersion({ cacheDirectory });
+  const selectedVersion = selection.state === "AVAILABLE" ? selection.version : undefined;
   let taskReader = null;
   const tasks = { read: (taskRef, options) => (taskReader === null ? null : taskReader.read(taskRef, options)) };
-  const sources = createGitHubWorkflowSources({ repository, repositoryName, store, tasks });
+  // The composition reads the same trusted cache and package version back for its own maintenance
+  // evidence, so selection and delivery can never name two different installations.
+  const sources = createSources({
+    repository,
+    repositoryName,
+    store,
+    tasks,
+    workflowVersion: selectedVersion,
+    installationCacheDirectory: cacheDirectory,
+    commandRunner,
+  });
   const adapters = createRunAuthorityAdapters({ sources: sources.sources, store, tasks });
 
   const request = { specId };
@@ -79,32 +117,46 @@ export async function startRun({ cwd = process.cwd(), specId, approval = null, c
     ready: { state: ready.state, reasonCode: ready.reasonCode, nextOwner: ready.nextOwner },
   };
 
-  if (ready.state !== "READY" && ready.reasonCode === "run_preparation_pending" && !result.reusedGrant) {
-    const preparation = (await adapters.handoff.read({ request, tracker, current })).preparation;
-    result.questions = preparation.questions;
-    if (approval === null) {
+  if (!result.reusedGrant) {
+    // A fresh Run records its one Grant here: what the Run is authorized to do and the exact package its
+    // host runs from. The planning handoff's own approvals are already subtracted by the preparation
+    // reduction, so a handoff that approved every declared operation is never asked again and its Grant
+    // carries no approvals member rather than an empty one.
+    const approvalGap = ready.state !== "READY" && ready.reasonCode === "run_preparation_pending";
+    const preparation = approvalGap
+      ? (await adapters.handoff.read({ request, tracker, current })).preparation
+      : null;
+    const questions = Array.isArray(preparation?.questions) ? preparation.questions : [];
+    if (questions.length > 0) result.questions = questions;
+    if (approvalGap && questions.length > 0 && approval === null) {
       return { ...result, outcome: "APPROVAL_REQUIRED" };
     }
-    const version = selectWorkflowVersion({ cacheDirectory });
-    if (version.state !== "AVAILABLE") throw new Error(`Workflow version is ${version.state}: ${version.reason}`);
-    const writer = store.acquireWriter(runId);
-    try {
-      writer.append({
-        type: "grant.recorded",
-        at: new Date().toISOString(),
-        runIdentity: current.runIdentity,
-        maxParallel: RUN_ENTRY_MAX_PARALLEL,
-        workflowVersion: version.version,
-        approvals: preparation.questions.map((question) => ({ ...question, authority: approval })),
-      });
-    } finally {
-      writer.release();
+    // Only a READY Run, or the human's approval of the questions this entry owns, authorizes the one
+    // Grant. Every other non-READY answer — a producer's retry, an ambiguous target, a planning-owned
+    // Manual prerequisite — stays that owner's, so nothing is written.
+    if (ready.state === "READY" || (approvalGap && questions.length > 0)) {
+      if (selection.state !== "AVAILABLE") throw new Error(`Workflow version is ${selection.state}: ${selection.reason}`);
+      const writer = store.acquireWriter(runId);
+      try {
+        writer.append({
+          type: "grant.recorded",
+          at: new Date().toISOString(),
+          runIdentity: current.runIdentity,
+          maxParallel: RUN_ENTRY_MAX_PARALLEL,
+          workflowVersion: selectedVersion,
+          ...(questions.length === 0
+            ? {}
+            : { approvals: questions.map((question) => ({ ...question, authority: approval })) }),
+        });
+      } finally {
+        writer.release();
+      }
+      journal = store.readEvents(runId);
+      current = await adapters.reconcile({ request: { specId, runIdentity: current.runIdentity }, tracker, journal });
+      ready = reduceRunReadyHandoff(await adapters.handoff.read({ request, tracker, current }));
+      result.recordedGrant = { approvedActions: questions.map(({ action }) => action) };
+      result.ready = { state: ready.state, reasonCode: ready.reasonCode, nextOwner: ready.nextOwner };
     }
-    journal = store.readEvents(runId);
-    current = await adapters.reconcile({ request: { specId, runIdentity: current.runIdentity }, tracker, journal });
-    ready = reduceRunReadyHandoff(await adapters.handoff.read({ request, tracker, current }));
-    result.recordedGrant = { approvedActions: preparation.questions.map(({ action }) => action) };
-    result.ready = { state: ready.state, reasonCode: ready.reasonCode, nextOwner: ready.nextOwner };
   }
 
   if (ready.state !== "READY") {
