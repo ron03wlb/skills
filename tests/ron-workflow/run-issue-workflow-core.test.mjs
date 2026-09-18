@@ -625,6 +625,50 @@ test("Run-ready handoff consumes the current to-spec publication receipt", () =>
   assert.equal(result.observed.handoffPublicationIdentity, "tracker-version:31");
 });
 
+test("Run-ready handoff accepts a current to-spec binding that carries its own scope identity", () => {
+  // Issue 129: the selected authority publishes its approved body's raw digest, while a producer's own
+  // checkpoint binding carries the scope identity that producer derived from the title, body,
+  // classification and ready label together. They are not the same quantity, so comparing them rejected
+  // every current Single-Issue publication before dispatch. The completed transaction still binds scope.
+  const input = currentSingleRunReadyFacts();
+  input.checkpoint.bindings.approvedScopeIdentity = `sha256:${"7".repeat(64)}`;
+  input.checkpoint.approvedScopeHash = input.checkpoint.bindings.approvedScopeIdentity;
+
+  const result = reduceRunReadyHandoff(input);
+
+  assert.notEqual(input.checkpoint.approvedScopeHash, input.authority.approvedScopeHash);
+  assert.equal(result.state, "READY");
+  assert.equal(result.reasonCode, null);
+  assert.equal(result.nextOwner, "run-issue-workflow");
+});
+
+test("Run-ready handoff still refuses a completed checkpoint or handoff that drifts from selected authority", () => {
+  const checkpointSeal = currentSingleRunReadyFacts();
+  checkpointSeal.checkpoint.planningSeal = "d".repeat(40);
+
+  const bindingSeal = currentSingleRunReadyFacts();
+  bindingSeal.checkpoint.bindings.planningSeal = "d".repeat(40);
+
+  const bindingClassification = currentSingleRunReadyFacts();
+  bindingClassification.checkpoint.bindings.classification = "MULTI";
+
+  const handoffScope = currentSingleRunReadyFacts();
+  handoffScope.handoff.approvedScopeHash = `sha256:${"9".repeat(64)}`;
+
+  const missingLaneIdentity = currentSingleRunReadyFacts();
+  missingLaneIdentity.checkpoint.handoffIdentity = "";
+
+  const multiWithoutUpstream = currentMultiRunReadyFacts();
+  delete multiWithoutUpstream.checkpoint.bindings.upstream;
+
+  for (const input of [checkpointSeal, bindingSeal, bindingClassification, handoffScope, missingLaneIdentity, multiWithoutUpstream]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, "producer_handoff_identity_conflict");
+    assert.equal(result.nextOwner, "human");
+  }
+});
+
 test("Run-ready handoff rejects a current to-spec handoff that drifts from its transaction or publication", () => {
   const changedTransaction = currentSingleRunReadyFacts();
   changedTransaction.handoff.transactionIdentity = `sha256:${"9".repeat(64)}`;
