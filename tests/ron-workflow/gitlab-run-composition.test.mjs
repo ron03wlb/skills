@@ -1,11 +1,12 @@
-// The GitLab Tracker Run sources (Issue 126, AC-1 through AC-5).
+// The GitLab Tracker Run sources (Issue 126, AC-1 through AC-5 and AC-8).
 //
 // A configured GitLab project must answer the same owning-source surface the GitHub composition answers,
 // derive the same Run facts, and keep the provider-neutral facts in the existing Run store. These tests
 // drive the sibling composition over a real Git repository and a configured
 // `docs/agents/gitlab-producer.json` binding, with the `glab` transport injected, and compare the facts it
 // derives against the facts the GitHub composition derives for the structurally identical fixture: one
-// Single-Issue and one Multi-Issue Spec whose dependant is gated behind a blocker.
+// Single-Issue and one Multi-Issue Spec whose dependant is gated behind a blocker. One test drives the
+// same composed read through the real `createGlabTransport` with only its process boundary injected.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -16,6 +17,7 @@ import test from "node:test";
 
 import { createRunAuthorityAdapters } from "../../skills/personal/run-issue-workflow/scripts/delivery-authority.mjs";
 import { createGitHubWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-sources.mjs";
+import { createGlabTransport } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-transport.mjs";
 import { createGitLabWorkflowSources } from "../../skills/personal/run-issue-workflow/scripts/gitlab-workflow-sources.mjs";
 import { bodyDigest, renderWorkflowRecord } from "../../skills/personal/run-issue-workflow/scripts/gitlab-workflow-records.mjs";
 import { planNativeRound } from "../../skills/personal/run-issue-workflow/scripts/native-round-loop.mjs";
@@ -76,7 +78,7 @@ const buildInstallation = (cacheDirectory) => {
 // dependant gated by the published body graph. The child bodies are byte-identical across the two
 // fixtures — the canonical `## Parent` cell that stands in for a native hierarchy link is inert for the
 // GitHub composition — so the derived facts can be compared fact for fact.
-const fixture = async (t, { tracker, classification = "MULTI" }) => {
+const fixture = async (t, { tracker, classification = "MULTI", realTransport = false }) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), `run-sources-${tracker}-`)));
   const repository = join(root, "repo");
   const agentRoot = join(root, "agent");
@@ -247,7 +249,7 @@ const fixture = async (t, { tracker, classification = "MULTI" }) => {
     const number = Number(url.searchParams.get("page") ?? 1);
     return rows.slice((number - 1) * 100, number * 100);
   };
-  const transport = async ({ method = "GET", path }) => {
+  const route = async ({ method = "GET", path }) => {
     calls.push({ method, path });
     if (method !== "GET") {
       writes.push({ method, path });
@@ -273,6 +275,30 @@ const fixture = async (t, { tracker, classification = "MULTI" }) => {
     if (issueRoute) return gitLabRow(Number(issueRoute[1]));
     throw new Error(`Unexpected fixture request ${method} ${path}`);
   };
+  // `glab api --include` prints exactly one HTTP envelope on stdout, so the only thing a fixture may
+  // replace is the process that runs it. With `realTransport` the composition reads through the real
+  // `createGlabTransport` — its request construction, absolute endpoint, preserved protocol and envelope
+  // parsing — with nothing but that process boundary injected (AC-8).
+  const glabInvocations = [];
+  const execute = async (command, args, options) => {
+    glabInvocations.push({ command, args, options });
+    const method = args[args.indexOf("--method") + 1];
+    const endpoint = new URL(args[args.indexOf("--method") + 2]);
+    const body = options.input === undefined ? undefined : JSON.parse(options.input);
+    try {
+      const answer = await route({ method, path: `${endpoint.pathname.replace(/^\/api\/v4/u, "")}${endpoint.search}`, body });
+      return `HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n${JSON.stringify(answer)}`;
+    } catch {
+      return "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\n\r\n{\"message\":\"404 Not Found\"}";
+    }
+  };
+  const transport = realTransport
+    ? createGlabTransport({
+      repository,
+      configuration: { schema: "gitlab-producer:v1", baseUrl: BASE_URL, project: PROJECT },
+      execute,
+    })
+    : route;
 
   const commandRunner = (name, args, options) => {
     if (name !== "gh") return runWorkflowCommand(name, args, options);
@@ -335,6 +361,7 @@ const fixture = async (t, { tracker, classification = "MULTI" }) => {
     approvedScopeHash,
     calls,
     writes,
+    glabInvocations,
     decomposition,
     readyStateReadBack,
     identities: { publication: publicationIdentity, decomposition: decompositionIdentity, handoff: handoffIdentity },
@@ -636,4 +663,50 @@ test("the same Start command reaches READY on a bound GitLab repository", async 
   assert.equal(grants[0].workflowVersion.id, f.version.id);
   assert.equal(started.plan.maxParallel, 3);
   assert.deepEqual(f.writes, [], "Start performs no tracker mutation");
+});
+
+// ---------------------------------------------------------------------------------------------
+// AC-8 — the composed read through the real transport, only its process boundary injected
+// ---------------------------------------------------------------------------------------------
+
+test("the composed GitLab read drives the real glab transport with only its process boundary injected", async (t) => {
+  const f = await fixture(t, { tracker: "gitlab", realTransport: true });
+  const tracker = await f.sources.sources.tracker.read(f.request);
+  assert.equal(tracker.spec.node_id, f.specId);
+  assert.equal(tracker.authority.classification, "MULTI");
+
+  // The real request construction: every read is one `glab api` invocation against the configured
+  // origin's absolute `/api/v4` endpoint, with the host pinned and the protocol preserved.
+  assert.ok(f.glabInvocations.length > 0, "the composed read performs real transport invocations");
+  for (const invocation of f.glabInvocations) {
+    assert.equal(invocation.command, "glab");
+    assert.equal(invocation.args[0], "api");
+    assert.equal(invocation.args[invocation.args.indexOf("--hostname") + 1], HOST);
+    assert.equal(invocation.args[invocation.args.indexOf("--method") + 1], "GET");
+    assert.equal(invocation.args.includes("--include"), true);
+    const endpoint = new URL(invocation.args[invocation.args.indexOf("--method") + 2]);
+    assert.equal(endpoint.origin, BASE_URL, "the endpoint binds the configured protocol and port");
+    const endpointPath = endpoint.pathname;
+    // Every read is bounded to the configured project, or to the authenticated identity that proves it.
+    assert.ok(endpointPath.startsWith(`/api/v4/projects/${encodeURIComponent(PROJECT)}`)
+      || endpointPath.startsWith(`/api/v4/projects/${PROJECT_ID}/`)
+      || endpointPath === "/api/v4/user", endpointPath);
+    assert.equal(invocation.options.env.GITLAB_API_PROTOCOL, "https");
+  }
+  // The composition's own reads — the note list, each accepted record's note re-read and the author's
+  // project membership — arrive through it, and the composed read still mutates nothing.
+  assert.ok(f.calls.some((call) => /\/issues\/\d+\/notes\?/u.test(call.path)), "the note list is read through it");
+  assert.ok(f.calls.some((call) => /\/issues\/\d+\/notes\/\d+$/u.test(call.path)), "each accepted note is re-read through it");
+  assert.ok(f.calls.some((call) => /members\/all\//u.test(call.path)), "record author membership is read through it");
+  assert.deepEqual(f.writes, [], "the composed read writes nothing");
+
+  // Response-envelope and error mapping: a rejected native response is REJECTED through the
+  // composition's own read, never an unresolved or successful read, and the provider body stays out.
+  await assert.rejects(() => f.sources.sources.tracker.read({ specId: `${PROJECT_URL}/-/issues/99` }), (error) => {
+    assert.equal(error.code, "GITLAB_PRODUCER_TRANSPORT");
+    assert.equal(error.httpStatus, 404);
+    assert.equal(error.outcome, "REJECTED");
+    assert.equal(error.message.includes("404 Not Found"), false, "a provider body never leaks into the mapped error");
+    return true;
+  });
 });
