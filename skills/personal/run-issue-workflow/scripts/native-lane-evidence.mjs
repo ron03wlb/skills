@@ -14,7 +14,7 @@
 // note all report `UNKNOWN` with the owning source named, which is the stop the lane planner needs
 // instead of a guessed owner.
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 
 import { LANE_STATES } from "./issue-lane.mjs";
 import { parseHostDispatchId } from "./pi-workflow-host.mjs";
@@ -44,6 +44,30 @@ export const NATIVE_RUN_LIVENESS = Object.freeze({
   interrupted: Object.freeze({ lane: "INACTIVE", terminal: true, settled: false }),
 });
 const UNKNOWN_LIVENESS = Object.freeze({ lane: "UNKNOWN", terminal: false, settled: false });
+
+// A native launcher that owns its own run ids records its own lifecycle vocabulary. Each alias below is
+// the harness's own name for one of the statuses above; an unlisted name proves nothing and stays
+// UNKNOWN rather than being guessed into a live or settled lane.
+export const NATIVE_RUN_STATE_ALIASES = Object.freeze({
+  pending: "queued",
+  queued: "queued",
+  running: "running",
+  complete: "completed",
+  completed: "completed",
+  partial: "partial",
+  failed: "failed",
+  cancelled: "stopped",
+  canceled: "stopped",
+  stopped: "stopped",
+  interrupted: "interrupted",
+});
+// The record file a launcher that does not write the pi-workflow task record publishes instead, and the
+// process proof its own artifact set carries once the launched process has closed.
+const NATIVE_STATUS_FILE = "status.json";
+const NATIVE_PROCESS_TERMINAL_FILE = "process-terminal.json";
+const isoOf = (value) => (typeof value === "number" && Number.isFinite(value)
+  ? new Date(value).toISOString()
+  : textOf(value));
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isText = (value) => typeof value === "string" && value.length > 0;
@@ -142,10 +166,15 @@ export function readSubagentRunRecord({
   }
   const cwd = textOf(pointer.cwd);
   const runsDir = textOf(pointer.runsDir);
+  // A launcher that publishes the pointer owns the mapping from the recorded lane reference to the run
+  // directory its harness created, so the pointer may name that directory explicitly and may point at an
+  // absolute run root outside the project checkout.
+  const recordDir = textOf(pointer.recordDir) ?? runId;
   const base = {
     schema: SUBAGENT_RUN_RECORD_SCHEMA,
     runId,
     correlationId: textOf(pointer.correlationId),
+    nativeRunId: textOf(pointer.nativeRunId),
     cwd,
     runsDir,
     updatedAt: textOf(pointer.updatedAt),
@@ -153,8 +182,61 @@ export function readSubagentRunRecord({
   if (cwd === null || runsDir === null) {
     return unreadableRun(runId, [`The native subagent run record pointer at ${pointerPath} names no run directory.`]);
   }
-  const recordPath = join(cwd, runsDir, runId, "run.json");
-  const record = exists(recordPath) ? readJson(readFile, recordPath) : null;
+  const laneDirectory = isAbsolute(runsDir) ? join(runsDir, recordDir) : join(cwd, runsDir, recordDir);
+  const taskRecordPath = join(laneDirectory, "run.json");
+  if (!exists(taskRecordPath)) {
+    // A harness that keeps its own lifecycle record instead of a pi-workflow task record: the pointer
+    // still proves the lane was materialized, and only that harness's own record decides liveness.
+    const nativePath = join(laneDirectory, NATIVE_STATUS_FILE);
+    const native = exists(nativePath) ? readJson(readFile, nativePath) : null;
+    if (native === null) {
+      return Object.freeze({
+        ...base,
+        state: "PRESENT",
+        status: null,
+        failureKind: null,
+        worktreePath: null,
+        heartbeatAt: null,
+        laneState: "UNKNOWN",
+        terminal: false,
+        settled: false,
+        evidence: Object.freeze([`Subagent run ${runId} publishes no readable record at ${nativePath}.`]),
+      });
+    }
+    const nativeState = textOf(native.state) ?? textOf(native.status);
+    const status = NATIVE_RUN_STATE_ALIASES[nativeState] ?? null;
+    const liveness = NATIVE_RUN_LIVENESS[status] ?? UNKNOWN_LIVENESS;
+    const processPath = join(laneDirectory, NATIVE_PROCESS_TERMINAL_FILE);
+    const process = exists(processPath) ? readJson(readFile, processPath) : null;
+    const closedInstances = Array.isArray(process?.instances)
+      ? process.instances.filter((instance) => instance?.closeObservedAt !== undefined && instance?.closeObservedAt !== null)
+      : [];
+    const processObserved = process?.state === "observed" && closedInstances.length > 0;
+    return Object.freeze({
+      ...base,
+      state: "PRESENT",
+      status,
+      failureKind: textOf(native.failureKind),
+      // The native record's `cwd` is the directory the launcher ran in, not the lane's own Issue
+      // worktree, so it is never reported as one.
+      worktreePath: null,
+      heartbeatAt: isoOf(native.lastActivityAt),
+      laneState: liveness.lane,
+      terminal: liveness.terminal,
+      // A settled lane additionally requires the launcher's own process proof, so a record that claims
+      // completion while its process is still open cannot settle closeout.
+      settled: liveness.settled && processObserved,
+      evidence: Object.freeze([
+        `Subagent run ${runId} records harness state ${nativeState ?? "unknown"} as status ${status ?? "unknown"}.`,
+        ...(status === null ? [`Subagent run ${runId} records an unrecognised harness state ${String(nativeState)}.`] : []),
+        ...(liveness.settled && !processObserved
+          ? [`Subagent run ${runId} records completion without a closed-process proof at ${processPath}.`]
+          : []),
+        ...(closedInstances.length === 0 ? [] : [`Subagent run ${runId} observed process close with exit code ${String(closedInstances[0].exitCode ?? "unknown")}.`]),
+      ]),
+    });
+  }
+  const record = readJson(readFile, taskRecordPath);
   if (record === null) {
     return Object.freeze({
       ...base,
@@ -166,7 +248,7 @@ export function readSubagentRunRecord({
       laneState: "UNKNOWN",
       terminal: false,
       settled: false,
-      evidence: Object.freeze([`Subagent run ${runId} publishes no readable record at ${recordPath}.`]),
+      evidence: Object.freeze([`Subagent run ${runId} publishes no readable record at ${taskRecordPath}.`]),
     });
   }
   const status = textOf(record.status);

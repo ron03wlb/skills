@@ -229,13 +229,19 @@ export function reduceRunReadyHandoff(input) {
       nextOwner: authority.classification === "SINGLE" ? "to-spec" : "to-tickets", noAutomaticTransition: "Known missing preparation belongs to the planning owner before starting this Run.",
       recoveryPredicates: ["planning_preparation_is_ready"] });
   }
+  // Scope binding. The selected authority publishes the approved body's raw digest, while a producer's
+  // own checkpoint binding carries the scope identity that producer derived from the title, body,
+  // classification and ready label together; the two are not the same quantity, so comparing them
+  // rejected every current Single-Issue publication before dispatch (Issue 129). The scope is instead
+  // bound through the completed transaction: this checkpoint's producer, Spec, target, planning seal,
+  // classification, transaction identity and baseline, its handoff identity, and the handoff record's own
+  // exact match with the selected authority's approved scope below.
   const expectedProducer = authority.classification === "SINGLE" ? "to-spec" : "to-tickets";
   const checkpointOwnsBaseScope = checkpoint.producerCommand === expectedProducer
     && checkpoint.specId === authority.specId
     && checkpoint.target === authority.target
     && checkpoint.planningSeal === authority.planningSeal
     && checkpoint.classification === authority.classification
-    && checkpoint.approvedScopeHash === authority.approvedScopeHash
     && isText(checkpoint.transactionIdentity)
     && gitObjectPattern.test(checkpoint.baseline);
   const currentProfile = checkpoint.profileVersion === "v2";
@@ -243,7 +249,6 @@ export function reduceRunReadyHandoff(input) {
     || checkpoint.profileVersion === null
     || checkpoint.profileVersion === "v1";
   const currentBindingsOwnScope = isRecord(checkpoint.bindings)
-    && checkpoint.bindings.approvedScopeIdentity === authority.approvedScopeHash
     && checkpoint.bindings.classification === authority.classification
     && checkpoint.bindings.planningSeal === authority.planningSeal
     && (authority.classification === "SINGLE"
