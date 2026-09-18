@@ -3411,11 +3411,13 @@ test("delivery host is explicit personal only", () => {
   assert.match(metadata, /^\s*allow_implicit_invocation:\s*false$/mu);
   assert.match(skill, /READY.*INCOMPLETE.*UNKNOWN/isu);
   assert.match(skill, /Pause.*Resume.*Stop/isu);
-  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*READY.*pi-workflow host.*compact task outcomes.*bounded recovery\/writer waits/isu);
+  assert.match(read("skills/personal/README.md"), /\[run-issue-workflow\]\(\.\/run-issue-workflow\/SKILL\.md\).*READY.*one delivery authority.*native lane per authorized action.*compact task outcomes.*bounded recovery\/writer waits/isu);
+  assert.doesNotMatch(read("skills/personal/README.md"), /pi-workflow host/iu);
   assert.match(skillEntry, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skillEntry, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
   assert.match(skillEntry, /DAG Run Grant.*`max_parallel`.*default three/isu);
-  assert.match(skillEntry, /pi-workflow bundle.*`workflows\/deliver-tracker-spec\/`/isu);
+  assert.match(skillEntry, /Domain action reducer fixes every legal action.*per-Run journal owns grants.*one native subagent lane per authorized action.*no single materialization is required/isu);
+  assert.doesNotMatch(skillEntry, /pi-workflow bundle/u);
   assert.match(skillEntry, /Read \[the delivery host contract\]\(references\/delivery-host\.md\) only when/isu);
   assert.match(skillEntry, /`pi-workflow-host\.mjs` plans exactly the legal actions the Domain action reducer returns/isu);
   assert.match(skillEntry, /Each executable Issue owns one lane.*isolated worker.*dedicated Issue worktree/isu);
@@ -3471,6 +3473,17 @@ test("delivery host is explicit personal only", () => {
 
   assert.match(read("CONTEXT.md"), /DAG run state.*`RECONCILING`.*`RUNNING`.*`WAITING_FOR_REPOSITORY_CLOSE_LEASE`.*`WAITING_FOR_TARGET_WRITER`.*`PAUSING`.*`PAUSED`.*`BLOCKED`.*`STOPPING`.*`STOPPED`.*`SUCCEEDED`/isu);
   assert.match(read("CONTEXT.md"), /real `close-issue` leaf alone acquires the repository close lease and then.*Target mutation serialization.*coordinator observes both.*never acquires, releases, reclaims, or delegates/isu);
+
+  // ADR-0080 separates the delivery authority from its execution material: the glossary names the
+  // authority layer and a replaceable materialization, and no single materialization is required.
+  const deliveryHostEntry = read("CONTEXT.md").match(/\*\*Delivery workflow host\*\*:\n([^\n]+)\n/u)?.[1] ?? "";
+  assert.match(deliveryHostEntry, /authority that decides.*replaceable material that performs.*Domain action reducer.*per-Run journal.*native subagent lane.*optional materialization/isu);
+  assert.doesNotMatch(deliveryHostEntry, /^The pi-workflow run/u);
+  assert.match(read("CONTEXT.md"), /\*\*Domain action reducer\*\*:[^\n]*\n[^\n]*Delivery workflow host\*\*'s execution material carries out/isu);
+  const deliveryHostContract = read("skills/personal/run-issue-workflow/references/delivery-host.md");
+  assert.match(deliveryHostContract, /authority layer that decides and replaceable execution material that performs/isu);
+  assert.match(deliveryHostContract, /one native subagent\s+lane per authorized action/isu);
+  assert.match(deliveryHostContract, /## Optional materialization: the `pi-workflow` bundle[\s\S]*never a requirement/isu);
   assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*repository-close or target-writer wait starts and settlements/isu);
 
   for (const name of ["status-succeeded", "status-diagnosed", "status-waiting"]) {

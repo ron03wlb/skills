@@ -1,17 +1,139 @@
 # Delivery host contract
 
-`/run-issue-workflow <Spec-ID>` remains the sole Start and re-entry authority. Its delivery host is the
-pi-workflow bundle whose launch spec `deliver-tracker-spec.json` sits at this skill package's root and whose
-stage controller lives in `workflows/deliver-tracker-spec/`. The bundle owns
-scheduling facts and durable run records only: it never decides scope, grants, budgets, retries, repair
-routing, close eligibility, or stop classification.
+`/run-issue-workflow <Spec-ID>` remains the sole Start and re-entry authority. Its delivery host is split
+into an authority layer that decides and replaceable execution material that performs: execution material
+owns the Run's scheduling, durable task records, and Issue worker lifecycle only as the authority layer
+authorizes, and no single materialization is required. The delivery path materializes one native subagent
+lane per authorized action, and the `pi-workflow` bundle stays one optional materialization of the same
+facts.
 
-This contract owns reducer-action materialization on the pi-workflow substrate. The Codex-native
-coordinator was removed with the host boundary in Issue 102; [the coordinator lifecycle](coordinator-lifecycle.md)
-keeps only its retired compact-outcome and no-repair boundaries for historical reconciliation. This page
-governs the delivery host everywhere the two once overlapped.
+This contract owns reducer-action materialization. The Codex-native coordinator was removed with the host
+boundary in Issue 102; [the coordinator lifecycle](coordinator-lifecycle.md) keeps only its retired
+compact-outcome and no-repair boundaries for historical reconciliation. This page governs the delivery
+host everywhere the two once overlapped.
 
-## Bundle
+## The authority layer
+
+The authority layer decides every legal action and owns every authority fact:
+
+- The **Domain action reducer** computes the one legal action set from reconciled tracker, Git, worktree,
+  completion, and journal evidence. It never invents, reorders, or reclassifies an action, and no
+  materialization substitutes a decision the reducer did not return.
+- The per-Run journal owns grants, control revisions, dispatch-attempt references, execution budgets,
+  bounded-remediation records, closeout-wait observations, and pause or stop transitions.
+- The **Issue lane** guards own one lane per executable Issue: the tool and prompt scope checks, the
+  recorded dispatch reservation that makes a lost launch response readable, and the supersession draft a
+  replacement carries.
+- The leaves keep their own contracts. `execute-issue` owns its Issue worktree, verification, independent
+  review, and candidate; `close-issue` alone acquires the repository close lease and then the target
+  mutation writer.
+- `scripts/pi-workflow-host.mjs` plans exactly the legal actions the Domain action reducer returns, and
+  `scripts/run-authority-adapters.mjs` reduces the tracker, reconciliation, target, checkpoint, handoff,
+  and writer facts that planning reads. `scripts/issue-lane.mjs` holds the lane decision and its scope
+  checks. None of them replaces a leaf contract.
+
+The authority layer invents no delivery budget. `max_parallel` keeps its preserved default of three, and
+the journal-owned six-hour per-Issue execution budget stays with its owner.
+
+## The execution material
+
+Execution material is replaceable. On the delivery path it is one native subagent lane per authorized
+action: one isolated `worker` child in its own managed Issue worktree, whose prompt invokes exactly one
+contract skill. Every materialization carries the same obligations:
+
+- Journal the dispatch reservation before the lane exists, so a lost launch response reads the lane back
+  instead of creating a second one.
+- Derive lane liveness and completion from the lane's own run record, the tracker completion note, and Git
+  state. A materialization whose only delivery evidence is a raw artifact publication is not lane
+  evidence.
+- Materialize only the actions the reducer returned, each with a deterministic id, so a resumed Run
+  re-issues a recorded operation rather than dispatching a second one.
+- Hand every fact it does not own back to its owner instead of guessing it, and never decide scope,
+  grants, budgets, retries, repair routing, close eligibility, or stop classification.
+
+Materialization adds no budget of its own: it never restates the journal-owned six-hour per-Issue budget
+as its own wall-clock cap, so healthy close contention may still exceed twelve hours. It must also be
+able to settle a mutation-capable lane in its own managed worktree, because a lane that finishes its work
+without a settled terminal outcome can never be closed; readiness reads that capability as a required
+surface (`scripts/lane-settlement-capability.mjs`).
+
+## The Issue lane
+
+One executable Issue owns exactly one lane: one isolated worker and one dedicated Issue worktree. Every
+lane runs in its own managed worktree, so the shared checkout stays read-only apart from ordinary
+worktree registration.
+
+The lane's worker is the agent shipped here as `agents/worker.md`. A materialization resolves that worker
+from the roots its own harness searches and proves the resolution before it materializes any lane, so a
+delivery repository or user agent root must provide the definition. An unresolved worker stops with
+`lane_agent_unresolved`, naming the roots searched and this canonical source.
+
+For each planned lane the authority layer decides exactly one action from the observed lane evidence:
+
+| Observed lane | Decision |
+| --- | --- |
+| none, no creation intent | `CREATE` — an implementation lane journals its dispatch reservation before native delivery |
+| none, a reserved creation intent | stop `creation_intent_unresolved` — a lost response is read back, never re-created |
+| one `RESUMABLE` lane at this attempt, journaled | `REUSE` — the recorded request is the reservation; an unjournaled re-use stops |
+| one `RESUMABLE` lane one attempt behind | `RESUME` — the retry is accounted with `replacement: null` and the same lane is resumed |
+| one `ACTIVE` lane | `OBSERVE` — an active lane is never re-dispatched or replaced |
+| one `INACTIVE` lane with exact inactive evidence | `REPLACE` — the supersession link is journaled first |
+| one `INACTIVE` lane without evidence or without a prior attempt, one `UNKNOWN` lane, one lane that cannot account the planned attempt, or two observed lanes | stop |
+
+Every new implementation lane journals one `dispatch.recorded` attempt reference before the worker
+exists, so a lost creation response, a restart, or a retry cannot produce a second lane and no attempt
+goes uncounted. A transient retry journals `retry.recorded` with `replacement: null` and a
+`dispatch.recorded` for the same lane, and the same lane is resumed rather than re-dispatched. A
+replacement carries a `retry.recorded` supersession link whose authorized task reference is exactly the
+lane the materialization then launches. A close lane owns close authority rather than a dispatch attempt,
+so it carries no new dispatch reservation.
+
+A lane's tools are always a subset of the declared ceiling and of the ceiling its agent definition
+declares for itself. Its prompt invokes exactly one contract skill — an implementation lane never
+closes, and a close lane never implements — so no worker can grant itself scope, a DAG Run Grant, or
+close authority.
+
+## One lane per authorized action
+
+Each legal action from the reducer becomes exactly one lane with a deterministic id, so a resumed Run
+re-issues a recorded operation rather than dispatching a second one:
+
+| Reducer action | Materialization |
+| --- | --- |
+| `dispatch_issue`, `recover_issue`, `repair_issue`, `upgrade_issue` | one native lane whose worker follows `execute-issue` |
+| `close_issue`, `close_parent` | one native lane whose worker follows `close-issue` |
+| `wait_repository_close_lease`, `wait_target_writer` | an authority-side bounded wait on the reducer's own `timeoutMs`, attributed to the reducer's own lease owner and consuming no lane |
+| `settle_pause`, `settle_stop` | a domain-owned `pause.transitioned` / `stop.transitioned` journal append |
+| `reconcile_run`, `remediate_environment` | handed back to the entry as `pendingOperations`; execution material has no reconciliation or environment adapter and does not invent one |
+
+A lane's tools are always a subset of the declared ceiling, and no lane borrows authority from its agent
+name alone.
+
+An empty action set is not by itself a failure. When the reducer has classified the Run as paused,
+stopping, idle, or terminated it returns no action, and materialization launches nothing. A Run the
+reducer classifies `BLOCKED` with no legal action stops with reason `blocked_run` — unless blocked-run
+convergence has just decided `CONTINUE_SAME_RUN`, in which case the same Run resumes its recorded
+operations and launches no new lane.
+
+Materialization stops and launches nothing when the reducer returns a contradictory action set,
+when an action cannot be materialized, when a re-issued operation changed its recorded request shape or
+its recorded order, when a settled operation recurs, when a newer dispatch would bypass an unsettled
+recorded attempt, or when a dispatch attempt is not accounted by the journal. It never escapes a
+contradiction by opening a second run, and the re-issue proof only governs materialization that actually
+performs something: an empty or refused action set launches nothing.
+
+## Optional materialization: the `pi-workflow` bundle
+
+`@gwab/pi-workflow` is one optional materialization of these same facts, never a requirement. ADR-0080
+retired it from the delivery path because `@gwab/pi-workflow@0.13.8` could not settle a mutation-capable
+managed-worktree lane — `establishRawOwner` requires `realpath(task.cwd) === project` while its worktree
+module makes the worktree `task.cwd` and its dynamic generated-task runtime forces that worktree for any
+non-read-only capability — so an implemented, verified, committed Issue could still never settle, and
+[Agwab/pi-workflow#16](https://github.com/AgwaB/pi-workflow/issues/16) records the defect
+(`docs/agents/pi-workflow-fit-evidence.md`, AC-2). It may be re-adopted without changing the journal,
+the reducer, or the Grant. While a repository still selects it, this section describes its transport.
+
+### Bundle
 
 - `deliver-tracker-spec.json` — one `dynamic` stage with `uses:
   "./workflows/deliver-tracker-spec/helpers/controller.mjs"` and an explicit read/write policy:
@@ -34,6 +156,12 @@ governs the delivery host everywhere the two once overlapped.
 - `scripts/issue-lane.mjs` (beside this bundle) — the one-lane-per-Issue decision, the tool and prompt
   scope checks, and the supersession draft a replacement carries.
 
+This bundle materializes its lanes through `defaults.worktreePolicy: "on"` and the agent named by
+`defaults.agent` (shipped here as `agents/worker.md`). pi-workflow resolves a generated agent name only
+from the project `.pi/agents/` directory, the user agent root, or its own bundled agents, so the
+controller proves resolution before it materializes any lane and otherwise stops with
+`lane_agent_unresolved`, naming both roots and this canonical source.
+
 Validate and launch by path:
 
 ```text
@@ -50,44 +178,7 @@ names `./workflows/deliver-tracker-spec/helpers/controller.mjs`. The enforced im
 "nobody else may import the entry": production modules of this package may import `delivery-authority.mjs`,
 but they may not import one of the owner modules inside its closure directly.
 
-## The Issue lane
-
-One executable Issue owns exactly one lane: one isolated worker and one dedicated Issue worktree. The
-bundle declares `defaults.worktreePolicy: "on"`, so every generated lane task runs in its own managed
-worktree, and the shared checkout stays read-only apart from ordinary worktree registration.
-
-The lane's worker is the agent named by `defaults.agent` (shipped here as `agents/worker.md`). pi-workflow
-resolves a generated agent name only from the project `.pi/agents/` directory, the user agent root, or
-its own bundled agents, so a delivery repository or user agent root must provide that definition. The
-controller proves resolution before it materializes any lane and otherwise stops with
-`lane_agent_unresolved`, naming both roots and this canonical source.
-
-For each planned lane the domain half decides exactly one action from the observed lane evidence:
-
-| Observed lane | Decision |
-| --- | --- |
-| none, no creation intent | `CREATE` — an implementation lane journals its dispatch reservation before native delivery |
-| none, a reserved creation intent | stop `creation_intent_unresolved` — a lost response is read back, never re-created |
-| one `RESUMABLE` lane at this attempt, journaled | `REUSE` — the recorded request is the reservation; an unjournaled re-use stops |
-| one `RESUMABLE` lane one attempt behind | `RESUME` — the retry is accounted with `replacement: null` and the same lane is resumed |
-| one `ACTIVE` lane | `OBSERVE` — an active lane is never re-dispatched or replaced |
-| one `INACTIVE` lane with exact inactive evidence | `REPLACE` — the supersession link is journaled first |
-| one `INACTIVE` lane without evidence or without a prior attempt, one `UNKNOWN` lane, one lane that cannot account the planned attempt, or two observed lanes | stop |
-
-Every new implementation lane journals one `dispatch.recorded` attempt reference before the worker
-exists, so a lost creation response, a restart, or a retry cannot produce a second lane and no attempt
-goes uncounted. A transient retry journals `retry.recorded` with `replacement: null` and a
-`dispatch.recorded` for the same lane, and the host run is resumed rather than re-dispatched. A
-replacement carries a `retry.recorded` supersession link whose authorized task reference is exactly the
-lane the host then materializes. A close lane owns close authority rather than a dispatch attempt, so it
-carries no new dispatch reservation.
-
-A lane's tools are always a subset of the declared ceiling and of the ceiling its agent definition
-declares for itself. Its prompt invokes exactly one contract skill — an implementation lane never
-closes, and a close lane never implements — so no worker can grant itself scope, a DAG Run Grant, or
-close authority.
-
-## One round
+### One round
 
 The runtime task is one JSON object:
 
@@ -125,36 +216,7 @@ materialized lanes, `idle` when the round has no legal action, `terminal` for a 
 `blocked` with a `stopCode` when a domain owner refused the round. The entry performs every item in
 `control.pendingOperations` before the next round; the projection is never authority.
 
-## The reducer owns the actions
-
-Each legal action from the reducer becomes exactly one materialization with a deterministic id, so a
-resumed host run re-issues a recorded operation rather than dispatching a second one:
-
-| Reducer action | Materialization |
-| --- | --- |
-| `dispatch_issue`, `recover_issue`, `repair_issue`, `upgrade_issue` | one generated `worker` task that follows `execute-issue` |
-| `close_issue`, `close_parent` | one generated `worker` task that follows `close-issue` |
-| `wait_repository_close_lease`, `wait_target_writer` | a host-side bounded wait on the reducer's own `timeoutMs`, attributed to the reducer's own lease owner and consuming no generated agent |
-| `settle_pause`, `settle_stop` | a domain-owned `pause.transitioned` / `stop.transitioned` journal append |
-| `reconcile_run`, `remediate_environment` | handed back to the entry as `pendingOperations`; the bundle has no reconciliation or environment adapter and does not invent one |
-
-A generated task's tools are always a subset of the declared ceiling, and no lane borrows authority
-from its agent name alone.
-
-An empty action set is not by itself a failure. When the reducer has classified the Run as paused,
-stopping, idle, or terminated it returns no action, and the round reports `idle` or `terminal` and
-dispatches nothing. A Run the reducer classifies `BLOCKED` with no legal action reports `blocked` with
-reason `blocked_run` — unless blocked-run convergence has just decided `CONTINUE_SAME_RUN`, in which
-case the round reports `idle` and the entry resumes the same host run.
-
-The round reports `blocked` and dispatches nothing when the reducer returns a contradictory action set,
-when an action cannot be materialized, when a re-issued operation changed its recorded request shape or
-its recorded order, when a settled operation recurs, when a newer dispatch would bypass an unsettled
-recorded attempt, or when a dispatch attempt is not accounted by the journal. It never escapes a
-contradiction by opening a second host run, and the re-issue proof only governs a round that actually
-materializes something: an idle or blocked round dispatches nothing.
-
-## Blocked-run convergence
+### Blocked-run convergence
 
 When a host run for this Spec and target is no longer terminal, the controller reads it back with
 `helpers/host-runs.mjs` and hands it to the domain half as `blockedHostRun`. A host run is only

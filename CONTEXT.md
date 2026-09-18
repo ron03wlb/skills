@@ -305,11 +305,11 @@ The rule that a skill-contract gap or control-engine defect keeps affected produ
 _Avoid_: Self-modifying run, product-worktree skill repair, silent coordinator patch
 
 **Delivery workflow host**:
-The pi-workflow run that owns one **DAG Run**'s scheduling, durable task records, and Issue worker lifecycle, dispatching and observing only the workers explicitly authorized by that Run's **DAG Run Grant**. It never decides authority, scope, retries, budgets, close eligibility, or stop classification, and **DAG run reconciliation** rebuilds state from owning sources rather than treating the host record as authority.
-_Avoid_: Codex-native coordinator, Orca runtime, standalone Node task client, host record as authority
+The delivery execution owner of one **DAG Run**, layered into the authority that decides and the replaceable material that performs. Its authority layer is `/run-issue-workflow`'s sole Start and re-entry authority, the **Domain action reducer** that fixes every legal action, the per-Run journal that owns grants, budgets, retries, repair waves, and outcomes, and the **Issue lane** guards. Its execution material owns the Run's scheduling, durable task records, and Issue worker lifecycle only as the reducer authorizes, through one native subagent lane in its own managed Issue worktree per authorized action, while a `pi-workflow` bundle stays one optional materialization of those same facts rather than the required scheduler. That material dispatches and observes only the workers the **DAG Run Grant** authorizes and never decides authority, scope, retries, budgets, close eligibility, or stop classification, and **DAG run reconciliation** rebuilds state from owning sources rather than treating a host record as authority.
+_Avoid_: pi-workflow as the required materialization, one required scheduler, Codex-native coordinator, Orca runtime, standalone Node task client, host record as authority
 
 **Domain action reducer**:
-The single deterministic owner of a **DAG Run**'s legal actions, computed from reconciled tracker, Git, worktree, completion, and journal evidence. The **Delivery workflow host** materializes only the actions this reducer returns and never invents, reorders, or reclassifies them.
+The single deterministic owner of a **DAG Run**'s legal actions, computed from reconciled tracker, Git, worktree, completion, and journal evidence. The **Delivery workflow host**'s execution material carries out only the actions this reducer returns and never invents, reorders, or reclassifies them.
 _Avoid_: Host-side scheduler policy, model-decided dispatch, duplicated action planning
 
 **Host liveness boundary**:
