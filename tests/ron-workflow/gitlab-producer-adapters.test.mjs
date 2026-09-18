@@ -365,4 +365,10 @@ test("entry registers accepted documents, writes a seal and completes the same S
   assert.equal(f.writes().length, 3);
   assert.equal(f.git("rev-list", "--count", `${baseline}..HEAD`), "1");
   assert.equal((await invoke("seal-write", request)).planningSeal, seal.planningSeal);
+  // The handoff owner disposes the same registered lane through the entry; its branch survives.
+  assert.deepEqual(await invoke("lane-dispose", lane), { schema: "git-planning-lane-disposal:v1", state: "disposed",
+    lane: { registrationId: lane.registrationId, taskId: lane.taskId, worktree: lane.worktree },
+    registrationAbsent: true, directoryAbsent: true });
+  assert.equal(existsSync(worktree), false);
+  assert.equal((await invoke("lane-dispose", lane)).state, "satisfied");
 });

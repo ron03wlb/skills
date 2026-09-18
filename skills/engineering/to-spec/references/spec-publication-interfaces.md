@@ -1,12 +1,13 @@
 # Spec publication interfaces
 
-Use these repository-configured adapters for a current ordinary Spec publication. Each adapter owns its source and returns a compact read-back receipt; callers compare identities and never reconstruct another adapter's result. Fresh operations use the owner-local `workflow-operation-identity.mjs` module for one versioned operation identity receipt.
+Use these repository-configured adapters for a current ordinary Spec publication. Each adapter owns its source and returns a compact read-back receipt; callers compare identities and never reconstruct another adapter's result. Fresh operations use `workflow-operation-identity.mjs` for one versioned operation identity receipt.
 
 ## Planning adapter
 
 - `planning.readBaseline` calls owner-local `scripts/planning-entry.mjs`'s `readPlanningBaseline({ request, adapter })`. The request binds `repositoryId`, proposed or existing `specId`, `target`, `baseline`, `approvedScopeIdentity`, `trackerVersion` (a reservation version in primary mode), `relevantFacts` keyed by source locator, and explicit `acceptedChanges` entries with repository-relative `path` and `contentIdentity` (an exact accepted patch may include its hunk identity). `adapter.readCurrent` reads the selected tracker identity/version/scope, current target `head`, and relevant source facts from their owners; it must not echo request fields as proof. Identity/version disagreement throws before publication, and a changed source returns `DRIFTED` with the owning source.
 - An empty `acceptedChanges` list returns `COMPATIBLE` with the latest target SHA without reading or creating a lane. For actual glossary or ADR writes, `request.lane` binds `taskId` and `worktree`; `adapter.readLane` proves Git registration, isolation from the target checkout, repository/Spec/target/baseline ownership, and exact accepted content. Missing or conflicting proof stops. The result's `requiresPlanningLane` selects the write boundary; it grants no commit or publication authority.
 - Resolve primary reservation before this read when its version does not exist yet, using the immutable proposed-Spec identity and the existing reservation adapter. Reservation grants no document write or published-scope authority. The tracker adapter still compare-and-sets the latest version at publication; the planning result does not replace that check.
+- `planning.disposeLane` disposes of the registered lane after the `handoff.completed` read-back; the binding's own action table owns its request, result, repeat and stop conditions.
 - `planningSeal.read` returns the exact target, Planning Seal SHA and `created`, `successor`, or `reused` state.
 - `planningSeal.write` accepts one `COMPATIBLE` baseline, one exact accepted glossary or ADR patch, and the shared Target mutation writer lease. It returns the target ref and one read-back Planning Seal commit containing only that patch.
 
@@ -15,7 +16,7 @@ The shared Target mutation writer is needed only by `planningSeal.write`; tracke
 ## Checkpoint adapter
 
 - `checkpoint.read` takes the exact repository, Spec, producer `to-spec`, versioned operation identity receipt, profile version, target, baseline, and bindings. A fresh `to-spec@v2` operation gets its operation identity receipt from `bindProducerCheckpointOperationIdentity` in `workflow-operation-identity.mjs`; the receipt binds repository, Spec, approved publication identity or hash, producer `to-spec`, and stage `publication`. It returns no transaction or one exact transaction with its first unsatisfied stage.
-- `checkpoint.create` calls `createProducerOperationCheckpoint`, which first resumes an exact stored identity and otherwise creates only a fresh current `to-spec@v2` transaction. Its bindings contain the Planning Seal, classification, approved-scope identity, and owner-derived operation receipt. The generic store treats operation IDs and bindings as opaque persistence data. Its ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`.
+- `checkpoint.create` calls `createProducerOperationCheckpoint`, which first resumes an exact stored identity and otherwise creates only a fresh current `to-spec@v2` transaction. Its bindings contain the Planning Seal, classification, approved-scope identity, and owner-derived operation receipt. The generic store treats operation IDs and bindings as opaque. Its ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`.
 - `checkpoint.advance` appends one stage receipt and reads the exact transaction back. Repeating the same receipt is idempotent; a different receipt or out-of-order stage is a Hard gate.
 
 An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its frozen profile. Resume its exact existing plan, checkpoint, attestation, publication, and handoff stages; never create a v1 transaction, migrate it to v2, regenerate its plan, or rewrite a completed receipt.
@@ -29,7 +30,7 @@ An existing valid incomplete transaction-v1 or `to-spec@v1` receipt stays on its
 ## Handoff adapter
 
 - `handoff.read` takes the exact current transaction identity and returns zero or one immutable handoff receipt.
-- `handoff.append` writes one receipt binding producer, Spec, tracker identity, target, Planning Seal, transaction identity, publication identity, classification, and approved-scope identity, then returns its immutable identity. Read it back before advancing `handoff.completed`.
+- `handoff.append` writes one receipt binding that same producer, Spec, tracker, target, Planning Seal, transaction, publication, classification and approved-scope identities, then returns its immutable identity. Read it back before advancing `handoff.completed`.
 
 ## Dispositions
 
@@ -45,4 +46,4 @@ For this configured host, serialize the existing owner-verified publication and 
 
 ## Installed GitLab producer binding
 
-For GitLab tracker-only publication, use the separately installed [GitLab producer adapters](../../../personal/run-issue-workflow/references/gitlab-producer-adapters.md). The repository's `docs/agents/gitlab-producer.json` binds the host and project; the reusable entry supplies the concrete planning, checkpoint, tracker and handoff operations above. It supports primary and revision `to-spec@v2` publication with native Issue/note identities, exact body digests and read/write/read-back semantics. Setup may inspect this binding but cannot install or repair it. Accepted document writes, decomposition and automatic Run composition remain separate owner capabilities.
+For GitLab tracker-only publication, use the separately installed [GitLab producer adapters](../../../personal/run-issue-workflow/references/gitlab-producer-adapters.md). The repository's `docs/agents/gitlab-producer.json` binds the host and project; the reusable entry supplies the concrete planning, checkpoint, tracker and handoff operations above. Setup may inspect this binding but cannot install or repair it. Accepted document writes, decomposition and automatic Run composition remain separate owner capabilities.

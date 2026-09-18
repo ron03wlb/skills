@@ -13,7 +13,7 @@ Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-
 ## Prerequisites
 
 - Tracker-only publication: settled scope, source identities, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
-- Actual glossary or ADR writes: the exact registered isolated lane and shared target writer.
+- Actual glossary or ADR writes: the exact registered isolated lane and shared target writer, disposed by `to-spec` once the handoff reads back.
 
 The owner-local planning adapter enforces this distinction before publication. The tracker adapter uses the verified publication mode; unsupported atomic compare-and-set is never assumed.
 
@@ -44,6 +44,7 @@ The Spec preserves the shared SQL decision boundary: routine reversible queries 
 - The published Planning Seal, operation-scoped transaction, tracker publication, and immutable handoff agree.
 - A Single-Issue Spec ends in `/run-issue-workflow <Spec-ID>`; a Multi-Issue parent ends in `/to-tickets <Spec-ID>`.
 - A recoverable failure names the owning source and same command to retry while any owned planning worktree remains intact.
+- A successful publication leaves no registered planning worktree behind; a failed one keeps it.
 
 ## Where it fits
 

@@ -38,7 +38,7 @@ export async function invokeGitHubProducer({ repository, input, transport, execu
   const configuration = readConfiguration(join(repository, "docs/agents/github-producer.json"));
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
-    "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "seal-write": ["planningSeal", "write"],
+    "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "lane-dispose": ["planning", "disposeLane"], "seal-write": ["planningSeal", "write"],
     identity: ["checkpoint", "identity"], "checkpoint-read": ["checkpoint", "read"], "checkpoint-create": ["checkpoint", "create"],
     "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"], "mutation-read": ["tracker", "readMutation"],
     "handoff-read": ["handoff", "read"], "handoff-append": ["handoff", "append"],

@@ -41,6 +41,12 @@ const saveNew = (path, value) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", flush: true });
 };
+// Owner-local registration and seal records are durable Git-common-dir state. Unreadable or malformed
+// content is a conflict the caller must report, never an untyped parse failure.
+const readOwnerJson = (path, message) => {
+  try { return JSON.parse(readFileSync(path, "utf8")); }
+  catch { throw conflict(message); }
+};
 
 // The caller supplies publication policy. This owner supplies independently read Git/lane evidence.
 export function createGitPlanningSeal({ repository, repositoryId, specId, target, gitCommonDir }) {
@@ -67,7 +73,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     if (!hash(id)) throw conflict("Planning registration identity is required");
     return join(root, "lanes", `${id.slice(7)}.json`);
   };
-  const validateLane = record => {
+  const validateLane = (record, requireHandoff = true) => {
     if (record.schema !== "git-planning-lane:v1" || !same(record.binding, bound) || !sha(record.baseline)) throw conflict("Planning lane binding differs");
     const worktree = realpathSync.native(record.worktree);
     if (samePath(worktree, repository)) throw conflict("An isolated planning worktree is required");
@@ -76,7 +82,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const entries = git(repository, ["worktree", "list", "--porcelain", "-z"]).split("\0");
     if (!entries.some(entry => entry.startsWith("worktree ") && existsSync(entry.slice(9)) && samePath(entry.slice(9), worktree))
       || git(worktree, ["rev-parse", "HEAD"]) !== record.baseline) throw conflict("Planning lane HEAD or native registration changed");
-    if (digest(readFileSync(record.authority.path)) !== record.authority.contentIdentity) throw conflict("Planning handoff content changed");
+    // The handoff note proves human acceptance, which sealing needs. Disposal does not: it proves the
+    // lane, and the accepted bytes it removes are already committed to the target by that same seal.
+    if (requireHandoff && digest(readFileSync(record.authority.path)) !== record.authority.contentIdentity) throw conflict("Planning handoff content changed");
     for (const change of record.changes) {
       if (!hash(change.contentIdentity) || digest(readFileSync(containedFile(worktree, change.path))) !== change.contentIdentity) throw conflict(`Accepted planning content changed: ${change.path}`);
       if (!same(treeEntry(record.baseline, change.path), change.base)) throw conflict(`Planning preimage differs: ${change.path}`);
@@ -84,7 +92,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     return record;
   };
   const loadLane = (lane, live = true) => {
-    const record = JSON.parse(readFileSync(registeredPath(lane?.registrationId), "utf8"));
+    const record = readOwnerJson(registeredPath(lane?.registrationId), "Planning registration is unreadable");
     if (digest(JSON.stringify(record)) !== lane.registrationId || record.taskId !== lane.taskId
       || record.worktree !== lane.worktree) throw conflict("Planning registration or ownership differs");
     if (record.schema !== "git-planning-lane:v1" || !same(record.binding, bound) || !sha(record.baseline)
@@ -113,7 +121,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const registrationId = digest(JSON.stringify(record));
     const path = registeredPath(registrationId);
     if (existsSync(path)) {
-      if (!same(JSON.parse(readFileSync(path, "utf8")), record)) throw conflict("Existing planning registration differs");
+      if (!same(readOwnerJson(path, "Existing planning registration is unreadable"), record)) throw conflict("Existing planning registration differs");
     } else saveNew(path, record);
     return { registrationId, taskId, worktree };
   };
@@ -121,6 +129,50 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const record = loadLane(lane);
     return { ...record.binding, taskId: record.taskId, worktree: record.worktree, baseline: record.baseline,
       registered: true, isolated: true, acceptedChanges: record.changes.map(({ path, contentIdentity }) => ({ path, contentIdentity })) };
+  };
+  // The disposal half of the lane's life. Only the exact registered lane this owner registered may be
+  // disposed, and disposing is safe because the accepted documents it still carries are already sealed
+  // into the target. Every precondition is re-proved from the registration and Git immediately before
+  // removal, and the lane must hold nothing beyond its accepted documents. No branch and no other
+  // worktree is ever touched, and absence is read back. A caller owns the timing: disposal belongs after
+  // the handoff this lane produced has been read back, and every failure short of absence preserves the
+  // lane.
+  const registeredPaths = () => git(repository, ["worktree", "list", "--porcelain", "-z"]).split("\0")
+    .filter(entry => entry.startsWith("worktree "))
+    .map(entry => resolve(entry.slice("worktree ".length)));
+  const dispose = lane => {
+    const record = loadLane(lane, false);
+    const worktree = resolve(record.worktree);
+    const registered = registeredPaths().includes(worktree);
+    const present = existsSync(record.worktree);
+    // The receipt re-probes absence when it is built, so a satisfied or disposed answer is measured
+    // rather than inherited from the pre-removal read.
+    const receipt = state => Object.freeze({ schema: "git-planning-lane-disposal:v1", state,
+      lane: { registrationId: lane.registrationId, taskId: record.taskId, worktree: record.worktree },
+      registrationAbsent: !registeredPaths().includes(worktree), directoryAbsent: !existsSync(record.worktree) });
+    // A repeated disposal after a lost response is the satisfied action, not a new removal.
+    if (!registered && !present) return receipt("satisfied");
+    if (!registered || !present) throw conflict("Planning lane registration and its directory disagree; preserve what remains and report it");
+    // The lane normally carries its accepted documents as uncommitted lane changes, which is why an
+    // ordinary removal refuses. The force below is therefore only safe after this owner has proved the
+    // lane's dirty path set is exactly those registered bytes, which validateLane reads back.
+    validateLane(record, false);
+    const dirty = [...new Set([
+      ...git(record.worktree, ["diff", "--name-only", "-z", "--cached", "HEAD"]).split("\0"),
+      ...git(record.worktree, ["diff", "--name-only", "-z"]).split("\0"),
+      ...git(record.worktree, ["ls-files", "-z", "--others", "--exclude-standard"]).split("\0"),
+    ].filter(Boolean))];
+    const accepted = new Set(record.changes.map(change => change.path));
+    for (const path of dirty) {
+      if (!accepted.has(path)) throw conflict("A planning lane may only be disposed while it holds nothing beyond its accepted documents");
+    }
+    try {
+      git(repository, ["worktree", "remove", "--force", record.worktree]);
+    } catch (error) {
+      throw conflict(`Planning lane could not be removed: ${String(error?.stderr ?? error?.message ?? "").trim()}`);
+    }
+    if (registeredPaths().includes(worktree) || existsSync(record.worktree)) throw conflict("Planning lane removal was not confirmed");
+    return receipt("disposed");
   };
   const intentPath = operationId => {
     if (!/^planning-[a-f0-9]{64}$/u.test(operationId ?? "")) throw conflict("Invalid Planning Seal operation identity");
@@ -145,7 +197,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     return record;
   };
   const read = ({ operationId }) => {
-    const intent = JSON.parse(readFileSync(intentPath(operationId), "utf8"));
+    const intent = readOwnerJson(intentPath(operationId), "Planning Seal intent is unreadable");
     if (intent.operationId !== operationId) throw conflict("Planning Seal operation differs");
     const record = checkCandidate(intent);
     const currentHead = head();
@@ -219,5 +271,5 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
       return read({ operationId });
     } finally { lease.release(); }
   };
-  return { register, readLane, write, read };
+  return { register, readLane, dispose, write, read };
 }

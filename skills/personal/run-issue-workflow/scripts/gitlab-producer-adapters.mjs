@@ -195,7 +195,7 @@ export async function createGitLabProducerAdapters(options) {
       const reservationRoot = join(connection.gitCommonDir, "matt-workflow-control", "gitlab-producer-reservations");
       const reservationPath = join(reservationRoot, `${operation.key}.json`);
       if (existsSync(reservationPath)) {
-        const saved = JSON.parse(readFileSync(reservationPath, "utf8"));
+        const saved = (() => { try { return JSON.parse(readFileSync(reservationPath, "utf8")); } catch { throw conflict("Reservation receipt is unreadable"); } })();
         if (saved.operationKey !== operation.key || saved.repositoryId !== repositoryId) throw conflict("Reservation receipt identity differs");
         iid = parseIid(saved.trackerIdentity);
         const current = await read();
@@ -294,7 +294,7 @@ export async function createGitLabProducerAdapters(options) {
     return checkpoints.advanceCheckpoint({ identity: input, stage, receipt });
   };
   return { repositoryId, publicationMode: "READ_WRITE_READBACK", approvedScopeIdentity,
-    planning: { readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane) },
+    planning: { readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
     planningSeal: { read: sealRead, write: sealWrite },
     tracker: { read, reserve, publish, readPublication: publicationRead,
       readMutation: request => readMutation(connection, publicationMutation(request)) },
