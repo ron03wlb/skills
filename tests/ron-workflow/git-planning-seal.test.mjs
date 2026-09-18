@@ -154,3 +154,53 @@ test("Unicode and spaced documentation paths preserve accepted bytes with Git ne
   assert.deepEqual(readFileSync(join(f.worktree, path)), bytes);
   assert.equal(readFileSync(join(f.repository, path), "utf8").replaceAll("\r\n", "\n"), bytes.toString().replaceAll("\r\n", "\n"));
 });
+
+test("only the exact registered lane, holding nothing beyond its accepted documents, is disposed", async t => {
+  const f = fixture(t);
+  const lane = f.owner.register(f.registration);
+  const registered = () => f.git(f.repository, "worktree", "list", "--porcelain").includes(lane.worktree);
+  assert.equal(registered(), true);
+  // The accepted documents are committed to the target before the lane is disposed.
+  const seal = await f.owner.write(f);
+  assert.equal(f.git(f.repository, "rev-parse", "HEAD"), seal.planningSeal);
+  // An unaccepted draft in the lane is preserved, never destroyed by a disposal.
+  writeFileSync(join(f.worktree, "scratch.txt"), "Unaccepted draft\n");
+  assert.throws(() => f.owner.dispose(lane), /nothing beyond its accepted documents/u);
+  assert.equal(registered(), true);
+  assert.equal(existsSync(join(f.worktree, "scratch.txt")), true);
+  // A foreign lane reference is not this owner's lane.
+  assert.throws(() => f.owner.dispose({ ...lane, taskId: "foreign-task" }), /ownership differs/u);
+  // An accepted document altered away from its registered bytes is never destroyed.
+  writeFileSync(join(f.worktree, "CONTEXT.md"), "Unaccepted edit\n");
+  assert.throws(() => f.owner.dispose(lane), /Accepted planning content changed/u);
+  writeFileSync(join(f.worktree, "CONTEXT.md"), "Accepted decision\n");
+  rmSync(join(f.worktree, "scratch.txt"));
+  // A handoff note a human has since cleaned up does not block an already sealed lane's disposal.
+  rmSync(f.registration.authority.path);
+  const receipt = f.owner.dispose(lane);
+  assert.deepEqual(receipt, { schema: "git-planning-lane-disposal:v1", state: "disposed",
+    lane: { registrationId: lane.registrationId, taskId: lane.taskId, worktree: lane.worktree },
+    registrationAbsent: true, directoryAbsent: true });
+  assert.equal(existsSync(lane.worktree), false);
+  assert.equal(registered(), false);
+  // The lane's branch survives: disposal removes a worktree, never a ref.
+  assert.equal(f.git(f.repository, "rev-parse", "refs/heads/planning"), f.baseline);
+  // A repeat after a lost response is the satisfied action rather than a second removal.
+  assert.equal(f.owner.dispose(lane).state, "satisfied");
+  // The durable seal outlives the lane it was written from.
+  assert.equal(f.owner.read({ operationId: seal.operationId }).planningSeal, seal.planningSeal);
+});
+
+test("a registration whose directory disappeared stops without touching another worktree", t => {
+  const f = fixture(t);
+  const lane = f.owner.register(f.registration);
+  const other = `${f.repository}-other-lane`;
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  f.git(f.repository, "worktree", "add", "-b", "other-lane", other, f.baseline);
+  rmSync(f.worktree, { recursive: true, force: true });
+  assert.throws(() => f.owner.dispose(lane), /registration and its directory disagree/u);
+  // The prunable registration is preserved for its owning source, and the other lane is untouched.
+  assert.equal(f.git(f.repository, "worktree", "list", "--porcelain").includes(lane.worktree), true);
+  assert.equal(existsSync(other), true);
+  assert.equal(f.git(other, "status", "--porcelain"), "");
+});

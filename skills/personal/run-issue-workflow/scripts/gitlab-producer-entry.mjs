@@ -4,13 +4,18 @@ import { fileURLToPath } from "node:url";
 import { connectGitLabProducer, configurationFromRemote, conflict, validateConfiguration } from "./gitlab-producer-transport.mjs";
 import { createGitLabProducerAdapters } from "./gitlab-producer-adapters.mjs";
 
+const readConfiguration = path => {
+  try { return JSON.parse(readFileSync(path, "utf8")); }
+  catch { throw conflict("GitLab producer configuration is unreadable"); }
+};
+
 export async function configureGitLabProducer({ repository, configuration, transport }) {
   repository = realpathSync.native(repository);
   const path = join(repository, "docs/agents/gitlab-producer.json");
-  const candidate = validateConfiguration(configuration ?? (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : configurationFromRemote(repository)));
+  const candidate = validateConfiguration(configuration ?? (existsSync(path) ? readConfiguration(path) : configurationFromRemote(repository)));
   const connected = await connectGitLabProducer({ repository, configuration: candidate, transport });
   if (existsSync(path)) {
-    const existing = validateConfiguration(JSON.parse(readFileSync(path, "utf8")));
+    const existing = validateConfiguration(readConfiguration(path));
     if (existing.baseUrl !== candidate.baseUrl || existing.project !== candidate.project) throw conflict("Existing binding differs; review it explicitly before replacement");
   } else {
     mkdirSync(dirname(path), { recursive: true });
@@ -22,7 +27,7 @@ export async function configureGitLabProducer({ repository, configuration, trans
 export async function inspectGitLabProducer({ repository, transport }) {
   const path = join(repository, "docs/agents/gitlab-producer.json");
   if (!existsSync(path)) return { state: "MISSING", owningSource: path, nextAction: "Explicitly run gitlab-producer-entry.mjs configure for this repository." };
-  const configuration = JSON.parse(readFileSync(path, "utf8"));
+  const configuration = readConfiguration(path);
   const connected = await connectGitLabProducer({ repository, configuration, transport });
   // `automaticRunHost` is the configured tracker's own capability, read beside it: this binding plus the
   // installed Run entry's GitLab Tracker Run sources make the project Run-ready, exactly as the GitHub
@@ -33,10 +38,10 @@ export async function inspectGitLabProducer({ repository, transport }) {
 }
 
 export async function invokeGitLabProducer({ repository, input, transport }) {
-  const configuration = JSON.parse(readFileSync(join(repository, "docs/agents/gitlab-producer.json"), "utf8"));
+  const configuration = readConfiguration(join(repository, "docs/agents/gitlab-producer.json"));
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
-    "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "seal-write": ["planningSeal", "write"],
+    "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "lane-dispose": ["planning", "disposeLane"], "seal-write": ["planningSeal", "write"],
     identity: ["checkpoint", "identity"], "checkpoint-read": ["checkpoint", "read"], "checkpoint-create": ["checkpoint", "create"],
     "checkpoint-advance": ["checkpoint", "advance"], publish: ["tracker", "publish"], "mutation-read": ["tracker", "readMutation"],
     "handoff-read": ["handoff", "read"], "handoff-append": ["handoff", "append"],

@@ -2,7 +2,7 @@
 
 `grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then runs a **boundary-first** interview. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reserves new major direction, architecture, table DDL and any migration cost for you, while ordinary business and implementation details follow project evidence or suitable established practice. Each question includes a concrete proposal, alternatives, trade-offs, reasons and a recommendation. Only accepted glossary or ADR writes require an isolated planning worktree.
 
-Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
+Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff, which disposes of it once that publication reads back. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
 ## When to reach for it
 
@@ -36,7 +36,7 @@ Each permitted dependency loads separately through the host:
 
 One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target without a shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry.
 
-- Accepted document writes stay in the exact registered worktree; preserve it through partial publication and dispose only that clean worktree after successful `to-spec` handoff read-back.
+- Accepted document writes stay in the exact registered worktree. Preserve it through partial publication; after the successful `to-spec` handoff read-back, that skill disposes of only this exact clean worktree, so a successful run leaves nothing registered.
 - Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree is created or retained.
 
 ## The boundary-first interview
@@ -132,6 +132,7 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 - Durable rationale is recorded directly in your project's ADR format, with the decision's actual basis visible.
 - It challenges a word you used because your existing glossary defines it differently.
 - The closing message gives you the exact handoff and the later `/to-spec` command.
+- After a successful `/to-spec` run the planning worktree is gone; after a failed one it is still registered for the retry.
 - Independent boundary questions can share a round; a design with only delegated details needs no approval round.
 
 ## Where it fits

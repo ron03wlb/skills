@@ -125,7 +125,7 @@ The compact user-visible terminal output from `grill-with-docs` that binds its *
 _Avoid_: Hidden planning journal, automatic `to-spec`, Planning Seal
 
 **Spec workflow lane**:
-The independent ownership and concurrency unit for exactly one proposed **Tracker Spec** and target, consisting of one Codex task and the Spec's later **DAG Run**. An isolated planning worktree is required when writing accepted glossary or ADR changes; read-only design and tracker-only publication need no worktree. Multiple lanes may plan, publish, and execute concurrently against one target; only bounded Planning Seal or integration writes enter **Target mutation serialization**.
+The independent ownership and concurrency unit for exactly one proposed **Tracker Spec** and target, consisting of one Codex task and the Spec's later **DAG Run**. An isolated planning worktree is required when writing accepted glossary or ADR changes; read-only design and tracker-only publication need no worktree, and `to-spec` disposes of that exact clean worktree once the published handoff reads back. Multiple lanes may plan, publish, and execute concurrently against one target; only bounded Planning Seal or integration writes enter **Target mutation serialization**.
 _Avoid_: Global multi-Spec coordinator, shared planning checkout, multi-Spec Run
 
 **Planning baseline revalidation**:
