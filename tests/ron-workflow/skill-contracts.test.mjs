@@ -3276,6 +3276,17 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.match(setupDocs, /per-Run execution capacity, lane settlement on the selected delivery substrate, and Run composition/isu);
   assert.match(setupDocs, /required seam that is missing or unknown leaves readiness not-ready.*read-only lane is never proof/isu);
 
+  // Issue 122 re-derives the setup bootstrap on the substrate ADR-0080 selects: every criterion names
+  // its prerequisite, the retired pi-workflow prerequisite set is re-derived instead of reused, and an
+  // unproven required capability returns the attributable not-ready verdict.
+  assert.match(diagnostics, /Re-derived bootstrap criteria.*Prerequisite it depends on.*Owning source that proves or repairs it.*Read-only proof/isu);
+  assert.match(diagnostics, /Former prerequisites, re-derived.*delivered bundle root.*Retired.*@earendil-works\/pi-coding-agent.*Retired.*lane worker agent at the harness pi-agent directory.*Re-derived.*run area.*Replaced.*gh api --paginate --slurp. support.*Kept/isu);
+  assert.match(diagnostics, /Installed host entry and retained version \|[\s\S]*?never a readiness prerequisite/iu);
+  assert.match(diagnostics, /Truthful readiness reduction.*never upgrades one.*not-ready verdict with exactly one attributable blocker per unproven prerequisite.*owning source, the observed evidence, and the smallest human action/isu);
+  assert.match(diagnostics, /Lane worker agent \|[\s\S]*?substrate's own read-back/iu);
+  assert.match(setup, /Boundaries[\s\S]*?one bounded plan[\s\S]*?no mutation before one explicit human acceptance/iu);
+  assert.match(setupDocs, /One plan, one acceptance, one owner per seam[\s\S]*?never reproduces their package building, installation, binding, tracker mutation, recovery or receipt logic/isu);
+
   assert.match(read("skills/engineering/to-spec/SKILL.md"), /references\/spec-publication-interfaces\.md/u);
   assert.match(read("skills/engineering/to-tickets/SKILL.md"), /references\/decomposition-publication-interfaces\.md/u);
   const gitlabDecompositionBinding = "skills/personal/run-issue-workflow/references/gitlab-to-tickets-adapters.md";
