@@ -29,7 +29,7 @@ The readiness prerequisites setup reports are a separate list. Each one is a rea
 
 ## The three decisions
 
-It leads each section with the recommended answer, and skips whatever exploration already settled. Most runs are two confirmations and done.
+It leads each section with the recommended answer, and skips whatever exploration already settled. Most runs settle every section in two answers; the resolved plan is then accepted once before anything is written.
 
 | Decision | What it proposes | When it actually asks |
 | --- | --- | --- |

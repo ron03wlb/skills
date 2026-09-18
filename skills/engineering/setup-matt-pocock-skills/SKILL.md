@@ -13,7 +13,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
 - **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, and the lane worker agent the selected substrate resolves
 
-This is a prompt-driven skill, not a deterministic script. Explore, present what you found, confirm with the user, then write.
+This is a prompt-driven skill, not a deterministic script. Explore, settle the sections with the user, present one bounded plan, and write only after it is accepted.
 
 ## Boundaries
 
