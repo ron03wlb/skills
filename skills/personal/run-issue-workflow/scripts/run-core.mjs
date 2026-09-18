@@ -248,13 +248,28 @@ export function reduceRunReadyHandoff(input) {
   const frozenProfile = checkpoint.profileVersion === undefined
     || checkpoint.profileVersion === null
     || checkpoint.profileVersion === "v1";
+  // A current MULTI checkpoint binds its two upstream identities either as one nested object (what the
+  // GitHub producer writes) or as flat siblings (what the GitLab producer wrote). A completed
+  // transaction is immutable, so a decomposition published before the shapes converged would otherwise
+  // stay unreadable forever; the pair is resolved once here so the scope check and the composite
+  // receipt check below read the same two identities, and neither shape can relax either comparison.
+  const upstreamBindings = isRecord(checkpoint.bindings)
+    ? isRecord(checkpoint.bindings.upstream)
+      ? {
+        publicationIdentity: checkpoint.bindings.upstream.publicationIdentity,
+        handoffIdentity: checkpoint.bindings.upstream.handoffIdentity,
+      }
+      : {
+        publicationIdentity: checkpoint.bindings.upstreamPublicationIdentity,
+        handoffIdentity: checkpoint.bindings.upstreamHandoffIdentity,
+      }
+    : null;
   const currentBindingsOwnScope = isRecord(checkpoint.bindings)
     && checkpoint.bindings.classification === authority.classification
     && checkpoint.bindings.planningSeal === authority.planningSeal
     && (authority.classification === "SINGLE"
-      || isRecord(checkpoint.bindings.upstream)
-        && isText(checkpoint.bindings.upstream.handoffIdentity)
-        && isText(checkpoint.bindings.upstream.publicationIdentity));
+      || isText(upstreamBindings?.handoffIdentity)
+        && isText(upstreamBindings?.publicationIdentity));
   const checkpointOwnsScope = checkpointOwnsBaseScope
     && (currentProfile
       ? isText(checkpoint.operationId) && currentBindingsOwnScope
@@ -438,8 +453,8 @@ export function reduceRunReadyHandoff(input) {
     const stageReceipts = checkpoint.stageReceipts;
     const currentCompositeMatches = isText(handoff.upstreamPublicationIdentity)
       && isText(handoff.upstreamHandoffIdentity)
-      && handoff.upstreamPublicationIdentity === checkpoint.bindings.upstream.publicationIdentity
-      && handoff.upstreamHandoffIdentity === checkpoint.bindings.upstream.handoffIdentity
+      && handoff.upstreamPublicationIdentity === upstreamBindings?.publicationIdentity
+      && handoff.upstreamHandoffIdentity === upstreamBindings?.handoffIdentity
       && isRecord(operationReceipt)
       && operationReceipt.transactionIdentity === checkpoint.transactionIdentity
       && isRecord(stageReceipts)

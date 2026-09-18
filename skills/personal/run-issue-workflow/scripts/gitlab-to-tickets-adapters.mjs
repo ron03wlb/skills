@@ -257,7 +257,13 @@ export async function createGitLabToTicketsAdapters(options) {
       producerCommand: "to-tickets", profileVersion: "v2", target, baseline,
       bindings: { planningSeal: upstream.publication.planningSeal, classification: "MULTI",
         approvedScopeIdentity: upstream.publication.approvedScopeIdentity,
-        trackerIdentity: parentIdentity, upstreamPublicationIdentity: upstream.publication.publicationIdentity,
+        // The nested pair is the shape every other decomposition producer binds and the shape the Run's
+        // MULTI scope check reads first; the flat siblings below stay because this producer's composite
+        // handoff record already carries them (Issue 137). Both carry the same two identities.
+        trackerIdentity: parentIdentity,
+        upstream: { publicationIdentity: upstream.publication.publicationIdentity,
+          handoffIdentity: upstream.handoff.handoffIdentity },
+        upstreamPublicationIdentity: upstream.publication.publicationIdentity,
         upstreamHandoffIdentity: upstream.handoff.handoffIdentity, readyLabel } });
   };
   const validateIdentity = input => {

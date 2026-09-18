@@ -304,6 +304,27 @@ test("body representation publishes exact decomposition, ready frontier and comp
   assert.throws(() => otherLabel.checkpoint.read(context.identity), { code: "GITLAB_PRODUCER_CONFLICT" });
 });
 
+test("fresh GitLab to-tickets binds the nested upstream pair beside the flat handoff identities", async t => {
+  // Issue 137: every other decomposition producer binds `bindings.upstream`, while this producer wrote
+  // the same two identities as flat siblings. A fresh GitLab transaction binds both, so the Run's MULTI
+  // scope check reads one shape from either producer, and the composite handoff record keeps the flat
+  // pair it already carries.
+  const f = fixture(t);
+  const context = await start(f, "body");
+  assert.deepEqual(context.identity.bindings.upstream, {
+    publicationIdentity: f.publication.identity,
+    handoffIdentity: f.options.upstreamHandoffIdentity });
+  assert.equal(context.identity.bindings.upstreamPublicationIdentity, f.publication.identity);
+  assert.equal(context.identity.bindings.upstreamHandoffIdentity, f.options.upstreamHandoffIdentity);
+  assert.deepEqual(Object.keys(context.identity.bindings).sort(), ["approvedScopeIdentity",
+    "classification", "operationIdentity", "planningSeal", "readyLabel", "trackerIdentity",
+    "upstream", "upstreamHandoffIdentity", "upstreamPublicationIdentity"]);
+  const transaction = context.adapter.checkpoint.read(context.identity);
+  assert.deepEqual(transaction.identity.bindings.upstream, {
+    publicationIdentity: f.publication.identity,
+    handoffIdentity: f.options.upstreamHandoffIdentity });
+});
+
 test("native rejection remains explicit and the same pre-decomposition transaction can adopt verified body mode", async t => {
   const f = fixture(t);
   const native = await start(f, "native");

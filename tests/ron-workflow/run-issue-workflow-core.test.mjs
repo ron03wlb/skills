@@ -669,6 +669,51 @@ test("Run-ready handoff still refuses a completed checkpoint or handoff that dri
   }
 });
 
+test("Run-ready handoff accepts either current MULTI upstream binding shape and still fails closed without one", () => {
+  // Issue 137: the GitHub producer binds its two upstream identities as one nested object, and the
+  // GitLab producer wrote the same two identities as flat siblings. A completed transaction is
+  // immutable, so both shapes must prove the same scope while a checkpoint carrying neither, or only
+  // half of the pair, still fails closed.
+  const nested = currentMultiRunReadyFacts();
+  assert.deepEqual(nested.checkpoint.bindings.upstream, {
+    handoffIdentity: "to-spec:handoff:37",
+    publicationIdentity: "tracker-version:37",
+  });
+  const nestedResult = reduceRunReadyHandoff(nested);
+  assert.equal(nestedResult.state, "READY");
+  assert.equal(nestedResult.reasonCode, null);
+
+  const flat = currentMultiRunReadyFacts();
+  const { upstream, ...flatBindings } = flat.checkpoint.bindings;
+  flat.checkpoint.bindings = {
+    ...flatBindings,
+    upstreamPublicationIdentity: upstream.publicationIdentity,
+    upstreamHandoffIdentity: upstream.handoffIdentity,
+  };
+  assert.equal(Object.hasOwn(flat.checkpoint.bindings, "upstream"), false);
+  const flatResult = reduceRunReadyHandoff(flat);
+  assert.equal(flatResult.state, "READY");
+  assert.equal(flatResult.reasonCode, null);
+  assert.equal(flatResult.nextOwner, "run-issue-workflow");
+
+  const halfPair = currentMultiRunReadyFacts();
+  const { upstream: onlyPublication, ...halfPairBindings } = halfPair.checkpoint.bindings;
+  halfPair.checkpoint.bindings = {
+    ...halfPairBindings,
+    upstreamPublicationIdentity: onlyPublication.publicationIdentity,
+  };
+
+  const neither = currentMultiRunReadyFacts();
+  delete neither.checkpoint.bindings.upstream;
+
+  for (const input of [halfPair, neither]) {
+    const result = reduceRunReadyHandoff(input);
+    assert.equal(result.state, "UNKNOWN");
+    assert.equal(result.reasonCode, "producer_handoff_identity_conflict");
+    assert.equal(result.nextOwner, "human");
+  }
+});
+
 test("Run-ready handoff rejects a current to-spec handoff that drifts from its transaction or publication", () => {
   const changedTransaction = currentSingleRunReadyFacts();
   changedTransaction.handoff.transactionIdentity = `sha256:${"9".repeat(64)}`;
