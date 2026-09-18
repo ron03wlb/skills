@@ -438,6 +438,27 @@ test("a rejected native blocking relation retains exact partial evidence and res
   assert.deepEqual(await context.adapter.tracker.readRelation({ relation }), recovered);
 });
 
+test("a rejected native relation with exact ABSENT read-back can adopt verified body representation", async t => {
+  const f = fixture(t);
+  const native = await start(f, { blockingRepresentation: "native" });
+  const children = await publishChildren(f, native, "body");
+  const relation = { kind: "blocker", childKey: children.second.key,
+    child: children.secondRead.trackerIdentity, blocker: children.firstRead.trackerIdentity };
+  f.failures.rejectNextDependency = true;
+  const relationPreflight = await preflightFor(native, children.keys);
+  await assert.rejects(() => native.adapter.tracker.publishRelation({ identity: native.identity, relation,
+    preflight: relationPreflight }), { code: "GITHUB_PRODUCER_REJECTED" });
+  assert.equal(native.adapter.tracker.readPartialRelations({ identity: native.identity })[0].readBack.state, "ABSENT");
+  const body = await createGitHubToTicketsAdapters({ ...f.options, blockingRepresentation: "body" });
+  assert.deepEqual(body.checkpoint.identity({ baseline: f.seal }), native.identity,
+    "representation is not part of the operation identity");
+  const decomposition = await body.tracker.publishDecomposition({ identity: native.identity,
+    decompositionMapping: children.mapping, blockerEdges: children.edges, children: [children.first, children.second],
+    preflight: await body.tracker.discoverChildren({ keys: children.keys, externalBlockers: [] }) });
+  assert.match(decomposition.decompositionIdentity, /^IC_[0-9]+$/u);
+  assert.equal(f.dependencies.size, 0, "the adopted body decomposition publishes no native blocking relation");
+});
+
 test("an unrelated operation or record is never treated as conflicting, and an unknown action mutates nothing", async t => {
   const f = fixture(t);
   f.writeBinding();

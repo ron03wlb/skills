@@ -669,7 +669,14 @@ export async function createGitHubToTicketsAdapters(options) {
           || value.readBack.state === "UNKNOWN" && typeof value.readBack.errorCode !== "string") {
           throw conflict("Partial native relation evidence is malformed");
         }
-        const descriptor = relationDescriptor(value.relation);
+        // Retained relation evidence is reconstructed from its own payload so the body adoption path can
+        // read it without the currently selected representation's publisher guard.
+        const descriptor = value.relation.kind === "parent"
+          ? { kind: "parent", child: value.relation.child, other: parentIdentity,
+            key: `parent:${value.relation.child}`, payload: value.relation }
+          : { kind: "blocker", child: value.relation.child, other: value.relation.blocker,
+            childKey: value.relation.childKey, key: `blocker:${value.relation.child}:${value.relation.blocker}`,
+            payload: value.relation };
         const expectedKey = `${operationId}:relation:${descriptor.key}`;
         const current = readMutation(connection, { key: value.mutation.key, payload: value.relation });
         if (value.mutation.key !== expectedKey || current.fingerprint !== value.mutation.fingerprint
