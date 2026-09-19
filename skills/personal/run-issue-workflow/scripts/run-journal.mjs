@@ -653,7 +653,20 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
     const terminal = events.find(item => item.type === "task.outcome" && item.receipt.issueId === event.issueId
       && item.receipt.operationId === event.operationId && ["SUCCEEDED", "FAILED"].includes(item.receipt.disposition));
     const needsTerminal = ["NATIVE_TERMINAL_OBSERVED", "EVIDENCE_VALIDATED", "CLOSE_ELIGIBLE"].includes(event.stage);
-    if (!grant || !dispatch || duplicate || needsTerminal && !terminal
+    // A Multi-Issue parent is never dispatched: the Run lanes its children only, so no dispatch.recorded
+    // for the parent Issue can exist. The parent's delivery progress — its close intent first — is
+    // therefore observed against the Grant's own bound decomposition identity, which is non-empty
+    // exactly for a decomposed Multi-Issue Run whose parent close is legitimate. Every other Issue id,
+    // and the Run's own Spec Issue on a Grant that carries no decomposition identity, still requires
+    // its own dispatch.recorded.
+    const runIdentity = grant?.runIdentity ?? null;
+    const parentClose = runIdentity !== null
+      && event.issueId === runIdentity.specId
+      && runIdentity.classification === "MULTI"
+      && typeof runIdentity.decompositionIdentity === "string"
+      && runIdentity.decompositionIdentity.length > 0;
+    const observedPrerequisite = dispatch ?? (parentClose ? runIdentity.decompositionIdentity : null);
+    if (!grant || observedPrerequisite === null || duplicate || needsTerminal && !terminal
       || Date.parse(event.sourceAt) > Date.parse(event.at)) {
       throw new TypeError("Delivery progress lacks its Grant, unique source evidence, or observed prerequisite");
     }

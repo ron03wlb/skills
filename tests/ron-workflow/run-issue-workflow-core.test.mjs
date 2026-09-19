@@ -27,6 +27,7 @@ import {
   RUN_READY_RESULT_SCHEMA,
   RUN_STATES,
 } from "../../skills/personal/run-issue-workflow/scripts/run-core.mjs";
+import { validateEventSemantics } from "../../skills/personal/run-issue-workflow/scripts/run-journal.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { bindTechnicalFailure } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 import { createTargetWriterWaitEvidence } from "../../skills/personal/run-issue-workflow/scripts/run-target-writer-wait.mjs";
@@ -3025,6 +3026,120 @@ test("remediation journal authority is scoped to the exact dispatch attempt with
     writer.release();
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// A Multi-Issue parent never has a lane of its own: the Run dispatches lanes for its children only, so
+// no `dispatch.recorded` for the parent Issue can exist. Its close intent — and every later stage of
+// that close — is observed against the Grant's own bound decomposition identity instead (Issue 139).
+const parentCloseIntent = (overrides = {}) => ({
+  type: "delivery.observed",
+  at: "2026-08-30T00:01:00.000Z",
+  issueId: "12",
+  operationId: `workflow-op-v1-${"c".repeat(64)}`,
+  stage: "CLOSE_DISPATCH_INTENT",
+  disposition: "INTENT_RECORDED",
+  sourceAt: "2026-08-30T00:01:00.000Z",
+  owner: "close-issue",
+  evidenceIdentity: null,
+  requestIdentity: "close:invocation-1",
+  blockingPredicate: null,
+  ...overrides,
+});
+
+const openRunWithGrant = (gitCommonDir, runId, runIdentity) => {
+  const store = createRunStore({ gitCommonDir });
+  const writer = store.acquireWriter(runId);
+  writer.append({
+    type: "grant.recorded",
+    at: "2026-08-30T00:00:00.000Z",
+    runIdentity: { ...runIdentity, runId },
+  });
+  return { store, writer };
+};
+
+test("a Multi-Issue parent close intent is journalable through the append path without a parent dispatch", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("delivery-progress-parent-close-");
+  const { store, writer } = openRunWithGrant(gitCommonDir, "run-12", grantFor("MULTI").runIdentity);
+  try {
+    writer.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:00:30.000Z",
+      issueId: "13",
+      attempt: 1,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    });
+    assert.equal(
+      store.readEvents("run-12").some(({ type, issueId }) => type === "dispatch.recorded" && issueId === "12"),
+      false,
+      "the Run lanes its children only, so the parent Issue carries no dispatch",
+    );
+
+    const intent = writer.append(parentCloseIntent());
+    assert.equal(intent.stage, "CLOSE_DISPATCH_INTENT");
+    assert.equal(intent.sequence, 3);
+
+    // Every other delivery-progress stage of that same parent close has the same prerequisite.
+    const accepted = writer.append(parentCloseIntent({
+      at: "2026-08-30T00:02:00.000Z",
+      sourceAt: "2026-08-30T00:02:00.000Z",
+      stage: "NATIVE_CLOSE_ACCEPTED",
+      disposition: "ACCEPTED",
+    }));
+    assert.equal(accepted.stage, "NATIVE_CLOSE_ACCEPTED");
+  } finally {
+    writer.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a child close intent still requires its own dispatch through the append path", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("delivery-progress-child-close-");
+  const { writer } = openRunWithGrant(gitCommonDir, "run-12", grantFor("MULTI").runIdentity);
+  try {
+    assert.throws(
+      () => writer.append(parentCloseIntent({ issueId: "13" })),
+      /Delivery progress lacks its Grant, unique source evidence, or observed prerequisite/u,
+    );
+    writer.append({
+      type: "dispatch.recorded",
+      at: "2026-08-30T00:01:30.000Z",
+      issueId: "13",
+      attempt: 1,
+      taskRef: { threadId: "thread-13", hostId: "local" },
+    });
+    const admitted = writer.append(parentCloseIntent({
+      issueId: "13",
+      at: "2026-08-30T00:02:00.000Z",
+      sourceAt: "2026-08-30T00:02:00.000Z",
+    }));
+    assert.equal(admitted.issueId, "13");
+  } finally {
+    writer.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the Run's own Spec Issue is refused when its Grant carries no decomposition identity", () => {
+  const { root, gitCommonDir } = createGitCommonDirFixture("delivery-progress-no-decomposition-");
+  const { writer } = openRunWithGrant(gitCommonDir, "run-12", grantFor("SINGLE").runIdentity);
+  try {
+    assert.throws(
+      () => writer.append(parentCloseIntent()),
+      /Delivery progress lacks its Grant, unique source evidence, or observed prerequisite/u,
+    );
+  } finally {
+    writer.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+  // A decomposed Run whose Grant binds no decomposition identity carries no parent prerequisite either.
+  const withoutDecomposition = {
+    ...grantFor("MULTI"),
+    runIdentity: { ...grantFor("MULTI").runIdentity, runId: "run-12", decompositionIdentity: null },
+  };
+  assert.throws(
+    () => validateEventSemantics([withoutDecomposition], parentCloseIntent()),
+    /Delivery progress lacks its Grant, unique source evidence, or observed prerequisite/u,
+  );
 });
 
 test("the single writer appends ordered control events and atomically rebuilds disposable status", () => {

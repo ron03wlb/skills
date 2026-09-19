@@ -623,3 +623,51 @@ test("a lost launch response with no native lane blocks the round instead of a s
   assert.equal(fixture.launches.length, 0);
   assert.equal(fixture.journal().filter(({ type }) => type === "dispatch.recorded").length, 1);
 });
+
+// A Multi-Issue Run lanes its children only, so its parent Issue never carries a `dispatch.recorded`.
+// The parent's close intent is journalable anyway, observed against the Grant's own bound decomposition
+// identity (Issue 139, AC-1, AC-2): proven here on the very Run journal the composed path produced.
+test("a Multi-Issue parent close intent is journalable on the Run that never dispatched its parent", async (t) => {
+  const fixture = await nativeFixture(t);
+  assert.equal((await fixture.start()).outcome, "READY");
+  await runComposed(await fixture.start(), fixture, { maxRounds: 1 });
+  assert.deepEqual(fixture.launches, ["dispatch_I_blocker_1"]);
+
+  const [runId] = fixture.store().listRunIds();
+  const journal = fixture.journal();
+  const grant = journal.find(({ type }) => type === "grant.recorded");
+  assert.equal(grant.runIdentity.classification, "MULTI");
+  assert.equal(grant.runIdentity.specId, SPEC_ID);
+  assert.equal(typeof grant.runIdentity.decompositionIdentity, "string");
+  assert.notEqual(grant.runIdentity.decompositionIdentity, "");
+  assert.deepEqual(
+    journal.filter(({ type }) => type === "dispatch.recorded").map(({ issueId }) => issueId),
+    [BLOCKER_ID],
+    "the Run dispatched its child only, never the parent Issue",
+  );
+
+  const writer = fixture.store().acquireWriter(runId);
+  try {
+    const appended = writer.append({
+      type: "delivery.observed",
+      at: AT,
+      issueId: SPEC_ID,
+      operationId: `workflow-op-v1-${"c".repeat(64)}`,
+      stage: "CLOSE_DISPATCH_INTENT",
+      disposition: "INTENT_RECORDED",
+      sourceAt: AT,
+      owner: "close-issue",
+      evidenceIdentity: null,
+      requestIdentity: "close:#invocation-1",
+      blockingPredicate: null,
+    });
+    assert.equal(appended.stage, "CLOSE_DISPATCH_INTENT");
+  } finally {
+    writer.release();
+  }
+
+  assert.deepEqual(
+    fixture.journal().filter(({ stage }) => stage === "CLOSE_DISPATCH_INTENT").map(({ issueId }) => issueId),
+    [SPEC_ID],
+  );
+});
