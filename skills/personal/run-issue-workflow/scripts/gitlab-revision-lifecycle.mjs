@@ -5,6 +5,33 @@ const one = (items, label) => {
   if (items.length !== 1) throw new Error(`${label}: expected one exact record`);
   return items[0];
 };
+const objectOf = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+
+// The GitLab composite handoff nests its authority fields under `authority`, keeps the decomposition
+// digest inside the decomposition read-back receipt it carries, and writes none of `specId`, `target`,
+// `classification`, `approvedScopeHash`, `decompositionIdentity` or `decompositionDigest` on its top
+// level; the GitHub encoding writes those facts flat and carries the digest as its own member. Resolve
+// both layouts the way the sibling Run readers already do — `normalizeWorkflowHandoff` in
+// `gitlab-workflow-sources.mjs` for the authority fields, the composite handoff check in `run-core.mjs`
+// for the digest — so the selector compares the record the GitLab producer actually wrote instead of a
+// GitHub-shaped one, which is why a GitLab Multi-Issue revision could never be selected.
+//
+// Resolution adds no authority and weakens no check: every resolved value is only ever compared for
+// equality against the tracker read-back that owns it, so a foreign, ambiguous or unprovable handoff
+// still matches nothing and still stops. A digest member that is present but not a digest stays present
+// and fails that comparison instead of falling back to the receipt.
+const handoffFacts = (record) => {
+  const authority = objectOf(record.authority) ?? {};
+  return {
+    specId: authority.specId ?? record.specId,
+    target: authority.target ?? record.target,
+    approvedScopeHash: authority.approvedScopeHash ?? record.approvedScopeHash,
+    decompositionIdentity: authority.decompositionIdentity ?? record.decompositionIdentity,
+    decompositionDigest: record.decompositionDigest === undefined
+      ? objectOf(record.operationReceipt)?.decompositionReadBack?.decompositionDigest
+      : record.decompositionDigest,
+  };
+};
 
 // Select evidence only. The caller still owns live Git, task and journal checks.
 export function selectRevisionLifecycle({ snapshot, issue, repositoryId }) {
@@ -39,12 +66,15 @@ export function selectRevisionLifecycle({ snapshot, issue, repositoryId }) {
       && [item.identity, item.record.authority.approvedScopeHash].includes(operation.approvedPublicationIdentity));
     if (authority.classification === "SINGLE" && ownPreviousPublication) return null;
     const proven = one(matches, "Previous lifecycle publication");
-    const handoff = one(previous.filter(({ record }) => record.kind === "producer_handoff" && record.producerCommand === "to-tickets"
-      && record.specId === authority.specId && record.target === authority.target
-      && record.approvedScopeHash === proven.publication.record.authority.approvedScopeHash
-      && record.upstreamPublicationIdentity === proven.publication.identity
-      && record.decompositionIdentity === proven.decomposition.identity
-      && record.decompositionDigest === proven.decomposition.bodySha256), "Previous decomposition handoff");
+    const handoff = one(previous.filter(({ record }) => {
+      if (record.kind !== "producer_handoff" || record.producerCommand !== "to-tickets") return false;
+      const facts = handoffFacts(record);
+      return facts.specId === authority.specId && facts.target === authority.target
+        && facts.approvedScopeHash === proven.publication.record.authority.approvedScopeHash
+        && record.upstreamPublicationIdentity === proven.publication.identity
+        && facts.decompositionIdentity === proven.decomposition.identity
+        && facts.decompositionDigest === proven.decomposition.bodySha256;
+    }), "Previous decomposition handoff");
     previousAuthorities.set(handoff.identity, { ...proven, handoff });
     const key = one(Object.keys(decomposition?.record.decompositionMapping ?? {}).filter(key => decomposition.record.decompositionMapping[key] === issue.node_id), "Current child key");
     if (proven.decomposition.record.decompositionMapping?.[key] !== issue.node_id
