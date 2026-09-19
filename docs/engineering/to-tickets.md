@@ -19,7 +19,7 @@ Reach for it only when [to-spec](https://aihero.dev/skills-to-spec) published a 
 
 ## Stable reconciliation
 
-Every child is self-contained and depends only on its parent constraints and explicit blockers; it does not need to know whether sibling Issues execute concurrently. Inline `Covers: AC-n` references keep plan and verification traceable without a separate matrix or parser.
+Every child is self-contained and depends only on its parent constraints and explicit blockers; it does not need to know whether sibling Issues execute concurrently. Inline `Covers: AC-n` references keep plan and verification traceable without a separate matrix or parser. Each child's contract also binds its completion to an approved-publication identity the completed producer transaction already proved — never one the lane chooses for itself — and derives its `execute-issue` operation key from that exact value.
 
 Decomposition keys make retries stable: exact tracker evidence is reused, while duplicate or conflicting identity sources fail closed. Owned blockers must be acyclic, and readable External blockers affect readiness while remaining read-only.
 
