@@ -88,6 +88,17 @@ Any current transaction, upstream publication, upstream handoff, child, relation
 
 `<Spec-ID>/<NN>`
 
+## Approved publication identity
+
+Bind this child's completion `approvedPublicationIdentity` to exactly one identity the completed producer transaction already bound for the parent Spec, and derive the `execute-issue` operation identity from that exact value:
+
+- the parent Spec's approved-scope hash;
+- the approved-scope identity that transaction derived and bound in its own checkpoint bindings, which the parent `decomposition:v1` record carries beside that hash;
+- the current `spec_publication` record identity;
+- the parent `decomposition:v1` record identity.
+
+The Run admits these values and no other. A bound value that none of those authorities carries, or an operation key that is not the honest derivation from the value bound here, is refused as outside proven authority.
+
 ## What to build
 
 <One independently verifiable outcome.>

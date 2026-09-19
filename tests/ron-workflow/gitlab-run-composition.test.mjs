@@ -79,7 +79,7 @@ const buildInstallation = (cacheDirectory) => {
 // dependant gated by the published body graph. The child bodies are byte-identical across the two
 // fixtures — the canonical `## Parent` cell that stands in for a native hierarchy link is inert for the
 // GitHub composition — so the derived facts can be compared fact for fact.
-const fixture = async (t, { tracker, classification = "MULTI", realTransport = false, declaration = true, manualPrerequisites = null }) => {
+const fixture = async (t, { tracker, classification = "MULTI", realTransport = false, declaration = true, manualPrerequisites = null, boundScopeIdentity = null, publishedScopeIdentity = null }) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), `run-sources-${tracker}-`)));
   const repository = join(root, "repo");
   const agentRoot = join(root, "agent");
@@ -101,6 +101,13 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
     ? SPEC_BODY
     : `${SPEC_BODY.trimEnd()}\n\n## Manual prerequisites\n\n${manualPrerequisites}\n`;
   const approvedScopeHash = bodyDigest(specBody);
+  // A producer's own approved-scope identity is not the approved body's raw digest: the producer derives
+  // it from the title, body, classification and ready label together, so on a GitLab-bound project the
+  // two differ. These two options model that distinction in each owner a child lane may read — the
+  // completed producer transaction's own bindings and the published `decomposition:v1` record — so a
+  // reader that admits only one of them can be told apart from one that admits both.
+  const boundScope = boundScopeIdentity ?? approvedScopeHash;
+  const publishedScope = publishedScopeIdentity ?? boundScope;
 
   git(repository, "init", "-b", TARGET);
   git(repository, "config", "user.name", "Fixture");
@@ -126,6 +133,7 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
     target: TARGET,
     planningSeal: seal,
     approvedScopeHash,
+    approvedScopeIdentity: publishedScope,
     decompositionMapping: classification === "MULTI" ? { "1/01": blockerId, "1/02": dependantId } : null,
     childBodyDigests: classification === "MULTI"
       ? { [blockerId]: bodyDigest(blockerBody), [dependantId]: bodyDigest(dependantBody) }
@@ -147,7 +155,7 @@ const fixture = async (t, { tracker, classification = "MULTI", realTransport = f
     target: TARGET,
     baseline: seal,
     bindings: {
-      approvedScopeIdentity: approvedScopeHash,
+      approvedScopeIdentity: boundScope,
       classification,
       planningSeal: seal,
       upstream: { handoffIdentity, publicationIdentity },
@@ -752,4 +760,128 @@ test("an explained negative declaration declares nothing while a real prerequisi
     [["gitlab", "INCOMPLETE", "run_preparation_pending", "to-spec"], ["github", "INCOMPLETE", "run_preparation_pending", "to-spec"]],
     "a section declaring a real prerequisite keeps its planning-owned gap in both readers");
   assert.deepEqual(both.map((tracker) => observed[tracker].required.preparation.reason), [reason, reason]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// AC-1 — the completed transaction's own approved-scope identity is admissible, in both readers
+// ---------------------------------------------------------------------------------------------
+
+// The exact live shape: a producer's bound scope identity that differs from the approved body's raw
+// digest. `SPEC_SCOPE_IDENTITY` stands in for it and `FOREIGN_IDENTITY` for a value no proven authority
+// carries.
+const SPEC_SCOPE_IDENTITY = `sha256:${"a".repeat(64)}`;
+const FOREIGN_IDENTITY = `sha256:${"f".repeat(64)}`;
+const BOTH_TRACKERS = ["gitlab", "github"];
+
+// Publish one honest child completion note on the fixture's blocker child: a real worktree, a candidate
+// integrated into the target, and the completion contract binding one declared `approvedPublicationIdentity`.
+// `misderivedKeyFrom` keeps that declared identity but re-points the receipt's key at another identity's
+// honest derivation, which is the only way to separate a declared identity from its key.
+const publishBlockerCompletion = (f, { declaredIdentity, misderivedKeyFrom = null, id = 90 }) => {
+  const worktree = join(dirname(f.repository), "worktrees", "issue-blocker");
+  mkdirSync(dirname(worktree), { recursive: true });
+  git(f.repository, "worktree", "add", "-b", "issue/blocker", worktree, f.seal);
+  writeFileSync(join(worktree, "blocker.txt"), "candidate\n");
+  git(worktree, "add", "blocker.txt");
+  git(worktree, "commit", "-m", "implement the blocker");
+  const candidate = git(worktree, "rev-parse", "HEAD");
+  git(f.repository, "merge", "--ff-only", "issue/blocker");
+  f.addNote({
+    iid: 2,
+    id,
+    record: {
+      kind: "implementation_complete",
+      repositoryId: f.repositoryId,
+      issueId: f.blockerId,
+      specId: f.specId,
+      target: TARGET,
+      targetWorktree: f.repository,
+      topic: "issue/blocker",
+      worktree,
+      baseline: f.seal,
+      candidate,
+      planningSeal: f.seal,
+      planningSealState: "reused",
+      operationIdentity: (() => {
+        const honest = deriveExecuteIssueOperationIdentity({
+          repositoryId: f.repositoryId,
+          specId: f.specId,
+          approvedPublicationIdentity: declaredIdentity,
+          issueId: f.blockerId,
+        });
+        if (misderivedKeyFrom === null) return honest;
+        return {
+          ...honest,
+          key: deriveExecuteIssueOperationIdentity({
+            repositoryId: f.repositoryId,
+            specId: f.specId,
+            approvedPublicationIdentity: misderivedKeyFrom,
+            issueId: f.blockerId,
+          }).key,
+        };
+      })(),
+      manualAttestations: [],
+      workflowArtifacts: [],
+      standards: "clean",
+      spec: "clean",
+      verification: [{ command: "node --test tests/ron-workflow/*.test.mjs", result: "PASS — fixture candidate verification" }],
+      repairWaveCount: 0,
+      worktreeState: "clean",
+    },
+  });
+  return { worktree, candidate };
+};
+
+const unresolvedEvidence = (read) => read.current.facts.contradictions
+  .filter((item) => item.code === "issue_evidence_unresolved")
+  .flatMap((item) => item.evidence);
+
+test("a child completion is admitted for every identity the completed transaction proved, in both readers", async (t) => {
+  for (const tracker of BOTH_TRACKERS) {
+    // One baseline fixture names the provider's own publication and decomposition identities, so the
+    // table below can bind each of the three identities already admitted.
+    const named = await fixture(t, { tracker, classification: "MULTI" });
+    const identities = [
+      ["the Spec's approved-scope hash", named.approvedScopeHash, {}],
+      ["the current publication identity", named.identities.publication, {}],
+      ["the published decomposition identity", named.identities.decomposition, {}],
+      ["the completed transaction's resulting scope identity", SPEC_SCOPE_IDENTITY, { boundScopeIdentity: SPEC_SCOPE_IDENTITY, publishedScopeIdentity: SPEC_SCOPE_IDENTITY }],
+      ["a scope identity only the completed transaction's bindings carry", SPEC_SCOPE_IDENTITY, { boundScopeIdentity: SPEC_SCOPE_IDENTITY, publishedScopeIdentity: bodyDigest(SPEC_BODY) }],
+      ["a scope identity only the published decomposition record carries", SPEC_SCOPE_IDENTITY, { boundScopeIdentity: bodyDigest(SPEC_BODY), publishedScopeIdentity: SPEC_SCOPE_IDENTITY }],
+    ];
+    for (const [name, declaredIdentity, options] of identities) {
+      const f = await fixture(t, { tracker, classification: "MULTI", ...options });
+      const { worktree, candidate } = publishBlockerCompletion(f, { declaredIdentity });
+      const read = await readFacts(f);
+      const node = read.current.facts.nodes.find((entry) => entry.issueId === f.blockerId);
+      assert.deepEqual(read.current.facts.contradictions, [], `${tracker}: ${name} must be admitted`);
+      assert.equal(node.completionState, "COMPLETE", `${tracker}: ${name} must read its completion`);
+      assert.equal(node.candidateReachable, true, `${tracker}: ${name} must keep its candidate reachable`);
+      assert.equal(node.worktreeState, "PRESENT", `${tracker}: ${name} must keep its lane readable`);
+      assert.equal(git(worktree, "rev-parse", "HEAD"), candidate, `${tracker}: ${name} must read the exact candidate`);
+    }
+  }
+});
+
+test("a child completion binding an identity no proven authority carries still fails closed, in both readers", async (t) => {
+  for (const tracker of BOTH_TRACKERS) {
+    const f = await fixture(t, { tracker, classification: "MULTI", boundScopeIdentity: SPEC_SCOPE_IDENTITY, publishedScopeIdentity: SPEC_SCOPE_IDENTITY });
+    publishBlockerCompletion(f, { declaredIdentity: FOREIGN_IDENTITY });
+    const read = await readFacts(f);
+    assert.deepEqual(unresolvedEvidence(read), ["Completion publication is outside current proven authority"], `${tracker}: a foreign identity must fail closed`);
+    const node = read.current.facts.nodes.find((entry) => entry.issueId === f.blockerId);
+    assert.equal(node.trackerState, "UNKNOWN", `${tracker}: the refused node reads UNKNOWN`);
+    assert.equal(node.completionState, "NONE", `${tracker}: the refused completion is not read`);
+  }
+});
+
+test("an admitted identity still refuses an operation key derived from another identity, in both readers", async (t) => {
+  for (const tracker of BOTH_TRACKERS) {
+    const f = await fixture(t, { tracker, classification: "MULTI", boundScopeIdentity: SPEC_SCOPE_IDENTITY, publishedScopeIdentity: SPEC_SCOPE_IDENTITY });
+    publishBlockerCompletion(f, { declaredIdentity: SPEC_SCOPE_IDENTITY, misderivedKeyFrom: FOREIGN_IDENTITY });
+    const read = await readFacts(f);
+    const evidence = unresolvedEvidence(read);
+    assert.deepEqual(evidence, ["Workflow operation identity receipt does not match its immutable inputs"], `${tracker}: the key must equal the honest derivation from the declared identity`);
+    assert.equal(read.current.facts.nodes.find((entry) => entry.issueId === f.blockerId).completionState, "NONE", `${tracker}: a misderived key is not read as completion evidence`);
+  }
 });

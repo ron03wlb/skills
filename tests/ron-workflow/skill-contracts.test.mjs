@@ -780,6 +780,9 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   assert.match(childContract, /Planning baseline.*Commit:.*Seal: <created, successor, or reused>/su, "canonical child contract has an incomplete Planning baseline");
   assert.match(childContract, /Acceptance Criteria.*Implementation Plan.*Verification.*Blocked by/su, "canonical child contract is not directly executable");
   assert.match(childContract, /Covers: AC-/u, "canonical child contract omits inline AC mapping");
+  // Issue 138, AC-2: the canonical child contract states every `approvedPublicationIdentity` value the
+  // reader admits, so a lane derives its own `execute-issue` operation identity instead of guessing.
+  assert.match(childContract, /`approvedPublicationIdentity`.*approved-scope hash.*checkpoint bindings.*`spec_publication` record identity.*`decomposition:v1` record identity.*refused as outside proven authority/su, "canonical child contract omits the admitted publication identities");
   assert.doesNotMatch(tickets, /<local-issue-template>|<issue-template>/u, "tracker adapters must not fork the canonical child contract");
   assert.match(tickets, /Read each published Issue back.*Planning baseline.*blocking/isu);
   assert.match(tickets, /consume.*classification.*never reclassif.*Multi-Issue/isu);

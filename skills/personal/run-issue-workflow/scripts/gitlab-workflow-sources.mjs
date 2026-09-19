@@ -706,6 +706,22 @@ export async function createGitLabWorkflowSources({
         reason:
           "The declared Manual prerequisite needs its planning-owned environment and attestation handoff before Run-ready",
       };
+    // The identities a child completion may bind (AC-1). The three the Run always admitted — the
+    // selected Spec's approved-scope hash, the current publication identity and, for a Multi-Issue Spec,
+    // the decomposition identity — plus the approved-scope identity the completed producer transaction
+    // itself bound for that Spec and the published decomposition record's own copy of it. A producer
+    // derives that identity from the title, body, classification and ready label together, so it is not
+    // the approved body's raw digest and a lane that binds it (the honest producer-derived value) was
+    // refused. Both values are read from those two already-validated owners and never from the completion
+    // under check, so admission stays non-circular; an identity none of them carries still fails closed.
+    const producerCheckpoint = checkpointRead(snapshot);
+    const admittedPublications = [
+      authority.approvedScopeHash,
+      snapshot.publication.identity,
+      snapshot.decomposition?.identity,
+      producerCheckpoint.approvedScopeHash,
+      snapshot.decomposition?.record.approvedScopeIdentity,
+    ].filter(Boolean);
     for (const issue of snapshot.issues) {
       try {
         if (snapshot.issueErrors?.has(issue.node_id))
@@ -1280,13 +1296,7 @@ export async function createGitLabWorkflowSources({
               record.operationIdentity.approvedPublicationIdentity;
             if (
               completion !== adoptedCompletion &&
-              ![
-                authority.approvedScopeHash,
-                snapshot.publication.identity,
-                snapshot.decomposition?.identity,
-              ]
-                .filter(Boolean)
-                .includes(publication)
+              !admittedPublications.includes(publication)
             )
               throw new Error(
                 "Completion publication is outside current proven authority",
@@ -2108,7 +2118,7 @@ export async function createGitLabWorkflowSources({
         schema: "run-ready-handoff-facts:v1",
         authority,
         preparation,
-        checkpoint: checkpointRead(snapshot),
+        checkpoint: producerCheckpoint,
         handoff,
         targetState: target.state,
         targetOwnership: target.ownership,
