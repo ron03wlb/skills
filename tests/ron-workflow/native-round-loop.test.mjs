@@ -12,6 +12,8 @@ import test from "node:test";
 import { assessLaneSettlement } from "../../skills/personal/run-issue-workflow/scripts/lane-settlement-capability.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { readNativeLaneEvidence } from "../../skills/personal/run-issue-workflow/scripts/native-lane-evidence.mjs";
+import { hostActionIdentity } from "../../skills/personal/run-issue-workflow/scripts/pi-workflow-host.mjs";
+import { closeLaneLivenessFor } from "../../skills/personal/run-issue-workflow/scripts/run-entry.mjs";
 import { LANE_TOOL_CEILING } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
 import { bindTechnicalFailure, nextRepairWave, recoveryDigest } from "../../skills/personal/run-issue-workflow/scripts/recovery-evidence.mjs";
 import { deriveCloseIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
@@ -674,6 +676,92 @@ test("the reducer's bounded close wait passes through unchanged and consumes no 
   assert.equal(waiting.waits[0].timeoutMs, 30_000);
   assert.equal(waiting.waits[0].owner.operationId, "close-op-1");
   assert.equal(boundRoundActions({ lanes: [], maxParallel: 1, activeIssueIds: [] }).executionSlots, 1);
+});
+
+// ---------------------------------------------------------------------------------------------
+// The close-lane liveness read names the lane its own close action minted
+// ---------------------------------------------------------------------------------------------
+
+// One native run record reader over an explicit set of materialized lanes — the exact port
+// `closeLaneLivenessFor` consumes — so the lane reference the probe asks about is observable rather
+// than inferred from the answer. An unlisted lane reads ABSENT, as a real reader reports it.
+const closeRunReader = (lanes, asked = []) => ({ runId }) => {
+  asked.push(runId);
+  return { schema: "pi-subagent-run-record:v1", runId, state: "ABSENT", ...(lanes[runId] ?? {}) };
+};
+
+const liveLane = { state: "PRESENT", status: "running", terminal: false };
+
+const closeProbeFor = (lanes, asked = []) => (request) => closeLaneLivenessFor({
+  request,
+  readSubagentRun: closeRunReader(lanes, asked),
+});
+
+test("the close-lane liveness read resolves the reference the host minted for the close action it reads", () => {
+  const parentRef = hostActionIdentity({ type: "close_parent", issueId: specId });
+  const childRef = hostActionIdentity({ type: "close_issue", issueId: "A" });
+  assert.equal(parentRef, "close_parent_I_114");
+  assert.equal(childRef, "close_A");
+
+  const asked = [];
+  const probe = closeProbeFor({ [parentRef]: liveLane }, asked);
+  // A parent close reads the parent lane: a present non-terminal native record is ACTIVE.
+  assert.equal(probe({ issueId: specId, actionType: "close_parent" }).state, "ACTIVE");
+  assert.deepEqual(asked, [parentRef], "a parent close asks about the lane the host minted for it");
+  // A child close keeps its own reference and its own classification: the parent's live record says
+  // nothing about the child lane, so the same reader reports the child lane ABSENT.
+  assert.equal(probe({ issueId: "A", actionType: "close_issue" }).state, "ABSENT");
+  assert.deepEqual(asked, [parentRef, childRef]);
+  // Both close shapes over the same present non-terminal record: each resolves its own host reference
+  // and reads its own lane ACTIVE.
+  const bothAsked = [];
+  const bothLive = closeProbeFor({ [parentRef]: liveLane, [childRef]: liveLane }, bothAsked);
+  assert.equal(bothLive({ issueId: specId, actionType: "close_parent" }).state, "ACTIVE");
+  assert.equal(bothLive({ issueId: "A", actionType: "close_issue" }).state, "ACTIVE");
+  assert.deepEqual(bothAsked, [parentRef, childRef]);
+  // A terminal parent lane is ABSENT, and an unreadable one is UNKNOWN rather than a second close
+  // owner, exactly as for a child today.
+  assert.equal(closeProbeFor({ [parentRef]: { state: "PRESENT", status: "completed", terminal: true } })({ issueId: specId, actionType: "close_parent" }).state, "ABSENT");
+  assert.equal(closeProbeFor({ [parentRef]: { state: "UNREADABLE", laneState: "UNKNOWN" } })({ issueId: specId, actionType: "close_parent" }).state, "UNKNOWN");
+  // A read that names no close action is not derivable, so the probe refuses to read some other lane's
+  // record and reports UNKNOWN instead.
+  assert.equal(closeProbeFor({ [parentRef]: liveLane })({ issueId: specId }).state, "UNKNOWN");
+});
+
+test("a live Multi-Issue parent close lane is read back, and launched only when its own lane is gone", () => {
+  const parentRef = hostActionIdentity({ type: "close_parent", issueId: specId });
+  const parentEvents = journal([grantEvent, closeIntentEvent(specId, closeOperationId(specId), `${parentRef}#invocation-1`)]);
+
+  // The parent's recorded invocation is still owned by the lane the host minted for the parent close.
+  const inFlight = plan(roundRead({
+    nodes: [succeededNode("A")],
+    events: parentEvents,
+    closeLane: closeProbeFor({ [parentRef]: liveLane }),
+  }));
+  assert.deepEqual(inFlight.legalActions, ["close_parent"]);
+  assert.deepEqual(inFlight.lanes, [], "a live parent close lane is read back, never duplicated");
+  assert.deepEqual(inFlight.readBacks.map((item) => [item.id, item.decision]), [[parentRef, "READ_BACK"]]);
+  assert.deepEqual(inFlight.closeIntents, [], "a read-back records no second invocation");
+
+  // Its native record is gone: the round may materialize the parent close again, as a new invocation.
+  const lost = plan(roundRead({
+    nodes: [succeededNode("A")],
+    events: parentEvents,
+    closeLane: closeProbeFor({}),
+  }));
+  assert.deepEqual(lost.lanes.map((lane) => [lane.id, lane.actionType, lane.issueId]), [[parentRef, "close_parent", specId]]);
+  assert.equal(lost.lanes[0].closeInvocation, 2);
+  assert.match(lost.closeIntents[0].requestIdentity, /^sha256:[0-9a-f]{64}#invocation-2$/u);
+
+  // The child close keeps the behaviour it has today, driven through the same real probe.
+  const childRef = hostActionIdentity({ type: "close_issue", issueId: "A" });
+  const child = plan(roundRead({
+    nodes: [completeNode("A")],
+    events: journal([grantEvent, dispatchEvent("A"), closeIntentEvent("A", closeOperationId("A"), `${childRef}#invocation-1`)]),
+    closeLane: closeProbeFor({ [childRef]: liveLane }),
+  }));
+  assert.deepEqual(child.lanes, []);
+  assert.deepEqual(child.readBacks.map((item) => [item.id, item.decision]), [[childRef, "READ_BACK"]]);
 });
 
 // ---------------------------------------------------------------------------------------------

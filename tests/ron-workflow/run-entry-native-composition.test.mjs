@@ -19,7 +19,7 @@ import { reduceRun } from "../../skills/personal/run-issue-workflow/scripts/deli
 import { bodyDigest, renderWorkflowRecord } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { LANE_TOOL_CEILING } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
 import { LANE_STANDING_RULES } from "../../skills/personal/run-issue-workflow/scripts/native-lane-runner.mjs";
-import { runNativeRoundLoop } from "../../skills/personal/run-issue-workflow/scripts/native-round-loop.mjs";
+import { runNativeRoundLoop, CLOSE_INTENT_STAGE } from "../../skills/personal/run-issue-workflow/scripts/native-round-loop.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { createNativeRunReader, startRun } from "../../skills/personal/run-issue-workflow/scripts/run-entry.mjs";
 import { runWorkflowCommand } from "../../skills/personal/run-issue-workflow/scripts/workflow-command.mjs";
@@ -330,6 +330,54 @@ const nativeFixture = async (t) => {
       rmSync(worktree, { recursive: true, force: true });
       fixtures[2].state = "closed";
     },
+    // One further child reaching node success without ever being dispatched by this Run: its own
+    // candidate is integrated and its completion note published, so every child of the parent is closed
+    // and reachable. The same completion payload the blocker publishes, bound to this child.
+    completeChild: ({ number, issueId, topic, file, worktreeName, completionIdentity }) => {
+      const worktree = join(root, "worktrees", worktreeName);
+      // The child's own baseline is the target head it starts from, so its candidate contains both that
+      // baseline and the Run's Planning Seal.
+      const baseline = git(repository, "rev-parse", "HEAD");
+      mkdirSync(join(root, "worktrees"), { recursive: true });
+      git(repository, "worktree", "add", "-b", topic, worktree, baseline);
+      writeFileSync(join(worktree, file), "candidate\n");
+      git(worktree, "add", file);
+      git(worktree, "commit", "-m", `implement ${issueId}`);
+      const candidate = git(worktree, "rev-parse", "HEAD");
+      git(repository, "merge", "--ff-only", topic);
+      fixtures[number].comments.push(comment(completionIdentity, {
+        kind: "implementation_complete",
+        issueId,
+        specId: SPEC_ID,
+        target: TARGET,
+        targetWorktree: repository,
+        topic,
+        worktree,
+        baseline,
+        candidate,
+        planningSeal: seal,
+        planningSealState: "reused",
+        operationIdentity: deriveExecuteIssueOperationIdentity({
+          repositoryId: REPOSITORY_ID,
+          specId: SPEC_ID,
+          approvedPublicationIdentity: APPROVED_PUBLICATION,
+          issueId,
+        }),
+        manualAttestations: [],
+        workflowArtifacts: [],
+        standards: "clean",
+        spec: "clean",
+        verification: [{ command: "node --test tests/ron-workflow/*.test.mjs", result: "PASS — fixture candidate verification" }],
+        repairWaveCount: 0,
+        worktreeState: "clean",
+      }));
+      return { candidate, worktree, topic };
+    },
+    closeChild: ({ number, worktree }) => {
+      git(repository, "worktree", "remove", "--force", worktree);
+      rmSync(worktree, { recursive: true, force: true });
+      fixtures[number].state = "closed";
+    },
   };
 };
 
@@ -622,6 +670,86 @@ test("a lost launch response with no native lane blocks the round instead of a s
   assert.deepEqual(loop.rounds[0].lanes, []);
   assert.equal(fixture.launches.length, 0);
   assert.equal(fixture.journal().filter(({ type }) => type === "dispatch.recorded").length, 1);
+});
+
+test("the composed close-lane read resolves the lane the close action mints, for both close shapes", async (t) => {
+  const fixture = await nativeFixture(t);
+  const started = await fixture.start();
+  assert.equal(started.outcome, "READY");
+
+  const parentRef = `close_parent_${SPEC_ID}`;
+  const childRef = `close_${SPEC_ID}`;
+  const read = (actionType) => started.round.closeLane({
+    issueId: SPEC_ID,
+    actionType,
+    operationId: "workflow-op-v1-close-lane-read",
+    requestIdentity: `${parentRef}#invocation-1`,
+  });
+
+  // The parent close lane's own native run record, exactly what the coordinator's launch port records.
+  writeNativeRun({ agentRoot: fixture.agentRoot, laneRef: parentRef, status: "running" });
+  assert.equal(read("close_parent").state, "ACTIVE");
+  // The child close reads the child lane: no record exists for it yet, so the parent's live record is
+  // never mistaken for the child's own lane.
+  assert.equal(read("close_issue").state, "ABSENT");
+  // Both close shapes over their own present non-terminal native record: each resolves its own host
+  // reference and reads ACTIVE.
+  writeNativeRun({ agentRoot: fixture.agentRoot, laneRef: childRef, status: "running" });
+  assert.equal(read("close_issue").state, "ACTIVE");
+  assert.equal(read("close_parent").state, "ACTIVE");
+  // A terminal parent lane no longer owns its invocation, and an unreadable one is UNKNOWN rather than a
+  // second parent close owner — the same classification a child lane reads today.
+  writeNativeRun({ agentRoot: fixture.agentRoot, laneRef: parentRef, status: "completed" });
+  assert.equal(read("close_parent").state, "ABSENT");
+  writeFileSync(join(fixture.agentRoot, ".pi/agent/subagent-runs", `${parentRef}.json`), "not a native run record");
+  assert.equal(read("close_parent").state, "UNKNOWN");
+  assert.equal(fixture.launches.length, 0, "a liveness read materializes nothing");
+});
+
+// A Multi-Issue Run's parent close is the one close with no dispatch and no candidate to fall back on:
+// its lane is minted as `close_parent_<Issue>` (`pi-workflow-host.mjs:162-165`) while the liveness probe
+// hard-coded the child form, so the round could never read the parent lane back and planned a second
+// close owner every round (Issue 140, AC-1, AC-2). Driven here on the composed path end to end.
+test("a live Multi-Issue parent close lane is read back by the composed path instead of re-planned", async (t) => {
+  const fixture = await nativeFixture(t);
+  assert.equal((await fixture.start()).outcome, "READY");
+  await runComposed(await fixture.start(), fixture, { maxRounds: 1 });
+  assert.deepEqual(fixture.launches, ["dispatch_I_blocker_1"]);
+
+  // Every child reaches node success: the blocker through its own lane's work, the dependant through the
+  // same completion and integration, without this Run ever dispatching it.
+  const blocker = fixture.completeBlocker();
+  fixture.settleLane({ laneRef: "dispatch_I_blocker_1", worktreePath: blocker.worktree });
+  fixture.closeBlocker({ worktree: blocker.worktree });
+  const dependant = fixture.completeChild({
+    number: 3,
+    issueId: DEPENDANT_ID,
+    topic: "issue/dependant",
+    file: "dependant.txt",
+    worktreeName: "issue-dependant",
+    completionIdentity: "IC_completion_dependant",
+  });
+  fixture.closeChild({ number: 3, worktree: dependant.worktree });
+
+  // The parent close is now the only legal action, and its lane is the reference the host mints for it.
+  const closing = await fixture.start();
+  assert.equal(closing.outcome, "READY", JSON.stringify(closing.diagnosis ?? closing.plan));
+  assert.deepEqual(closing.plan.legalActions, ["close_parent"]);
+  assert.deepEqual(
+    closing.plan.lanes.map((lane) => [lane.id, lane.actionType, lane.issueId]),
+    [[`close_parent_${SPEC_ID}`, "close_parent", SPEC_ID]],
+  );
+
+  const closeRound = await runComposed(closing, fixture, { maxRounds: 2 });
+  assert.deepEqual(closeRound.rounds[0].lanes, [`close_parent_${SPEC_ID}`]);
+  assert.deepEqual(fixture.launches, ["dispatch_I_blocker_1", `close_parent_${SPEC_ID}`]);
+  // The parent lane's own native run is live, so the next round reads that lane back: the recorded
+  // invocation stays owned by one close lane and no second parent close owner is planned.
+  assert.deepEqual(closeRound.rounds[1].lanes, []);
+  assert.deepEqual(closeRound.rounds[1].readBacks, [`close_parent_${SPEC_ID}`]);
+  const intents = fixture.journal().filter(({ stage }) => stage === CLOSE_INTENT_STAGE);
+  assert.deepEqual(intents.map(({ issueId }) => issueId), [SPEC_ID]);
+  assert.match(intents[0].requestIdentity, /#invocation-1$/u);
 });
 
 // A Multi-Issue Run lanes its children only, so its parent Issue never carries a `dispatch.recorded`.

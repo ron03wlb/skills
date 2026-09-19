@@ -238,14 +238,17 @@ export function createNativeLaneTaskReader({ readJournal, readRecordedLanes, rea
 
 // The close lane's own liveness. A close lane consumes no dispatch reservation, so the only durable facts
 // about it are the invocation the loop recorded before the lane existed and the lane's own deterministic
-// identity. The probe answers ACTIVE while that lane's native run is still live, ABSENT when the native
-// read proves it gone, and UNKNOWN — which stops the round instead of putting a second close owner on one
-// Issue — when the read proves neither.
+// identity. `request.actionType` is the close action being asked about — `close_issue` for a child and
+// `close_parent` for a Multi-Issue parent — and the lane reference is derived from it through the host's
+// own grammar, so the probe and the minted lane can never name two different lanes. The probe answers
+// ACTIVE while that lane's native run is still live, ABSENT when the native read proves it gone, and
+// UNKNOWN — which stops the round instead of putting a second close owner on one Issue — when the read
+// proves neither.
 export function closeLaneLivenessFor({ request, readSubagentRun } = {}) {
   const issueId = request?.issueId;
   let laneRef;
   try {
-    laneRef = hostActionIdentity({ type: "close_issue", issueId });
+    laneRef = hostActionIdentity({ type: request?.actionType, issueId });
   } catch (error) {
     return Object.freeze({ state: "UNKNOWN", evidence: [`The close lane reference for Issue ${String(issueId)} is not derivable: ${error.message}`] });
   }

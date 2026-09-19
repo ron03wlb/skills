@@ -567,9 +567,12 @@ export function planNativeRound({
       continue;
     }
     const recorded = intents.at(-1);
+    // The liveness read names the close action it is asking about, so the probe derives the lane
+    // reference from the same action the host minted: `close_parent_<Issue>` for a parent close and
+    // `close_<Issue>` for a child one.
     const fresh = read.closeLane === null
       ? null
-      : read.closeLane({ issueId: item.issueId, operationId, requestIdentity: recorded.requestIdentity });
+      : read.closeLane({ issueId: item.issueId, actionType: item.actionType, operationId, requestIdentity: recorded.requestIdentity });
     const state = isRecord(fresh) && ["ACTIVE", "ABSENT"].includes(fresh.state) ? fresh.state : "UNKNOWN";
     if (state === "UNKNOWN") {
       return stoppedFor(ROUND_LOOP_STOP_CODES.closeLaneOwnerUnproven, [
