@@ -1,8 +1,8 @@
 ## What it does
 
-`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target to the current task, then runs a **boundary-first** interview. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reserves new major direction, architecture, table DDL and any migration cost for you, while ordinary business and implementation details follow project evidence or suitable established practice. Each question includes a concrete proposal, alternatives, trade-offs, reasons and a recommendation. Only accepted glossary or ADR writes require an isolated planning worktree.
+`grill-with-docs` binds one proposed [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) and target, then runs a **boundary-first** interview. When accepted glossary or ADR writes require a lane, the host automatically supplies its stable opaque task identity; you never provide or confirm it, and it is not an Issue ID. The [agent](https://www.aihero.dev/ai-coding-dictionary/agent) reserves new major direction, architecture, table DDL and any migration cost for you, while ordinary business and implementation details follow project evidence or suitable established practice. Each question includes a concrete proposal, alternatives, trade-offs, reasons and a recommendation. Only accepted glossary or ADR writes require an isolated planning worktree.
 
-Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the task through the later `to-spec` handoff, which disposes of it once that publication reads back. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
+Accepted decisions are **[stateful](https://www.aihero.dev/ai-coding-dictionary/stateful)**: resolved terms and ADRs are recorded in an owned planning worktree, isolated from the target checkout and other lanes. Each decision retains its inherited, human-confirmed, or delegated basis and source. The worktree stays with the host-resolved task identity through the later `to-spec` handoff, which disposes of it once that publication reads back. An explicit empty change list carries tracker-only settled scope without creating files or inferring ownership from target dirt.
 
 ## When to reach for it
 
@@ -22,9 +22,9 @@ The wayfinder split comes down to session count: `/grill-with-docs` for single-s
 
 ## Prerequisites
 
-The skill reads a Git repository; before accepted document writes, the task must own one isolated planning worktree. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's glossary if a `CONTEXT-MAP.md` exists. ADRs follow the project's location and format, falling back to `docs/adr/`. Files are created lazily; the target checkout is not the writing surface.
+The skill reads a Git repository; before accepted document writes, the active host must provide a stable opaque task identity and the lane must own one isolated planning worktree. If the host identity is unavailable, the skill stops before creating the lane or writing, reports `host identity unavailable`, and preserves the settled interview for retry; entering an ID manually cannot unblock it. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's glossary if a `CONTEXT-MAP.md` exists. ADRs follow the project's location and format, falling back to `docs/adr/`. Files are created lazily; the target checkout is not the writing surface.
 
-It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. Both receive the same settled scope and, for accepted document writes, the same task, proposed Spec, target, baseline, and worktree identity.
+It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. Both receive the same settled scope and, for accepted document writes, the same host-resolved task identity, proposed Spec, target, baseline, and worktree identity.
 
 Each permitted dependency loads separately through the host:
 
@@ -34,10 +34,11 @@ Each permitted dependency loads separately through the host:
 
 ## The planning lane
 
-One lane belongs to one task, one proposed Spec, and one target. Multiple lanes may use the same target without a shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry.
+One lane belongs to one host-resolved opaque task identity, one proposed Spec, and one target. The identity is compared only for equality, never interpreted as a Tracker ID. Multiple lanes may use the same target without a shared planning checkout or global workflow lock. A lane-identity mismatch is a Recoverable blocker that reports the lane registry, observed evidence, smallest human action, preserved stages, and the same `/grill-with-docs` retry.
 
 - Accepted document writes stay in the exact registered worktree. Preserve it through partial publication; after the successful `to-spec` handoff read-back, that skill disposes of only this exact clean worktree, so a successful run leaves nothing registered.
-- Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree is created or retained.
+- Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree, lane, or task identity is created or required.
+- The grill creates only the local proposed-Spec/lane identity. It does not reserve or publish any Tracker object; `to-spec` exclusively owns those actions.
 
 ## The boundary-first interview
 
@@ -111,9 +112,9 @@ Yes. Moving existing data, adapting consumers or transitioning an operational wo
 Yes. This is the right skill for a codebase with no ADRs, no domain language and no design principles: invoke it and say "help me document my repo". The community pattern pairs it with [improve-codebase-architecture](https://aihero.dev/skills-improve-codebase-architecture) for building or repairing a `CONTEXT.md`. Expect to steer it: it will read code and ask you about what it finds, and you are the one who says which of the words already in the codebase are the right ones.
 
 **What should I do when the session ends?**
-Keep the exact handoff packet in the same conversation: task identity, proposed Spec, target, current baseline, and the accepted-change evidence. Then explicitly run `/to-spec` with that packet; finishing the interview does not invoke it automatically or reopen settled design.
+Keep the exact handoff packet in the same conversation: the host-resolved opaque task identity, proposed Spec, target, current baseline, and the accepted-change evidence. Then explicitly run `/to-spec` with that packet; finishing the interview does not invoke it automatically or reopen settled design. You are never asked to supply this identity, and it is not an Issue ID.
 
-- For read-only or tracker-only work, the packet carries an explicit empty accepted-change list.
+- For read-only or tracker-only work, the packet carries an explicit empty accepted-change list and no task identity.
 - For document writes, it carries the owned worktree and every accepted glossary or ADR path or hunk with its content identity. Your accepted documents remain available through publication or an interrupted handoff.
 
 [to-spec](https://aihero.dev/skills-to-spec) publishes the next command: a Single-Issue Spec continues to `run-issue-workflow`; a Multi-Issue Spec goes through `to-tickets` first.
@@ -124,7 +125,8 @@ Nobody is happy with the name. There is an open suggestion to rename it `grill-d
 ## It's working if
 
 - Accepted glossary changes appear *during* the session, term by term; a session with no accepted document changes finishes with an explicit empty list.
-- Accepted files change only in the task's isolated planning worktree; the target checkout and other lanes stay untouched.
+- Accepted files change only in the host-resolved task identity's isolated planning worktree; the target checkout and other lanes stay untouched.
+- The host supplies lane identity automatically when document writes are accepted; no user-entered ID or Tracker Issue can stand in for it.
 - The glossary reads as pure vocabulary (your project's words with tight definitions) and contains no implementation detail or spec-like prose.
 - Questions the codebase can answer get answered by reading the codebase, not asked of you.
 - Ordinary details inside settled boundaries appear as delegated defaults rather than questions.

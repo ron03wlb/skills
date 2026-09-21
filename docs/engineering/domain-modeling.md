@@ -2,7 +2,7 @@
 
 `domain-modeling` builds and sharpens a project's **ubiquitous language** while you are designing: challenging a term that conflicts with the glossary, forcing a precise word where you used a vague one, and stress-testing a relationship with a concrete scenario until the boundaries are exact.
 
-It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. Under `grill-with-docs`, it writes only inside the active task's isolated planning worktree and returns accepted path or hunk identities to that lane. A lane-identity mismatch is a Hard gate before any write, leaving the target checkout and other lanes unchanged. A standalone invocation keeps using the current worktree.
+It is the **active** discipline, not the passive one. Reading `CONTEXT.md` to borrow its vocabulary is a one-line habit any skill can do; this skill is for when you are *changing* the model. Under `grill-with-docs`, it writes only inside the active host-resolved task identity's isolated planning worktree and returns accepted path or hunk identities to that lane. The opaque identity is supplied by the host, never by you, and is not a Tracker ID. A lane-identity mismatch is a Hard gate before any write; unavailable host identity stops safely before writing, leaving the target checkout and other lanes unchanged. A standalone invocation keeps using the current worktree.
 
 ## When to reach for it
 
@@ -23,7 +23,7 @@ Reach for it when the *words* are the problem:
 
 ## Prerequisites
 
-None up front. The skill writes into two places and creates both lazily. When a caller supplies an active [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) workflow lane, both paths live inside that lane's isolated planning worktree:
+None up front. The skill writes into two places and creates both lazily. When a caller supplies an active [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) workflow lane, its stable opaque task identity is resolved from the active host before the first write; if unavailable, `host identity unavailable` preserves the settled design for retry. Both paths then live inside that lane's isolated planning worktree:
 
 - **`CONTEXT.md`** at the repo root, created by the first resolved term. In a repo with a `CONTEXT-MAP.md` at the root, terms go into the per-context `CONTEXT.md` the map points at instead.
 - **The repository's ADR location and format**, falling back to `docs/adr/` when no convention exists, created by the first qualifying decision.
