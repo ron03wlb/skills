@@ -26,6 +26,7 @@
 // journal, or mutates the tracker. Its only write is the one Grant the selected Run authorizes; the loop
 // writes the dispatch reservations and close-lane intents it owns through the append port below.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -281,7 +282,7 @@ const readNativeIssueReads = async ({ lanes, sources }) => {
   const reads = new Map();
   for (const issueId of new Set(lanes.map((lane) => lane.issueId))) {
     const issue = await sources.readIssue(issueId);
-    const completion = [...(issue.records ?? [])].reverse().find(({ record }) => (
+    const completion = (issue.records ?? []).toReversed().find(({ record }) => (
       record?.kind === COMPLETION_NOTE_KIND && record.issueId === issueId
     )) ?? null;
     reads.set(issueId, Object.freeze({
@@ -367,16 +368,19 @@ export function createNativeRunComposition({
     });
   };
 
-  // The loop's single journal append. The reservation is durable before the launch envelope exists, which
-  // is what makes a lost launch response readable instead of repeatable.
-  const append = (event) => {
+  // The loop's single journal writer. A coordinator step appends its complete authorized event set
+  // under one ownership interval, so no lane action can leave the step before every reservation and
+  // close intent from that round is durable.
+  const appendAll = (events) => {
+    if (!Array.isArray(events)) throw new TypeError("Native Run journal append needs an event list");
     const writer = store.acquireWriter(runId);
     try {
-      return writer.append(event);
+      return events.map((event) => writer.append(event));
     } finally {
       writer.release();
     }
   };
+  const append = (event) => appendAll([event])[0];
 
   return Object.freeze({
     schema: NATIVE_RUN_COMPOSITION_SCHEMA,
@@ -388,6 +392,7 @@ export function createNativeRunComposition({
     taskReader: createNativeLaneTaskReader({ readJournal, readRecordedLanes, readSubagentRun }),
     readRound,
     append,
+    appendAll,
     // The loop's third port. A worker launch is the coordinator's alone, so the composition names its
     // owner instead of pretending to have one.
     launchOwner: "coordinator",
@@ -397,6 +402,7 @@ export function createNativeRunComposition({
 // The plan the coordinator materializes: the native round plan's disposition, its legal action set, the
 // lanes and read-backs this round owns, and any fail-closed stop.
 const planSummary = (plan) => Object.freeze({
+  runId: plan.runId,
   disposition: plan.disposition,
   controlRevision: plan.controlRevision,
   maxParallel: plan.maxParallel,
@@ -419,17 +425,27 @@ const planSummary = (plan) => Object.freeze({
     actionType: lane.actionType,
     issueId: lane.issueId,
     skill: lane.skill,
+    agent: lane.agent,
+    tools: Object.freeze([...(lane.tools ?? [])]),
+    worktreePolicy: lane.worktreePolicy,
+    attempt: lane.attempt,
     decision: lane.decision,
     laneRef: lane.laneRef,
     closeInvocation: lane.closeInvocation,
+    launch: lane.launch === null || lane.launch === undefined ? null : Object.freeze({ ...lane.launch }),
   })),
   readBacks: plan.readBacks.map((item) => Object.freeze({
     id: item.id,
     actionType: item.actionType,
     issueId: item.issueId,
     laneRef: item.laneRef,
+    requestIdentity: item.requestIdentity ?? null,
     decision: item.decision,
   })),
+  waits: plan.waits.map((item) => Object.freeze({ ...item })),
+  hostOperations: plan.hostOperations.map((item) => Object.freeze({ ...item })),
+  reservations: plan.reservations.map((event) => Object.freeze({ ...event })),
+  closeIntents: plan.closeIntents.map((event) => Object.freeze({ ...event })),
   deferred: plan.deferred.map((item) => Object.freeze({ id: item.id, reason: item.reason })),
   stop: plan.stop ?? null,
 });
@@ -609,6 +625,7 @@ export async function startRun({
       schema: NATIVE_RUN_COMPOSITION_SCHEMA,
       readRound: composition.readRound,
       append: composition.append,
+      appendAll: composition.appendAll,
       repositoryId: composition.repositoryId,
       approvedPublicationIdentity: tracker.authority.approvedScopeHash,
       agentCeiling: composition.agentCeiling,
@@ -618,24 +635,50 @@ export async function startRun({
   };
 }
 
+export const RUN_ENTRY_COMPACT_BYTE_LIMIT = 16 * 1024;
+export const RUN_ENTRY_ARTIFACT_BYTE_LIMIT = 512 * 1024;
+export const RUN_ENTRY_FULL_BYTE_LIMIT = 256 * 1024;
+
 const runCli = async (argv) => {
   const [specId, ...rest] = argv;
   let approval = null;
-  let outPath = null;
+  let artifactPath = null;
   let cwd = process.cwd();
+  let full = false;
   for (let index = 0; index < rest.length; index += 1) {
-    if (rest[index] === "--approve") approval = rest[index + 1] ?? null;
-    else if (rest[index] === "--out") outPath = rest[index + 1] ?? null;
-    else if (rest[index] === "--cwd") cwd = rest[index + 1] ?? cwd;
+    if (rest[index] === "--approve") approval = rest[++index] ?? null;
+    else if (["--out", "--artifact"].includes(rest[index])) artifactPath = rest[++index] ?? null;
+    else if (rest[index] === "--cwd") cwd = rest[++index] ?? cwd;
+    else if (rest[index] === "--full") full = true;
   }
   const result = await startRun({ specId, approval, cwd });
-  if (outPath !== null && result.outcome === "READY") {
-    mkdirSync(dirname(resolve(outPath)), { recursive: true });
-    writeFileSync(outPath, `${JSON.stringify(result.round)}\n`);
-    process.stdout.write(`${JSON.stringify({ ...result, round: undefined, roundPath: resolve(outPath) }, null, 2)}\n`);
-    return result;
-  }
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  const resultRecord = /** @type {Record<string, any>} */ (result);
+  const safeRunId = String(resultRecord.plan?.runId ?? resultRecord.operationId ?? specId ?? "unbound").replaceAll(/[^a-zA-Z0-9._-]/gu, "_");
+  artifactPath ??= resolve(cwd, ".git", "run-issue-workflow", "artifacts", `${safeRunId}.json`);
+  const artifact = {
+    schema: "run-issue-workflow-round-artifact:v1",
+    result: { ...result, round: undefined, nativeLoop: undefined },
+    round: resultRecord.round ?? null,
+    plan: resultRecord.plan ?? null,
+  };
+  const artifactBytes = `${JSON.stringify(artifact)}\n`;
+  if (Buffer.byteLength(artifactBytes) > RUN_ENTRY_ARTIFACT_BYTE_LIMIT)
+    throw new Error(`Run entry artifact exceeds ${RUN_ENTRY_ARTIFACT_BYTE_LIMIT} bytes`);
+  mkdirSync(dirname(resolve(artifactPath)), { recursive: true });
+  writeFileSync(resolve(artifactPath), artifactBytes, { mode: 0o600 });
+  const artifactSha256 = `sha256:${createHash("sha256").update(artifactBytes).digest("hex")}`;
+  const summary = {
+    schema: "run-issue-workflow-step-summary:v1",
+    outcome: result.outcome,
+    runId: resultRecord.plan?.runId ?? null,
+    plan: resultRecord.plan === undefined ? null : planSummary(resultRecord.plan),
+    stop: resultRecord.plan?.stop ?? resultRecord.diagnosis ?? null,
+    artifactRefs: { round: resolve(artifactPath), sha256: artifactSha256 },
+  };
+  const output = `${JSON.stringify(full ? artifact : summary, null, 2)}\n`;
+  const limit = full ? RUN_ENTRY_FULL_BYTE_LIMIT : RUN_ENTRY_COMPACT_BYTE_LIMIT;
+  if (Buffer.byteLength(output) > limit) throw new Error(`Run entry ${full ? "full" : "compact"} output exceeds ${limit} bytes`);
+  process.stdout.write(output);
   return result;
 };
 

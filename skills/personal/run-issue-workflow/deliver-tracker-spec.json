@@ -21,6 +21,7 @@
       {
         "id": "delivery",
         "type": "dynamic",
+        "profileRole": "research-execution",
         "dynamic": {
           "uses": "./workflows/deliver-tracker-spec/helpers/controller.mjs",
           "mode": "graph-splice",

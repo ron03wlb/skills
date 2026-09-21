@@ -5,7 +5,7 @@
 // receipt is complete only when it re-reads the selected package manifest, binds its source commit and
 // manifest SHA-256, proves every managed entry the current environment resolves points at that exact
 // package directory, and invokes the one kept package-owned capability probe
-// (`--qualification-identity`) through that selected `installed-entry.mjs`. This module adds no readiness
+// (`--capability-identity`) through that selected `installed-entry.mjs`. This module adds no readiness
 // prerequisite and reproduces none of those owners' logic: it calls the same owner and reports the four
 // required seams that owner's own evidence proves — the selected package version, its manifest
 // integrity, the environment-resolved managed entries and the proven capability — with the owning source
@@ -21,10 +21,11 @@
 // environment resolves are in `docs/agents/installed-readiness-evidence.md`.
 
 import { realpathSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  managedWorkflowEntryPaths,
   readWorkflowInstallationEvidence,
   selectWorkflowVersion,
 } from "./workflow-installation.mjs";
@@ -54,7 +55,6 @@ export const INSTALLED_READINESS_BLOCKER_CODES = Object.freeze({
 
 const INSTALLATION_OWNER =
   "skills/personal/run-issue-workflow/scripts/workflow-installation.mjs";
-const manifestIdentityPattern = /^sha256:[a-f0-9]{64}$/u;
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const isText = (value) => typeof value === "string" && value.length > 0;
@@ -63,13 +63,7 @@ const isText = (value) => typeof value === "string" && value.length > 0;
 // trusted cache location. The owner re-derives the same set itself and rejects a subset, a superset and
 // any entry whose link target or real path resolves elsewhere, so this only declares which environment
 // this read covers; the boundary verdict stays the owner's own.
-const managedEntryPaths = (cacheDirectory) => {
-  const codexHome = dirname(resolve(cacheDirectory));
-  return [
-    join(codexHome, "skills", "run-issue-workflow"),
-    join(dirname(codexHome), ".agents", "skills", "run-issue-workflow"),
-  ];
-};
+const managedEntryPaths = (cacheDirectory) => managedWorkflowEntryPaths(cacheDirectory);
 
 const seamRow = ({ seam, owner, state, observed }) => {
   // One report vocabulary: a seam row can only name a required seam, a known state and its owner.
@@ -140,7 +134,7 @@ const reportFor = ({
 const installAction = (expectedSourceCommit) =>
   `Install the reviewed package version for ${expectedSourceCommit} with the installation owner's own ` +
   `command (scripts/install-workflow.mjs <trusted-source-repository> <exact-commit> <cache-directory> ` +
-  `<public-skill-directory>), then re-read the installed evidence.`;
+  `--entry <path> --entry <path> --entry <path>), then re-read the installed evidence.`;
 
 // The installed entry the owner invokes its capability probe through, read back from the receipt's own
 // entry target rather than re-derived from the installation layout.
@@ -159,8 +153,8 @@ const probePathOf = (evidence) => {
 // own owner string already carries the flag, so it is kept verbatim and never suffixed again.
 const probeOwner = (entryPath) =>
   entryPath === null
-    ? "installed-entry.mjs --qualification-identity (not invoked; the read stopped before the probe)"
-    : `${entryPath} --qualification-identity`;
+    ? "installed-entry.mjs --capability-identity (not invoked; the read stopped before the probe)"
+    : `${entryPath} --capability-identity`;
 
 // Read the installed version's own readiness evidence and reduce one report: every required seam's state
 // with its owning source, the owner's receipt when it returned one, and exactly one verdict.

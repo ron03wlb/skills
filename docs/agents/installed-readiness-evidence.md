@@ -1,4 +1,9 @@
-# Installed readiness evidence
+# Historical installed readiness evidence
+
+> Historical record from 2026-09-18. The current native package uses `--capability-identity`, manages
+> `.codex`, `.agents`, and `.claude` entries transactionally, and records current local migration evidence
+> in [`current-native-measurement.md`](../../skills/personal/run-issue-workflow/references/current-native-measurement.md).
+> The `--qualification-identity` names below describe the recorded pre-migration package only.
 
 Installed readiness is owned by `skills/personal/run-issue-workflow/scripts/workflow-installation.mjs` and stated in [OPERATOR.md](../../skills/personal/run-issue-workflow/OPERATOR.md): an installation receipt is complete only when it re-reads the selected package manifest, binds its source commit and manifest SHA-256, proves every managed entry the current environment resolves points at that exact package directory, and invokes the one kept package-owned capability probe (`--qualification-identity`) through that selected `installed-entry.mjs`. This page records the verdict that owner's own evidence produces for the installed version the environment resolved at the time it was read, together with the re-runnable read that produced it.
 

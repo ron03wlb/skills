@@ -183,7 +183,7 @@ const lanePrompt = (action) => {
     case "dispatch_issue":
       return `Use $execute-issue to implement dependency-ready Issue ${action.issueId} in its dedicated Issue worktree under the unchanged read-back DAG Run Grant. Dispatch attempt ${action.attempt}/${DISPATCH_LIMIT}.`;
     case "recover_issue":
-      return `Use $execute-issue to recover Issue ${action.issueId} from its exact recorded failure ${action.failure?.identity} in an isolated task under the unchanged read-back DAG Run Grant.`;
+      return `Use $execute-issue to recover Issue ${action.issueId} from its exact recorded failure ${action.failure?.identity} under the unchanged read-back DAG Run Grant. Isolate diagnosis evidence, then continue the writer in the already recorded Issue lane. A replacement lane is legal only after the journal records the reducer-authorized supersession.`;
     case "repair_issue":
       return `Use $execute-issue to repair Issue ${action.issueId} in its original task, topic branch and worktree. Merge the exact current target baseline ${action.targetHead} into the topic without rebasing or resetting, and resolve only the existing Acceptance Criteria and exclusions. Preserve candidate ${action.candidate}. Do not integrate or close.`;
     case "upgrade_issue":

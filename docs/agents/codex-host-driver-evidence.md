@@ -1,4 +1,8 @@
-# Issue 75: Codex host driver evidence
+# Historical Issue 75 Codex host driver evidence
+
+> This page records the retired pre-native host. It is not current delivery evidence. See
+> [`current-native-measurement.md`](../../skills/personal/run-issue-workflow/references/current-native-measurement.md)
+> for the current substrate's bounded claims.
 
 This is bounded transport/loading evidence for [Issue 75](https://github.com/ron03wlb/skills/issues/75), under Spec 72. It does not establish unattended workflow delivery or exactly-once native mutation.
 

@@ -1,10 +1,10 @@
-# Delivery substrate cutover and measurement evidence
+# Historical pre-native delivery measurement
 
-This reference publishes the Spec #96 delivery-substrate cutover evidence and the carried Issue #91
-measurement requirements (per ADR-0078). It is reproducible: every command below is re-runnable from the
-recorded checkout, and every objective the current substrate cannot exercise is reported `unavailable`
-rather than inferred. It makes no speed, cost, or quality parity claim without paired candidate-matched
-evidence.
+This is a historical record of the Spec #96 cutover and the earlier optional `pi-workflow` substrate. It
+predates the native coordinator stepper and must not be used to infer current native delivery speed,
+cost, success rate, or savings. Current component and transport evidence lives in
+[current-native-measurement.md](current-native-measurement.md); real tracker delivery remains
+`unavailable` until an explicitly authorized tracker Run is observed end to end.
 
 ## Substrate cutover evidence
 
@@ -52,7 +52,7 @@ one non-coordinator owner, an unknown input normalizes to `UNCLASSIFIED` with on
 diagnosis, and no row grants the host repair authority. The delivery host materializes only the actions the
 Domain action reducer returns; it never invents a recovery owner.
 
-## Per-phase measurement ontology
+## Historical per-phase measurement ontology
 
 Each phase is reported separately and is never summed into another. A phase the current substrate cannot
 exercise is recorded `unavailable`, never inferred from a fixture, blocker, dispatch, or heartbeat.
@@ -75,7 +75,7 @@ exercise is recorded `unavailable`, never inferred from a fixture, blocker, disp
 | lease acquisition | exercised by close-issue component tests; delivery-time value `unavailable` |
 | close completion | `unavailable` — no live Run was scheduled |
 
-## Bounded evidence report
+## Historical bounded evidence report
 
 Recorded commands and identities (re-runnable):
 

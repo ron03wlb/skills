@@ -59,16 +59,22 @@ function copyHostAssets(repository) {
 // qualification is fatal here, so a proof that fell back to it would be visible in the recorded spawns.
 // The faults are the owner's own capability verdicts: an unknown, an unreadable and an incomplete probe.
 const installedEntryFixture = `
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 const version = process.argv[3];
 const mode = process.argv[2];
 const fault = process.env.WORKFLOW_QUALIFICATION_FAULT ?? null;
 const capability = { platform: process.platform, arch: process.arch, node: process.version,
   kernelRelease: "6.18.33.2-microsoft-standard-WSL2", wslDistro: "Ubuntu", posixCleanup: true };
-if (mode === "--qualification-identity") {
+const manifest = readFileSync(resolve(import.meta.dirname, "../../../..", ".workflow-version.json"));
+const manifestSha256 = "sha256:" + createHash("sha256").update(manifest).digest("hex");
+if (mode === "--capability-identity" || mode === "--capability-identity") {
   if (fault === "unknown-capability") { process.stderr.write("capability unknown\\n"); process.exitCode = 1; }
   else if (fault === "unreadable-capability") process.stdout.write("not json");
-  else if (fault === "incomplete-capability") process.stdout.write(JSON.stringify({ state: "READY", capability: { platform: process.platform } }));
-  else process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, capability }));
+  else if (fault === "incomplete-capability") process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, manifestSha256, capability: { platform: process.platform } }));
+  else process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, manifestSha256,
+    capabilityIdentity: "sha256:" + "c".repeat(64), capability }));
 } else if (mode === "--qualify-repair-package") {
   process.stderr.write("the retired live qualification must never be required again\\n");
   process.exitCode = 1;
@@ -82,6 +88,7 @@ function buildInstalledWorkflow() {
   const cacheDirectory = join(root, ".codex", "workflow-packages");
   const codexEntry = join(root, ".codex", "skills", "run-issue-workflow");
   const agentsEntry = join(root, ".agents", "skills", "run-issue-workflow");
+  const claudeEntry = join(root, ".claude", "skills", "run-issue-workflow");
   mkdirSync(
     join(sourceRepository, "skills/personal/run-issue-workflow/scripts"),
     { recursive: true },
@@ -130,14 +137,8 @@ function buildInstalledWorkflow() {
     sourceRepository,
     sourceCommit: candidate,
     cacheDirectory,
-    skillDirectory: codexEntry,
+    skillDirectories: [codexEntry, agentsEntry, claudeEntry],
   }).version;
-  installWorkflow({
-    sourceRepository,
-    sourceCommit: candidate,
-    cacheDirectory,
-    skillDirectory: agentsEntry,
-  });
   const spawned = [];
   const commandRunner = (name, args, options) => {
     spawned.push([name, ...args]);
@@ -162,6 +163,7 @@ function buildInstalledWorkflow() {
     version,
     codexEntry,
     agentsEntry,
+    claudeEntry,
     spawned,
     read,
     link,
@@ -177,6 +179,7 @@ test("the proof reports every required seam and one READY verdict from the insta
     version,
     codexEntry,
     agentsEntry,
+    claudeEntry,
     spawned,
     read,
     remove,
@@ -189,7 +192,7 @@ test("the proof reports every required seam and one READY verdict from the insta
     assert.equal(report.blocker, null);
     assert.equal(report.cacheDirectory, cacheDirectory);
     assert.equal(report.expectedSourceCommit, candidate);
-    assert.equal(report.evidence.schema, "codex-workflow-effective-evidence:v3");
+    assert.equal(report.evidence.schema, "codex-workflow-effective-evidence:v4");
     assert.deepEqual(
       report.seams.map(({ seam }) => seam),
       [...INSTALLED_READINESS_SEAMS],
@@ -210,7 +213,7 @@ test("the proof reports every required seam and one READY verdict from the insta
     assert.match(manifestSeam.observed.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(
       entrySeam.observed.entries.map(({ path }) => path),
-      [codexEntry, agentsEntry],
+      [codexEntry, agentsEntry, claudeEntry],
     );
     assert.ok(
       entrySeam.observed.entries.every(
@@ -243,17 +246,17 @@ test("the proof reports every required seam and one READY verdict from the insta
     );
     assert.match(
       capabilitySeam.owner,
-      /installed-entry\.mjs --qualification-identity$/u,
+      /installed-entry\.mjs --capability-identity$/u,
     );
     // The seam's owning source names the probe exactly once, with its own flag.
     assert.equal(
-      capabilitySeam.owner.match(/--qualification-identity/gu).length,
+      capabilitySeam.owner.match(/--capability-identity/gu).length,
       1,
     );
     // One capability probe proves the read; the retired live qualification is never invoked and no
     // retained sample is read or written.
     assert.equal(spawned.length, 1);
-    assert.match(spawned[0].join(" "), /--qualification-identity/u);
+    assert.match(spawned[0].join(" "), /--capability-identity/u);
     assert.equal(
       spawned.some((argv) => argv.includes("--qualify-repair-package")),
       false,
@@ -425,7 +428,7 @@ test("an unprovable capability returns one attributable blocker naming its ownin
       assert.equal(report.blocker.state, state);
       assert.match(
         report.blocker.owner,
-        /installed-entry\.mjs --qualification-identity$/u,
+        /installed-entry\.mjs --capability-identity$/u,
       );
       assert.match(report.blocker.action, /re-read the installed evidence/u);
       assert.match(report.blocker.reason, /\S/u);
@@ -435,7 +438,7 @@ test("an unprovable capability returns one attributable blocker naming its ownin
       );
       assert.equal(capabilitySeam.owner, report.blocker.owner, fault);
       assert.equal(
-        capabilitySeam.owner.match(/--qualification-identity/gu).length,
+        capabilitySeam.owner.match(/--capability-identity/gu).length,
         1,
         `${fault}: the owning source names the probe once`,
       );
@@ -545,7 +548,7 @@ test("the documented command re-runs unchanged to the same verdict", () => {
       ({ seam }) => seam === "installed-capability-probe",
     );
     assert.equal(faultedSeam.owner, faulted.blocker.owner);
-    assert.equal(faultedSeam.owner.match(/--qualification-identity/gu).length, 1);
+    assert.equal(faultedSeam.owner.match(/--capability-identity/gu).length, 1);
   } finally {
     remove();
   }

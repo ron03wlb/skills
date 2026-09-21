@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -14,6 +15,7 @@ import {
   writeSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const LEGACY_WORKFLOW_CHECKPOINT_SCHEMA = "workflow-checkpoint-transaction:v1";
 export const WORKFLOW_CHECKPOINT_SCHEMA = "workflow-checkpoint-transaction:v2";
@@ -383,7 +385,37 @@ const writeDurableFile = (path, text) => {
   }
 };
 
-export function createWorkflowControlStore({ gitCommonDir }) {
+const legacyCompatibilityEntry = fileURLToPath(new URL("./workflow-control-store-legacy-entry.mjs", import.meta.url));
+const invokeLegacyCompatibility = ({ checkpointPath, operation, payload }) => {
+  const request = { schema: "workflow-control-legacy-request:v1", checkpointPath, operation, payload };
+  let output;
+  try {
+    output = execFileSync(process.execPath, [legacyCompatibilityEntry], {
+      input: JSON.stringify(request),
+      encoding: "utf8",
+      maxBuffer: 256 * 1024,
+      timeout: 30000,
+      windowsHide: true,
+    });
+  } catch (error) {
+    throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", [
+      `Legacy compatibility entry failed for ${checkpointPath}: ${error.stderr?.toString().trim() || error.message}`,
+    ]);
+  }
+  let response;
+  try {
+    response = JSON.parse(output);
+  } catch (error) {
+    throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", [`Legacy compatibility entry returned unreadable evidence: ${error.message}`]);
+  }
+  if (response?.schema !== "workflow-control-legacy-response:v1" || response.operation !== operation
+    || response.checkpointPath !== checkpointPath) {
+    throw fail("WORKFLOW_CHECKPOINT_STATE_UNKNOWN", ["Legacy compatibility entry read-back differs from its exact request."]);
+  }
+  return response;
+};
+
+export function createWorkflowControlStore({ gitCommonDir, legacyCompatibility = invokeLegacyCompatibility }) {
   if (!isText(gitCommonDir)) throw new TypeError("gitCommonDir is required");
   const controlRoot = join(resolve(gitCommonDir), "matt-workflow-control");
   const transactionsRoot = join(controlRoot, "workflow-checkpoints");
@@ -397,7 +429,10 @@ export function createWorkflowControlStore({ gitCommonDir }) {
   const readFile = (path) => {
     try {
       const parsed = JSON.parse(readFileSync(path, "utf8"));
-      if (parsed?.schema === LEGACY_WORKFLOW_CHECKPOINT_SCHEMA) return validateLegacyTransaction(parsed);
+      if (parsed?.schema === LEGACY_WORKFLOW_CHECKPOINT_SCHEMA) {
+        legacyCompatibility({ checkpointPath: path, operation: "validate_transaction", payload: { transaction: parsed } });
+        return validateLegacyTransaction(parsed);
+      }
       if (parsed?.schema === WORKFLOW_CHECKPOINT_SCHEMA) return validateTransaction(parsed);
       throw new TypeError("Unsupported workflow checkpoint schema");
     } catch (error) {
@@ -529,7 +564,9 @@ export function createWorkflowControlStore({ gitCommonDir }) {
 
   const readCheckpoint = (inputIdentity) => {
     if (identityKind(inputIdentity) === "legacy") {
-      return readLegacyCheckpoint(normalizeLegacyIdentity(inputIdentity));
+      const identity = normalizeLegacyIdentity(inputIdentity);
+      legacyCompatibility({ checkpointPath: fileFor(legacyScopeKeyFor(identity)), operation: "normalize_identity", payload: { identity } });
+      return readLegacyCheckpoint(identity);
     }
     return readCurrentCheckpoint(normalizeIdentity(inputIdentity));
   };
@@ -537,6 +574,7 @@ export function createWorkflowControlStore({ gitCommonDir }) {
   const createCheckpoint = (inputIdentity) => {
     if (identityKind(inputIdentity) === "legacy") {
       const identity = normalizeLegacyIdentity(inputIdentity);
+      legacyCompatibility({ checkpointPath: fileFor(legacyScopeKeyFor(identity)), operation: "normalize_identity", payload: { identity } });
       const existing = readLegacyCheckpoint(identity);
       if (existing) return existing;
       throw fail("WORKFLOW_CHECKPOINT_LEGACY_CREATE_UNSUPPORTED", [
@@ -609,6 +647,7 @@ export function createWorkflowControlStore({ gitCommonDir }) {
     if (!WORKFLOW_CHECKPOINT_STAGES.includes(stage)) throw new TypeError(`Unknown workflow checkpoint stage ${stage}`);
     validateLegacyStageResult(stage, result, identity);
     const scopeKey = legacyScopeKeyFor(identity);
+    legacyCompatibility({ checkpointPath: fileFor(scopeKey), operation: "validate_stage_result", payload: { identity, stage, result } });
     mkdirSync(transactionsRoot, { recursive: true });
     assertStorageUnambiguous([scopeKey]);
     const writer = acquireWriter(identity, "advance", scopeKey);

@@ -1,24 +1,11 @@
-// Native lane launch.
-//
-// ADR-0080 makes one Issue lane a native subagent lane owned by the coordinator. The coordinator's own
-// harness names its runs, so this owner supplies the two things the delivery host needs from that
-// harness and must never invent:
-//
-//   * the exact launch request for one planned lane, derived from the lane's own launch envelope, so the
-//     prompt, the one contract skill, the tool ceiling and the worktree policy cannot drift; and
-//   * the documented pointer that binds the journal's recorded lane reference to the native run the
-//     harness actually created, published exclusively and never repointed.
-//
-// A pointer the harness's own record cannot back is not evidence. This module publishes the mapping and
-// nothing else: liveness, terminal state and settlement are read by `native-lane-evidence.mjs` from the
-// harness's own artifacts under the pointer, so a launch that never happened stays ABSENT.
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { subagentRunsRoot } from "./native-lane-evidence.mjs";
+import { resolveLaneRecordLocation } from "./native-lane-record-locator.mjs";
 
 export const LANE_LAUNCH_REQUEST_SCHEMA = "native-lane-launch-request:v1";
-export const LANE_POINTER_SCHEMA = "native-lane-pointer:v1";
+export const LANE_POINTER_SCHEMA = "native-lane-pointer:v2";
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const isText = (value) => typeof value === "string" && value.length > 0;
@@ -27,8 +14,6 @@ const requireText = (value, label) => {
   return value;
 };
 
-// The one request the coordinator hands to its harness for a planned lane. Every field comes from the
-// lane's own launch envelope; this builder re-derives nothing and widens nothing.
 export function createLaneLaunchRequest({ runId, lane } = {}) {
   requireText(runId, "A lane launch request needs the logical DAG Run id");
   if (!isRecord(lane)) throw new TypeError("A lane launch request needs one planned lane");
@@ -42,12 +27,10 @@ export function createLaneLaunchRequest({ runId, lane } = {}) {
     throw new TypeError(`Lane ${laneRef} prompt does not carry its standing rules`);
   }
   const tools = Array.isArray(launch.tools) ? launch.tools : null;
-  if (tools === null || tools.length === 0 || tools.some((tool) => !isText(tool))) {
+  if (tools === null || tools.length === 0 || tools.some((tool) => !isText(tool)))
     throw new TypeError(`Lane ${laneRef} launch request needs its declared tools`);
-  }
-  if (!isRecord(launch.taskRef) || !isText(launch.taskRef.threadId) || launch.taskRef.threadId !== laneRef) {
+  if (!isRecord(launch.taskRef) || !isText(launch.taskRef.threadId) || launch.taskRef.threadId !== laneRef)
     throw new TypeError(`Lane ${laneRef} launch request must carry its own task reference`);
-  }
   return Object.freeze({
     schema: LANE_LAUNCH_REQUEST_SCHEMA,
     runId,
@@ -67,16 +50,87 @@ export function createLaneLaunchRequest({ runId, lane } = {}) {
   });
 }
 
-// Publish the mapping the reader resolves: the pointer is named by the recorded lane reference, and its
-// own `runId` is that same reference, because that identity — not the harness's id — is what the journal
-// authorizes. The harness's own id is carried beside it, and the run directory may be absolute because a
-// harness may keep its artifacts outside the project checkout.
+const parsePointer = ({ path, laneRef, readFile }) => {
+  let pointer;
+  try { pointer = JSON.parse(readFile(path)); }
+  catch { throw new Error(`The existing lane pointer at ${path} is unreadable`); }
+  if (pointer?.schema === "native-lane-pointer:v2") {
+    if (pointer.runId !== laneRef || !Array.isArray(pointer.generations) || pointer.generations.length === 0)
+      throw new Error(`Lane ${laneRef} has an invalid generation chain`);
+    let previous = null;
+    for (let index = 0; index < pointer.generations.length; index += 1) {
+      const generation = pointer.generations[index];
+      if (generation.generation !== index + 1 || generation.previousNativeRunId !== previous
+        || !isText(generation.nativeRunId) || !isText(generation.cwd) || !isText(generation.runsDir))
+        throw new Error(`Lane ${laneRef} generation chain is discontinuous at ${index + 1}`);
+      try {
+        resolveLaneRecordLocation({
+          cwd: generation.cwd,
+          runsDir: generation.runsDir,
+          recordDir: generation.recordDir ?? generation.nativeRunId,
+        });
+      } catch (error) {
+        throw new Error(`Lane ${laneRef} generation ${index + 1} has an unsafe record location: ${error.message}`);
+      }
+      previous = generation.nativeRunId;
+    }
+    return pointer;
+  }
+  if ((pointer?.schema === "native-lane-pointer:v1" || pointer?.schemaVersion === 1)
+    && pointer.runId === laneRef && isText(pointer.nativeRunId)) {
+    try {
+      resolveLaneRecordLocation({
+        cwd: pointer.cwd,
+        runsDir: pointer.runsDir,
+        recordDir: pointer.recordDir ?? pointer.nativeRunId,
+      });
+    } catch (error) {
+      throw new Error(`Lane ${laneRef} has an unsafe record location: ${error.message}`);
+    }
+    return {
+      schemaVersion: 2,
+      schema: LANE_POINTER_SCHEMA,
+      runId: laneRef,
+      correlationId: pointer.correlationId ?? laneRef,
+      generations: [{
+        generation: 1,
+        nativeRunId: pointer.nativeRunId,
+        previousNativeRunId: null,
+        cwd: pointer.cwd,
+        runsDir: pointer.runsDir,
+        ...(pointer.recordDir === undefined ? {} : { recordDir: pointer.recordDir }),
+        updatedAt: pointer.updatedAt,
+      }],
+      updatedAt: pointer.updatedAt,
+    };
+  }
+  throw new Error(`Lane ${laneRef} has an unsupported pointer schema`);
+};
+
+export function readLanePointer({
+  runsRoot = null,
+  homeDir,
+  env = process.env,
+  laneRef,
+  exists = existsSync,
+  readFile = (path) => readFileSync(path, "utf8"),
+} = {}) {
+  const root = runsRoot ?? subagentRunsRoot({ homeDir, env });
+  requireText(laneRef, "A lane pointer needs the recorded lane reference");
+  const path = `${root}/${laneRef}.json`;
+  if (!exists(path)) return null;
+  const pointer = parsePointer({ path, laneRef, readFile });
+  return Object.freeze({ path, pointer, latest: Object.freeze({ ...pointer.generations.at(-1) }) });
+}
+
 export function publishLanePointer({
   runsRoot = null,
   homeDir,
   env = process.env,
   laneRef,
   nativeRunId,
+  previousNativeRunId = null,
+  generation = null,
   cwd,
   runsDir,
   recordDir = null,
@@ -84,6 +138,7 @@ export function publishLanePointer({
   exists = existsSync,
   readFile = (path) => readFileSync(path, "utf8"),
   writeFile = (path, value) => writeFileSync(path, value, { encoding: "utf8", flag: "wx", flush: true }),
+  replaceFile = (from, to) => renameSync(from, to),
   makeDirectory = (path) => mkdirSync(path, { recursive: true }),
 } = {}) {
   const root = runsRoot ?? subagentRunsRoot({ homeDir, env });
@@ -93,28 +148,57 @@ export function publishLanePointer({
   requireText(runsDir, "A lane pointer needs the run directory root");
   requireText(at, "A lane pointer needs its publication instant");
   if (recordDir !== null && !isText(recordDir)) throw new TypeError("A lane pointer record directory must be text when given");
+  resolveLaneRecordLocation({ cwd, runsDir, recordDir: recordDir ?? nativeRunId });
   const path = `${root}/${laneRef}.json`;
+  const existing = exists(path) ? parsePointer({ path, laneRef, readFile }) : null;
+  const latest = existing?.generations.at(-1) ?? null;
+  let requestedGeneration = generation;
+  if (requestedGeneration === null) {
+    if (latest === null) requestedGeneration = 1;
+    else requestedGeneration = latest.nativeRunId === nativeRunId ? latest.generation : latest.generation + 1;
+  }
+  if (!Number.isInteger(requestedGeneration) || requestedGeneration < 1)
+    throw new TypeError("A lane pointer generation must be a positive integer");
+  if (latest !== null && latest.nativeRunId === nativeRunId && requestedGeneration === latest.generation) {
+    const exact = latest.previousNativeRunId === previousNativeRunId && latest.cwd === cwd && latest.runsDir === runsDir
+      && (latest.recordDir ?? null) === recordDir;
+    if (!exact) throw new Error(`Lane ${laneRef} generation ${requestedGeneration} conflicts with its existing bind`);
+    return Object.freeze({ path, pointer: existing, generation: latest, reused: true });
+  }
+  if (requestedGeneration !== (latest?.generation ?? 0) + 1)
+    throw new Error(`Lane ${laneRef} generation chain is discontinuous: expected ${(latest?.generation ?? 0) + 1}, received ${requestedGeneration}`);
+  if (previousNativeRunId !== (latest?.nativeRunId ?? null))
+    throw new Error(`Lane ${laneRef} already points at native run ${String(latest?.nativeRunId)}; resume must bind that exact previous native run id`);
+  const nextGeneration = {
+    generation: requestedGeneration,
+    nativeRunId,
+    previousNativeRunId,
+    cwd,
+    runsDir,
+    ...(recordDir === null ? {} : { recordDir }),
+    updatedAt: at,
+  };
   const pointer = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     schema: LANE_POINTER_SCHEMA,
     runId: laneRef,
+    correlationId: laneRef,
     nativeRunId,
     cwd,
     runsDir,
     ...(recordDir === null ? {} : { recordDir }),
-    correlationId: laneRef,
+    generations: [...(existing?.generations ?? []), nextGeneration],
     updatedAt: at,
   };
-  if (exists(path)) {
-    const existing = (() => {
-      try { return JSON.parse(readFile(path)); } catch { throw new Error(`The existing lane pointer at ${path} is unreadable`); }
-    })();
-    if (JSON.stringify(existing) === JSON.stringify(pointer)) return Object.freeze({ path, pointer, reused: true });
-    // A lane is bound to the native run it was launched as. Repointing it would let one recorded attempt
-    // be satisfied by a second run, which is exactly the duplicate lane the reservation exists to stop.
-    throw new Error(`Lane ${laneRef} already points at native run ${String(existing?.nativeRunId ?? existing?.runId)}; preserve it and resolve the existing lane instead of repointing it`);
-  }
   makeDirectory(dirname(path));
-  writeFile(path, `${JSON.stringify(pointer, null, 2)}\n`);
-  return Object.freeze({ path, pointer, reused: false });
+  if (existing === null) writeFile(path, `${JSON.stringify(pointer, null, 2)}\n`);
+  else {
+    const temporary = `${path}.${process.pid}.${requestedGeneration}`;
+    writeFile(temporary, `${JSON.stringify(pointer, null, 2)}\n`);
+    replaceFile(temporary, path);
+  }
+  const readBack = parsePointer({ path, laneRef, readFile });
+  if (JSON.stringify(readBack) !== JSON.stringify(pointer))
+    throw new Error(`Lane ${laneRef} generation ${requestedGeneration} read-back differs`);
+  return Object.freeze({ path, pointer, generation: Object.freeze(nextGeneration), reused: false });
 }

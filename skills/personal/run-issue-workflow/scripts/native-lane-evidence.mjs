@@ -13,10 +13,11 @@
 // recorded lane, a tracker note that does not bind this Issue, or Git evidence that contradicts the
 // note all report `UNKNOWN` with the owning source named, which is the stop the lane planner needs
 // instead of a guessed owner.
-import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 
 import { LANE_STATES } from "./issue-lane.mjs";
+import { realpathIsContained, resolveLaneRecordLocation } from "./native-lane-record-locator.mjs";
 import { parseHostDispatchId } from "./pi-workflow-host.mjs";
 
 export const NATIVE_LANE_EVIDENCE_SCHEMA = "native-lane-evidence:v1";
@@ -95,11 +96,12 @@ const readJson = (readFile, path) => {
 // is honoured exactly as the lane agent resolver honours it, so a harness that moved its agent root
 // cannot make this reader look in the wrong place.
 export function subagentRunsRoot({ homeDir, env = process.env } = {}) {
-  const configured = typeof env?.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR.trim() !== ""
-    ? env.PI_CODING_AGENT_DIR.trim()
-    : homeDir === undefined
-      ? null
-      : join(homeDir, ".pi", "agent");
+  let configured = null;
+  if (typeof env?.PI_CODING_AGENT_DIR === "string" && env.PI_CODING_AGENT_DIR.trim() !== "") {
+    configured = env.PI_CODING_AGENT_DIR.trim();
+  } else if (homeDir !== undefined) {
+    configured = join(homeDir, ".pi", "agent");
+  }
   if (configured === null) throw new TypeError("Native lane evidence needs the user home directory or the agent root");
   return join(configured, SUBAGENT_RUNS_DIRECTORY);
 }
@@ -136,6 +138,7 @@ export function readSubagentRunRecord({
   env = process.env,
   readFile = (path) => readFileSync(path, "utf8"),
   exists = existsSync,
+  realpath = exists === existsSync ? realpathSync : null,
 } = {}) {
   requireText(runId, "Native lane evidence needs one subagent run id");
   const root = runsRoot ?? subagentRunsRoot({ homeDir, env });
@@ -164,31 +167,92 @@ export function readSubagentRunRecord({
   if (pointer.runId !== runId) {
     return unreadableRun(runId, [`The native subagent run record pointer at ${pointerPath} names run ${String(pointer.runId)}.`]);
   }
-  const cwd = textOf(pointer.cwd);
-  const runsDir = textOf(pointer.runsDir);
+  let binding = pointer;
+  let generation = 1;
+  if (pointer.schema === "native-lane-pointer:v2") {
+    if (!Array.isArray(pointer.generations) || pointer.generations.length === 0) {
+      return unreadableRun(runId, [`The native lane pointer at ${pointerPath} has no generation chain.`]);
+    }
+    let previous = null;
+    for (let index = 0; index < pointer.generations.length; index += 1) {
+      const item = pointer.generations[index];
+      if (item?.generation !== index + 1 || item?.previousNativeRunId !== previous || !isText(item?.nativeRunId)) {
+        return unreadableRun(runId, [`The native lane pointer at ${pointerPath} has a discontinuous generation chain at ${index + 1}.`]);
+      }
+      try {
+        resolveLaneRecordLocation({
+          cwd: item.cwd,
+          runsDir: item.runsDir,
+          recordDir: item.recordDir ?? item.nativeRunId,
+        });
+      } catch (error) {
+        return unreadableRun(runId, [`The native lane pointer at ${pointerPath} has an unsafe generation ${index + 1}: ${error.message}`]);
+      }
+      previous = item.nativeRunId;
+    }
+    binding = pointer.generations.at(-1);
+    generation = binding.generation;
+  }
+  const cwd = textOf(binding.cwd);
+  const runsDir = textOf(binding.runsDir);
   // A launcher that publishes the pointer owns the mapping from the recorded lane reference to the run
   // directory its harness created, so the pointer may name that directory explicitly and may point at an
   // absolute run root outside the project checkout.
-  const recordDir = textOf(pointer.recordDir) ?? runId;
+  const recordDir = textOf(binding.recordDir) ?? textOf(binding.nativeRunId) ?? runId;
   const base = {
     schema: SUBAGENT_RUN_RECORD_SCHEMA,
     runId,
     correlationId: textOf(pointer.correlationId),
-    nativeRunId: textOf(pointer.nativeRunId),
+    nativeRunId: textOf(binding.nativeRunId),
+    generation,
+    previousNativeRunId: textOf(binding.previousNativeRunId),
     cwd,
     runsDir,
-    updatedAt: textOf(pointer.updatedAt),
+    updatedAt: textOf(binding.updatedAt) ?? textOf(pointer.updatedAt),
   };
   if (cwd === null || runsDir === null) {
     return unreadableRun(runId, [`The native subagent run record pointer at ${pointerPath} names no run directory.`]);
   }
-  const laneDirectory = isAbsolute(runsDir) ? join(runsDir, recordDir) : join(cwd, runsDir, recordDir);
+  let location;
+  try {
+    location = resolveLaneRecordLocation({ cwd, runsDir, recordDir });
+  } catch (error) {
+    return unreadableRun(runId, [`The native lane pointer at ${pointerPath} has an unsafe record location: ${error.message}`]);
+  }
+  const { base: runRoot, laneDirectory } = location;
+  const safelyExists = (path) => {
+    if (!exists(path)) return false;
+    if (realpath !== null && !realpathIsContained({ base: runRoot, candidate: path, realpath })) {
+      throw new Error(`${path} resolves outside ${runRoot}`);
+    }
+    return true;
+  };
+  try {
+    if (realpath !== null && exists(laneDirectory)
+      && !realpathIsContained({ base: runRoot, candidate: laneDirectory, realpath })) {
+      return unreadableRun(runId, [`The native lane directory ${laneDirectory} resolves outside its run root.`]);
+    }
+  } catch (error) {
+    return unreadableRun(runId, [`The native lane directory ${laneDirectory} is unreadable: ${error.message}`]);
+  }
   const taskRecordPath = join(laneDirectory, "run.json");
-  if (!exists(taskRecordPath)) {
+  let taskRecordExists;
+  try {
+    taskRecordExists = safelyExists(taskRecordPath);
+  } catch (error) {
+    return unreadableRun(runId, [`The native lane record ${taskRecordPath} is unsafe: ${error.message}`]);
+  }
+  if (!taskRecordExists) {
     // A harness that keeps its own lifecycle record instead of a pi-workflow task record: the pointer
     // still proves the lane was materialized, and only that harness's own record decides liveness.
     const nativePath = join(laneDirectory, NATIVE_STATUS_FILE);
-    const native = exists(nativePath) ? readJson(readFile, nativePath) : null;
+    let nativeExists;
+    try {
+      nativeExists = safelyExists(nativePath);
+    } catch (error) {
+      return unreadableRun(runId, [`The native lane record ${nativePath} is unsafe: ${error.message}`]);
+    }
+    const native = nativeExists ? readJson(readFile, nativePath) : null;
     if (native === null) {
       return Object.freeze({
         ...base,
@@ -207,7 +271,13 @@ export function readSubagentRunRecord({
     const status = NATIVE_RUN_STATE_ALIASES[nativeState] ?? null;
     const liveness = NATIVE_RUN_LIVENESS[status] ?? UNKNOWN_LIVENESS;
     const processPath = join(laneDirectory, NATIVE_PROCESS_TERMINAL_FILE);
-    const process = exists(processPath) ? readJson(readFile, processPath) : null;
+    let processExists;
+    try {
+      processExists = safelyExists(processPath);
+    } catch (error) {
+      return unreadableRun(runId, [`The native lane process record ${processPath} is unsafe: ${error.message}`]);
+    }
+    const process = processExists ? readJson(readFile, processPath) : null;
     const closedInstances = Array.isArray(process?.instances)
       ? process.instances.filter((instance) => instance?.closeObservedAt !== undefined && instance?.closeObservedAt !== null)
       : [];

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { createLaneLaunchRequest, publishLanePointer } from "../../skills/personal/run-issue-workflow/scripts/native-lane-launch.mjs";
@@ -135,6 +138,86 @@ test("the pointer binds one recorded lane to one native run and is never repoint
   assert.throws(() => publishLanePointer({ runsRoot: root, laneRef: "dispatch_1", cwd: "/repo", runsDir: "/tmp/runs", at: "x",
     exists: virtual.exists, readFile: virtual.readFile, writeFile: virtual.writeFile, makeDirectory: virtual.makeDirectory }),
   /native run id/u);
+});
+
+test("lane record locations fail closed on traversal and allow contained nested layouts", () => {
+  const invalid = [
+    "../spoof",
+    "nested/../../spoof",
+    "nested\\..\\../spoof",
+    "/absolute/spoof",
+    "C:\\absolute\\spoof",
+    "nested/record\u0000.json",
+  ];
+  for (const recordDir of invalid) {
+    const virtual = virtualRoot();
+    assert.throws(() => publishLanePointer({
+      runsRoot: virtual.root,
+      laneRef: `lane-${invalid.indexOf(recordDir)}`,
+      nativeRunId: "native-1",
+      cwd: "/repo",
+      runsDir: ".runs",
+      recordDir,
+      at: "2026-09-18T06:00:00.000Z",
+      exists: virtual.exists,
+      readFile: virtual.readFile,
+      writeFile: virtual.writeFile,
+      makeDirectory: virtual.makeDirectory,
+    }), /relative|traverse|inside|control characters/u, recordDir);
+    assert.equal(virtual.written.length, 0);
+  }
+
+  const nested = virtualRoot();
+  const published = publishLanePointer({
+    runsRoot: nested.root,
+    laneRef: "lane-nested",
+    nativeRunId: "native-1",
+    cwd: "/repo",
+    runsDir: ".runs",
+    recordDir: "harness/native-1",
+    at: "2026-09-18T06:00:00.000Z",
+    exists: nested.exists,
+    readFile: nested.readFile,
+    writeFile: nested.writeFile,
+    makeDirectory: nested.makeDirectory,
+  });
+  assert.equal(published.generation.recordDir, "harness/native-1");
+});
+
+test("a symlinked lane record outside the run root is unreadable and never settled", () => {
+  const root = mkdtempSync(join(tmpdir(), "native-lane-containment-"));
+  try {
+    const pointers = join(root, "pointers");
+    const runs = join(root, "runs");
+    const outside = join(root, "outside");
+    mkdirSync(pointers);
+    mkdirSync(runs);
+    mkdirSync(outside);
+    writeFileSync(join(outside, "status.json"), JSON.stringify({ state: "completed" }));
+    writeFileSync(join(outside, "process-terminal.json"), JSON.stringify({
+      state: "observed",
+      instances: [{ closeObservedAt: "2026-09-18T06:00:01.000Z", exitCode: 0 }],
+    }));
+    symlinkSync(outside, join(runs, "escaped"), "dir");
+    publishLanePointer({
+      runsRoot: pointers,
+      laneRef: "lane-escaped",
+      nativeRunId: "native-1",
+      cwd: root,
+      runsDir: runs,
+      recordDir: "escaped",
+      at: "2026-09-18T06:00:00.000Z",
+    });
+
+    const evidence = readSubagentRunRecord({ runId: "lane-escaped", runsRoot: pointers });
+    assert.equal(evidence.state, "UNREADABLE");
+    assert.equal(evidence.laneState, "UNKNOWN");
+    assert.equal(evidence.terminal, false);
+    assert.equal(evidence.settled, false);
+    assert.match(evidence.evidence.join(" "), /outside|unsafe/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a lane launch request carries the envelope it was planned with and nothing wider", () => {

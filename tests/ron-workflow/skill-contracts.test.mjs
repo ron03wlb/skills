@@ -3430,17 +3430,16 @@ test("delivery host is explicit personal only", () => {
   assert.match(skillEntry, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skillEntry, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
   assert.match(skillEntry, /DAG Run Grant.*`max_parallel`.*default three/isu);
-  assert.match(skillEntry, /Domain action reducer fixes every legal action.*per-Run journal owns grants.*one native subagent lane per authorized action.*no single materialization is required/isu);
-  assert.doesNotMatch(skillEntry, /pi-workflow bundle/u);
+  assert.match(skillEntry, /Domain action reducer.*append-only Run journal own legal actions.*grants.*six-hour Issue budgets.*ten-wave material repair limits/isu);
   assert.match(skillEntry, /Read \[the delivery host contract\]\(references\/delivery-host\.md\) only when/isu);
-  assert.match(skillEntry, /`pi-workflow-host\.mjs` plans exactly the legal actions the Domain action reducer returns/isu);
-  assert.match(skillEntry, /Each executable Issue owns one lane.*isolated worker.*dedicated Issue worktree/isu);
-  assert.match(skillEntry, /implementation lane follows `execute-issue`.*close lane follows `close-issue`/isu);
+  assert.match(skillEntry, /`run-authority-adapters\.mjs` reduces owning facts.*`pi-workflow-host\.mjs` plans exactly the legal actions/isu);
+  assert.match(skillEntry, /stateless native stepper.*reconstructs the round.*bounded action metadata.*artifact reference/isu);
+  assert.match(skillEntry, /`create_lane`.*fresh native subagent run.*`resume_lane`.*exact previous native generation.*`observe_lane`.*read-only/isu);
   assert.match(skillEntry, /`implementation_complete`.*serialize `close-issue`/isu);
-  assert.match(skillEntry, /Release dependants only after the candidate is reachable from the Issue target branch.*exact worktree is absent.*Issue is closed/isu);
-  assert.match(skillEntry, /parent-only close after all-child node success/isu);
-  assert.match(skillEntry, /real `close-issue` leaf alone acquires the repository close lease and then the target mutation writer/isu);
-  assert.match(skillEntry, /six-hour execution budget/isu);
+  assert.match(skillEntry, /Release dependants only after.*blocker is closed.*candidate is reachable from target.*exact worktree is absent/isu);
+  assert.match(skillEntry, /Close a Multi-Issue parent only after every child reaches node success/isu);
+  assert.match(skillEntry, /Only `close-issue` acquires the repository close lease and target writer/isu);
+  assert.match(skillEntry, /six-hour Issue budgets/isu);
   assert.match(skillEntry, /Explicit Spec or batch selection includes matching completed Runs.*cached `SUCCEEDED`.*no execution, verification or close replay/isu);
 
   assert.match(host, /HOST_ACTION_POLICY.*dispatch_issue.*close_issue/isu);
@@ -3497,7 +3496,21 @@ test("delivery host is explicit personal only", () => {
   const deliveryHostContract = read("skills/personal/run-issue-workflow/references/delivery-host.md");
   assert.match(deliveryHostContract, /authority layer that decides and replaceable execution material that performs/isu);
   assert.match(deliveryHostContract, /one native subagent\s+lane per authorized action/isu);
-  assert.match(deliveryHostContract, /## Optional materialization: the `pi-workflow` bundle[\s\S]*never a requirement/isu);
+  assert.match(deliveryHostContract, /## Optional materialization[\s\S]*pi-workflow-materialization\.md[\s\S]*native Start path does not load/isu);
+  assert.match(read("skills/personal/run-issue-workflow/references/pi-workflow-materialization.md"), /one optional materialization.*never a requirement/isu);
+  const relationships = read("CONTEXT.md").split("## Relationships", 2)[1] ?? "";
+  assert.match(relationships, /Native subagent lanes plus the stateless native coordinator stepper are the current v1 execution adapter/isu);
+  assert.match(relationships, /pi-workflow.*operator explicitly selects.*optional materialization/isu);
+  assert.doesNotMatch(relationships, /Codex-native coordinator.*is the v1 execution adapter|DAG control bridge.*(?:may record|binds only)|DAG control panel.*is a replaceable projection|DAG status snapshot.*is an atomic/isu);
+  for (const historicalPath of [
+    "docs/agents/codex-host-driver-evidence.md",
+    "docs/agents/installed-readiness-evidence.md",
+    "docs/agents/workflow-instruction-evidence.md",
+  ]) {
+    const historical = read(historicalPath);
+    assert.match(historical, /^# Historical/iu, `${historicalPath} must identify its retired evidence`);
+    assert.match(historical, /current-native-measurement\.md/iu, `${historicalPath} must point to current native evidence`);
+  }
   assert.match(read("docs/adr/0040-run-tracker-specs-as-codex-native-dags.md"), /events\.jsonl.*repository-close or target-writer wait starts and settlements/isu);
 
   for (const name of ["status-succeeded", "status-diagnosed", "status-waiting"]) {

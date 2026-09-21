@@ -321,12 +321,12 @@ The single deterministic owner of a **DAG Run**'s legal actions, computed from r
 _Avoid_: Host-side scheduler policy, model-decided dispatch, duplicated action planning
 
 **Host liveness boundary**:
-The rule that automatic scheduling and closeout exist only while the **Delivery workflow host** run is active. A stopped or lost host dispatches and closes nothing; already-dispatched workers may settle, and their evidence is adopted only by a later explicit `/run-issue-workflow <Spec-ID>` reconciliation.
-_Avoid_: Hidden daemon authority, assumed background continuation, host-record-owned progress
+The rule that automatic scheduling and closeout exist only during an explicitly invoked stateless native coordinator step. A stopped or lost coordinator invocation dispatches and closes nothing; already-dispatched native subagent lanes may settle, and their evidence is adopted only by a later explicit `/run-issue-workflow <Spec-ID>` reconciliation.
+_Avoid_: Hidden daemon authority, assumed background continuation, native-run-record-owned progress
 
-**Delivery substrate cutover**:
-The migration rule that every non-terminal **DAG Run** reaches terminal state on the retired Codex-native host before any Run starts on the **Delivery workflow host**. The two substrates never schedule one repository concurrently, and the authority journal stays readable throughout.
-_Avoid_: Parallel substrates, mid-Run substrate switch, forced Run abandonment
+**Historical delivery substrate cutover**:
+The completed migration rule that required every non-terminal **DAG Run** on the retired Codex-native host to reach terminal state before the current native-subagent substrate started a Run. It is retained as historical migration evidence, not as a current execution adapter.
+_Avoid_: Reapplying a completed cutover, parallel substrates, mid-Run substrate switch
 
 **Issue lane**:
 The one-to-one binding between an executable Issue and one isolated Issue worker with its dedicated **Issue worktree**. The worker invokes `execute-issue`, which alone creates or reuses that worktree and performs every product edit, verification, and candidate commit there; the shared checkout remains read-only except for ordinary worktree registration. A transient retry reuses the same lane when reachable, and a replacement requires proof that the prior worker cannot continue plus a journaled supersession link.
@@ -348,9 +348,9 @@ _Avoid_: Workaround loop, hidden retry, successful wrapper means successful buil
 The fail-closed suspension of new dispatch and closeout when current tracker evidence cannot be read. The engine makes three health/read probes after 5, 15, and 30 seconds without consuming the **DAG retry budget**; recovery triggers full evidence reconciliation, while continued failure yields run-level `BLOCKED` with reason `tracker_unavailable`. Already-running workers may settle local work, but no candidate becomes authoritative `IMPLEMENTATION_COMPLETE` and no new close step starts without tracker read-back.
 _Avoid_: Cached tracker authority, worker retry, offline Issue close
 
-**Delivery status projection**:
-The read-only **Delivery workflow host** board and status view of one **DAG Run**'s scheduling state, Issue worker state, close progress, and **DAG stop diagnosis** records. It never starts a Run or owns workflow state, scheduling authority, or failure classification.
-_Avoid_: DAG control panel, workflow source of truth, scheduler, permanent sidebar
+**Historical delivery status projection**:
+The retired read-only control-panel projection of one **DAG Run**'s scheduling state, Issue worker state, close progress, and **DAG stop diagnosis** records. The current native adapter does not load this projection; current state is re-derived by the stateless native stepper from the journal and owning evidence.
+_Avoid_: Current adapter, workflow source of truth, scheduler, permanent sidebar
 
 **Operator control intent**:
 The durable, journaled Pause, Resume, or Stop request carrying one control request identity and expected next Run revision. The **Domain action reducer** reads the current intent before returning further legal actions, so recovery inspects the exact journaled control and never replays an uncertain mutation.
@@ -361,12 +361,12 @@ The host-level stop that interrupts active Issue workers without letting them se
 _Avoid_: Cooperative pause, graceful stop, silent worker kill
 
 **DAG run journal**:
-The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single domain authority writer. It records only authority facts: grants, control revisions, dispatch-attempt references, **Issue execution budget** evidence, bounded-remediation records, closeout-wait observations, and pause or stop transitions. Scheduling facts remain owned by the **Delivery workflow host** run record; tracker, Git, worktree, and worker facts remain references to their owning sources and are re-read during reconciliation.
-_Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint, scheduler record as authority
+The append-only `events.jsonl` stored under `${git-common-dir}/matt-workflow-control/runs/<run-id>/` by the single domain authority writer. It records only authority facts: grants, control revisions, dispatch-attempt references, **Issue execution budget** evidence, bounded-remediation records, closeout-wait observations, and pause or stop transitions. Native lane scheduling and liveness facts remain references to their owning native run records; tracker, Git, worktree, and worker facts are likewise re-read during reconciliation.
+_Avoid_: `.git/ron-workflow/` reuse, duplicate tracker database, mutable checkpoint, native run record as authority
 
-**DAG status snapshot**:
-The disposable **Delivery workflow host** run-status projection of one **DAG Run**'s scheduling state. It owns no workflow fact, carries no per-run control token, and is rebuildable from the host run record and the **DAG run journal**.
-_Avoid_: Resume authority, append-only audit record, UI-owned state
+**Historical DAG status snapshot**:
+The retired disposable control-panel projection of one **DAG Run**'s scheduling state. It owned no workflow fact and carried no authority; the current native adapter neither writes nor reads it.
+_Avoid_: Current native evidence, resume authority, append-only audit record, UI-owned state
 
 **DAG run-state cleanup**:
 An auditable startup retention sweep that may remove eligible terminal-run journals and snapshots from `${git-common-dir}/matt-workflow-control/runs/`. A Run is eligible only when it is `SUCCEEDED` or `STOPPED`, is older than 30 days, and is outside the newest ten terminal Runs; uncertain authority-writer or active-worker evidence makes it ineligible. Each deletion is first recorded in append-only `cleanup.jsonl`, while `--cleanup-preview` reports the same selection without deleting. It never deletes an active, pausing, paused, blocked, or stopping Run, and it never touches tracker history, branches, worktrees, candidates, or product files. **Delivery workflow host** run-record retention stays separate and is owned by that host.
@@ -718,15 +718,15 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - **DAG run reconciliation** skips manually completed nodes only after proving **DAG node success**, resumes an existing valid `implementation_complete` or partial **Close progress**, and dispatches only the remaining dependency-ready frontier without duplicating Issues, workers, or execution lanes
 - **DAG run reconciliation** resumes the same run only when its **DAG run identity** is unchanged; identity drift invalidates the old grant and reports `contract_drift` without selecting a mixed frontier
 - After planning or decomposition resolves identity drift, a new Run revision requires explicit human authority for that exact scope; before any Run exists, an approved revision may retain the active original Start, while an existing Grant is never silently rebound
-- Every blocked, failed, or run-paused state requires a **DAG stop diagnosis**; the Codex panel renders that record but never invents, weakens, or repairs its evidence
+- Every blocked, failed, or run-paused state requires a **DAG stop diagnosis**; the native coordinator returns that record but never invents, weakens, or repairs its evidence
 - A **Workflow limitation class** identifies whether progress requires instance resolution, control-engine repair, shared-skill contract change, or a human decision on unresolved evidence
 - **Shared workflow repair isolation** requires every skill-contract or control-engine repair to occur outside the affected product Run with its own scope, review, verification, and installation; already-approved pre-Run maintenance retains the original Start authority and returns through fresh reconciliation without repeated human approval
-- The **Codex-native coordinator** is the v1 execution adapter for a **DAG Run**; the Run Grant's explicit child-task authority permits native Codex task creation, while Orca and Codex App Server remain outside v1
-- The **Coordinator liveness boundary** keeps the **DAG Run** automatic only while its coordinator task is active; coordinator loss is fail-closed and a later explicit invocation reconciles settled child-task evidence without duplicate dispatch
-- The **DAG control bridge** may record bounded panel commands while the coordinator is active, but it never continues scheduling or closeout after coordinator loss
-- Each executable Issue has one **Codex Issue lane**: its child task runs against the saved project while `execute-issue` owns one separate dedicated **Issue worktree**, so `close-issue` retains its existing exact merge, worktree-removal, and tracker-close sequence
-- A **Codex Issue lane** performs no product-file write in the shared checkout; replacement is legal only after the prior task is proved unable to continue and the **DAG run journal** records their supersession relationship
-- **Workflow evidence ownership** assigns scope and blocker facts to tracker/decomposition read-back, candidate and review facts to completion notes, integration and cleanup facts to Git/worktrees, dispatch liveness to Codex task lifecycle read-back, and grant or control facts to the control engine; contradiction across these domains pauses instead of choosing a winner
+- Native subagent lanes plus the stateless native coordinator stepper are the current v1 execution adapter for a **DAG Run**; `pi-workflow` is loaded only when an operator explicitly selects that optional materialization
+- The **Host liveness boundary** keeps automatic progress scoped to the active native coordinator invocation; coordinator loss is fail-closed and a later explicit invocation reconciles settled native run evidence without duplicate dispatch
+- Journaled **Operator control intent** is reduced before another action is returned; no panel or bridge continues scheduling or closeout after coordinator loss
+- Each executable Issue has one **Issue lane** whose native subagent invokes `execute-issue`; that leaf alone owns one separate dedicated **Issue worktree**, so `close-issue` retains its existing exact merge, worktree-removal, and tracker-close sequence
+- An **Issue lane** performs no product-file write in the shared checkout; replacement is legal only after the prior lane is proved unable to continue and the **DAG run journal** records their supersession relationship
+- **Workflow evidence ownership** assigns scope and blocker facts to tracker/decomposition read-back, candidate and review facts to completion notes, integration and cleanup facts to Git/worktrees, dispatch liveness to native run lifecycle read-back, and grant or control facts to the control engine; contradiction across these domains pauses instead of choosing a winner
 - **Bounded environment remediation** is allowed only for an exact recognized fingerprint, records the selected skill and process-local action, reruns the exact failed command, and preserves the command's real result
 - One **Environment remediation cycle** is allowed per Issue dispatch attempt and exact fingerprint; it consumes no **DAG retry budget**, never repeats for the same fingerprint, and records `environment_unresolved` when the exact rerun still fails
 - A different failure after remediation is classified independently, and only a later worker or terminal restart consumes another **DAG retry budget** attempt
@@ -734,11 +734,10 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - The **Tracker outage gate** forbids cached tracker state from authorizing dispatch, `implementation_complete`, or closeout; after three failed probes at 5, 15, and 30 seconds, the Run becomes `BLOCKED` with `tracker_unavailable`
 - While the **Tracker outage gate** is active, already-running workers may preserve local candidates and worktrees but must stop at the next tracker-dependent evidence boundary; tracker recovery causes full reconciliation before automatic progress resumes
 - Tracker health probes do not consume the **DAG retry budget**; Resume or a new `/run-issue-workflow` invocation repeats current evidence acquisition rather than trusting the earlier outage result
-- The **DAG control panel** is a replaceable projection over the control engine's versioned status interface; opening, closing, or reopening it never starts a **DAG Run**, while its explicit Pause, Resume, and Stop actions create idempotent control events and Refresh is read-only
-- The **DAG control bridge** binds only to loopback for the active run, requires its per-run token for Pause, Resume, or Stop, and offers no Start endpoint, arbitrary command execution, or durable state of its own
-- Each **DAG Run** has one **DAG run journal** under the repository's common Git directory; `/run-issue-workflow` reconstructs current state from that journal plus live tracker, Git, worktree, and Codex task evidence instead of replaying a mutable checkpoint
-- The **DAG status snapshot** is an atomic, disposable panel projection; deleting or corrupting it cannot authorize, resume, or complete a Run because the engine must rebuild it from the journal and owning evidence sources
-- **DAG run-state cleanup** runs only when `/run-issue-workflow` is explicitly invoked, retains every terminal Run from the last 30 days and at least the newest ten terminal Runs, and skips any Run whose terminal state, engine-lock release, or absence of active Codex tasks cannot be proved
+- Pause, Resume, and Stop are durable **Operator control intent** events read by the reducer; the current native adapter has no control-panel or control-bridge owner
+- Each **DAG Run** has one **DAG run journal** under the repository's common Git directory; `/run-issue-workflow` reconstructs current state from that journal plus live tracker, Git, worktree, and native run evidence instead of replaying a mutable checkpoint
+- Retired control-panel status snapshots are historical only; deleting or corrupting one cannot authorize, resume, or complete a current Run because the stateless native stepper rebuilds state from the journal and owning evidence sources
+- **DAG run-state cleanup** runs only when `/run-issue-workflow` is explicitly invoked, retains every terminal Run from the last 30 days and at least the newest ten terminal Runs, and skips any Run whose terminal state, engine-lock release, or absence of active native lanes cannot be proved
 - Before deleting an eligible Run directory, **DAG run-state cleanup** appends its Run ID, Spec ID, terminal state, deletion time, and retention reason to `cleanup.jsonl`; `--cleanup-preview` performs the same proof and selection without deletion
 - **DAG run-state cleanup** never runs as a side effect of Stop, Issue closeout, repository cleanup, or panel closure
 - A Spec may contain at most three non-authoritative **User Outcomes**, while its numbered **Acceptance Criteria** are the only done and traceability authority

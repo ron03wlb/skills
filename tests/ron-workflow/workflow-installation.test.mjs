@@ -94,16 +94,22 @@ test("Run renewal preserves its journaled workflow version across coordinator re
 // verifies, with a package-owned installed entry that answers only the capability probe. The retired live
 // qualification is fatal here, so a read that falls back to it is visible in the recorded spawns.
 const installedEntryFixture = `
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 const version = process.argv[3];
 const mode = process.argv[2];
 const fault = process.env.WORKFLOW_QUALIFICATION_FAULT ?? null;
 const capability = { platform: process.platform, arch: process.arch, node: process.version,
   kernelRelease: "6.18.33.2-microsoft-standard-WSL2", wslDistro: "Ubuntu", posixCleanup: true };
-if (mode === "--qualification-identity") {
+const manifest = readFileSync(resolve(import.meta.dirname, "../../../..", ".workflow-version.json"));
+const manifestSha256 = "sha256:" + createHash("sha256").update(manifest).digest("hex");
+if (mode === "--capability-identity" || mode === "--qualification-identity") {
   if (fault === "unknown-capability") { process.stderr.write("capability unknown\\n"); process.exitCode = 1; }
   else if (fault === "unreadable-capability") process.stdout.write("not json");
-  else if (fault === "incomplete-capability") process.stdout.write(JSON.stringify({ state: "READY", capability: { platform: process.platform } }));
-  else process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, capability }));
+  else if (fault === "incomplete-capability") process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, manifestSha256, capability: { platform: process.platform } }));
+  else process.stdout.write(JSON.stringify({ state: "READY", packageVersionId: version, manifestSha256,
+    capabilityIdentity: "sha256:" + "c".repeat(64), capability }));
 } else if (mode === "--qualify-repair-package") {
   process.stderr.write("the retired live qualification must never be required again\\n");
   process.exitCode = 1;
@@ -117,6 +123,7 @@ function buildInstalledWorkflow() {
     cacheDirectory = join(root, ".codex", "workflow-packages");
   const codexEntry = join(root, ".codex", "skills", "run-issue-workflow");
   const agentsEntry = join(root, ".agents", "skills", "run-issue-workflow");
+  const claudeEntry = join(root, ".claude", "skills", "run-issue-workflow");
   mkdirSync(
     join(sourceRepository, "skills/personal/run-issue-workflow/scripts"),
     { recursive: true },
@@ -168,14 +175,8 @@ function buildInstalledWorkflow() {
     sourceRepository,
     sourceCommit: candidate,
     cacheDirectory,
-    skillDirectory: codexEntry,
+    skillDirectories: [codexEntry, agentsEntry, claudeEntry],
   }).version;
-  installWorkflow({
-    sourceRepository,
-    sourceCommit: candidate,
-    cacheDirectory,
-    skillDirectory: agentsEntry,
-  });
   const spawned = [];
   const commandRunner = (name, args, options) => {
     spawned.push([name, ...args]);
@@ -184,7 +185,7 @@ function buildInstalledWorkflow() {
   const read = () =>
     readWorkflowInstallationEvidence({
       cacheDirectory,
-      skillDirectories: [codexEntry, agentsEntry],
+      skillDirectories: [codexEntry, agentsEntry, claudeEntry],
       expectedSourceCommit: candidate,
       commandRunner,
     });
@@ -195,6 +196,7 @@ function buildInstalledWorkflow() {
     version,
     codexEntry,
     agentsEntry,
+    claudeEntry,
     spawned,
     commandRunner,
     read,
@@ -210,6 +212,7 @@ test("installed readiness reads the version, manifest, resolved entries and capa
     version,
     codexEntry,
     agentsEntry,
+    claudeEntry,
     spawned,
     commandRunner,
     read,
@@ -217,12 +220,12 @@ test("installed readiness reads the version, manifest, resolved entries and capa
   } = fixture;
   try {
     const evidence = read();
-    assert.equal(evidence.schema, "codex-workflow-effective-evidence:v3");
+    assert.equal(evidence.schema, "codex-workflow-effective-evidence:v4");
     assert.equal(evidence.candidate, candidate);
     assert.match(evidence.manifestSha256, /^sha256:[a-f0-9]{64}$/u);
     assert.deepEqual(
       evidence.entries.map((item) => item.path),
-      [codexEntry, agentsEntry],
+      [codexEntry, agentsEntry, claudeEntry],
     );
     assert.ok(
       evidence.entries.every((item) => item.packageVersionId === version.id),
@@ -241,7 +244,7 @@ test("installed readiness reads the version, manifest, resolved entries and capa
       "the receipt carries no retained component-fixture observations",
     );
     assert.equal(spawned.length, 1, "one capability probe proves the read");
-    assert.match(spawned[0].join(" "), /--qualification-identity/u);
+    assert.match(spawned[0].join(" "), /--capability-identity/u);
     assert.equal(
       spawned.some((argv) => argv.includes("--qualify-repair-package")),
       false,
@@ -383,7 +386,7 @@ test("an unprovable capability yields one attributable blocker and no live quali
       assert.equal(thrown.code, "installed_workflow_capability_unproven");
       assert.equal(thrown.state, state);
       assert.equal(typeof thrown.reason, "string");
-      assert.match(thrown.owner, /installed-entry\.mjs --qualification-identity$/u);
+      assert.match(thrown.owner, /installed-entry\.mjs --capability-identity$/u);
       assert.match(thrown.message, /smallest human action/u);
       assert.ok(
         thrown.message.includes(thrown.action),
@@ -391,7 +394,7 @@ test("an unprovable capability yields one attributable blocker and no live quali
       );
       assert.match(
         thrown.action,
-        /installed-entry\.mjs --qualification-identity/u,
+        /installed-entry\.mjs --capability-identity/u,
         "the smallest human action names the owning source",
       );
       assert.match(thrown.action, /re-read the installed evidence/u);
@@ -414,6 +417,7 @@ test("a foreign, misdirected or missing managed entry still withholds READY", ()
     candidate,
     codexEntry,
     agentsEntry,
+    claudeEntry,
     spawned,
     commandRunner,
     remove,
@@ -435,7 +439,7 @@ test("a foreign, misdirected or missing managed entry still withholds READY", ()
       process.platform === "win32" ? "junction" : "dir",
     );
     assert.throws(
-      () => readEntries([codexEntry, agentsEntry]),
+      () => readEntries([codexEntry, agentsEntry, claudeEntry]),
       /managed entry/u,
     );
     fs.rmSync(agentsEntry);
@@ -452,18 +456,18 @@ test("a foreign, misdirected or missing managed entry still withholds READY", ()
       process.platform === "win32" ? "junction" : "dir",
     );
     assert.throws(
-      () => readEntries([codexEntry, agentsEntry]),
+      () => readEntries([codexEntry, agentsEntry, claudeEntry]),
       /managed entry/u,
     );
     fs.rmSync(agentsEntry);
     assert.throws(
-      () => readEntries([codexEntry, agentsEntry]),
+      () => readEntries([codexEntry, agentsEntry, claudeEntry]),
       /managed entry/u,
     );
     fs.renameSync(preserved, agentsEntry);
     assert.equal(
-      readEntries([codexEntry, agentsEntry]).schema,
-      "codex-workflow-effective-evidence:v3",
+      readEntries([codexEntry, agentsEntry, claudeEntry]).schema,
+      "codex-workflow-effective-evidence:v4",
     );
     assert.equal(
       spawned.length,
@@ -879,11 +883,7 @@ test("the exact install command recovers repeated interruptions before the catal
         replaceLinkTarget: sourceRepository,
       };
       fs.renameSync = (from, to) => {
-        if (
-          previousEntry
-            ? from === skillDirectory
-            : to === join(cacheDirectory, "installation.json")
-        )
+        if (to === join(cacheDirectory, "installation.json"))
           throw new Error("Interrupted initial installation");
         return originalRename(from, to);
       };

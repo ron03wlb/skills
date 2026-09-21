@@ -88,17 +88,13 @@ test("no production module of this package outside the entry imports an authorit
   assert.deepEqual(offenders, [], "the bundle-local entry is this package's only authority seam");
 });
 
-test("moved decisions live in authority code instead of the Codex host boundary", () => {
+test("moved decisions live in authority code and the retired Codex composition is absent", () => {
   assert.equal(typeof authority.assessRecoveryCompatibility, "function");
   assert.equal(typeof authority.validateTaskOutcomeReceipt, "function");
   assert.equal(typeof authority.validateDeliveryProgress, "function");
   assert.equal(typeof authority.createTaskOutcomeReceipt, "function");
 
-  // The installed composition surface reaches this decision through the entry; a local reimplementation
-  // in the Codex host boundary would restore the coupling this Issue removed.
-  const composition = readFileSync(join(scripts, "codex-workflow.mjs"), "utf8");
-  assert.doesNotMatch(composition, /function assessRecoveryCompatibility/u);
-  assert.match(composition, /export \{ assessRecoveryCompatibility \} from "\.\/delivery-authority\.mjs";/u);
+  assert.equal(existsSync(join(scripts, "codex-workflow.mjs")), false);
 
   const journal = readFileSync(join(scripts, "run-journal.mjs"), "utf8");
   assert.match(journal, /from "\.\/journal-event-schema\.mjs"/u);

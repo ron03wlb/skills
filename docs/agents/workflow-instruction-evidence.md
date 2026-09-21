@@ -1,4 +1,9 @@
-# Issue 76: workflow instruction evidence
+# Historical Issue 76 workflow instruction evidence
+
+> This page preserves evidence for the retired Codex host and its deleted `codex-workflow.mjs`
+> adapter. It is not current delivery guidance. See
+> [`current-native-measurement.md`](../../skills/personal/run-issue-workflow/references/current-native-measurement.md)
+> for the current native-subagent substrate.
 
 This audit implements [Issue 76](https://github.com/ron03wlb/skills/issues/76) under [Spec 72](https://github.com/ron03wlb/skills/issues/72), against execution baseline `49951f9b63434a1712f937c984785ac8cb966098`. It changes instructions, their contract checks and the package's exact shared-reference list; runtime workflow ownership stays unchanged. The executable workflow governing this delivery remains pinned to `db130a91219ef4df4a7339b0a6c3b9149b6fc66692768ce32be656f0529bda37`.
 

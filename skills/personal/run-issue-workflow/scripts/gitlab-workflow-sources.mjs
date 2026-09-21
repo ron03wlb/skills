@@ -64,190 +64,29 @@ import {
 import { createIntegrationVerification } from "../../../engineering/execute-issue/scripts/verification-cache.mjs";
 import { selectWorkflowVersion } from "./workflow-installation.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
+import {
+  COMMIT_PATTERN as sha,
+  authorityConflict,
+  canonicalWorktreePath as worktreePath,
+  createAutomaticHostCleanupPacket,
+  createTrackerWorkflowCore,
+  declaresManualPrerequisite,
+  exactlyOne as one,
+  isAutomaticHostCleanupReason,
+  isCompleteVerificationEvidence,
+  normalizeWorkflowHandoff,
+} from "./tracker-workflow-core.mjs";
 
-const authorityConflict = (message) =>
-  Object.assign(new Error(message), { code: "WORKFLOW_AUTHORITY_CONFLICT" });
-const one = (values, label) => {
-  if (values.length !== 1)
-    throw authorityConflict(
-      `${label}: expected one exact record, observed ${values.length}`,
-    );
-  return values[0];
-};
-const sha = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u;
-const automaticHostCleanupReasons = new Set([
-  "host_release_unavailable",
-  "host_task_ownership_unproven",
-]);
-const worktreePath = (path) =>
-  existsSync(path) ? realpathSync.native(path) : resolve(path);
-// A `## Manual prerequisites` section declares nothing when it opens with one of the three negative
-// declarations, even when an explanation continues after it; a section that declares a real
-// prerequisite still declares one. Both tracker readers keep this one rule.
-const negativeManualPrerequisite = /^(?:N\/A|None|Not applicable)(?![a-z0-9])/iu;
-const declaresManualPrerequisite = (section) =>
-  !negativeManualPrerequisite.test(section);
-// The canonical body section a GitLab child carries in place of a native hierarchy link (ADR-0073).
 const sectionOf = (body, heading) => {
   const lines = String(body ?? "").replace(/\r\n/gu, "\n").split("\n");
   const marker = `## ${heading}`;
   const indexes = lines.flatMap((line, index) => (line === marker ? [index] : []));
-  if (indexes.length !== 1)
-    throw authorityConflict(`Issue body must contain one ${marker} section`);
-  const end = lines.findIndex(
-    (line, index) => index > indexes[0] && line.startsWith("## "),
-  );
+  if (indexes.length !== 1) throw authorityConflict(`Issue body must contain one ${marker} section`);
+  const end = lines.findIndex((line, index) => index > indexes[0] && line.startsWith("## "));
   return lines.slice(indexes[0] + 1, end < 0 ? lines.length : end).join("\n").trim();
 };
-// A completion's `verification[]` mixes candidate verification with explicitly labelled
-// control runs. Only candidate entries prove the change; a control reports its own
-// observed result and never stands in for the candidate's passing evidence.
-const controlVerificationLabel = /^\s*control(?: run)?\s*[:\u2014\u2013-]\s/iu;
-const isControlVerification = (item) =>
-  typeof item.command === "string" && controlVerificationLabel.test(item.command);
-const isReadableVerification = (item) =>
-  typeof item.command === "string" &&
-  item.command.length > 0 &&
-  typeof item.result === "string" &&
-  item.result.length > 0;
-const isPassingVerification = (item) =>
-  typeof item.result === "string" &&
-  /^(?:PASS(?:ED)?|SUCCEEDED)\b/iu.test(item.result);
-const isCompleteVerificationEvidence = (items) =>
-  Array.isArray(items) &&
-  items.length > 0 &&
-  items.every(
-    (item) =>
-      isReadableVerification(item) &&
-      (isControlVerification(item) || isPassingVerification(item)),
-  ) &&
-  items.some(
-    (item) => !isControlVerification(item) && isPassingVerification(item),
-  );
 
-export const isAutomaticHostCleanupReason = (reasonCode) =>
-  automaticHostCleanupReasons.has(reasonCode);
-
-export function createAutomaticHostCleanupPacket({
-  result,
-  taskCwd,
-  originalTaskRef,
-  integrationRecord,
-  record,
-  target,
-  targetName,
-  issueId,
-  specId,
-}) {
-  const failure = result?.observations?.[0];
-  const originalTaskMatches =
-    originalTaskRef?.threadId === result?.taskRef?.threadId &&
-    originalTaskRef?.hostId === result?.taskRef?.hostId;
-  const integrationChecks = integrationRecord?.current?.results?.map(
-    (attempt, index) => {
-      const obligation = integrationRecord.obligation?.[index],
-        inputs = attempt.inputs;
-      if (
-        !Array.isArray(obligation?.command) ||
-        !obligation.command.length ||
-        !obligation.command.every((value) => typeof value === "string") ||
-        !Array.isArray(obligation.configFiles) ||
-        !obligation.configFiles.every((value) => typeof value === "string") ||
-        !inputs?.environment ||
-        typeof inputs.environment !== "object" ||
-        Array.isArray(inputs.environment) ||
-        !Object.keys(inputs.environment).length ||
-        !isDeepStrictEqual(inputs.external, {}) ||
-        !Array.isArray(inputs.configuration) ||
-        inputs.configuration.length !== obligation.configFiles.length ||
-        inputs.configuration.some(
-          (item, configIndex) =>
-            item?.file !== obligation.configFiles[configIndex] ||
-            !/^[a-f0-9]{64}$/u.test(item.digest),
-        )
-      )
-        return null;
-      return {
-        command: obligation.command,
-        configFiles: obligation.configFiles,
-        environment: inputs.environment,
-        externalInputs: { kind: "none" },
-      };
-    },
-  );
-  const integrationMatches =
-    integrationRecord?.current?.state === "PASS" &&
-    Array.isArray(integrationChecks) &&
-    !integrationChecks.includes(null) &&
-    result?.integrationVerification?.state === "PASS" &&
-    Array.isArray(result.integrationVerification.checks) &&
-    isDeepStrictEqual(
-      result.integrationVerification.checks,
-      integrationChecks,
-    ) &&
-    result.integrationVerification.identity ===
-      integrationRecord.current.identity;
-  const resultMatches =
-    result?.candidate === record.candidate &&
-    result.targetHead === target.head &&
-    result.candidateReachable === true &&
-    worktreePath(result.worktree) === worktreePath(record.worktree) &&
-    worktreePath(taskCwd) === worktreePath(record.worktree) &&
-    result.directoryState === "EMPTY_UNREGISTERED" &&
-    originalTaskMatches &&
-    isAutomaticHostCleanupReason(result.reasonCode) &&
-    ["EBUSY", "EPERM", "EACCES"].includes(failure?.code) &&
-    typeof failure.message === "string" &&
-    failure.message.length > 0;
-  if (!resultMatches || !integrationMatches) return null;
-  return {
-    completion: {
-      issueId,
-      specId,
-      target: targetName,
-      targetWorktree: target.worktree,
-      topic: record.topic,
-      worktree: record.worktree,
-      candidate: record.candidate,
-    },
-    taskRef: originalTaskRef,
-    failure: { code: failure.code, message: failure.message },
-    integrationChecks,
-  };
-}
-
-// The composite producer handoff names its own publication: for `to-spec` that is the publication
-// comment, for `to-tickets` it is the decomposition record. The canonical payload nests the authority
-// fields under `authority` and the consumed upstream records under `upstream`; the GitHub encoding may
-// carry the authority fields flat, and a composite handoff may spell its own publication identity as
-// `decompositionIdentity` or as the producer's own `publicationIdentity`. Consumers read one flat
-// shape, and every value still has to equal the tracker and checkpoint read-back in the Run-ready
-// reducer, so no identity check is weakened here.
-const normalizeWorkflowHandoff = (snapshot) => {
-  const record = snapshot.handoff.record;
-  const objectOf = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
-  const authority = objectOf(record.authority) ?? record;
-  const upstream = objectOf(record.upstream) ?? {};
-  const classification = authority.classification ?? record.classification;
-  const publicationIdentity = record.publicationIdentity ?? authority.publicationIdentity ?? null;
-  let decompositionIdentity = record.decompositionIdentity;
-  if (decompositionIdentity === undefined) decompositionIdentity = authority.decompositionIdentity;
-  if (decompositionIdentity === undefined && classification === "MULTI") decompositionIdentity = publicationIdentity;
-  if (decompositionIdentity === undefined) decompositionIdentity = null;
-  return {
-    ...record,
-    specId: authority.specId ?? record.specId,
-    target: authority.target ?? record.target,
-    planningSeal: authority.planningSeal ?? record.planningSeal,
-    classification,
-    approvedScopeHash: authority.approvedScopeHash ?? record.approvedScopeHash,
-    publicationIdentity,
-    decompositionIdentity,
-    upstreamPublicationIdentity: record.upstreamPublicationIdentity ?? upstream.publicationIdentity ?? null,
-    upstreamHandoffIdentity: record.upstreamHandoffIdentity ?? upstream.handoffIdentity ?? null,
-    identity: snapshot.handoff.identity,
-  };
-};
+export { isAutomaticHostCleanupReason, createAutomaticHostCleanupPacket };
 
 export async function createGitLabWorkflowSources({
   repository,
@@ -264,8 +103,14 @@ export async function createGitLabWorkflowSources({
 }) {
   repository = realpathSync.native(repository);
   const bindingPath = join(repository, "docs/agents/gitlab-producer.json");
-  const configured = configuration
-    ?? (existsSync(bindingPath) ? JSON.parse(readFileSync(bindingPath, "utf8")) : null);
+  let configured = configuration;
+  if (configured === null && existsSync(bindingPath)) {
+    try {
+      configured = JSON.parse(readFileSync(bindingPath, "utf8"));
+    } catch (error) {
+      throw authorityConflict(`The configured GitLab tracker binding is unreadable: ${error.message}`);
+    }
+  }
   if (configured === null)
     throw authorityConflict(
       "A configured GitLab tracker binding is required: docs/agents/gitlab-producer.json is missing",
@@ -363,6 +208,13 @@ export async function createGitLabWorkflowSources({
       );
     return { issueId: issue.web_url, state: issue.state.toUpperCase() };
   };
+  createTrackerWorkflowCore({
+    provider: "gitlab",
+    repositoryId,
+    readIssue,
+    readIssueState,
+    providerAuthority: { approvedScope: "final-lf-normalized-body-digest", decomposition: "published-body-graph" },
+  });
   const worktrees = () =>
     git("worktree", "list", "--porcelain", "-z")
       .split("\0\0")
@@ -445,7 +297,6 @@ export async function createGitLabWorkflowSources({
   };
   const trackerRead = async (request) => {
     const spec = await readIssue(request.specId);
-    const digest = bodyDigest(spec.body);
     // GitLab may strip a description's final LF, so the approved publication, handoff and decomposition
     // are matched by either exact digest of the same bytes. The producer's approved scope hash is never
     // rewritten here: the record's own hash stays the Run's approved scope.
@@ -1018,25 +869,19 @@ export async function createGitLabWorkflowSources({
           task.repairRequest.runId === selectedIdentity.runId;
         const repairing =
           (acceptedRepair && task.state === "RUNNING") || recoveryWriting;
+        let taskState = "NONE";
+        if (task?.state === "RUNNING") taskState = "EXECUTING";
+        else if (task?.state === "DISPATCHED") taskState = "DISPATCHED";
+        else if (task && task.state !== "RESUMABLE") taskState = "UNKNOWN";
+        let completionState = "NONE";
+        if (completion) completionState = "COMPLETE";
+        else if (latest?.record.kind === "implementation_blocked") completionState = "BLOCKED";
         const node = {
           issueId: issue.node_id,
           blockers: snapshot.blockers.get(issue.node_id),
           trackerState: issue.state.toUpperCase(),
-          taskState:
-            task?.state === "RUNNING"
-              ? "EXECUTING"
-              : task?.state === "DISPATCHED"
-                ? "DISPATCHED"
-                : task?.state === "RESUMABLE"
-                  ? "NONE"
-                  : task
-                    ? "UNKNOWN"
-                    : "NONE",
-          completionState: completion
-            ? "COMPLETE"
-            : latest?.record.kind === "implementation_blocked"
-              ? "BLOCKED"
-              : "NONE",
+          taskState,
+          completionState,
           candidateReachable: false,
           worktreeState: "ABSENT",
         };
@@ -1487,12 +1332,12 @@ export async function createGitLabWorkflowSources({
           ) {
             const reported = task.closeResult.integrationVerification;
             const current = integrationRecord?.current;
-            const expectedState =
-              task.closeResult.state === "INTEGRATION_FAILED"
-                ? "FAIL"
-                : task.closeResult.state === "INTEGRATION_UNKNOWN"
-                  ? "UNKNOWN"
-                  : "PASS";
+            const expectedStates = {
+              INTEGRATION_FAILED: "FAIL",
+              INTEGRATION_UNKNOWN: "UNKNOWN",
+              HOST_CLEANUP_BLOCKED: "PASS",
+            };
+            const expectedState = expectedStates[task.closeResult.state];
             const matches =
               current?.state === expectedState &&
               current.issueId === issue.node_id &&
@@ -1968,7 +1813,11 @@ export async function createGitLabWorkflowSources({
               result?.maintenance
             ) {
               const proof = maintenanceProof;
-              if (workflowVersion?.id !== proof.packageVersion.id) {
+              if (workflowVersion?.id === proof.packageVersion.id) {
+                node.maintenanceRecoveryIdentity = recoveryIntent.requestIdentity;
+                delete node.integrationVerification;
+                failure = null;
+              } else {
                 contradictions.push({
                   code: "workflow_runtime_reentry_required",
                   reasonCode: "workflow_runtime_reentry_required",
@@ -1977,11 +1826,6 @@ export async function createGitLabWorkflowSources({
                     "Verified maintenance installation requires the installed entry to freshly reconcile this same Run with the proven package.",
                   ],
                 });
-              } else {
-                node.maintenanceRecoveryIdentity =
-                  recoveryIntent.requestIdentity;
-                delete node.integrationVerification;
-                failure = null;
               }
             } else if (!result)
               throw new Error(
@@ -2204,13 +2048,9 @@ export async function createGitLabWorkflowSources({
             !current.taskRefs[issue.node_id] &&
             store.readHostTask({ runId, issueId: issue.node_id }),
         );
-        row.activeTasks = unresolvedIntent
-          ? "UNKNOWN"
-          : states.some(({ state }) => state === "RUNNING")
-            ? "PRESENT"
-            : states.every(({ state }) => state === "RESUMABLE")
-              ? "ABSENT"
-              : "UNKNOWN";
+        row.activeTasks = "UNKNOWN";
+        if (!unresolvedIntent && states.some(({ state }) => state === "RUNNING")) row.activeTasks = "PRESENT";
+        else if (!unresolvedIntent && states.every(({ state }) => state === "RESUMABLE")) row.activeTasks = "ABSENT";
         row.state = reduceRun({ ...current.facts, journal }).run.state;
         const completedTimes = states.map(
           ({ snapshot: task }) => task?.turns?.[0]?.completedAt,
