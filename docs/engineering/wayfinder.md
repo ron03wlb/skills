@@ -2,7 +2,7 @@
 
 `wayfinder` takes an effort too big for one agent [session](https://www.aihero.dev/ai-coding-dictionary/session): an idea whose **destination** you can name but whose route you cannot yet see, and charts it as a shared **map** of **decision tickets** on your issue tracker, then resolves them one at a time until the way is clear.
 
-It plans, it does not do. Every ticket holds a question whose resolution is a decision, not a slice of a build to execute, and the map is finished when nothing is left to decide before someone goes and builds the thing. That one rule is what separates a wayfinder ticket from an ordinary implementation [ticket](https://www.aihero.dev/ai-coding-dictionary/ticket), and it is the rule agents break most often. When the map clears, wayfinder hands off; it does not carry on into code.
+It plans, it does not do. Every ticket holds a question whose resolution is a decision, not a slice of a build to execute. When the map clears, Wayfinder writes one **delivery route** with one next command; it does not carry on into code or leave the next skill to guess.
 
 ## When to reach for it
 
@@ -15,7 +15,7 @@ It is the heaviest, densest flow in the set, so the trigger is narrow: the effor
 | A well-scoped feature you can settle in one sitting | [grill-me](https://aihero.dev/skills-grill-me), or [grill-with-docs](https://aihero.dev/skills-grill-with-docs) when there is a codebase |
 | A greenfield project, or a build spanning many sessions, with the route still unclear | `/wayfinder` |
 | A thread where the deciding is already done | [to-spec](https://aihero.dev/skills-to-spec): skip straight past the map |
-| A cleared wayfinder map | [to-spec](https://aihero.dev/skills-to-spec), then [to-tickets](https://aihero.dev/skills-to-tickets) and [implement](https://aihero.dev/skills-implement) |
+| A cleared wayfinder map | Follow its delivery route: [grill-with-docs](https://aihero.dev/skills-grill-with-docs) when a codebase decision or target is still missing; otherwise [to-spec](https://aihero.dev/skills-to-spec) for Tracker delivery |
 | An existing session that has already grown too big | say "hand off to `/wayfinder`" ([handoff](https://aihero.dev/skills-handoff) bridges into a map as well as out of one) |
 
 Greenfield is not a requirement. Wayfinder is used routinely on legacy and half-built codebases, and it is arguably sharper there, because a lot of the fog is "what is already true here" rather than "what should we do".
@@ -30,9 +30,11 @@ The tracker is not decoration. Blocking is what renders the frontier visually in
 
 The **map** is a single issue labelled `wayfinder:map`; its tickets are its child issues. It is an **index, not a store**: a decision lives in exactly one place, its ticket, and the map only gists it and links. A session loads the map at low resolution and zooms into individual tickets on demand, which is what lets a map keep growing without every session paying for its whole history.
 
-Four things live on it:
+Six things live on it:
 
 - **Destination**: what reaching the end of this map looks like. Naming it is the first act of charting, before any ticket exists, because the destination fixes the scope every ticket is measured against.
+- **Delivery context**: only for an effort that might reach code delivery: repository, target branch, material constraints, and verification assumptions. It is deliberately not a Git baseline or execution permission.
+- **Delivery route**: pending until the map clears, then one low-resolution outcome and one next-command pointer. If a decision changes, the route is invalidated rather than treated as standing permission.
 - **Decisions so far**: one line per closed ticket, each linking to where the detail actually lives.
 - **Not yet specified**: the **fog of war**. Decisions you can tell are coming but cannot yet phrase sharply. The test for fog versus ticket is whether you can state the question precisely *now*, not whether you can answer it. Resolving a ticket clears the fog ahead of it and graduates whatever is now specifiable into fresh tickets.
 - **Out of scope**: work ruled beyond the destination. Fog only ever gathers *toward* the destination, so out-of-scope work is closed and never graduates.
@@ -62,11 +64,11 @@ Session count, not project size. `/grill-with-docs` is single-session planning; 
 **When it asks for the "destination", does it mean the end of this session or the end of everything?**
 The whole map. That means the destination of the entire map, not just the initial session. The question reads ambiguously because wayfinder is by definition a multi-session tool, so a session-scoped answer never makes sense. Typical destinations are a [spec](https://www.aihero.dev/ai-coding-dictionary/spec) to hand off, a decision to lock before planning starts, a proof of concept, or a change made in place like a data migration.
 
-**The map is cleared. Didn't wayfinder already write the spec and make the tickets? Why do I still need `/to-spec` and `/to-tickets`?**
-No. Wayfinder's tickets are decision tickets, and by the time the map closes they are all closed too. What is left is a map full of linked decisions, which is not a build plan. [to-spec](https://aihero.dev/skills-to-spec) collapses those linked decisions into one spec (`/to-spec #<map_issue>`) and [to-tickets](https://aihero.dev/skills-to-tickets) slices that into tracer-bullet implementation tickets. Looping the map straight into [implement](https://aihero.dev/skills-implement) skips the collapse and throws the linked detail away. Go straight to implementation only when the effort turned out genuinely small. People do run the abbreviated pipeline and report it working; the two extra steps buy you an explicit spec artifact that a reviewer or a colleague can read, which matters more the less solo you are.
+**The map is cleared. Which command do I run now?**
+Read the map's delivery route, not the individual decision tickets. If codebase design, a target branch, or accepted glossary/ADR work is still missing, it says `/grill-with-docs <map URL>`; that produces the Planning handoff packet for [to-spec](https://aihero.dev/skills-to-spec). A delivery-ready map says `/to-spec <map URL>`. `to-spec` then classifies one Tracker Spec: Single-Issue ends in `/run-issue-workflow <Spec-ID>`; Multi-Issue first goes to [to-tickets](https://aihero.dev/skills-to-tickets), then its Run command. A pure decision map stops. No map directly starts `execute-issue`, a Run, or [implement](https://aihero.dev/skills-implement).
 
 **My agent started writing production code in the middle of a wayfinder session.**
-The most-reported failure with this skill, and there is a real hole behind it. Wayfinder's "plan, don't do" default can be overridden in the map's **Notes**, but the Notes are written by the agent, so the constraint and its exemption live in the same file the constrained party owns. One user watched an agent write "this map carries execution" into its own Notes and then read it back in later sessions as its own licence, building on a live server. There is no hard in-skill stop for "I meant the default." Until there is: read the Notes on any map you didn't chart yourself, keep implementation in its own sessions, and treat any `wayfinder:task` that looks like a slice of the build as mis-typed.
+That ticket is mis-typed. A map's Notes cannot turn a decision ticket into a delivery Issue, and the only code-delivery route starts at the map's recorded `/to-spec` command. Keep implementation in its own session; a `wayfinder:task` that reads like a build slice belongs downstream of the map.
 
 **I charted 27 tickets, and by the time I got to the thirteenth, the rest no longer made sense.**
 A real and repeatedly-reported outcome, verbatim from a field report. Wayfinder's default instinct is to plan comprehensively, and a map whose later tickets rest on assumptions the earlier ones invalidate is exactly the waterfall trap the skill is accused of. Two things push back on it. Scope the map to a bounded destination rather than to the whole product. Practitioners consistently report that maps scoped to one defined epic behave better than a sprawling "implement V1", and planning something very big is not the goal in the first place: shipping small increments is. And [prototype](https://www.aihero.dev/ai-coding-dictionary/prototyping) aggressively: the whole reason the route stays current is that uncertainty is flushed out by cheap concrete artifacts before implementation depends on it. Wayfinder is "prototypemaxxing", not "planmaxxing".
@@ -94,10 +96,11 @@ It is this skill, renamed to `wayfinder` in v1.1 and invoked as `/wayfinder`. "D
 - A session resolves one ticket, posts the answer as a resolution comment, closes it, and leaves one line on the map's *Decisions so far*. Then it stops.
 - **Not yet specified** shrinks over time. A patch of fog that graduates into a ticket disappears from that section rather than living in both places.
 - When the opening breadth-first grill turns up no fog at all, the skill stops and tells you the effort is small enough to skip the map.
-- The session that finishes the map hands you toward a spec, not a pull request.
+- The session that finishes the map leaves one valid delivery route with exactly one next command; a later decision change visibly invalidates it.
+- A delivery-ready map enters `/to-spec`, which—not Wayfinder—chooses Single-Issue or Multi-Issue execution.
 
 ## Where it fits
 
-`wayfinder` is a **situational on-ramp**, not the default front door. The grill-led idea → ship chain is still where most work starts; wayfinder is what you climb onto when the idea is too big to hold in one session, and it merges back onto that chain at [to-spec](https://aihero.dev/skills-to-spec), because a cleared map hands off rather than builds.
+`wayfinder` is a **situational on-ramp**, not the default front door. The grill-led idea → ship chain is still where most work starts; Wayfinder is what you climb onto when the idea is too big to hold in one session. Its cleared-map route either returns through [grill-with-docs](https://aihero.dev/skills-grill-with-docs) for missing codebase design, enters [to-spec](https://aihero.dev/skills-to-spec) for Tracker delivery, or stops after a pure decision.
 
 Underneath, it is mostly other skills wearing wayfinder's scheduling: [grilling](https://aihero.dev/skills-grilling) and [domain-modeling](https://aihero.dev/skills-domain-modeling) resolve the default ticket type, [prototype](https://aihero.dev/skills-prototype) resolves the tickets that talking cannot, and [research](https://aihero.dev/skills-research) runs as a subagent so its reading never lands in your session. [handoff](https://aihero.dev/skills-handoff) is the bridge in and out: into a map from a conversation that outgrew itself, out of one when a side quest appears mid-session. For anything else, [ask-matt](https://aihero.dev/skills-ask-matt) routes over the whole set.

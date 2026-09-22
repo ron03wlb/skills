@@ -1,6 +1,6 @@
 ---
 name: wayfinder
-description: Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.
+description: Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, resolve them one at a time, then route the cleared map to its next planning or delivery flow.
 disable-model-invocation: true
 ---
 
@@ -10,7 +10,22 @@ The destination varies per effort, and naming it is the first act of charting: i
 
 ## Plan, don't do
 
-Wayfinder is **planning** by default: each ticket resolves a decision, and the map is done when the way is clear, with nothing left to decide before someone goes and does the thing. The pull to just do the work is usually the signal you've reached the edge of the map and it's time to hand off. An effort can override this in its **Notes**, carrying execution into the map itself, but absent that, produce decisions, not deliverables.
+Wayfinder is **planning**: each ticket resolves a decision, and the map is done when the way is clear, with nothing left to decide before someone goes and does the thing. The pull to just do the work is the signal you've reached the edge of the map and it is time to route the outcome. A map's **Notes** never turn a decision ticket into a delivery Issue or permission to implement; code delivery follows the cleared-map route below.
+
+## Route a cleared map
+
+A map is **not clear** while it has an open or blocked child, anything in **Not yet specified**, or a decision that has invalidated another ticket. Keep working the map in that state: create, update, block, or reopen the affected decision ticket, and remove any stale delivery route.
+
+When the map is clear, choose exactly one outcome from this table. The route is a next command, not implementation authority.
+
+| Outcome | When it applies | Next step |
+| --- | --- | --- |
+| Continue decisions | A question, fog patch, or decision impact remains. | Keep the map open; do not emit a delivery command. |
+| Design handoff | The map reached its destination, but a codebase-bound reserved decision, target branch, or accepted glossary/ADR change is still missing. | `/grill-with-docs <map URL>`; its Planning handoff packet then goes to `/to-spec`. |
+| Tracker delivery | Every decision is settled, **Delivery context** is complete, and no accepted glossary/ADR change needs a planning lane. | `/to-spec <map URL>`. It alone selects Single-Issue → `/run-issue-workflow <Spec-ID>` or Multi-Issue → `/to-tickets <Spec-ID>` → `/run-issue-workflow <Spec-ID>`. |
+| Decision complete | The destination is only a decision, with no delivery to make. | Report the result and stop. |
+
+For every clear map, return a compact **delivery route card**: outcome, reason, map URL, target branch when applicable, one exact next command, an informational downstream chain, and these baseline boundaries: Wayfinder records no Git baseline; `to-spec` revalidates planning facts and selects the Planning Seal; `to-tickets` checks its lineage; `execute-issue` later captures one Execution baseline per Issue attempt. Store the same low-resolution outcome and pointer under **Delivery route** on the map. If the map becomes unclear, mark that route invalid and remove its next command; it never grants downstream authority.
 
 ## Refer by name
 
@@ -36,6 +51,20 @@ The whole map at low resolution, loaded once per session. Open tickets are **not
 ## Notes
 
 <domain; skills every session should consult; standing preferences for this effort>
+
+## Delivery context
+
+<!-- Fill only when this map may route to code delivery. Record repository, target branch, known constraints, and verification assumptions; never record a commit SHA or execution authority. -->
+
+- Repository: <repository identity>
+- Target branch: <branch>
+- Constraints and verification assumptions: <links or concise facts>
+
+## Delivery route
+
+<!-- Keep this low-resolution: pending until the map is clear, then outcome, reason, one next-command pointer, and any downstream artifact link. Mark it invalid if a decision or Delivery context changes. -->
+
+- Status: pending
 
 ## Decisions so far
 
@@ -110,10 +139,11 @@ User invokes with a loose idea.
 
 1. **Name the destination.** Call the Skill tool twice, for "grilling" and "domain-modeling", to pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it's settled first.
 2. **Map the frontier.** Grill again, **breadth-first** this time: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** (the way to the destination is already clear, the whole journey small enough for one session), you don't need a map. Stop and ask the user how they'd like to proceed.
-3. **Create the map** (label `wayfinder:map`): Destination and Notes filled in, Decisions-so-far empty, the fog sketched into **Not yet specified**.
-4. **Create the tickets you can specify now** as child issues of the map, then wire blocking edges in a **second pass** (issues need ids before they can reference each other). Wiring sorts them into the frontier and the blocked; everything you can't yet specify stays in the fog: the **Not yet specified** section.
-5. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with "research" to resolve it in parallel, capturing its findings on a throwaway `research/<name>` branch with a context pointer from the ticket.
-6. Stop: charting is one session's work; it hand-resolves nothing.
+3. **Record delivery context when needed.** For a destination that may reach code delivery, record repository identity, target branch, material constraints, and verification assumptions. Do not capture a Git baseline or delivery authority here.
+4. **Create the map** (label `wayfinder:map`): Destination and Notes filled in, Delivery route pending, Decisions-so-far empty, the fog sketched into **Not yet specified**.
+5. **Create the tickets you can specify now** as child issues of the map, then wire blocking edges in a **second pass** (issues need ids before they can reference each other). Wiring sorts them into the frontier and the blocked; everything you can't yet specify stays in the fog: the **Not yet specified** section.
+6. **Fire the research subagents.** For each `research` ticket you just created, spin up a subagent that calls the Skill tool with "research" to resolve it in parallel, capturing its findings on a throwaway `research/<name>` branch with a context pointer from the ticket.
+7. Stop: charting is one session's work; it hand-resolves nothing.
 
 ### Work through the map
 
@@ -123,6 +153,7 @@ User invokes with a map (URL or number). A ticket is **optional**: without one, 
 2. Choose the ticket. If the user named one, use it. Otherwise take the first frontier ticket in order. **Claim it**: assign it to yourself before any work.
 3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for "grilling" and "domain-modeling".
 4. Record the resolution: post the answer as a **resolution comment**, **close** the issue, and **append a context pointer** to the map's Decisions-so-far.
-5. Add newly-surfaced tickets (create-then-wire); graduate any fog the answer has made specifiable, clearing each graduated patch from **Not yet specified** so it lives only as its new ticket. If the answer reveals that a ticket (this one or another) sits beyond the destination, **rule it out of scope** rather than resolving it on the route. If the decision invalidates other parts of the map, update or delete those tickets.
+5. Add newly-surfaced tickets (create-then-wire); graduate any fog the answer has made specifiable, clearing each graduated patch from **Not yet specified** so it lives only as its new ticket. If the answer reveals that a ticket (this one or another) sits beyond the destination, **rule it out of scope** rather than resolving it on the route. If the decision invalidates other parts of the map, update or delete those tickets and mark any Delivery route invalid.
+6. When no decision ticket, fog patch, or impact remains, apply [Route a cleared map](#route-a-cleared-map). Write the low-resolution route under **Delivery route**, return the delivery route card, and stop. Do not call `/execute-issue`, `/run-issue-workflow`, or `/implement` from a map; only the recorded next command owns the next transition.
 
 The user may run unblocked tickets in parallel, so expect other sessions to be editing the tracker concurrently.

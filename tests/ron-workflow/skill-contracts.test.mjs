@@ -92,6 +92,33 @@ test("Router and Operational Skill entry word budgets name every exact file and 
   );
 });
 
+test("Wayfinder routes a cleared decision map without granting execution authority", () => {
+  const wayfinder = read("skills/engineering/wayfinder/SKILL.md");
+  const toSpec = read("skills/engineering/to-spec/SKILL.md");
+  const askMatt = read("skills/engineering/ask-matt/SKILL.md");
+  const wayfinderDocs = read("docs/engineering/wayfinder.md");
+  const toSpecDocs = read("docs/engineering/to-spec.md");
+  const askMattDocs = read("docs/engineering/ask-matt.md");
+  const wayfinderMetadata = read("skills/engineering/wayfinder/agents/openai.yaml");
+
+  assert.match(wayfinder, /## Delivery context.*never record a commit SHA or execution authority/isu);
+  assert.match(wayfinder, /Repository:.*Target branch:.*Constraints and verification assumptions/isu);
+  assert.match(wayfinder, /## Delivery route.*Status: pending/isu);
+  assert.match(wayfinder, /Continue decisions.*Design handoff.*Tracker delivery.*Decision complete/isu);
+  assert.match(wayfinder, /`\/grill-with-docs <map URL>`.*`\/to-spec <map URL>`/isu);
+  assert.match(wayfinder, /Do not call `\/execute-issue`, `\/run-issue-workflow`, or `\/implement` from a map/isu);
+  assert.match(wayfinder, /mark any Delivery route invalid.*apply.*Route a cleared map/isu);
+  assert.match(toSpec, /Consume either a Planning handoff packet or a cleared `wayfinder:map`/isu);
+  assert.match(toSpec, /every child decision is closed.*Not yet specified.*Delivery context.*Delivery route.*Tracker delivery/isu);
+  assert.match(toSpec, /remaining fog or impact returns to Wayfinder.*accepted glossary\/ADR change returns to `\/grill-with-docs`/isu);
+  assert.match(askMatt, /clear map.*`\/grill-with-docs <map URL>`.*`\/to-spec <map URL>`.*Only `to-spec` classifies delivery.*maps never start leaves/isu);
+  assert.match(wayfinderDocs, /delivery route.*one next command/isu);
+  assert.match(wayfinderDocs, /delivery-ready map says `\/to-spec <map URL>`.*Single-Issue.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*to-tickets/isu);
+  assert.match(toSpecDocs, /cleared.*wayfinder.*map.*delivery route says `\/to-spec <map URL>`/isu);
+  assert.match(askMattDocs, /cleared.*wayfinder.*exactly one recorded delivery route/isu);
+  assert.match(wayfinderMetadata, /short_description: "Map a large effort as decision tickets and route its exit"/u);
+});
+
 test("moved workflow detail has an exact conditional owner-local reference and single owner", () => {
   const boundaries = [
     {
@@ -935,7 +962,7 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
   const implement = read("skills/engineering/implement/SKILL.md");
   const implementDocs = read("docs/engineering/implement.md");
 
-  const handoffEntry = spec.indexOf("Consume the planning lane handoff");
+  const handoffEntry = spec.indexOf("Consume a settled planning source");
   const seal = spec.indexOf("Revalidate the Planning baseline and select the Planning Seal", handoffEntry);
   const checkpoint = spec.indexOf("Start or resume the Spec producer transaction", seal);
   const publication = spec.indexOf("Publish and complete the handoff", checkpoint);

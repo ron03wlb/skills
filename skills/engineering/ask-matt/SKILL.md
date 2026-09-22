@@ -30,7 +30,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 - A personal daily reflection → `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 - Codex interruptions → personal `/workflow-retro`.
 - Raw request → `/triage`; failure whose cause is unknown → `/diagnosing-bugs`.
-- Unsettled large effort → `/wayfinder`; runnable design question → `/prototype`; source comparison requiring a cited repository note → `/research`.
+- Unsettled large effort → `/wayfinder`; a clear map records `/grill-with-docs <map URL>`, `/to-spec <map URL>`, or stop. Only `to-spec` classifies delivery; maps never start leaves. A runnable design question → `/prototype`; source comparison → `/research`.
 - Architecture → `/improve-codebase-architecture`; changed domain concepts → `/domain-modeling`; module/public-interface design → `/codebase-design`. Existing-term lookups and routine fixes stay inline.
 - A human-only dashboard, credential, migration, or cutover step → `/wizard`.
 

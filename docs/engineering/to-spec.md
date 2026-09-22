@@ -8,12 +8,12 @@ It does not restart the interview, commit an operational plan, or create prospec
 
 You invoke this by typing `/to-spec` — the [agent](https://www.aihero.dev/ai-coding-dictionary/agent) won't reach for it on its own.
 
-Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-grill-with-docs) has settled one proposed Spec and target. Use [to-tickets](https://aihero.dev/skills-to-tickets) only when the published Spec says Multi-Issue.
+Reach for it after [grill-with-docs](https://aihero.dev/skills-grill-with-docs) has settled one proposed Spec and target, or from a cleared [wayfinder](https://aihero.dev/skills-wayfinder) map whose delivery route says `/to-spec <map URL>`. Use [to-tickets](https://aihero.dev/skills-to-tickets) only when the published Spec says Multi-Issue.
 
 ## Prerequisites
 
-- Tracker-only publication: settled scope, source identities, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
-- Actual glossary or ADR writes: the exact registered isolated lane, its adapter-issued opaque task identity and allocation, and shared target writer, disposed by `to-spec` once the handoff reads back. A missing or mismatched allocation stops before publication and preserves the handoff for retry.
+- Tracker-only publication: a Planning handoff packet or a cleared Wayfinder map with settled scope, reachable decision sources, repository and target branch in Delivery context, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
+- Actual glossary or ADR writes: the exact registered isolated lane, its adapter-issued opaque task identity and allocation, and shared target writer, disposed by `to-spec` once the handoff reads back. A map that needs this branch returns to [grill-with-docs](https://aihero.dev/skills-grill-with-docs); a missing or mismatched allocation stops before publication and preserves the handoff for retry.
 
 The owner-local planning adapter enforces this distinction before publication. The tracker adapter uses the verified publication mode; unsupported atomic compare-and-set is never assumed.
 
@@ -49,4 +49,4 @@ The Spec preserves the shared SQL decision boundary: routine reversible queries 
 
 ## Where it fits
 
-`to-spec` follows [grill-with-docs](https://aihero.dev/skills-grill-with-docs). It routes a Single-Issue Tracker Spec to the repository's Run coordinator and a Multi-Issue Tracker Spec to [to-tickets](https://aihero.dev/skills-to-tickets); approved Standalone Specs use [implement](https://aihero.dev/skills-implement). See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.
+`to-spec` follows [grill-with-docs](https://aihero.dev/skills-grill-with-docs), or a delivery-ready [wayfinder](https://aihero.dev/skills-wayfinder) map. It routes a Single-Issue Tracker Spec to the repository's Run coordinator and a Multi-Issue Tracker Spec to [to-tickets](https://aihero.dev/skills-to-tickets); approved Standalone Specs use [implement](https://aihero.dev/skills-implement). See [ask-matt](https://aihero.dev/skills-ask-matt) for the full map.

@@ -10,9 +10,11 @@ Publish one settled scope; do not restart discovery. Use repository evidence, es
 
 The configured tracker and triage labels must exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. Checkpoint profiles and concrete adapters require installation. For GitLab publication, read [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) and its registered-document writer. Setup cannot repair these seams. Accepted glossary or ADR writes require the shared Target mutation writer.
 
-## 1. Consume the planning lane handoff
+## 1. Consume a settled planning source
 
-Consume the settled scope, repository, proposed or existing Tracker Spec identity, target, baseline, relevant source facts, and explicit accepted glossary or ADR changes. A tracker-only publication with an empty list needs no planning worktree or lane handoff. Missing or conflicting source, version, or identity stops before mutation.
+Consume either a Planning handoff packet or a cleared `wayfinder:map`. Both sources must provide settled scope, repository, proposed or existing Tracker Spec identity, target, relevant source facts, decision bases, and exact non-ADR behavior, exclusions, and verification assumptions. A tracker-only publication with an empty list of accepted changes needs no planning worktree or lane handoff. Missing or conflicting source, version, or identity stops before mutation.
+
+A cleared map is a valid direct source only when every child decision is closed, **Not yet specified** is empty, **Delivery context** names the repository and target branch, each decision remains reachable through its resolution, and its **Delivery route** selects Tracker delivery with `/to-spec <map URL>`. It records no Git baseline: this skill reads the Planning baseline later. A map with remaining fog or impact returns to Wayfinder; a missing reserved design decision, target, or accepted glossary/ADR change returns to `/grill-with-docs` for its Planning handoff packet. Never infer either branch, repair the map, or create a planning lane from a direct map.
 
 Retain the handoff's inherited, human-confirmed, or delegated basis and source per decision. A choice within the recorded delegation needs no individual or blanket reconfirmation; a missing basis or changed scope returns only the affected decision to planning. Preserve exact non-ADR behavior, numeric defaults, exclusions, and verification assumptions in the Spec. Carry prior SQL approval and preparation-before-dependent-implementation ordering; design or artifact approval never becomes database execution authority.
 
