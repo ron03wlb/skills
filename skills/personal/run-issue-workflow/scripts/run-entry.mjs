@@ -45,7 +45,7 @@ import { createNativeLaneGit } from "./native-lane-runner.mjs";
 import { planNativeRound } from "./native-round-loop.mjs";
 import { hostActionIdentity } from "./pi-workflow-host.mjs";
 import { createRunStore } from "./run-store.mjs";
-import { selectWorkflowVersion } from "./workflow-installation.mjs";
+import { inspectWorkflowInstallation } from "./workflow-installation.mjs";
 import { runWorkflowCommand } from "./workflow-command.mjs";
 
 export const RUN_ENTRY_SCHEMA = "pi-workflow-run-entry:v1";
@@ -485,8 +485,17 @@ export async function startRun({
   const { repository, gitCommonDir } = trackerSelection;
   const selectedCreateSources = createSources ?? trackerSourceFactory(trackerSelection.tracker);
   const store = createRunStore({ gitCommonDir });
-  const selection = selectWorkflowVersion({ cacheDirectory });
-  const selectedVersion = selection.state === "AVAILABLE" ? selection.version : undefined;
+  const installation = inspectWorkflowInstallation({ cacheDirectory });
+  if (installation.state !== "READY") {
+    return {
+      schema: RUN_ENTRY_SCHEMA,
+      specId,
+      outcome: "INSTALLATION_BLOCKED",
+      diagnosis: installation,
+    };
+  }
+  const selection = installation.selection;
+  const selectedVersion = selection.version;
   // The lane-task adapter the reconciliation reads is the native one, and it is built from the same
   // recorded lanes the round read uses. It is late-bound because the sources that consume it are
   // constructed before the Run identity — and therefore the composition — is known.
@@ -570,7 +579,6 @@ export async function startRun({
     // Grant. Every other non-READY answer — a producer's retry, an ambiguous target, a planning-owned
     // Manual prerequisite — stays that owner's, so nothing is written.
     if (ready.state === "READY" || (approvalGap && questions.length > 0)) {
-      if (selection.state !== "AVAILABLE") throw new Error(`Workflow version is ${selection.state}: ${selection.reason}`);
       const writer = store.acquireWriter(runId);
       try {
         writer.append({

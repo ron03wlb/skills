@@ -48,6 +48,7 @@ const TO_TICKETS_PUBLICATION_STAGES = Object.freeze([
 export const WORKFLOW_CHECKPOINT_PROFILES = Object.freeze({
   "to-spec@v1": WORKFLOW_CHECKPOINT_STAGES,
   "to-spec@v2": TO_SPEC_PUBLICATION_STAGES,
+  "to-spec@v3": TO_SPEC_PUBLICATION_STAGES.slice(0, 2),
   "to-tickets@v1": TO_TICKETS_CHECKPOINT_STAGES,
   "to-tickets@v2": TO_TICKETS_PUBLICATION_STAGES,
 });

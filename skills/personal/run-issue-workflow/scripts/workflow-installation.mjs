@@ -104,6 +104,26 @@ export function selectWorkflowVersion({ cacheDirectory, recordedVersion }) {
   }
 }
 
+export function inspectWorkflowInstallation({ cacheDirectory, recordedVersion } = {}) {
+  const selection = selectWorkflowVersion({ cacheDirectory, recordedVersion });
+  if (selection.state === "AVAILABLE") {
+    return Object.freeze({ state: "READY", selection, blocker: null });
+  }
+  const reason = selection.reason ?? "Installation evidence is unavailable";
+  const code = /installation\.json.*ENOENT/u.test(reason) ? "missing_installation_catalog"
+    : /not valid JSON|Unknown installation metadata/u.test(reason) ? "invalid_installation_catalog"
+      : /pending/u.test(reason) ? "installation_recovery_pending"
+        : /managed entry|Package|package/u.test(reason) ? "installation_evidence_unproven"
+          : "installation_unavailable";
+  return Object.freeze({
+    state: "BLOCKED",
+    code,
+    reason,
+    action: selection.recovery,
+    selection,
+  });
+}
+
 const capabilityDescriptorFields = ["arch", "kernelRelease", "node", "platform", "posixCleanup", "wslDistro"];
 const sortedKeys = (value) => value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).sort() : [];
 const provenCapability = (capability) => JSON.stringify(sortedKeys(capability)) === JSON.stringify(capabilityDescriptorFields)

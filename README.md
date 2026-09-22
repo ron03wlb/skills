@@ -157,6 +157,7 @@ For debugging, I've also built a **[`/diagnosing-bugs`](./skills/engineering/dia
 This is built in to every layer of these skills:
 
 - [`/to-spec`](./skills/engineering/to-spec/SKILL.md) synthesizes settled context into mapped Acceptance Criteria and the exact execution route
+- [`/publish-decision`](./skills/engineering/publish-decision/SKILL.md) publishes a documentation-only decision without starting delivery work
 
 And crucially, [`/improve-codebase-architecture`](./skills/engineering/improve-codebase-architecture/SKILL.md) helps you rescue a codebase that has become a ball of mud. I recommend running it on your codebase once every few days.
 
@@ -184,6 +185,7 @@ Skills I use daily for code work.
 - **[wiki](./skills/engineering/wiki/SKILL.md)** — Inspect or update one repository Wiki independently, with validation, semantic review, repair, and a Wiki-only local commit.
 - **[remove-ron](./skills/engineering/remove-ron/SKILL.md)** — Remove only the retired repository-local Ron setup footprint while preserving shared configuration and history.
 - **[to-spec](./skills/engineering/to-spec/SKILL.md)** — Revalidate settled scope, use an isolated planning lane for accepted document writes, and publish the Planning Seal plus exact Run handoff or decomposition command.
+- **[publish-decision](./skills/engineering/publish-decision/SKILL.md)** — Publish one settled ADR or glossary decision with Git and Tracker read-back, without starting delivery work.
 - **[to-tickets](./skills/engineering/to-tickets/SKILL.md)** — Run one minimal deterministic Multi-Issue decomposition producer, publish its Decomposition publication record, and emit one composite Run handoff.
 - **[implement](./skills/engineering/implement/SKILL.md)** — Build an approved Standalone Spec or explicit direct task on the current branch with TDD and review.
 - **[wayfinder](./skills/engineering/wayfinder/SKILL.md)** — Plan a huge chunk of work, more than one agent session can hold, as a shared map of investigation tickets on the issue tracker — resolve them one at a time until the way to the destination is clear.

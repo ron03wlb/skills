@@ -260,9 +260,9 @@ test("an installation the start path cannot resolve fails closed instead of reco
   const fixture = await startFixture(t, {
     handoffApprovals: REQUIRED_ACTIONS.map((action) => ({ ...action, authority: "human:planning" })),
   });
-  await assert.rejects(
-    () => fixture.run({ cacheDirectory: join(fixture.root, "absent-cache") }),
-    /Workflow version is UNAVAILABLE/u,
-  );
+  const result = await fixture.run({ cacheDirectory: join(fixture.root, "absent-cache") });
+  assert.equal(result.outcome, "INSTALLATION_BLOCKED");
+  assert.equal(result.diagnosis.code, "missing_installation_catalog");
+  assert.match(result.diagnosis.reason, /installation\.json/u);
   assert.deepEqual(fixture.journal(), []);
 });

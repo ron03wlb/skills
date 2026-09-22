@@ -140,7 +140,7 @@ export function deriveSpecReservationOperationIdentity(input) {
 
 export function bindProducerCheckpointOperationIdentity(identity) {
   if (!isRecord(identity)) throw new TypeError("Producer checkpoint identity must be an object");
-  if (identity.profileVersion !== "v2") {
+  if (!["v2", "v3"].includes(identity.profileVersion)) {
     throw new TypeError("Only a current-profile producer checkpoint can bind a new operation identity");
   }
   if (!isRecord(identity.bindings)) throw new TypeError("Producer checkpoint bindings must be an object");
@@ -175,14 +175,14 @@ export function createProducerOperationCheckpoint({ store, identity }) {
   if (typeof store?.readCheckpoint !== "function" || typeof store?.createCheckpoint !== "function") {
     throw new TypeError("Producer checkpoint adapter requires readCheckpoint() and createCheckpoint()");
   }
-  if (identity?.profileVersion === "v2"
+  if (["v2", "v3"].includes(identity?.profileVersion)
     && isRecord(identity.bindings)
     && Object.hasOwn(identity.bindings, "operationIdentity")) {
     return store.createCheckpoint(bindProducerCheckpointOperationIdentity(identity));
   }
   const existing = store.readCheckpoint(identity);
   if (existing) return store.createCheckpoint(identity);
-  if (identity?.profileVersion !== "v2") return store.createCheckpoint(identity);
+  if (!["v2", "v3"].includes(identity?.profileVersion)) return store.createCheckpoint(identity);
   return store.createCheckpoint(bindProducerCheckpointOperationIdentity(identity));
 }
 

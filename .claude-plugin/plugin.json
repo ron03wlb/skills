@@ -29,6 +29,7 @@
     "./skills/engineering/remove-ron",
     "./skills/engineering/tdd",
     "./skills/engineering/to-spec",
+    "./skills/engineering/publish-decision",
     "./skills/engineering/to-tickets",
     "./skills/engineering/wayfinder",
     "./skills/engineering/implement",

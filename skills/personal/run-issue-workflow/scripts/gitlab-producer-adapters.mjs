@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readPlanningBaseline } from "../../../engineering/to-spec/scripts/planning-entry.mjs";
 import { createWorkflowControlStore } from "./workflow-control-store.mjs";
+import { createOperationEnvelopeStore } from "./operation-envelope-store.mjs";
 import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint, deriveSpecReservationOperationIdentity } from "./delivery-authority.mjs";
 import { connectGitLabProducer, conflict, digest, gitRead, withProducerLock } from "./gitlab-producer-transport.mjs";
 import { mutateOnce, readMutation } from "./gitlab-producer-mutations.mjs";
@@ -25,13 +26,15 @@ export async function createGitLabProducerAdapters(options) {
   text(publication?.title, "publication title");
   text(publication?.body, "publication body");
   noQuickActions(publication.body);
-  if (!["SINGLE", "MULTI"].includes(publication.classification)) throw conflict("Producer must supply SINGLE or MULTI classification");
-  const readyLabel = publication.readyLabel ?? "ready-for-agent";
-  if (!/^[^,\r\n]+$/u.test(readyLabel)) throw conflict("One exact ready label is required");
+  if (!["SINGLE", "MULTI", "DECISION_ONLY"].includes(publication.classification)) throw conflict("Producer must supply SINGLE, MULTI, or DECISION_ONLY classification");
+  const decisionOnly = publication.classification === "DECISION_ONLY";
+  const readyLabel = decisionOnly ? null : publication.readyLabel ?? "ready-for-agent";
+  if (readyLabel !== null && !/^[^,\r\n]+$/u.test(readyLabel)) throw conflict("One exact ready label is required");
   const approvedScopeHash = digest(publication.body);
   const approvedScopeIdentity = digest(JSON.stringify({ title: publication.title, body: publication.body,
     classification: publication.classification, readyLabel }));
   const checkpoints = createWorkflowControlStore({ gitCommonDir: connection.gitCommonDir });
+  const envelopes = createOperationEnvelopeStore({ gitCommonDir: connection.gitCommonDir });
   let iid = options.specId === undefined ? null : parseIid(options.specId);
   let reservationOperation = null;
   function parseIid(locator) {
@@ -72,7 +75,8 @@ export async function createGitLabProducerAdapters(options) {
   const publishedBodyMatches = body => body === publication.body
     || publication.body.endsWith("\n") && body === publication.body.slice(0, -1);
   const assertPublished = (current, labels) => {
-    if (!publishedBodyMatches(current.body) || current.issue.title !== publication.title || !current.labels.includes(readyLabel)
+    if (!publishedBodyMatches(current.body) || current.issue.title !== publication.title
+      || (readyLabel !== null && !current.labels.includes(readyLabel))
       || !same(normalizeLabels(current.labels), normalizeLabels(labels))
       || current.issue.state !== "opened") throw conflict("Published Issue body, title, labels or state differs");
   };
@@ -111,10 +115,17 @@ export async function createGitLabProducerAdapters(options) {
   };
   const identity = ({ baseline: baselineSha, relevantFacts, sealOperationId }) => {
     if (!relevantFacts || typeof relevantFacts !== "object" || Array.isArray(relevantFacts)) throw conflict("Explicit relevantFacts are required");
-    return bindProducerCheckpointOperationIdentity({ repositoryId, specId: specId(), producerCommand: "to-spec", profileVersion: "v2",
+    return bindProducerCheckpointOperationIdentity({ repositoryId, specId: specId(), producerCommand: "to-spec", profileVersion: decisionOnly ? "v3" : "v2",
       target, baseline: baselineSha, bindings: { planningSeal: baselineSha, classification: publication.classification,
         approvedScopeIdentity, trackerIdentity: specId(), relevantFacts, ...(sealOperationId ? { sealOperationId } : {}) } });
   };
+  const envelopeFor = input => envelopes.create({ identity: input, intent: {
+    title: publication.title,
+    body: publication.body,
+    bodyDigest: approvedScopeHash,
+    contentType: "text/markdown",
+    effects: publication.preparation?.requiredActions ?? [],
+  } });
   const validateIdentity = input => {
     const expected = identity({ baseline: input?.baseline, relevantFacts: input?.bindings?.relevantFacts, sealOperationId: input?.bindings?.sealOperationId });
     if (!same(input, expected)) throw conflict("Checkpoint binding differs from the selected repository, Spec, target or publication");
@@ -232,22 +243,23 @@ export async function createGitLabProducerAdapters(options) {
     getTransaction(input);
     text(expectedVersion, "expectedVersion");
     return { key: `${input.operationId}:issue-body`, payload: { body: publication.body, title: publication.title,
-      labels: normalizeLabels([...normalizeLabels(expectedLabels), readyLabel]), expectedVersion, trackerIdentity: specId() } };
+      labels: normalizeLabels(readyLabel === null ? normalizeLabels(expectedLabels) : [...normalizeLabels(expectedLabels), readyLabel]), expectedVersion, trackerIdentity: specId() } };
   };
   const publish = async ({ identity: input, expectedVersion, expectedLabels, retryRejected = false }) => withProducerLock(connection, specId(), async () => {
     const tx = getTransaction(input);
     if (!same(tx.progress[0]?.receipt, sealRead({ identity: input }))) throw conflict("Planning Seal read-back must precede publication");
     const existing = await publicationRead(input);
     if (existing) return existing;
-    const names = (await list("/labels")).map(label => label.name);
-    if (!names.includes(readyLabel)) throw conflict("Configured ready label does not exist; producer cannot create labels");
+    const names = readyLabel === null ? [] : (await list("/labels")).map(label => label.name);
+    if (readyLabel !== null && !names.includes(readyLabel)) throw conflict("Configured ready label does not exist; producer cannot create labels");
     text(expectedVersion, "expectedVersion");
     const beforeLabels = normalizeLabels(expectedLabels);
-    const labels = normalizeLabels([...beforeLabels, readyLabel]);
+    const labels = normalizeLabels(readyLabel === null ? beforeLabels : [...beforeLabels, readyLabel]);
     const result = await mutateOnce(connection, { ...publicationMutation({ identity: input, expectedVersion, expectedLabels }), retryRejected,
       observe: async attempted => {
         const current = await snapshot();
-        if (attempted && publishedBodyMatches(current.body) && current.issue.title === publication.title && current.labels.includes(readyLabel)) {
+        if (attempted && publishedBodyMatches(current.body) && current.issue.title === publication.title
+          && (readyLabel === null || current.labels.includes(readyLabel))) {
           assertPublished(current, labels); return current;
         }
         if (current.version !== expectedVersion || current.issue.state !== "opened") throw conflict("Issue version or state changed before publication");
@@ -259,7 +271,8 @@ export async function createGitLabProducerAdapters(options) {
         validateIdentity(input);
         // GitLab REST does not provide this adapter with atomic CAS. Check again immediately before PUT.
         if ((await snapshot()).version !== expectedVersion) throw conflict("Issue version changed before PUT");
-        await api(`/issues/${iid}`, "PUT", { title: publication.title, description: publication.body, add_labels: readyLabel });
+        await api(`/issues/${iid}`, "PUT", { title: publication.title, description: publication.body,
+          ...(readyLabel === null ? {} : { add_labels: readyLabel }) });
       },
     });
     const record = { schema, kind: "spec_publication", repositoryId, operationKey: input.operationId, authority: authority(input),
@@ -269,6 +282,7 @@ export async function createGitLabProducerAdapters(options) {
     return publicationRead(input);
   });
   const handoffRead = async ({ identity: input }) => {
+    if (decisionOnly) throw conflict("Decision publication is terminal and has no Run handoff");
     const tx = getTransaction(input);
     const pub = await publicationRead(input);
     if (!pub || !same(tx.progress[1]?.receipt, pub)) throw conflict("Exact publication read-back must precede handoff");
@@ -296,7 +310,11 @@ export async function createGitLabProducerAdapters(options) {
       : stage === "publication.read_back" ? await publicationRead(input)
         : stage === "handoff.completed" ? await handoffRead({ identity: input }) : null;
     if (!observed || !same(observed, receipt)) throw conflict("Stage receipt is not the exact owner read-back");
-    return checkpoints.advanceCheckpoint({ identity: input, stage, receipt });
+    const transaction = checkpoints.advanceCheckpoint({ identity: input, stage, receipt });
+    const envelopeReceipt = { stage, owner: "to-spec", readBack: receipt };
+    if (stage === "handoff.completed" || (decisionOnly && stage === "publication.read_back")) envelopes.complete({ identity: input, receipt: envelopeReceipt });
+    else envelopes.appendReceipt({ identity: input, receipt: envelopeReceipt });
+    return transaction;
   };
   return { repositoryId, publicationMode: "READ_WRITE_READBACK", approvedScopeIdentity,
     planning: { allocateLane: request => planningWriter().allocateLane(request), readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
@@ -309,6 +327,7 @@ export async function createGitLabProducerAdapters(options) {
         if (!checkpoints.readCheckpoint(input) && (await findRecord("spec_publication", input.operationId) || await findRecord("producer_handoff", input.operationId))) {
           throw conflict("Downstream producer records exist without their transaction; preserve the evidence");
         }
+        envelopeFor(input);
         return createProducerOperationCheckpoint({ store: checkpoints, identity: input });
       }, advance },
     handoff: { read: handoffRead, append: handoffAppend } };

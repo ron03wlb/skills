@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createGitHubProducerAdapters } from "../../skills/personal/run-issue-workflow/scripts/github-producer-adapters.mjs";
+import { createOperationEnvelopeStore } from "../../skills/personal/run-issue-workflow/scripts/operation-envelope-store.mjs";
 import { configureGitHubProducer, inspectGitHubProducer, invokeGitHubProducer } from "../../skills/personal/run-issue-workflow/scripts/github-producer-entry.mjs";
 import { createGhTransport, proveGhCapability } from "../../skills/personal/run-issue-workflow/scripts/github-producer-transport.mjs";
 import { bodyDigest, readWorkflowRecords } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
@@ -94,6 +95,9 @@ async function prepared(f, overrides = {}) {
   assert.equal((await adapter.planning.readBaseline({ baseline, trackerVersion: current.version, relevantFacts, acceptedChanges: [] })).disposition, "COMPATIBLE");
   const identity = adapter.checkpoint.identity({ baseline, relevantFacts });
   await adapter.checkpoint.create(identity);
+  const envelope = createOperationEnvelopeStore({ gitCommonDir: f.git("rev-parse", "--absolute-git-dir") }).read(identity);
+  assert.equal(envelope.intent.body, (overrides.publication ?? publication).body, "checkpoint creation persists the canonical body before publication");
+  assert.equal(envelope.intent.bodyDigest, bodyDigest((overrides.publication ?? publication).body));
   await adapter.checkpoint.advance({ identity, stage: "planning_seal.read_back", receipt: adapter.planningSeal.read({ identity }) });
   return { adapter, identity, expectedVersion: current.version, expectedLabels: current.labels };
 }
@@ -268,6 +272,19 @@ test("checkpoint rejects foreign bindings and fabricated receipts", async t => {
   await assert.rejects(() => ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "publication.read_back", receipt: { publicationIdentity: "fake" } }), /read-back/u);
   await assert.rejects(() => ctx.adapter.tracker.publish({ ...ctx, identity: { ...ctx.identity, specId: "foreign" } }), /binding/u);
   assert.equal(f.writes().length, 0);
+});
+
+test("DECISION_ONLY publication terminates after tracker read-back without ready label or Run handoff", async t => {
+  const f = fixture(t);
+  const decision = { ...publication, classification: "DECISION_ONLY" };
+  const ctx = await prepared(f, { publication: decision });
+  const receipt = await ctx.adapter.tracker.publish(ctx);
+  const transaction = await ctx.adapter.checkpoint.advance({ identity: ctx.identity, stage: "publication.read_back", receipt });
+  assert.equal(ctx.identity.profileVersion, "v3");
+  assert.equal(transaction.state, "COMPLETED");
+  assert.deepEqual(f.issues.get(169).labels.map(({ name }) => name), ["existing-label"]);
+  assert.equal(f.comments.get(169).length, 1);
+  await assert.rejects(() => ctx.adapter.handoff.append({ identity: ctx.identity }), /terminal/u);
 });
 
 test("one module isolates operations across Specs and repositories", async t => {

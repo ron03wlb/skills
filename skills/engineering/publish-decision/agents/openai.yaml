@@ -1,0 +1,5 @@
+interface:
+  display_name: "Publish Decision"
+  short_description: "Publish a documentation-only decision without starting a Run"
+policy:
+  allow_implicit_invocation: false
