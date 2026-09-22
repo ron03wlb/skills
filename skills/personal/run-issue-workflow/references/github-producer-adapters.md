@@ -40,6 +40,7 @@ The same API is available as `createGitHubProducerAdapters({repository, configur
 | --- | --- | --- |
 | `reserve` | `tracker.reserve` | Primary: `{mode:"primary", proposedSpecIdentity}` with no `specId`; returns the reserved Issue node identity and version. Revision: select the existing `specId` and use `{mode:"revision"}`. |
 | `read` | `tracker.read` | Returns native Issue node ID, body, labels, comments and opaque `version`. |
+| `lane-allocate` | `planning.allocateLane` | `{proposedSpecIdentity, baseline, relevantFacts}`. Allocates/reuses the opaque task identity and worktree without reserving or publishing a Spec; compatible ancestor baselines rebind to current target. |
 | `baseline` | `planning.readBaseline` | `{baseline, trackerVersion, relevantFacts, acceptedChanges:[]}`. Facts map relevant normalized repository file paths to `git-blob:<object-id>` from the settled baseline. Returns the existing planning entry's `COMPATIBLE` or `DRIFTED` result. |
 | `identity` | `checkpoint.identity` | `{baseline, relevantFacts, sealOperationId?}` using the revalidated baseline or written seal SHA and returned facts. Preserve the exact returned current `to-spec@v2` identity for all retries. |
 | `checkpoint-read` | `checkpoint.read` | The exact identity object; returns zero or one matching transaction. |
@@ -67,7 +68,8 @@ Only the explicit `to-spec` owner may register its accepted handoff, and only th
 
 | CLI action | Request and result |
 | --- | --- |
-| `lane-register` | `{taskId, worktree, baseline, authority:{path,contentIdentity}, acceptedChanges:[{path,contentIdentity}]}`. SHA-256 identities cover exact file bytes. Independently checks the common Git directory, native worktree registration, isolated lane HEAD, handoff and files; freezes baseline blobs and modes. Returns `{registrationId,taskId,worktree}`. Exact registration retry reuses the immutable record. |
+| `lane-allocate` | `{proposedSpecIdentity, baseline, relevantFacts}`. Atomically creates or reuses one adapter-issued UUID task identity and native isolated worktree; an ancestor baseline rebinds only when every fact matches current target bytes. Returns `{allocationId,taskId,worktree,baseline}`. |
+| `lane-register` | `{allocationId, baseline, authority:{path,contentIdentity}, acceptedChanges:[{path,contentIdentity}]}`. No caller task ID or worktree is accepted. SHA-256 identities cover exact file bytes. Independently checks the allocation, common Git directory, native worktree registration, isolated lane HEAD, handoff and files; freezes baseline blobs and modes. Returns `{registrationId,allocationId,taskId,worktree}`. Exact registration retry reuses the immutable record. |
 | `lane-read` | The returned lane object. Rechecks its exact registration and content and supplies the generic planning entry's lane evidence. |
 | `lane-dispose` | The same lane object. Re-proves that exact registered lane and requires it to hold nothing beyond its accepted documents, removes only that planning worktree and deletes no branch, then reads back registration and directory absence. A repeat after a lost response returns the satisfied action; a registration/directory disagreement, unaccepted lane content or an unconfirmed removal stops and preserves what remains. |
 | `baseline` | With documents, include `lane` and the same nonempty `acceptedChanges`; keep the lane's original `baseline`, and declare current relevant facts explicitly. Compatible unrelated target movement returns the latest target SHA. |

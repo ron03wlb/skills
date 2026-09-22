@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createGitLabProducerAdapters } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-adapters.mjs";
 import { configureGitLabProducer, inspectGitLabProducer, invokeGitLabProducer } from "../../skills/personal/run-issue-workflow/scripts/gitlab-producer-entry.mjs";
@@ -408,17 +408,18 @@ test("final LF tolerance does not accept other body or native state changes", as
 test("entry registers accepted documents, writes a seal and completes the same Spec with native read-back", async t => {
   const f = fixture(t);
   await configureGitLabProducer(f.options);
-  const worktree = `${f.repository}-planning`;
-  t.after(() => rmSync(worktree, { recursive: true, force: true }));
   const baseline = f.git("rev-parse", "HEAD");
-  f.git("worktree", "add", "-b", "planning", worktree, baseline);
+  const invoke = (action, request) => invokeGitLabProducer({ ...f.options, input: { action, request, specId: 169, target: "target", publication } });
+  const allocation = await invokeGitLabProducer({ repository: f.repository, transport: f.transport,
+    input: { action: "lane-allocate", target: "target", request: { proposedSpecIdentity: "spec-169", baseline, relevantFacts: {} } } });
+  const worktree = allocation.worktree;
+  t.after(() => rmSync(dirname(worktree), { recursive: true, force: true }));
   writeFileSync(join(worktree, "CONTEXT.md"), "Accepted glossary\n");
   const authority = { path: join(f.repository, "handoff.md"), contentIdentity: digest("Explicit accepted glossary\n") };
   writeFileSync(authority.path, "Explicit accepted glossary\n");
   const acceptedChanges = [{ path: "CONTEXT.md", contentIdentity: digest(readFileSync(join(worktree, "CONTEXT.md"))) }];
-  const invoke = (action, request) => invokeGitLabProducer({ ...f.options, input: { action, request, specId: 169, target: "target", publication } });
   const current = await invoke("read");
-  const lane = await invoke("lane-register", { taskId: "accepted-task", worktree, baseline, acceptedChanges, authority });
+  const lane = await invoke("lane-register", { allocationId: allocation.allocationId, baseline, acceptedChanges, authority });
   const request = { baseline, trackerVersion: current.version, relevantFacts: {}, acceptedChanges, lane };
   assert.equal((await invoke("baseline", request)).requiresPlanningLane, true);
   const seal = await invoke("seal-write", request);

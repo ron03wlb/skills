@@ -41,6 +41,11 @@ const saveNew = (path, value) => {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx", flush: true });
 };
+const sourcePath = path => {
+  if (typeof path !== "string" || !path || path.startsWith("/") || /[\\:\x00-\x1f]/u.test(path)
+    || path.split("/").some(part => ["", ".", "..", ".git"].includes(part))) throw conflict("Relevant planning fact must be a normalized repository-relative file path");
+  return path;
+};
 // Owner-local registration and seal records are durable Git-common-dir state. Unreadable or malformed
 // content is a conflict the caller must report, never an untyped parse failure.
 const readOwnerJson = (path, message) => {
@@ -57,6 +62,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
   git(repository, ["check-ref-format", `refs/heads/${target}`]);
   if (!samePath(commonDir(repository), gitCommonDir)) throw conflict("Planning repository identity differs");
   const root = join(gitCommonDir, "matt-workflow-control", "planning-seals");
+  const allocationsRoot = join(gitCommonDir, "matt-workflow-control", "planning-lanes");
   const head = () => git(repository, ["rev-parse", `refs/heads/${target}^{commit}`]);
   const ancestor = (older, newer = head()) => git(repository, ["merge-base", "--is-ancestor", older, newer]);
   const trees = new Map(); // Immutable commit objects only; current refs and lane bytes are always reread.
@@ -72,6 +78,97 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
   const registeredPath = id => {
     if (!hash(id)) throw conflict("Planning registration identity is required");
     return join(root, "lanes", `${id.slice(7)}.json`);
+  };
+  const allocationPath = id => {
+    if (!hash(id)) throw conflict("Planning allocation identity is required");
+    return join(allocationsRoot, `${id.slice(7)}.json`);
+  };
+  const allocationBinding = proposedSpecIdentity => ({ repositoryId, proposedSpecIdentity, target });
+  const factObjectsAt = (commit, facts) => Object.fromEntries(Object.entries(facts).map(([path, expected]) => {
+    sourcePath(path);
+    if (typeof expected !== "string" || !/^git-blob:[a-f0-9]{40,64}$/u.test(expected)) throw conflict(`Relevant planning fact is unreadable: ${path}`);
+    const blob = git(repository, ["rev-parse", `${commit}:${path}`]);
+    if (!sha(blob)) throw conflict(`Relevant planning fact is unreadable: ${path}`);
+    return [path, `git-blob:${blob}`];
+  }));
+  const nativeAllocation = record => {
+    const worktree = realpathSync.native(record.worktree);
+    if (samePath(worktree, repository) || !samePath(commonDir(worktree), gitCommonDir)
+      || !samePath(git(worktree, ["rev-parse", "--show-toplevel"]), worktree)
+      || git(worktree, ["rev-parse", "HEAD"]) !== record.baseline) throw conflict("Allocated planning lane differs");
+    const entries = git(repository, ["worktree", "list", "--porcelain", "-z"]).split("\0");
+    if (!entries.some(entry => entry.startsWith("worktree ") && existsSync(entry.slice(9)) && samePath(entry.slice(9), worktree))) {
+      throw conflict("Allocated planning lane is not registered");
+    }
+    return record;
+  };
+  const allocationRecord = allocationId => {
+    const record = readOwnerJson(allocationPath(allocationId), "Planning allocation is unreadable");
+    if (record.schema !== "planning-lane-allocation:v1" || record.allocationId !== allocationId
+      || !same(record.binding, allocationBinding(record.binding?.proposedSpecIdentity)) || !sha(record.baseline)
+      || typeof record.taskId !== "string" || !record.taskId || typeof record.worktree !== "string" || typeof record.branch !== "string") {
+      throw conflict("Planning allocation differs");
+    }
+    return record;
+  };
+  const readAllocation = allocationId => nativeAllocation(allocationRecord(allocationId));
+  const materializeAllocation = record => {
+    if (!existsSync(record.worktree)) {
+      const entries = git(repository, ["worktree", "list", "--porcelain", "-z"]).split("\0");
+      if (entries.some(entry => entry.startsWith("worktree ") && resolve(entry.slice(9)) === resolve(record.worktree))) {
+        throw conflict("Allocated planning lane directory is missing");
+      }
+      mkdirSync(dirname(record.worktree), { recursive: true });
+      const branchExists = git(repository, ["for-each-ref", "--format=%(refname)", `refs/heads/${record.branch}`]);
+      git(repository, branchExists ? ["worktree", "add", record.worktree, record.branch]
+        : ["worktree", "add", "-b", record.branch, record.worktree, record.baseline]);
+    }
+    return nativeAllocation(record);
+  };
+  const allocateLane = request => {
+    const proposedSpecIdentity = text(request?.proposedSpecIdentity, "proposed Spec identity");
+    if (!sha(request?.baseline)) throw conflict("Planning baseline is required");
+    if (!request.relevantFacts || typeof request.relevantFacts !== "object" || Array.isArray(request.relevantFacts)) {
+      throw conflict("Explicit relevant planning facts are required");
+    }
+    const current = head();
+    ancestor(request.baseline, current);
+    const expected = factObjectsAt(request.baseline, request.relevantFacts);
+    const observed = factObjectsAt(current, request.relevantFacts);
+    for (const path of Object.keys(expected)) {
+      if (expected[path] !== request.relevantFacts[path]) throw conflict(`Planning fact differs from its baseline: ${path}`);
+      if (observed[path] !== expected[path]) return { disposition: "DRIFTED", owningSource: path, expected: expected[path], observed: observed[path] };
+    }
+    const binding = allocationBinding(proposedSpecIdentity);
+    const allocationId = digest(JSON.stringify(binding));
+    const path = allocationPath(allocationId);
+    if (existsSync(path)) {
+      const existing = materializeAllocation(allocationRecord(allocationId));
+      if (existing.baseline !== current) {
+        ancestor(existing.baseline, current);
+        if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before rebinding its baseline");
+        git(existing.worktree, ["reset", "--hard", current]);
+        existing.baseline = current;
+        existing.relevantFacts = observed;
+        writeFileSync(path, `${JSON.stringify(existing, null, 2)}\n`, { encoding: "utf8", flush: true });
+      }
+      return { disposition: "ALLOCATED", ...nativeAllocation(existing) };
+    }
+    const taskId = randomUUID();
+    const worktree = join(dirname(repository), ".matt-planning-lanes", allocationId.slice(7));
+    const branch = `planning/${allocationId.slice(7, 19)}`;
+    const record = { schema: "planning-lane-allocation:v1", allocationId, binding, taskId, worktree, branch,
+      baseline: current, relevantFacts: observed };
+    try { saveNew(path, record); }
+    catch (error) {
+      if (error?.code === "EEXIST") return { disposition: "ALLOCATED", ...materializeAllocation(allocationRecord(allocationId)) };
+      throw error;
+    }
+    try { return { disposition: "ALLOCATED", ...materializeAllocation(record) }; }
+    catch (error) {
+      // The durable allocation is the creation intent. A retry reads or completes only this exact lane.
+      throw conflict(`Planning lane allocation is incomplete at ${worktree} (exists=${existsSync(worktree)}): ${String(error?.stderr ?? error?.message ?? "").trim()}`);
+    }
   };
   const validateLane = (record, requireHandoff = true) => {
     if (record.schema !== "git-planning-lane:v1" || !same(record.binding, bound) || !sha(record.baseline)) throw conflict("Planning lane binding differs");
@@ -94,17 +191,22 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
   const loadLane = (lane, live = true) => {
     const record = readOwnerJson(registeredPath(lane?.registrationId), "Planning registration is unreadable");
     if (digest(JSON.stringify(record)) !== lane.registrationId || record.taskId !== lane.taskId
-      || record.worktree !== lane.worktree) throw conflict("Planning registration or ownership differs");
+      || record.worktree !== lane.worktree || (record.allocationId !== undefined && record.allocationId !== lane.allocationId)) throw conflict("Planning registration or ownership differs");
     if (record.schema !== "git-planning-lane:v1" || !same(record.binding, bound) || !sha(record.baseline)
       || !record.changes?.length || record.changes.some(change => !sha(change.blob) || !hash(change.contentIdentity))) throw conflict("Planning registration content differs");
     return live ? validateLane(record) : record;
   };
   const register = request => {
-    const { taskId, baseline, authority } = request;
-    text(taskId, "planning taskId");
-    if (!sha(baseline) || !hash(authority?.contentIdentity)) throw conflict("Exact baseline and handoff identity are required");
+    const { authority } = request;
+    if (!hash(authority?.contentIdentity)) throw conflict("Exact handoff identity is required");
+    if (typeof request?.taskId === "string" || typeof request?.worktree === "string") {
+      throw conflict("Fresh planning registration requires an adapter allocation, not a taskId or worktree");
+    }
+    const allocation = readAllocation(request?.allocationId);
+    const { taskId, baseline } = allocation;
+    if (request.baseline !== undefined && request.baseline !== baseline) throw conflict("Planning registration baseline differs from its allocation");
     ancestor(baseline);
-    const worktree = realpathSync.native(request.worktree);
+    const worktree = allocation.worktree;
     if (!Array.isArray(request.acceptedChanges) || !request.acceptedChanges.length) throw conflict("Registration requires an explicit accepted delta");
     const seen = new Set();
     const changes = request.acceptedChanges.map(({ path, contentIdentity }) => {
@@ -114,6 +216,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
       return { path, contentIdentity, base: treeEntry(baseline, path) };
     });
     const record = validateLane({ schema: "git-planning-lane:v1", binding: bound, taskId, worktree, baseline,
+      allocationId: allocation.allocationId,
       authority: { path: realpathSync.native(authority.path), contentIdentity: authority.contentIdentity }, changes });
     const blobs = laneBlobs(record);
     for (const change of record.changes) change.blob = blobs.get(change.path);
@@ -123,11 +226,11 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     if (existsSync(path)) {
       if (!same(readOwnerJson(path, "Existing planning registration is unreadable"), record)) throw conflict("Existing planning registration differs");
     } else saveNew(path, record);
-    return { registrationId, taskId, worktree };
+    return { registrationId, allocationId: allocation.allocationId, taskId, worktree };
   };
   const readLane = lane => {
     const record = loadLane(lane);
-    return { ...record.binding, taskId: record.taskId, worktree: record.worktree, baseline: record.baseline,
+    return { ...record.binding, ...(record.allocationId === undefined ? {} : { allocationId: record.allocationId }), taskId: record.taskId, worktree: record.worktree, baseline: record.baseline,
       registered: true, isolated: true, acceptedChanges: record.changes.map(({ path, contentIdentity }) => ({ path, contentIdentity })) };
   };
   // The disposal half of the lane's life. Only the exact registered lane this owner registered may be
@@ -271,5 +374,5 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
       return read({ operationId });
     } finally { lease.release(); }
   };
-  return { register, readLane, dispose, write, read };
+  return { allocateLane, register, readLane, dispose, write, read };
 }

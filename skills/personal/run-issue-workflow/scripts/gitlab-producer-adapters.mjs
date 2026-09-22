@@ -299,7 +299,7 @@ export async function createGitLabProducerAdapters(options) {
     return checkpoints.advanceCheckpoint({ identity: input, stage, receipt });
   };
   return { repositoryId, publicationMode: "READ_WRITE_READBACK", approvedScopeIdentity,
-    planning: { readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
+    planning: { allocateLane: request => planningWriter().allocateLane(request), readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
     planningSeal: { read: sealRead, write: sealWrite },
     tracker: { read, reserve, publish, readPublication: publicationRead,
       readMutation: request => readMutation(connection, publicationMutation(request)) },

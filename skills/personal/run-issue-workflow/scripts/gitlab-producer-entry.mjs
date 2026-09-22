@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectGitLabProducer, configurationFromRemote, conflict, validateConfiguration } from "./gitlab-producer-transport.mjs";
 import { createGitLabProducerAdapters } from "./gitlab-producer-adapters.mjs";
+import { createGitPlanningSeal } from "./git-planning-seal.mjs";
 
 const readConfiguration = path => {
   try { return JSON.parse(readFileSync(path, "utf8")); }
@@ -39,6 +40,11 @@ export async function inspectGitLabProducer({ repository, transport }) {
 
 export async function invokeGitLabProducer({ repository, input, transport }) {
   const configuration = readConfiguration(join(repository, "docs/agents/gitlab-producer.json"));
+  if (input?.action === "lane-allocate") {
+    const connection = await connectGitLabProducer({ repository, configuration, transport });
+    return createGitPlanningSeal({ repository: connection.repository, repositoryId: connection.repositoryId,
+      specId: input.request?.proposedSpecIdentity, target: input.target, gitCommonDir: connection.gitCommonDir }).allocateLane(input.request);
+  }
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
     "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "lane-dispose": ["planning", "disposeLane"], "seal-write": ["planningSeal", "write"],

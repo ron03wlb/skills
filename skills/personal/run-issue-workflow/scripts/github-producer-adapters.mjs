@@ -297,7 +297,7 @@ export async function createGitHubProducerAdapters(options) {
   };
   if (options.specId !== undefined) { number = await locate(options.specId); await snapshot(); }
   return { repositoryId, repositoryName, publicationMode: "READ_WRITE_READBACK", approvedScopeIdentity, capability,
-    planning: { readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
+    planning: { allocateLane: request => planningWriter().allocateLane(request), readBaseline: baseline, registerLane: request => planningWriter().register(request), readLane: lane => planningWriter().readLane(lane), disposeLane: lane => planningWriter().dispose(lane) },
     planningSeal: { read: sealRead, write: sealWrite },
     tracker: { read, reserve, publish, readPublication: publicationRead,
       readMutation: request => readMutation(connection, publicationMutation(request)) },

@@ -1,6 +1,6 @@
 ## What it does
 
-`to-spec` turns settled scope, using an isolated planning lane only for accepted glossary or ADR writes, into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), then publishes one immutable downstream handoff. A document-writing lane carries a stable opaque task identity resolved from the active host, never supplied by a human or interpreted as an Issue ID.
+`to-spec` turns settled scope, using an isolated planning lane only for accepted glossary or ADR writes, into an execution-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), then publishes one immutable downstream handoff. A document-writing lane carries a stable opaque task identity and allocation issued by the planning adapter, never supplied by a human or interpreted as an Issue ID.
 
 It does not restart the interview, commit an operational plan, or create prospective contribution evidence for ordinary publication. It revalidates relevant source facts against the latest target and uses a minimal operation-scoped transaction so concurrent lanes do not share a planning checkout or block one another. Its concrete producer adapter derives the deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, and stage inputs; only `to-spec` primary mode reserves a Tracker Spec, temporarily using the proposed-Spec identity before binding the reserved tracker identity for publication. The generic checkpoint store persists opaque IDs and never interprets producer semantics.
 
@@ -13,11 +13,11 @@ Reach for it in the same task after [grill-with-docs](https://aihero.dev/skills-
 ## Prerequisites
 
 - Tracker-only publication: settled scope, source identities, the existing tracker identity/version for a revision, and an explicit empty accepted-change list; no planning worktree or lane handoff.
-- Actual glossary or ADR writes: the exact registered isolated lane, its host-resolved opaque task identity, and shared target writer, disposed by `to-spec` once the handoff reads back. If the host cannot supply that identity, `host identity unavailable` stops before publication and preserves the handoff for retry.
+- Actual glossary or ADR writes: the exact registered isolated lane, its adapter-issued opaque task identity and allocation, and shared target writer, disposed by `to-spec` once the handoff reads back. A missing or mismatched allocation stops before publication and preserves the handoff for retry.
 
 The owner-local planning adapter enforces this distinction before publication. The tracker adapter uses the verified publication mode; unsupported atomic compare-and-set is never assumed.
 
-[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) configures the tracker and triage labels, and only diagnoses the separately installed publication adapters and Workflow checkpoint store. Missing adapters require their owning package's installation or binding entry. The document-write branch additionally consumes the shared Target mutation writer and active host-resolved lane handoff.
+[setup-matt-pocock-skills](https://aihero.dev/skills-setup-matt-pocock-skills) configures the tracker and triage labels, and only diagnoses the separately installed publication adapters and Workflow checkpoint store. Missing adapters require their owning package's installation or binding entry. The document-write branch additionally consumes the shared Target mutation writer and active adapter-issued lane handoff.
 
 GitLab publication has a reusable producer binding for primary reservation and revision of an existing Spec. Its installed document writer registers the exact accepted handoff, checks original document content against the current target, and retains one candidate for interruption recovery. It shares the delivery writer lock, preserves unrelated work, and stops on overlapping edits. Tracker-only publication still creates no seal commit. Repository configuration remains separate from read-only setup diagnostics, and for a GitLab tracker the approved setup plan binds the project through its producer owner. With that binding present, the Run entry requires no separate GitLab capability: it composes the GitLab tracker sources for the configured project.
 
@@ -40,8 +40,8 @@ The Spec preserves the shared SQL decision boundary: routine reversible queries 
 
 ## It's working if
 
-- Two host-resolved task identities can plan and publish different Specs against one target without sharing a planning checkout.
-- Accepted document writes verify the same opaque host identity end to end; a human is never asked for it, and tracker reservation begins only in `to-spec`.
+- Two adapter-issued task identities can plan and publish different Specs against one target without sharing a planning checkout.
+- Accepted document writes verify the same opaque adapter allocation end to end; a human is never asked for it, and tracker reservation begins only in `to-spec`.
 - The published Planning Seal, operation-scoped transaction, tracker publication, and immutable handoff agree.
 - A Single-Issue Spec ends in `/run-issue-workflow <Spec-ID>`; a Multi-Issue parent ends in `/to-tickets <Spec-ID>`.
 - A recoverable failure names the owning source and same command to retry while any owned planning worktree remains intact.

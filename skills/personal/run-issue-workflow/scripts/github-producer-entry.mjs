@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connectGitHubProducer, configurationFromRemote, conflict, validateConfiguration } from "./github-producer-transport.mjs";
 import { createGitHubProducerAdapters } from "./github-producer-adapters.mjs";
+import { createGitPlanningSeal } from "./git-planning-seal.mjs";
 
 const readConfiguration = path => {
   try { return JSON.parse(readFileSync(path, "utf8")); }
@@ -36,6 +37,11 @@ export async function inspectGitHubProducer({ repository, transport }) {
 
 export async function invokeGitHubProducer({ repository, input, transport, execute, capability }) {
   const configuration = readConfiguration(join(repository, "docs/agents/github-producer.json"));
+  if (input?.action === "lane-allocate") {
+    const connection = await connectGitHubProducer({ repository, configuration, transport });
+    return createGitPlanningSeal({ repository: connection.repository, repositoryId: connection.repositoryId,
+      specId: input.request?.proposedSpecIdentity, target: input.target, gitCommonDir: connection.gitCommonDir }).allocateLane(input.request);
+  }
   const allowed = {
     read: ["tracker", "read"], reserve: ["tracker", "reserve"], baseline: ["planning", "readBaseline"], seal: ["planningSeal", "read"],
     "lane-register": ["planning", "registerLane"], "lane-read": ["planning", "readLane"], "lane-dispose": ["planning", "disposeLane"], "seal-write": ["planningSeal", "write"],

@@ -75,7 +75,7 @@ A Needs Summary creates shared understanding. Explicit authorization already giv
 For a new software project without a governing Spec, the personal `/start-project` skill gathers product, risk, architecture, and cost evidence. Its handoff depends on the available planning evidence:
 
 - An existing matching Planning handoff packet goes to [to-spec](https://aihero.dev/skills-to-spec).
-- Without that packet, [grill-with-docs](https://aihero.dev/skills-grill-with-docs) establishes the planning lane and supplies it.
+- Without that packet, [grill-with-docs](https://aihero.dev/skills-grill-with-docs) has its planning adapter allocate the lane and supplies it.
 - A published Tracker Spec keeps its recorded next command.
 
 `start-project` remains a personal skill, outside the promoted plugin.

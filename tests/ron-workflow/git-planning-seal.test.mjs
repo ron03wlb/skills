@@ -11,7 +11,7 @@ import { digest } from "../../skills/personal/run-issue-workflow/scripts/gitlab-
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "planning-seal-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const repository = join(root, "target"), worktree = join(root, "lane");
+  const repository = join(root, "target"); let worktree;
   mkdirSync(repository);
   const git = (cwd, ...args) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }).trim();
   git(repository, "init", "-b", "target");
@@ -21,20 +21,40 @@ function fixture(t) {
   writeFileSync(join(repository, "other.txt"), "Unrelated original\n");
   git(repository, "add", "."); git(repository, "commit", "-m", "baseline");
   const baseline = git(repository, "rev-parse", "HEAD");
-  git(repository, "worktree", "add", "-b", "planning", worktree, baseline);
+  const options = { repository, repositoryId: "gitlab:fixture/project", specId: "https://fixture/project/-/issues/142", target: "target", gitCommonDir: join(repository, ".git") };
+  const owner = createGitPlanningSeal(options);
+  const relevantFacts = { "CONTEXT.md": `git-blob:${git(repository, "rev-parse", "HEAD:CONTEXT.md")}` };
+  const allocation = owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline, relevantFacts });
+  worktree = allocation.worktree;
   writeFileSync(join(worktree, "CONTEXT.md"), "Accepted decision\n");
   mkdirSync(join(worktree, "docs")); writeFileSync(join(worktree, "docs/decision.md"), "Accepted detail\n");
   const authority = { path: join(root, "handoff.md"), contentIdentity: digest("Human accepted both documents\n") };
   writeFileSync(authority.path, "Human accepted both documents\n");
   const acceptedChanges = ["CONTEXT.md", "docs/decision.md"].map(path => ({ path, contentIdentity: digest(readFileSync(join(worktree, path))) }));
-  const options = { repository, repositoryId: "gitlab:fixture/project", specId: "https://fixture/project/-/issues/142", target: "target", gitCommonDir: join(repository, ".git") };
-  const owner = createGitPlanningSeal(options);
-  const registration = { taskId: "task-142", worktree, baseline, acceptedChanges, authority };
+  const registration = { allocationId: allocation.allocationId, baseline, acceptedChanges, authority };
   const lane = owner.register(registration);
   const request = { baseline, trackerVersion: "native-version", relevantFacts: {}, acceptedChanges, lane };
   const revalidate = async () => ({ disposition: "COMPATIBLE", baseline: git(repository, "rev-parse", "HEAD") });
-  return { root, repository, worktree, git, baseline, owner, options, registration, request, revalidate };
+  return { root, repository, worktree, git, baseline, owner, options, allocation, registration, request, revalidate };
 }
+
+test("adapter allocation issues one opaque task identity and rebinds only a clean compatible lane", t => {
+  const f = fixture(t);
+  assert.match(f.allocation.taskId, /^[0-9a-f-]{36}$/u);
+  assert.deepEqual(f.owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline: f.baseline,
+    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } }).allocationId, f.allocation.allocationId);
+  f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
+  writeFileSync(join(f.repository, "other.txt"), "compatible target movement\n");
+  f.git(f.repository, "add", "other.txt"); f.git(f.repository, "commit", "-m", "compatible movement");
+  const rebound = f.owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline: f.baseline,
+    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } });
+  assert.equal(rebound.baseline, f.git(f.repository, "rev-parse", "HEAD"));
+  assert.equal(f.git(f.worktree, "rev-parse", "HEAD"), rebound.baseline);
+  writeFileSync(join(f.repository, "CONTEXT.md"), "Changed fact\n");
+  f.git(f.repository, "add", "CONTEXT.md"); f.git(f.repository, "commit", "-m", "changed fact");
+  assert.deepEqual(f.owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline: f.baseline,
+    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } }).disposition, "DRIFTED");
+});
 
 test("exact accepted seal preserves unrelated target/lane dirt and retries one commit after restart", async t => {
   const f = fixture(t);
@@ -133,7 +153,7 @@ test("unsafe paths and foreign repositories cannot register and committed docume
   for (const path of ["../CONTEXT.md", "docs/../../outside.md", "src/code.java", "docs\\decision.md"]) {
     assert.throws(() => f.owner.register({ ...f.registration, acceptedChanges: [{ path, contentIdentity: digest("text") }] }), /paths/u);
   }
-  assert.throws(() => f.owner.register({ ...f.registration, worktree: f.repository }), /isolated/u);
+  assert.throws(() => f.owner.register({ ...f.registration, worktree: f.repository }), /adapter allocation/u);
   const receipt = await f.owner.write(f);
   writeFileSync(join(f.repository, "CONTEXT.md"), "Later changed contract\n");
   f.git(f.repository, "add", "CONTEXT.md"); f.git(f.repository, "commit", "-m", "changed");
@@ -184,7 +204,7 @@ test("only the exact registered lane, holding nothing beyond its accepted docume
   assert.equal(existsSync(lane.worktree), false);
   assert.equal(registered(), false);
   // The lane's branch survives: disposal removes a worktree, never a ref.
-  assert.equal(f.git(f.repository, "rev-parse", "refs/heads/planning"), f.baseline);
+  assert.equal(f.git(f.repository, "rev-parse", `refs/heads/${f.allocation.branch}`), f.baseline);
   // A repeat after a lost response is the satisfied action rather than a second removal.
   assert.equal(f.owner.dispose(lane).state, "satisfied");
   // The durable seal outlives the lane it was written from.

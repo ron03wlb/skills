@@ -478,25 +478,25 @@ test("dependency loading separates host mechanism from invocation and selected-s
   assert.match(convention, /allow_implicit_invocation: false/iu);
 });
 
-test("grill-with-docs metadata and docs preserve both planning branches and the host-resolved handoff", () => {
+test("grill-with-docs metadata and docs preserve both planning branches and the allocated handoff", () => {
   const skill = read("skills/engineering/grill-with-docs/SKILL.md");
   const metadata = read("skills/engineering/grill-with-docs/agents/openai.yaml");
   const docs = read("docs/engineering/grill-with-docs.md");
   assert.match(skill, /Read-only exploration and tracker-only settled scope need no worktree/u);
-  assert.match(skill, /Before creating a lane or accepting the first glossary or ADR write.*Spec workflow lane/isu);
+  assert.match(skill, /Before creating a lane or accepting the first glossary or ADR write.*`lane-allocate` action/isu);
   assert.match(skill, /selected source and invocation restrictions.*same settled scope.*same lane identity/isu);
-  assert.match(skill, /handoff packet containing the host-resolved opaque `taskId` for a document-writing lane, the proposed Spec, target, current baseline.*empty change list.*owned worktree.*every accepted glossary or ADR path or hunk.*content identity/isu);
+  assert.match(skill, /handoff packet containing the adapter-issued opaque `taskId` and allocation ID for a document-writing lane, the proposed Spec, target, current baseline.*empty change list.*owned worktree.*every accepted glossary or ADR path or hunk.*content identity/isu);
   assert.match(skill, /partial publication, uncommitted accepted decision, identity mismatch, or failed read-back preserves it/u);
   assert.match(metadata, /allow_implicit_invocation: false/u);
   assert.match(docs, /Read-only design and tracker-only scope.*no worktree/isu);
   assert.match(docs, /Accepted document writes.*exact registered worktree.*successful `to-spec` handoff read-back/isu);
   assert.match(docs, /generic Skill tool.*host-supported named-skill loading/isu);
-  assert.match(docs, /task identity, proposed Spec, target,.*baseline.*accepted.*path or hunk.*content identity/isu);
+  assert.match(docs, /task identity, allocation ID, proposed Spec, target,.*baseline.*accepted.*path or hunk.*content identity/isu);
   assert.match(docs, /explicitly run `\/to-spec` with that packet/iu);
   assert.doesNotMatch(docs, /closing message tends to be open-ended/u);
 });
 
-test("planning lanes use host-resolved opaque task identity and leave Tracker publication to to-spec", () => {
+test("planning lanes use adapter-issued opaque task identity and leave Tracker publication to to-spec", () => {
   const grill = read("skills/engineering/grill-with-docs/SKILL.md");
   const domain = read("skills/engineering/domain-modeling/SKILL.md");
   const spec = read("skills/engineering/to-spec/SKILL.md");
@@ -505,20 +505,18 @@ test("planning lanes use host-resolved opaque task identity and leave Tracker pu
   const domainDocs = read("docs/engineering/domain-modeling.md");
   const specDocs = read("docs/engineering/to-spec.md");
 
-  assert.match(grill, /stable opaque `taskId`.*active host context.*never ask a human/isu);
-  assert.match(grill, /stop before the lane or write with `host identity unavailable`, preserving the settled design/isu);
+  assert.match(grill, /planning adapter's `lane-allocate` action.*stable opaque `taskId`.*never ask a human/isu);
+  assert.match(grill, /ancestor baseline automatically rebinds.*every cited fact still matches/isu);
   assert.match(grill, /never reserves or publishes a Tracker Spec or Issue.*`\/to-spec` alone owns Tracker reservation and publication/isu);
-  assert.match(domain, /host-resolved opaque `taskId`.*Never accept.*human.*Tracker ID/isu);
-  assert.match(domain, /stop before the write with `host identity unavailable` and preserve the settled design/isu);
-  assert.match(spec, /host-resolved opaque `taskId`.*never human input.*not a Tracker ID/isu);
-  assert.match(spec, /Recoverable `host identity unavailable` blocker that stops before publication/isu);
-  assert.match(interfaces, /request\.lane\.taskId.*stable opaque identity.*active host.*never human input.*Tracker ID/isu);
-  assert.match(interfaces, /adapter\.readLane.*equality with the active host task identity/isu);
-  assert.match(interfaces, /An unavailable host identity stops before publication with the recoverable `host identity unavailable` blocker/isu);
+  assert.match(domain, /adapter-issued opaque `taskId`, allocation ID.*Never accept.*human.*Tracker ID/isu);
+  assert.match(domain, /missing or mismatched allocation stops before the write and preserves the settled design/isu);
+  assert.match(spec, /adapter-issued opaque `taskId` and allocation ID.*never human input.*not a Tracker ID/isu);
+  assert.match(interfaces, /`planning\.allocateLane`.*adapter-issued opaque `taskId`.*worktree/isu);
+  assert.match(interfaces, /adapter\.readLane.*allocation.*equality.*exact accepted content/isu);
   assert.match(spec + interfaces, /Only `to-spec`.*`tracker\.reserve`/isu);
-  assert.match(grillDocs, /host automatically supplies.*opaque task identity.*never provide or confirm.*not an Issue ID/isu);
-  assert.match(domainDocs, /opaque identity is supplied by the host.*never by you.*not a Tracker ID/isu);
-  assert.match(specDocs, /stable opaque task identity resolved from the active host.*never supplied by a human.*interpreted as an Issue ID/isu);
+  assert.match(grillDocs, /adapter automatically allocates.*opaque task identity.*never provide or confirm.*not an Issue ID/isu);
+  assert.match(domainDocs, /opaque identity and allocation are supplied by the planning adapter.*never by you.*not Tracker IDs/isu);
+  assert.match(specDocs, /opaque task identity and allocation issued by the planning adapter.*never supplied by a human.*interpreted as an Issue ID/isu);
 });
 
 test("promoted README invocation groups match each skill's invocation policy", () => {
@@ -746,11 +744,11 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   const domainDocs = read("docs/engineering/domain-modeling.md");
   const interfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
 
-  assert.match(grill, /Spec workflow lane.*one host-resolved task identity.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
+  assert.match(grill, /adapter-allocated identity.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
   assert.match(grill, /same target.*without.*shared planning checkout.*global workflow lock.*cross-lane.*mutation/isu);
   assert.match(grill, /Load "grilling" and "domain-modeling" as separate named skills.*generic Skill tool.*otherwise.*host-supported.*SKILL\.md.*same lane identity/isu);
   assert.match(grill, /handoff packet.*tell the human to run `\/to-spec`.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
-  assert.match(grill, /Recoverable blocker.*lane registry.*observed evidence.*smallest human action.*preserved stages.*same `\/grill-with-docs`/isu);
+  assert.match(grill, /Recoverable blocker.*registry.*observed evidence.*smallest human action.*preserved stages.*same `\/grill-with-docs`/isu);
   assert.match(domain, /active Spec workflow lane.*accepted.*CONTEXT\.md.*ADR.*only.*planning worktree/isu);
   assert.match(domain, /lane identity.*mismatch.*Hard gate.*stop.*target checkout.*other lane/isu);
   assert.match(grillDocs + domainDocs, /one proposed (?:Tracker )?Spec.*target.*isolated planning worktree/isu);
@@ -758,7 +756,7 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   const specSeal = spec.indexOf("Revalidate the Planning baseline and select the Planning Seal");
   const specPublish = spec.indexOf("Publish and complete the handoff", specSeal);
   assert.equal(specSeal !== -1 && specPublish > specSeal, true, "to-spec must seal planning artifacts before publish");
-  assert.match(spec, /planning lane.*host-resolved opaque `taskId`.*proposed Tracker Spec.*target.*baseline.*planning worktree.*accepted glossary.*ADR.*path or hunk.*content identity/isu);
+  assert.match(spec, /planning lane.*adapter-issued opaque `taskId` and allocation ID.*proposed Tracker Spec.*target.*baseline.*planning worktree.*accepted glossary.*ADR.*path or hunk.*content identity/isu);
   assert.match(spec, /re-read only.*relevant glossary.*ADR.*source facts.*latest target/isu);
   assert.match(spec, /compatible.*target movement.*bind.*latest baseline/isu);
   assert.match(spec, /relevant semantic drift.*Recoverable blocker.*owning source.*observed evidence.*smallest human action.*preserved stages.*same `\/to-spec` retry/isu);

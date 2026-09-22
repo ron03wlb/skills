@@ -26,6 +26,7 @@ export async function readPlanningBaseline({ request, adapter }) {
     const expectedLane = {
       repositoryId: request.repositoryId, specId: request.specId, target: request.target,
       baseline: request.baseline, taskId: request.lane.taskId, worktree: request.lane.worktree,
+      ...(request.lane.allocationId === undefined ? {} : { allocationId: request.lane.allocationId }),
     };
     for (const [field, expected] of Object.entries(expectedLane)) {
       if (typeof expected !== "string" || !expected || lane[field] !== expected) throw new Error(`Planning lane mismatch: ${field}`);
