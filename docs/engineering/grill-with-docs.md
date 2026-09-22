@@ -22,7 +22,9 @@ The wayfinder split comes down to session count: `/grill-with-docs` for single-s
 
 ## Prerequisites
 
-The skill reads a Git repository; before accepted document writes, the configured planning adapter allocates one stable opaque task identity and isolated planning worktree from the proposed Spec, target, baseline, and explicit relevant facts. It rejects user-entered IDs and resumes the same allocation on retry. An ancestor baseline rebinds to the latest target only when every cited fact still matches; fact drift or a dirty allocated lane stops safely for recovery. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's glossary if a `CONTEXT-MAP.md` exists. ADRs follow the project's location and format, falling back to `docs/adr/`. Files are created lazily; the target checkout is not the writing surface.
+The skill reads a Git repository; before accepted document writes, it first runs a planning-adapter preflight and then the configured planning adapter allocates one stable opaque task identity and isolated planning worktree from the proposed Spec, target, baseline, and explicit relevant facts. It rejects user-entered IDs and resumes the same allocation on retry. An ancestor baseline rebinds to the latest target only when every cited fact still matches; fact drift or a dirty allocated lane stops safely for recovery. Resolved terms go to a `CONTEXT.md` glossary inside that worktree, or to the relevant context's glossary if a `CONTEXT-MAP.md` exists. ADRs follow the project's location and format, falling back to `docs/adr/`. Files are created lazily; the target checkout is not the writing surface.
+
+The preflight keeps three resources separate: the GitLab Issue URL is Tracker metadata, the planning-adapter endpoint is an owner-supplied MCP server URL, and `lane-allocate` is the required adapter capability. A Tracker or web URL is rejected as an adapter endpoint. Before allocation, the host checks the MCP registry, adapter connection, exposed tools, target branch, and baseline. An unavailable adapter preserves a user-visible checkpoint with the proposed Issue, branch, baseline, and accepted decisions; it reports `registry_empty`, `adapter_missing`, `adapter_disconnected`, or `capability_missing` with registry counts and the registration remedy. It never installs the Issue URL, guesses an endpoint, or creates an unbound manual lane. Once the owner registers and connects the explicit endpoint with `lane-allocate`, the session resumes directly at allocation rather than re-running settled decisions.
 
 It also needs two other skills present: [grilling](https://aihero.dev/skills-grilling) supplies the interview, and [domain-modeling](https://aihero.dev/skills-domain-modeling) supplies the writing discipline. Both receive the same settled scope and, for accepted document writes, the same adapter-issued task identity, allocation ID, proposed Spec, target, baseline, and worktree identity.
 
@@ -39,6 +41,7 @@ One lane belongs to one adapter-issued opaque task identity, one proposed Spec, 
 - Accepted document writes stay in the exact registered worktree. Preserve it through partial publication; after the successful `to-spec` handoff read-back, that skill disposes of only this exact clean worktree, so a successful run leaves nothing registered.
 - Read-only design and tracker-only scope use an explicit empty accepted-change list; no worktree, lane, or task identity is created or required.
 - The grill creates only the local proposed-Spec/lane identity. It does not reserve or publish any Tracker object; `to-spec` exclusively owns those actions.
+- Its preflight audit records only a redacted endpoint source, adapter name/version, exposed capabilities, outcome, and checkpoint/resume ID. The checkpoint retains decisions independently of MCP availability; no credential or Tracker URL becomes adapter configuration.
 
 ## The boundary-first interview
 
@@ -92,6 +95,9 @@ Scope decides it. Use this for anything you can settle in one session; use [wayf
 
 **It ran, but no `CONTEXT.md` and no ADRs appeared.**
 Read-only or tracker-only planning can finish with an explicit empty accepted-change list. A session that only reuses existing conventions may need no new documents. A qualifying decision within the delegated writing scope is recorded directly, and the handoff identifies its path or hunk and content identity in the registered isolated worktree.
+
+**Why did lane allocation stop before it called the adapter?**
+The planning-adapter preflight found an empty registry, a missing or disconnected adapter, or an adapter without `lane-allocate`. Keep the returned checkpoint and ask the adapter owner or Pi host to register and connect the explicit MCP endpoint. The GitLab Issue URL identifies the work; it is not an endpoint to install. After the capability is available, retry `/grill-with-docs` with the checkpoint to continue at allocation without re-answering accepted decisions.
 
 **It asked everything at once, with no recommendations, and never mentioned `CONTEXT.md`.**
 That is the skill failing to load one of its two dependencies. Without [grilling](https://aihero.dev/skills-grilling), you get an undifferentiated question dump; without [domain-modeling](https://aihero.dev/skills-domain-modeling), you get a good interview with no paper trail. Partial loading correlates with model and [effort](https://www.aihero.dev/ai-coding-dictionary/effort) level, and it is the most reported problem with this skill. If you suspect it, ask the agent which skills and lane identity it loaded.
