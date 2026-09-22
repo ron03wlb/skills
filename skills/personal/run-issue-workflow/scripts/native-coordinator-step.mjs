@@ -7,6 +7,7 @@ import { readLanePointer, publishLanePointer } from "./native-lane-launch.mjs";
 import { startRun } from "./run-entry.mjs";
 
 export const NATIVE_COORDINATOR_STEP_SCHEMA = "native-coordinator-step:v1";
+const PROMPT_BYTE_LIMIT = 4096;
 const sha256 = (value) => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const isText = (value) => typeof value === "string" && value.length > 0;
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -20,11 +21,9 @@ const planArray = (plan, name) => {
   if (!Array.isArray(value)) throw new TypeError(`Native coordinator plan ${name} must be an array`);
   return value;
 };
-const promptFor = (launch) => {
-  const prompt = String(launch?.prompt ?? "");
-  if (Buffer.byteLength(prompt) <= 4096) return prompt;
-  return `${prompt.slice(0, 4000)}\n[bounded by native coordinator]`;
-};
+// Prompts are a coordinator capability boundary: oversize input is rejected before the journal is touched,
+// rather than truncated into a different launch request.
+const promptFor = (launch) => launch.prompt;
 const actionIdentity = (runId, type, item) => sha256(JSON.stringify({
   runId,
   type,
@@ -48,6 +47,17 @@ const generationFor = ({ laneRef, type, runsRoot, readPointer }) => {
   };
 };
 
+const startRunIdentity = (started) => {
+  const startRunId = started?.runId;
+  const planRunId = started?.plan?.runId;
+  const hasStartRunId = startRunId !== undefined && startRunId !== null;
+  const hasPlanRunId = planRunId !== undefined && planRunId !== null;
+  if ((hasStartRunId && !isText(startRunId)) || (hasPlanRunId && !isText(planRunId))) return null;
+  if (isText(startRunId) && isText(planRunId) && startRunId !== planRunId) return null;
+  if (isText(startRunId)) return startRunId;
+  return isText(planRunId) ? planRunId : null;
+};
+
 export function planNativeCoordinatorStep({
   started,
   runsRoot = null,
@@ -57,21 +67,49 @@ export function planNativeCoordinatorStep({
   artifactRefs = {},
 } = {}) {
   const plan = started?.plan;
-  if (!plan || !isText(plan.runId)) {
+  const runId = startRunIdentity(started);
+  if (!plan || runId === null) {
     return Object.freeze({
       schema: NATIVE_COORDINATOR_STEP_SCHEMA,
       runId: null,
       outcome: "BLOCKED",
       actions: Object.freeze([]),
       artifactRefs: Object.freeze({ ...artifactRefs }),
-      stop: started?.diagnosis ?? { code: "native_step_input_unavailable", evidence: ["Start returned no native round plan."] },
+      stop: started?.diagnosis ?? { code: "native_step_input_unavailable", evidence: ["Start returned no native round plan or one conflicting Run identity."] },
     });
   }
-
+  const invalidPrompt = (plan.lanes ?? []).find((lane) => !isText(lane.launch?.prompt));
+  if (invalidPrompt !== undefined) {
+    return Object.freeze({
+      schema: NATIVE_COORDINATOR_STEP_SCHEMA,
+      runId,
+      outcome: "BLOCKED",
+      actions: Object.freeze([]),
+      artifactRefs: Object.freeze({ ...artifactRefs }),
+      stop: {
+        code: "native_action_prompt_invalid",
+        evidence: [`Lane ${invalidPrompt.laneRef ?? invalidPrompt.id ?? "unknown"} has no non-empty string prompt.`],
+      },
+    });
+  }
+  const oversizedPrompt = (plan.lanes ?? []).find((lane) => Buffer.byteLength(promptFor(lane.launch)) > PROMPT_BYTE_LIMIT);
+  if (oversizedPrompt !== undefined) {
+    return Object.freeze({
+      schema: NATIVE_COORDINATOR_STEP_SCHEMA,
+      runId,
+      outcome: "BLOCKED",
+      actions: Object.freeze([]),
+      artifactRefs: Object.freeze({ ...artifactRefs }),
+      stop: {
+        code: "native_action_prompt_too_large",
+        evidence: [`Lane ${oversizedPrompt.laneRef ?? oversizedPrompt.id ?? "unknown"} has a prompt larger than ${PROMPT_BYTE_LIMIT} bytes.`],
+      },
+    });
+  }
   // Preflight is deliberately complete before the journal writer is touched. Pointer generation,
   // prompts, tools, identities and the compact output are therefore either all valid or append count is
-  // zero for the round.
-  const runId = requireText(plan.runId, "Native coordinator Run id");
+  // zero for the round. The Start-level Run identity above may be the canonical top-level value or the
+  // legacy plan value, but when both exist it has already been proven identical.
   const lanes = planArray(plan, "lanes");
   const readBacks = planArray(plan, "readBacks");
   const waits = planArray(plan, "waits");
@@ -225,7 +263,7 @@ const flags = (argv) => {
   return { values, positional };
 };
 
-export async function runNativeCoordinatorCli(argv = process.argv.slice(2)) {
+export async function runNativeCoordinatorCli(argv = process.argv.slice(2), { start = startRun } = {}) {
   const [command = "step", ...rest] = argv;
   const { values, positional } = flags(rest);
   if (command === "bind") {
@@ -245,9 +283,11 @@ export async function runNativeCoordinatorCli(argv = process.argv.slice(2)) {
   }
   if (command !== "step") throw new Error(`Unknown native coordinator command: ${command}`);
   const specId = positional[0] ?? values.spec;
-  const started = await startRun({ cwd: values.cwd ?? process.cwd(), specId, approval: values.approve ?? null });
+  const started = await start({ cwd: values.cwd ?? process.cwd(), specId, approval: values.approve ?? null });
   const startedRecord = /** @type {Record<string, any>} */ (started);
-  const artifactPath = resolve(values.artifact ?? joinArtifact(values.cwd ?? process.cwd(), startedRecord.plan?.runId ?? "unbound"));
+  const runId = startRunIdentity(started);
+  if (runId === null) throw new Error("Start returned no validated Run identity; no coordinator artifact was written");
+  const artifactPath = resolve(values.artifact ?? joinArtifact(values.cwd ?? process.cwd(), runId));
   mkdirSync(dirname(artifactPath), { recursive: true });
   const artifact = {
     schema: "native-coordinator-round-artifact:v1",

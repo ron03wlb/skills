@@ -1,0 +1,13 @@
+---
+status: accepted
+---
+
+# Complete explicit tracker-only Issues with one prose-bound note
+
+A published Single-Issue Spec may use a narrow `tracker_only:v1` completion mode only when it explicitly requires exactly one final tracker evidence note, declares that no repository candidate exists, and marks the documentation-only Planning Seal candidate as not applicable. Direct human `/execute-issue <Issue-ID>` writes the complete human-readable outcome and exactly one `implementation_complete` workflow record in that same note. The record carries the normal deterministic execution operation identity, binds the trimmed prose by SHA-256, and makes every repository field explicitly null or not applicable. It creates no branch, worktree, commit, candidate, compatibility-adoption note, Manual prerequisite, workflow artifact, or repository Standards-review claim. This is human-confirmed by the request to repair the completion contract for `spay/spay2#186` and then use only the manual leaf skills.
+
+Direct human `/close-issue <Issue-ID>` accepts the mode only after re-reading the exact published declaration and validating the note identity, body digest, prose digest, operation identity, Planning Seal, target, clean Spec result, and passing read-only evidence checks. Closeout holds the repository close lease but not the target mutation writer, closes the Issue, reads it back, and writes no second note. Missing or ambiguous declarations, any repository contribution, a digest mismatch, non-clean review or verification, or uncertain mutation outcome stops without mutation. This branch does not change the default `to-spec` handoff to `/run-issue-workflow`, does not teach the current coordinator to infer tracker-only work, and does not turn an ordinary implementation Issue into a no-candidate completion.
+
+This narrows the repository-backed assumptions in [ADR-0022](0022-use-issue-native-execution-and-closeout.md) and complements [ADR-0074](0074-review-documentation-only-planning-seals-as-execution-candidates.md): ADR-0074 still governs a real non-empty documentation commit used as both Seal and candidate, while this decision governs an outcome that exists only in tracker evidence and therefore has no repository candidate at all.
+
+Reversal or validation: reject the mode unless all published trigger conditions are exact; verify that the one note round-trips with matching prose and body digests and explicit null repository fields; verify that tracker-only closeout never calls the target-writer acquisition path; and confirm that ordinary executable Issues still require their reviewed repository candidate, worktree lifecycle, compatibility rules, and three-action closeout.

@@ -1,10 +1,10 @@
 ## What it does
 
-`close-issue` closes one Issue against the local target branch recorded when its Issue worktree was created. A direct human request or one valid read-back DAG Run Grant may authorize entry without separate per-Issue approval; the skill never creates the Grant or widens what closeout may do.
+`close-issue` closes one completed Issue against its published close authority. Repository-backed closeout uses the local target branch recorded when its Issue worktree was created; tracker-only closeout has no worktree or repository candidate. A direct human request or one valid read-back DAG Run Grant may authorize entry without separate per-Issue approval; the skill never creates the Grant or widens what closeout may do.
 
-Close progress is idempotent. An Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. Coordinator membership is exact: a Single-Issue target is the bound [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), a Multi-Issue child is an exact mapping member, and a parent-only target is the bound Spec itself. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
+Close progress is idempotent. A repository-backed Executable Issue has exactly three ordered actions: merge its unchanged completed candidate, remove its exact clean worktree, and close the Issue. A published `tracker_only:v1` completion has one action: validate the same exact final evidence note, close the Issue, and read it back without repository mutation. Coordinator membership is exact: a Single-Issue target is the bound [Spec](https://www.aihero.dev/ai-coding-dictionary/spec), a Multi-Issue child is an exact mapping member, and a parent-only target is the bound Spec itself. Git ancestry, worktree registration, and tracker state say which action comes next, so retries need no custom progress record and target movement never sends a valid candidate back to execution.
 
-Closeout has two nested leases. One repository close lease covers the same Git common dir and serializes closeout across targets. The leaf acquires the repository lease and target mutation writer in that order, then releases them in reverse after required read-back. Different repositories remain concurrent, while planning uses only its exact target writer. The lease boundary derives a deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, stage, and Issue inputs, then validates the exact `implementation_complete` operation receipt without repeating execution semantics.
+Repository-backed closeout has two nested leases. One repository close lease covers the same Git common dir and serializes closeout across targets; the leaf acquires repository then target in that order and releases them in reverse after required read-back. Tracker-only closeout keeps only the repository close lease because it never mutates the target. Different repositories remain concurrent, while planning uses only its exact target writer. The lease boundary derives a deterministic versioned operation identity from immutable repository, Spec, approved-publication, producer, stage, and Issue inputs, then validates the exact `implementation_complete` operation receipt without repeating execution semantics.
 
 ## When to reach for it
 
@@ -18,9 +18,14 @@ Missing authority stops before mutation. A Skill-caused pause identifies its exa
 
 Any number of Issue worktrees may execute concurrently. Reach for this once per completed Issue; repository serialization affects closeout only, while Issue execution and unrelated planning remain concurrent. Healthy contention continues through bounded observations without a fixed timeout that asks you to restart. Unknown ownership or proof mismatch preserves the affected closeout; healthy acquisition races return to observation. Use the same command for a completed Multi-Issue parent after all of its exact children are closed.
 
-## Three observable actions
+## Observable actions
 
-On WSL, closeout retries ordinary nonrecursive removal of an empty residual worktree. The original completion remains valid and the Issue stays open until the directory is removed. A failed removal retains a concrete blocker with its observed error. It never uses PowerShell, translates Windows paths, infers process ownership from a PID, or terminates a process as cleanup. Native desktop release remains unavailable. Tool policy rejection must be resolved at that boundary.
+| Completion mode | Close actions |
+| --- | --- |
+| Repository-backed | Merge the exact candidate, remove the exact clean worktree, then close and read back the Issue. |
+| `tracker_only:v1` | Revalidate the prose-bound single completion note, then close and read back the Issue. No merge, target writer, integration check, worktree removal, or second note. |
+
+On WSL, repository-backed closeout retries ordinary nonrecursive removal of an empty residual worktree. The original completion remains valid and the Issue stays open until the directory is removed. A failed removal retains a concrete blocker with its observed error. It never uses PowerShell, translates Windows paths, infers process ownership from a PID, or terminates a process as cleanup. Native desktop release remains unavailable. Tool policy rejection must be resolved at that boundary.
 
 An unloaded native task is settled only when its latest turn is completed and its exact task, host and directory still match. Cleanup does not need to wake it, and unfinished or unknown task state still blocks recovery.
 
@@ -49,9 +54,10 @@ A Multi-Issue Spec has no candidate to merge. Its parent-only path reads the Dec
 
 ## It's working if
 
-- The reviewed candidate reaches the recorded target before the Issue is closed.
+- A repository-backed reviewed candidate reaches the recorded target before the Issue is closed.
 - Only the registered clean Issue worktree is removed, and tracker closure is read back last.
-- A dirty target, merge conflict, or incomplete child set stops with the remaining action stated and no product-code repair.
+- A tracker-only close leaves the target, branch set, and worktrees unchanged and adds no note.
+- A dirty target, merge conflict, invalid tracker-only receipt, or incomplete child set stops with the remaining action stated and no product-code repair.
 
 ## Where it fits
 

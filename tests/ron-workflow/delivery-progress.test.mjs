@@ -7,7 +7,10 @@ import {
   summarizeDeliveryProgress,
   validateDeliveryProgress,
 } from "../../skills/personal/run-issue-workflow/scripts/delivery-progress.mjs";
-import { acquireCloseIssueLeases } from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
+import {
+  acquireCloseIssueLeases,
+  acquireTrackerOnlyCloseLease,
+} from "../../skills/engineering/close-issue/scripts/close-lease.mjs";
 
 const issueId = "I_issue";
 const operationId = `workflow-op-v1-${"a".repeat(64)}`;
@@ -171,6 +174,33 @@ test("a later completion flow does not reuse an older native settlement or close
   const summary = summarizeDeliveryProgress(events, issueId, operationId);
   assert.equal(summary.publicationToTerminalRecognitionMs, 5_000);
   assert.equal(summary.continuouslyEligibleToNativeCloseAcceptanceMs, 15_000);
+});
+
+test("tracker-only closeout acquires no target mutation writer", () => {
+  const calls = [];
+  const store = {
+    gitCommonDir: "C:/repo/.git",
+    acquireRepositoryCloseLease() {
+      calls.push("acquire:repository");
+      return {
+        assertCurrent() { calls.push("assert:repository"); },
+        release() { calls.push("release:repository"); },
+      };
+    },
+    acquireTargetMutationWriter() { throw new Error("tracker-only closeout must not acquire a target writer"); },
+  };
+  const lease = acquireTrackerOnlyCloseLease({
+    store,
+    repositoryId: "github:example/repo",
+    specId: "I_spec",
+    approvedPublicationIdentity: `sha256:${"c".repeat(64)}`,
+    issueId,
+  });
+  assert.equal(lease.deliveryProgress().targetWriterAcquiredAt, null);
+  lease.assertCurrent();
+  assert.match(lease.markCompleted().closeCompletedAt, /Z$/u);
+  lease.release();
+  assert.deepEqual(calls, ["acquire:repository", "assert:repository", "assert:repository", "release:repository"]);
 });
 
 test("the close owner exposes lease acquisition and completion timestamps while both leases remain current", () => {

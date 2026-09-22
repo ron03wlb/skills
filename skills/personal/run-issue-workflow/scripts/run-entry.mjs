@@ -399,6 +399,11 @@ export function createNativeRunComposition({
   });
 }
 
+const authorizedActionsFor = (plan) => Object.freeze([...new Set([
+  ...plan.lanes.map((lane) => lane.id),
+  ...plan.readBacks.map((item) => item.id),
+])]);
+
 // The plan the coordinator materializes: the native round plan's disposition, its legal action set, the
 // lanes and read-backs this round owns, and any fail-closed stop.
 const planSummary = (plan) => Object.freeze({
@@ -419,7 +424,7 @@ const planSummary = (plan) => Object.freeze({
     consulted: plan.readyState.consulted,
     projection: plan.readyState.projection,
   }),
-  authorizedActions: [...new Set([...plan.lanes.map((lane) => lane.id), ...plan.readBacks.map((item) => item.id)])],
+  authorizedActions: authorizedActionsFor(plan),
   lanes: plan.lanes.map((lane) => Object.freeze({
     id: lane.id,
     actionType: lane.actionType,
@@ -615,10 +620,14 @@ export async function startRun({
     repositoryId: composition.repositoryId,
     approvedPublicationIdentity: tracker.authority.approvedScopeHash,
   });
+  const coordinatorPlan = Object.freeze({
+    ...plan,
+    authorizedActions: authorizedActionsFor(plan),
+  });
   return {
     ...result,
     outcome: "READY",
-    plan: planSummary(plan),
+    plan: coordinatorPlan,
     observedLanes: round.laneEvidence.lanes.length,
     round,
     nativeLoop: {
@@ -653,7 +662,7 @@ const runCli = async (argv) => {
   }
   const result = await startRun({ specId, approval, cwd });
   const resultRecord = /** @type {Record<string, any>} */ (result);
-  const safeRunId = String(resultRecord.plan?.runId ?? resultRecord.operationId ?? specId ?? "unbound").replaceAll(/[^a-zA-Z0-9._-]/gu, "_");
+  const safeRunId = String(resultRecord.runId ?? resultRecord.plan?.runId ?? resultRecord.operationId ?? specId ?? "unbound").replaceAll(/[^a-zA-Z0-9._-]/gu, "_");
   artifactPath ??= resolve(cwd, ".git", "run-issue-workflow", "artifacts", `${safeRunId}.json`);
   const artifact = {
     schema: "run-issue-workflow-round-artifact:v1",

@@ -26,8 +26,8 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 
 - **[pre-execute-issue](./pre-execute-issue/SKILL.md)** — Prepare and attest one exact declared Issue prerequisite through content-bound Operator SQL outcomes.
 - **[prepare-prerequisite-artifact](./prepare-prerequisite-artifact/SKILL.md)** — Build one adapter-bound, fail-closed Operator SQL prerequisite candidate without touching an external environment.
-- **[execute-issue](./execute-issue/SKILL.md)** — Bind a deterministic Issue operation, implement and fully verify one human- or DAG-authorized Issue, and declare exact `workflowArtifacts` while preserving completion across recorded-target movement.
-- **[close-issue](./close-issue/SKILL.md)** — Bind a deterministic closeout operation, validate any `workflowArtifacts`, then resume three idempotent actions against one human- or DAG-authorized recorded target or close a verified Multi-Issue parent.
+- **[execute-issue](./execute-issue/SKILL.md)** — Bind a deterministic Issue operation and record one verified repository-backed or explicit tracker-only completion with exact `workflowArtifacts`.
+- **[close-issue](./close-issue/SKILL.md)** — Bind a deterministic closeout operation, validate completion and `workflowArtifacts`, then resume repository-backed actions, perform a tracker-only close, or close a verified Multi-Issue parent.
 - **[attest-target-contribution](./attest-target-contribution/SKILL.md)** — Append or reuse exact authority evidence for eligible direct target contribution recovery or a frozen producer-owned prospective Workflow plan checkpoint.
 - **[record-closed-issue-reconciliation](./record-closed-issue-reconciliation/SKILL.md)** — Append or reuse immutable closed Issue evidence for human-confirmed failed-command or command-representation reconciliation.
 - **[prototype](./prototype/SKILL.md)** — Build a throwaway prototype to answer a design question: a runnable terminal app for state/logic, or several toggleable UI variations.

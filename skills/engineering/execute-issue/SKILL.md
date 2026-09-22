@@ -1,11 +1,11 @@
 ---
 name: execute-issue
-description: Implement and verify one dependency-ready tracker Issue in its recorded-target worktree. Use when a human invokes the Issue directly or a valid DAG Run Grant authorizes its coordinator lane.
+description: Execute and verify one dependency-ready tracker Issue in its published repository-backed or tracker-only mode. Use when a human invokes the Issue directly or a valid DAG Run Grant authorizes its coordinator lane.
 ---
 
 # Execute Issue
 
-Implement exactly one dependency-ready Tracker Spec or child Issue in a dedicated Git worktree. This skill owns implementation and Matt `code-review`; it stops at verified completion and never invokes `close-issue`.
+Execute one dependency-ready Tracker Spec or child Issue in its published mode. Repository-backed work uses a dedicated Git worktree and owns implementation and Matt `code-review`; tracker-only work follows its shared contract. It stops at verified completion and never invokes `close-issue`.
 
 ## 1. Enter the exact Issue
 
@@ -15,11 +15,13 @@ Entry authority is direct human invocation or a valid DAG Run Grant. Direct huma
 
 Read [`references/operation-identity.md`](references/operation-identity.md) for every fresh or retried lane, derive the deterministic operation identity, and keep `execute-issue` as implementation receipt owner. Caller task and Run correlation never grant authority.
 
+When the published Single-Issue Spec declares tracker-only, single-note, no-candidate completion, read [tracker-only completion](../../../docs/agents/references/tracker-only-completion.md). On an exact match, follow it instead of the remaining repository-backed sections; otherwise stop.
+
 If the latest valid `implementation_complete` still binds this Issue, its current operation identity or exact frozen legacy membership, recorded worktrees and branches, baseline, and unchanged clean reviewed candidate must agree. Report it and stop. Target movement alone does not supersede `implementation_complete`. A later blocked state supersedes completion only when its evidence invalidates that candidate's implementation, Standards or Spec review, or verification.
 
 A dirty target stop or partial close is not a conflict-resolution rerun. When completion remains valid, perform only cheap read-only identity and evidence checks. Do not run baseline, focused, final, or full suite verification; do not rerun review, create a commit, or write a tracker note. Return remaining close progress to the same authorized close owner. Human-owned target dirt still needs human resolution; direct entry then retries `/close-issue <Issue-ID>`, while the authorized coordinator reconciles before continuing that owner.
 
-An explicit conflict-resolution or technical-failure recovery request from a human or evidence-bound coordinator is the completion-preserving exception. For technical failure, read [technical recovery](references/technical-recovery.md) before diagnosis, ownership transfer or source edits. A coordinator handoff consumes the same Issue operation material repair budget (maximum ten across re-entry) and preserves the original worktree and task history while transferring exclusive write ownership to the recorded isolated repair task. Conflict recovery requires safe target-abort read-back; successful integration followed by failed verification preserves that merge. After a `/close-issue` merge conflict, the human or same authorized coordinator may rerun `execute-issue` in the same topic branch and Issue worktree. Capture the latest target as the new attempt baseline and merge that exact baseline into the topic branch without rebasing or resetting; resolve only while Acceptance Criteria, target, exclusions and ownership remain unchanged. Require the new candidate to contain the new baseline. A Scope change stops for planning; a successful rerun writes a new `implementation_complete` note that becomes current.
+An explicit human or evidence-bound coordinator recovery request is the completion-preserving exception. Read [technical recovery](references/technical-recovery.md) before diagnosis, ownership transfer, conflict retry, or source edits; it owns the existing lane, budget, baseline, candidate, scope-stop, and replacement-completion rules.
 
 For a real blocked exit, append and read back one `implementation_blocked` with reason, cumulative repair-wave count, and available target, worktree, baseline, and candidate identities. Explain the gate using [workflow stop diagnosis](../../../docs/agents/references/workflow-stop-diagnosis.md). Tracker ambiguity never claims supersession or completion.
 
@@ -35,7 +37,7 @@ Matt/Ron owners, runtime, references, and `docs/` stay in the selected immutable
 
 Trace real behavior and the highest verification seam. Use TDD when a focused test captures the change. Commit coherent verified slices.
 
-Expected paths and symbols are hints. Include Necessary discovery only when source proves an existing plan step and unchanged `AC-n` require it. Record a Material plan deviation with covered `AC-n` for behavior-neutral implementation changes. Behavior, Acceptance Criteria, target, exclusion, independent outcome, or ownership changes are Scope changes and stop for planning.
+Expected paths and symbols are hints. Include Necessary discovery only when source proves an existing plan step and unchanged `AC-n` require it. Record a Material plan deviation with covered `AC-n` for behavior-neutral implementation changes. Any behavior, Acceptance Criteria, target, exclusion, independent outcome, or ownership change is a Scope change and stops for planning.
 
 Prepare prospective `workflowArtifacts` before review: use an explicit empty list or entries with one unique repository-relative `path`, truthful requirement source (`requirementSource`), and concise `purpose` for each required non-contract plan or log. For every declared path, verify its Execution baseline-to-candidate diff ownership, then pass the prospective declaration to `code-review`. Runtime, public-contract, routing, Acceptance Criteria, governance, arbitrary, ambiguous, falsely sourced, or unowned documentation stays ordinary material scope. It supplies classification only, never mapping, coverage, review, verification, or an exemption.
 
@@ -53,4 +55,4 @@ For a task created under a versioned Run model policy, read [repair progress and
 
 Freshly validate final verification inputs; reuse a passing result only through [the execution-owned verification cache](scripts/verification-cache.mjs) when exact candidate, command, relevant configuration, environment and freshly read required external inputs are unchanged. Otherwise run the required checks. Never reuse unknown external validity, a failed result or an uncommitted candidate. Require clean Standards and Spec, a clean Issue worktree at the reviewed candidate, and every consumed Manual prerequisite attestation to pass the reference's completion-time fresh read-back. Then read [implementation completion evidence](references/completion-evidence.md) only when adopting workflow-artifact compatibility or writing `implementation_complete`; it solely owns those payloads.
 
-Write and read back exactly one completion note, then stop. Execution never integrates, removes a worktree, closes the Issue, pushes, or deploys. Subsequent `close-issue` entry uses direct human authority, a valid DAG Run Grant, or the same approved maintenance handoff described in Run preparation.
+Write and read back exactly one repository-backed completion note under [implementation completion evidence](references/completion-evidence.md), then stop. Execution never integrates, removes a worktree, closes the Issue, pushes, or deploys. Subsequent `close-issue` entry uses direct human authority, a valid DAG Run Grant, or the same approved maintenance handoff described in Run preparation.

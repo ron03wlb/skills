@@ -1,4 +1,4 @@
 interface:
   display_name: "Close Issue"
   short_description: "Close one human- or DAG-authorized Issue"
-  default_prompt: "Use $close-issue to complete the recorded target integration, worktree cleanup, and tracker closure."
+  default_prompt: "Use $close-issue to validate the published completion and perform only its remaining repository-backed or tracker-only close actions."

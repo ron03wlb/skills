@@ -108,6 +108,66 @@ const inputFields = new Set([
   "approvedPublicationIdentity",
   "issueId",
 ]);
+const trackerOnlyInputFields = new Set([
+  "store",
+  "repositoryId",
+  "specId",
+  "approvedPublicationIdentity",
+  "issueId",
+]);
+
+export function acquireTrackerOnlyCloseLease(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new TypeError("Tracker-only close lease input must be an object");
+  }
+  const unknown = Object.keys(input).find((field) => !trackerOnlyInputFields.has(field));
+  const missing = [...trackerOnlyInputFields].find((field) => !Object.hasOwn(input, field));
+  if (unknown) throw new TypeError(`Tracker-only close lease input contains unknown field ${unknown}`);
+  if (missing) throw new TypeError(`Tracker-only close lease input is missing field ${missing}`);
+  const { store, repositoryId, specId, approvedPublicationIdentity, issueId } = input;
+  requireMethod(store, "acquireRepositoryCloseLease");
+  const operationIdentity = deriveCloseIssueOperationIdentity({
+    repositoryId,
+    specId,
+    approvedPublicationIdentity,
+    issueId,
+  });
+  const repositoryLease = store.acquireRepositoryCloseLease({ operationId: operationIdentity.key });
+  const repositoryCloseAcquiredAt = new Date().toISOString();
+  let repositoryReleased = false;
+  let closeCompletedAt = null;
+  const deliveryProgress = () => Object.freeze({
+    repositoryCloseAcquiredAt,
+    targetWriterAcquiredAt: null,
+    closeCompletedAt,
+  });
+  return Object.freeze({
+    operationId: operationIdentity.key,
+    operationIdentity,
+    gitCommonDir: store.gitCommonDir,
+    assertCurrent() {
+      if (repositoryReleased) throw new Error("CLOSE_ISSUE_LEASE_RELEASED");
+      repositoryLease.assertCurrent();
+      return true;
+    },
+    deliveryProgress() {
+      return deliveryProgress();
+    },
+    markCompleted() {
+      if (closeCompletedAt) return deliveryProgress();
+      if (repositoryReleased) throw new Error("CLOSE_ISSUE_LEASE_RELEASED");
+      repositoryLease.assertCurrent();
+      closeCompletedAt = new Date().toISOString();
+      return deliveryProgress();
+    },
+    release() {
+      if (!repositoryReleased) {
+        repositoryLease.release();
+        repositoryReleased = true;
+      }
+    },
+  });
+}
 
 // The close owner retains the original operation error if releasing either lease also fails.
 export async function withCloseIssueLeases(input, action) {
@@ -116,6 +176,18 @@ export async function withCloseIssueLeases(input, action) {
   try { result = await action(leases); } catch (error) { operationError = error; }
   try { leases.release(); } catch (releaseError) {
     if (operationError) throw new AggregateError([operationError, releaseError], "Close operation failed and lease release requires recovery");
+    throw releaseError;
+  }
+  if (operationError) throw operationError;
+  return result;
+}
+
+export async function withTrackerOnlyCloseLease(input, action) {
+  const lease = acquireTrackerOnlyCloseLease(input);
+  let result, operationError;
+  try { result = await action(lease); } catch (error) { operationError = error; }
+  try { lease.release(); } catch (releaseError) {
+    if (operationError) throw new AggregateError([operationError, releaseError], "Tracker-only close operation failed and lease release requires recovery");
     throw releaseError;
   }
   if (operationError) throw operationError;

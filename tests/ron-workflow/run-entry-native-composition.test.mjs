@@ -18,6 +18,7 @@ import test from "node:test";
 import { reduceRun } from "../../skills/personal/run-issue-workflow/scripts/delivery-authority.mjs";
 import { bodyDigest, renderWorkflowRecord } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { LANE_TOOL_CEILING } from "../../skills/personal/run-issue-workflow/scripts/issue-lane.mjs";
+import { planNativeCoordinatorStep } from "../../skills/personal/run-issue-workflow/scripts/native-coordinator-step.mjs";
 import { LANE_STANDING_RULES } from "../../skills/personal/run-issue-workflow/scripts/native-lane-runner.mjs";
 import { runNativeRoundLoop, CLOSE_INTENT_STAGE } from "../../skills/personal/run-issue-workflow/scripts/native-round-loop.mjs";
 import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
@@ -437,6 +438,26 @@ test("the entry emits the round the native round loop consumes and plans it thro
   assert.deepEqual(started.plan.frontier.ready, [BLOCKER_ID]);
   assert.deepEqual(started.plan.frontier.gated, [DEPENDANT_ID]);
 
+  // Start returns the full native plan rather than the lossy CLI summary. The stateless coordinator can
+  // therefore journal the reservation and materialize the exact launch envelope from this real shape.
+  assert.equal(started.plan.runId, started.runId);
+  assert.deepEqual(started.plan.reservations.map(({ type }) => type), ["dispatch.recorded"]);
+  assert.equal(started.plan.lanes[0].worktreePolicy, "on");
+  assert.deepEqual(started.plan.lanes[0].tools, AGENT_CEILING);
+  assert.match(started.plan.lanes[0].launch.prompt, /^\S*Use \$execute-issue/mu);
+  assert.equal(typeof started.plan.lanes[0].launch.requestIdentity, "string");
+  assert.deepEqual(fixture.journal().map(({ type }) => type), ["grant.recorded"], "planning a round dispatches nothing");
+  const nativeStep = planNativeCoordinatorStep({
+    started,
+    readPointer: () => null,
+    appendAll: started.nativeLoop.appendAll,
+  });
+  assert.equal(nativeStep.outcome, "ACTION_REQUIRED");
+  assert.equal(nativeStep.runId, started.runId);
+  assert.equal(nativeStep.actions[0].mode, "on");
+  assert.deepEqual(nativeStep.actions[0].tools, AGENT_CEILING);
+  assert.equal(nativeStep.actions[0].prompt, started.plan.lanes[0].launch.prompt);
+
   // The loop's ports are the entry's own composition; only the launch port belongs to the coordinator.
   assert.equal(started.nativeLoop.launchOwner, "coordinator");
   assert.equal(typeof started.nativeLoop.readRound, "function");
@@ -444,8 +465,8 @@ test("the entry emits the round the native round loop consumes and plans it thro
   assert.equal(started.nativeLoop.repositoryId, REPOSITORY_ID);
   assert.equal(started.nativeLoop.approvedPublicationIdentity, APPROVED_PUBLICATION);
   assert.deepEqual(started.nativeLoop.agentCeiling, AGENT_CEILING);
-  assert.deepEqual(fixture.journal().map(({ type }) => type), ["grant.recorded"], "planning a round dispatches nothing");
-  assert.equal(fixture.launches.length, 0, "the entry never dispatches a lane");
+  assert.deepEqual(fixture.journal().map(({ type }) => type), ["grant.recorded", "dispatch.recorded"], "the coordinator journals its reservation before returning the launch action");
+  assert.equal(fixture.launches.length, 0, "the entry and coordinator step never dispatch a lane");
 
   // The entry source proves the default path reaches no bundle helper and no pi-workflow host round. The
   // optional bundle stays in the repository; nothing here imports it.

@@ -34,6 +34,7 @@ const readJson = (path) => {
 const sharedReferences = [
   "docs/agents/run-preparation.md",
   "docs/agents/references/approved-pre-run-workflow-maintenance.md",
+  "docs/agents/references/tracker-only-completion.md",
   "docs/agents/references/workflow-stop-diagnosis.md",
 ];
 const safePath = (path) => typeof path === "string"

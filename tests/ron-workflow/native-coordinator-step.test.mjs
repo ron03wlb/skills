@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
-import { planNativeCoordinatorStep } from "../../skills/personal/run-issue-workflow/scripts/native-coordinator-step.mjs";
+import { planNativeCoordinatorStep, runNativeCoordinatorCli } from "../../skills/personal/run-issue-workflow/scripts/native-coordinator-step.mjs";
 import { publishLanePointer, readLanePointer } from "../../skills/personal/run-issue-workflow/scripts/native-lane-launch.mjs";
 
 const lane = (fields = {}) => ({
@@ -21,8 +24,7 @@ const lane = (fields = {}) => ({
   },
   ...fields,
 });
-const started = (plan) => ({ outcome: "READY", plan: {
-  runId: "workflow-op-v1:run",
+const started = (plan) => ({ outcome: "READY", runId: "workflow-op-v1:run", plan: {
   disposition: "DISPATCH",
   reservations: [{ type: "dispatch.recorded", issueId: "I_1" }],
   closeIntents: [],
@@ -90,12 +92,6 @@ test("complete preflight failures append no authority events", () => {
       pattern: /tools/u,
     },
     {
-      name: "invalid prompt",
-      plan: { lanes: [lane({ launch: { prompt: "", requestIdentity: "request-1" } })] },
-      readPointer: () => null,
-      pattern: /prompt/u,
-    },
-    {
       name: "duplicate action identity",
       plan: { lanes: [lane(), lane()] },
       readPointer: () => null,
@@ -126,6 +122,72 @@ test("complete preflight failures append no authority events", () => {
     }), item.pattern, item.name);
     assert.deepEqual(appended, [], item.name);
   }
+});
+
+test("an oversized prompt blocks before its reservation is journaled", () => {
+  const appended = [];
+  const candidate = lane();
+  const result = planNativeCoordinatorStep({
+    started: started({
+      lanes: [lane({ launch: { ...candidate.launch, prompt: "x".repeat(4097) } })],
+    }),
+    append: (event) => appended.push(event),
+    readPointer: () => null,
+  });
+  assert.equal(result.outcome, "BLOCKED");
+  assert.equal(result.stop.code, "native_action_prompt_too_large");
+  assert.deepEqual(result.actions, []);
+  assert.deepEqual(appended, []);
+});
+
+test("missing and non-string prompts block before their reservations are journaled", () => {
+  for (const prompt of [undefined, { text: "not a prompt" }]) {
+    const appended = [];
+    const candidate = lane();
+    const result = planNativeCoordinatorStep({
+      started: started({ lanes: [lane({ launch: { ...candidate.launch, prompt } })] }),
+      append: (event) => appended.push(event),
+      readPointer: () => null,
+    });
+    assert.equal(result.outcome, "BLOCKED");
+    assert.equal(result.stop.code, "native_action_prompt_invalid");
+    assert.deepEqual(result.actions, []);
+    assert.deepEqual(appended, []);
+  }
+});
+
+test("conflicting top-level and legacy plan Run identities fail closed", () => {
+  const input = started({ runId: "workflow-op-v1:other", lanes: [lane()] });
+  const result = planNativeCoordinatorStep({ started: input, readPointer: () => null });
+  assert.equal(result.outcome, "BLOCKED");
+  assert.equal(result.stop.code, "native_step_input_unavailable");
+  assert.deepEqual(result.actions, []);
+});
+
+test("present malformed Run identities fail closed", () => {
+  for (const input of [
+    { ...started({ lanes: [lane()] }), runId: 42 },
+    started({ runId: 42, lanes: [lane()] }),
+  ]) {
+    const result = planNativeCoordinatorStep({ started: input, readPointer: () => null });
+    assert.equal(result.outcome, "BLOCKED");
+    assert.equal(result.stop.code, "native_step_input_unavailable");
+    assert.deepEqual(result.actions, []);
+  }
+});
+
+test("the coordinator CLI writes no artifact for conflicting Run identities", async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "native-coordinator-conflict-")));
+  const artifact = join(root, "round.json");
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  await assert.rejects(
+    runNativeCoordinatorCli(["step", "186", "--cwd", root, "--artifact", artifact], {
+      start: async () => ({ runId: "workflow-op-v1:run", plan: { runId: "workflow-op-v1:other" } }),
+    }),
+    /no validated Run identity/u,
+  );
+  assert.equal(existsSync(artifact), false);
 });
 
 test("same-lane recovery resumes the exact latest native generation", () => {

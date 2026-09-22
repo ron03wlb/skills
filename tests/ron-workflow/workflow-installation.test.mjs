@@ -501,12 +501,18 @@ test("an installed entry update preserves a running workflow's exact executable 
   );
   const maintenanceReference =
     "docs/agents/references/approved-pre-run-workflow-maintenance.md";
+  const trackerOnlyReference =
+    "docs/agents/references/tracker-only-completion.md";
   const diagnosisReference =
     "docs/agents/references/workflow-stop-diagnosis.md";
   mkdirSync(join(sourceRepository, "docs/agents/references"));
   writeFileSync(
     join(sourceRepository, maintenanceReference),
     "Approved maintenance owner\n",
+  );
+  writeFileSync(
+    join(sourceRepository, trackerOnlyReference),
+    "Tracker-only completion owner\n",
   );
   writeFileSync(
     join(sourceRepository, diagnosisReference),
@@ -527,6 +533,7 @@ test("an installed entry update preserves a running workflow's exact executable 
       "skills",
       "docs/agents/run-preparation.md",
       maintenanceReference,
+      trackerOnlyReference,
       diagnosisReference,
     );
     git(
@@ -563,6 +570,10 @@ test("an installed entry update preserves a running workflow's exact executable 
     assert.equal(
       readFileSync(join(first.root, maintenanceReference), "utf8"),
       "Approved maintenance owner\n",
+    );
+    assert.equal(
+      readFileSync(join(first.root, trackerOnlyReference), "utf8"),
+      "Tracker-only completion owner\n",
     );
     assert.equal(
       readFileSync(join(first.root, diagnosisReference), "utf8"),

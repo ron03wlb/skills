@@ -1,6 +1,6 @@
 ## What it does
 
-`execute-issue` implements one dependency-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) or child Issue in a dedicated worktree, verifies it, and runs [code-review](https://aihero.dev/skills-code-review) independently for Standards and Spec until both are clean. A direct human request or one valid read-back DAG Run Grant may authorize entry; the skill never creates the Grant or asks an authorized coordinator for separate per-Issue approval.
+`execute-issue` executes one dependency-ready Tracker [Spec](https://www.aihero.dev/ai-coding-dictionary/spec) or child Issue and records one validated completion. Repository-backed Issues use a dedicated worktree, verification, and independent [code-review](https://aihero.dev/skills-code-review) for Standards and Spec. An explicitly published tracker-only, single-note, no-candidate Issue instead validates and publishes its complete human-readable outcome and machine receipt in that one note, without a worktree or repository candidate. A direct human request or one valid read-back DAG Run Grant may authorize entry; the skill never creates the Grant or asks an authorized coordinator for separate per-Issue approval.
 
 It trusts the published delivery classification and records the branch from which the worktree was created as the Issue's only default merge target. Coordinator entry fails closed unless the Grant binds that exact Spec, target, classification, and scope. A Single-Issue coordinator target must be the exact bound Spec; a Multi-Issue target must be an exact mapping member in the bound decomposition record and dependency-ready under its published blockers. The Planning Seal must be reachable and current, while expected paths remain discovery hints rather than an allowlist. No declared Manual prerequisite preserves ordinary execution; one exact unresolved declaration automatically enters [pre-execute-issue](https://aihero.dev/skills-pre-execute-issue) inside the same authorized lane. Each fresh lane has a deterministic versioned operation identity derived from immutable repository, Spec, approved-publication, producer, stage, and Issue inputs, and its `implementation_complete` note carries that full receipt for downstream validation.
 
@@ -17,7 +17,9 @@ Missing authority stops before worktree creation or mutation. A real Skill-cause
 - Published dependency-ready Issue: invoke this directly or through its authorized Run.
 - Approved Standalone Spec or explicit current-branch work: use [implement](https://aihero.dev/skills-implement).
 
-## Trustworthy candidate
+## Trustworthy completion
+
+The tracker-only branch is deliberately narrow. The published Single-Issue Spec must require exactly one final evidence note, no repository candidate, and no documentation-only Seal candidate. The note binds its prose to one `tracker_only:v1` `implementation_complete` record by digest, carries the normal operation identity, and explicitly marks repository fields as not applicable. It writes no compatibility-adoption notes, creates no repository state, and returns to planning if any trigger is missing or ambiguous.
 
 Necessary source-grounded dependencies continue automatically while Acceptance Criteria stay unchanged; behavior, target, exclusion, schema outcome, or ownership changes return to planning. Late prerequisite discovery preserves coherent checkpoints and automatically enters the same prerequisite flow before dependent verification while scope stays unchanged. The matching content-bound attestation returns only to the original lane after fresh Issue, Spec, target, Planning Seal, candidate, blob, branch, worktree, blocker, scope, and ancestry checks. Focused checks run through implementation, followed by required final verification and the repository full suite.
 
@@ -58,9 +60,10 @@ Successful verification is reused only while the candidate, exact command, relev
 - For newly policy-bound Issue tasks, the coordinator selects a suitable [model](https://www.aihero.dev/ai-coding-dictionary/model) once and may grant one stronger continuation after the same confirmed defect survives two complete repair waves. Each wave has a read-back progress record that preserves its cumulative number across interruptions.
 - Older tasks retain their settings.
 - A controlled yield reports a clean verified and independently reviewed candidate; host acceptance and unavailable independent effective-setting read-back remain distinct.
-- Implementation stays in the exact Issue worktree and preserves the recorded target and Acceptance Criteria.
-- Focused checks, the required full suite, and both review axes pass for one clean candidate SHA.
-- The completion note binds that candidate and its required evidence without merging, closing, pushing, or deploying it.
+- Repository-backed implementation stays in the exact Issue worktree and preserves the recorded target and Acceptance Criteria.
+- Repository-backed focused checks, the required full suite, and both review axes pass for one clean candidate SHA.
+- A tracker-only completion has one read-back note whose prose digest matches its record and no branch, worktree, candidate, adoption note, or extra tracker write.
+- The completion note binds its mode-specific outcome and required evidence without merging, closing, pushing, or deploying it.
 - An eligible model upgrade preserves the existing task, candidate and cumulative repair count.
 
 ## Where it fits

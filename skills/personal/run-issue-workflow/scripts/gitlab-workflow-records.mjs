@@ -26,9 +26,17 @@ export const WORKFLOW_RECORD_KINDS = Object.freeze([
   "workflow_artifacts_contract_adopted:v1",
 ]);
 const kinds = new Set(WORKFLOW_RECORD_KINDS);
-const blocks = /^```(?:workflow-record|json)\r?\n([\s\S]*?)^```\s*$/gmu;
+const candidateBlocks = /^```(?:workflow-record|json)\r?\n([\s\S]*?)^```/gmu;
+const blocks = /^```(?:workflow-record|json)\r?\n([\s\S]*?)^```\s*(?![\s\S])/gmu;
 
 export const bodyDigest = (body) => `sha256:${createHash("sha256").update(body).digest("hex")}`;
+const normalizeNoteProse = (prose) => {
+  if (typeof prose !== "string" || prose.trim().length === 0) throw conflict("Workflow note prose must be non-empty text");
+  const normalized = prose.trim();
+  if (/^```(?:workflow-record|json)\b/mu.test(normalized)) throw conflict("Workflow note prose cannot contain another workflow record");
+  return normalized;
+};
+export const workflowNoteProseDigest = (prose) => bodyDigest(normalizeNoteProse(prose));
 
 const canonical = value => Array.isArray(value) ? value.map(canonical)
   : value && typeof value === "object"
@@ -40,6 +48,20 @@ const isRecord = value => value !== null && typeof value === "object" && !Array.
 export function renderWorkflowRecord(record) {
   if (!kinds.has(record?.kind)) throw conflict("Unsupported workflow record kind");
   return `\`\`\`${WORKFLOW_RECORD_FENCE}\n${JSON.stringify(record, null, 2)}\n\`\`\``;
+}
+
+export function renderWorkflowNote(record, prose = null) {
+  const rendered = renderWorkflowRecord(record);
+  if (prose === null) {
+    if (record?.completionMode === "tracker_only:v1") throw conflict("Tracker-only workflow notes require prose");
+    return rendered;
+  }
+  const normalized = normalizeNoteProse(prose);
+  if (record?.completionMode === "tracker_only:v1"
+    && record?.trackerOutcome?.proseSha256 !== bodyDigest(normalized)) {
+    throw conflict("Tracker-only workflow note prose digest differs");
+  }
+  return `${normalized}\n\n${rendered}`;
 }
 
 const noteIdentity = (note, index) => {
@@ -54,10 +76,19 @@ const acceptNote = async ({ note, index, repositoryId, issueIdentity, issueIid, 
   const noteId = noteIdentity(note, index);
   if (note.system === true) return null;
   const body = typeof note.body === "string" ? note.body : "";
-  const found = [...body.matchAll(blocks)];
+  const candidates = [...body.matchAll(candidateBlocks)];
+  const claimsWorkflowRecord = body.includes(`\`\`\`${WORKFLOW_RECORD_FENCE}`)
+    || candidates.some((candidate) => {
+      try { return kinds.has(JSON.parse(candidate[1])?.kind); }
+      catch { return false; }
+    });
   // A note without a recognized record contributes nothing, whatever it is; only a note that claims a
   // record has to prove it belongs to this Issue.
-  if (found.length === 0) return null;
+  if (!claimsWorkflowRecord) return null;
+  const openings = [...body.matchAll(/^```(?:workflow-record|json)\r?\n/gmu)];
+  if (openings.length > 1) throw conflict("A workflow note must contain exactly one record");
+  const found = [...body.matchAll(blocks)];
+  if (found.length === 0) throw conflict("A workflow note record must be the final body content");
   if (issueIid !== null && (note.noteable_type !== "Issue" || note.noteable_iid !== issueIid)) {
     throw conflict(`Workflow note ${noteId} belongs to another noteable`);
   }
@@ -73,10 +104,12 @@ const acceptNote = async ({ note, index, repositoryId, issueIdentity, issueIid, 
     const fresh = await reReadNote(noteId);
     if (!isRecord(fresh) || fresh.id !== noteId || fresh.body !== note.body) throw conflict("Workflow note changed during read-back");
   }
+  const prose = body.slice(0, found[0].index).trim();
   return Object.freeze({
     identity: `${issueIdentity}#note_${noteId}`,
     noteId,
     bodySha256: bodyDigest(note.body),
+    proseSha256: prose.length === 0 ? null : bodyDigest(prose),
     createdAt: note.created_at ?? null,
     record,
   });
@@ -134,13 +167,15 @@ export async function appendWorkflowRecord({
   issueIid,
   issueIdentity,
   record,
+  prose = null,
   retryRejected = false,
 } = {}) {
   if (!isRecord(connection) || typeof connection.api !== "function" || typeof connection.list !== "function") {
     throw conflict("Workflow record writes need one connected GitLab producer");
   }
   if (!Number.isSafeInteger(issueIid) || issueIid < 1) throw conflict("Workflow record writes need one native Issue iid");
-  const body = renderWorkflowRecord(record);
+  const body = renderWorkflowNote(record, prose);
+  const expectedBodySha256 = bodyDigest(body);
   const key = workflowRecordKey(record, issueIdentity);
   const readBack = async () => {
     const found = await readWorkflowRecords({
@@ -154,12 +189,21 @@ export async function appendWorkflowRecord({
     if (candidates.length > 1) throw conflict("Multiple records claim the same workflow record key");
     if (candidates.length === 0) return null;
     const [existing] = candidates;
-    if (JSON.stringify(existing.record) !== JSON.stringify(record)) throw conflict("An existing workflow record with this key differs");
-    return Object.freeze({ state: "APPENDED", record: existing.record, identity: existing.identity, noteId: existing.noteId, bodySha256: existing.bodySha256 });
+    if (JSON.stringify(existing.record) !== JSON.stringify(record) || existing.bodySha256 !== expectedBodySha256) {
+      throw conflict("An existing workflow record with this key differs");
+    }
+    return Object.freeze({
+      state: "APPENDED",
+      record: existing.record,
+      identity: existing.identity,
+      noteId: existing.noteId,
+      bodySha256: existing.bodySha256,
+      proseSha256: existing.proseSha256,
+    });
   };
   return mutateOnce(connection, {
     key,
-    payload: record,
+    payload: prose === null ? record : { record, bodySha256: expectedBodySha256 },
     retryRejected,
     observe: readBack,
     write: async () => {

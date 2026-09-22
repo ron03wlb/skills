@@ -335,7 +335,7 @@ test("formal GitHub reconciliation carries an unchanged closed child and scopes 
     await expectRejected(/contract changed/u);
     fixtures[2].body = "unchanged child";
     done.body += "\nchanged receipt";
-    await expectRejected(/Adopted completion/u);
+    await expectRejected(/Adopted completion|exactly one record/u);
     done.body = renderWorkflowRecord(complete);
     for (const field of [
       "publicationIdentity",

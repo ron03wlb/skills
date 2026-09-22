@@ -7,6 +7,8 @@ description: Close one completed Issue or Multi-Issue Spec against its recorded 
 
 Close one completed Executable Issue through exactly three ordered actions, or a Multi-Issue parent through parent-only closeout. Never repairs product code, invokes `execute-issue`, reruns Issue review or aggregate verification, pushes, or deploys.
 
+`completionMode: "tracker_only:v1"` follows [tracker-only completion](../../../docs/agents/references/tracker-only-completion.md) instead; never infer from missing candidate fields.
+
 ## 1. Bind entry and owners
 
 Read the Issue, parent/linked Spec, ordered history, blockers, recorded Issue target branch, and Git worktree registrations. Resolve identities from tracker and Git evidence; never infer a target from the current checkout or substitute another target. Read [operation identity](references/operation-identity.md) for the deterministic operation identity; `close-issue` is its closeout operation owner. Derive canonical common directory and owner-local [lease boundary](scripts/close-lease.mjs). The close owner is sole owner of the repository close lease before the target mutation writer for direct human and DAG entry; callers cannot pre-acquire or delegate either lease. Use `withCloseIssueLeases` for the ordered close action boundary: release the target writer before the repository lease after required read-back or a verified stop, retaining the original operation error together with any release failure.

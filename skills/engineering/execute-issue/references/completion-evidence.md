@@ -1,6 +1,6 @@
 # Implementation completion evidence
 
-Read this reference only after final verification passes, Standards and Spec are clean, the Issue worktree is clean, and `HEAD` is the reviewed candidate. This file solely owns workflow-artifact compatibility-adoption publication and the `implementation_complete` payload. Operation-identity adoption remains solely owned by [operation identity](operation-identity.md); consume its read-back result here without repeating its validation. This file grants no integration, close, push, deployment, or external-execution authority.
+Read this reference only for repository-backed completion after final verification passes, Standards and Spec are clean, the Issue worktree is clean, and `HEAD` is the reviewed candidate. A published tracker-only, single-note, no-candidate outcome follows [the shared tracker-only contract](../../../../docs/agents/references/tracker-only-completion.md) instead; do not create either compatibility-adoption note for that current explicit payload. This file solely owns repository-backed workflow-artifact compatibility-adoption publication and the `implementation_complete` payload. Operation-identity adoption remains solely owned by [operation identity](operation-identity.md); consume its read-back result here without repeating its validation. This file grants no integration, close, push, deployment, or external-execution authority.
 
 ## Workflow artifact compatibility adoption
 

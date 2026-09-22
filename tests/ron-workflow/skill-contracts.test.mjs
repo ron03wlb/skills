@@ -38,6 +38,7 @@ const readExecuteIssueContract = () => [
   read("skills/engineering/execute-issue/references/operation-identity.md"),
   read("skills/engineering/execute-issue/references/manual-prerequisites.md"),
   read("skills/engineering/execute-issue/references/completion-evidence.md"),
+  read("docs/agents/references/tracker-only-completion.md"),
   read("skills/engineering/execute-issue/references/technical-recovery.md"),
 ].join("\n");
 const readToSpecContract = () => [
@@ -53,6 +54,7 @@ const readCloseIssueContract = () => [
   read("skills/engineering/close-issue/references/close-coordination.md"),
   read("skills/engineering/close-issue/references/executable-closeout.md"),
   read("skills/engineering/close-issue/references/parent-closeout.md"),
+  read("docs/agents/references/tracker-only-completion.md"),
 ].join("\n");
 
 const workflowEntryBudgets = Object.freeze([
@@ -122,8 +124,9 @@ test("moved workflow detail has an exact conditional owner-local reference and s
         "skills/engineering/execute-issue/references/operation-identity.md",
         "skills/engineering/execute-issue/references/manual-prerequisites.md",
         "skills/engineering/execute-issue/references/completion-evidence.md",
+        "docs/agents/references/tracker-only-completion.md",
       ],
-      trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
+      trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*read \[tracker-only completion\]\(\.\.\/\.\.\/\.\.\/docs\/agents\/references\/tracker-only-completion\.md\).*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
     },
     {
       entry: "skills/engineering/close-issue/SKILL.md",
@@ -131,8 +134,9 @@ test("moved workflow detail has an exact conditional owner-local reference and s
         "skills/engineering/close-issue/references/close-coordination.md",
         "skills/engineering/close-issue/references/executable-closeout.md",
         "skills/engineering/close-issue/references/parent-closeout.md",
+        "docs/agents/references/tracker-only-completion.md",
       ],
-      trigger: /Read \[close coordination\]\(references\/close-coordination\.md\) before any lease acquisition.*For executable actions.*\[executable closeout\]\(references\/executable-closeout\.md\).*For a Multi-Issue parent.*\[parent closeout\]\(references\/parent-closeout\.md\)/isu,
+      trigger: /follows \[tracker-only completion\]\(\.\.\/\.\.\/\.\.\/docs\/agents\/references\/tracker-only-completion\.md\) instead.*Read \[close coordination\]\(references\/close-coordination\.md\) before any lease acquisition.*For executable actions.*\[executable closeout\]\(references\/executable-closeout\.md\).*For a Multi-Issue parent.*\[parent closeout\]\(references\/parent-closeout\.md\)/isu,
     },
   ];
 
@@ -177,7 +181,7 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     },
     {
       owner: "skills/engineering/execute-issue/references/operation-identity.md",
-      detail: "Before the first prospective completion in one exact repository, tracker, Spec, and Issue-target scope",
+      detail: "Before the first prospective repository-backed completion in one exact repository, tracker, Spec, and Issue-target scope",
     },
   ]) {
     const observedOwners = contractPaths.filter((path) => read(path).includes(detail));
@@ -1992,6 +1996,48 @@ test("workflowArtifacts classify required Issue-owned documentation without bypa
 });
 
 
+test("tracker-only completion owns one prose-bound note and no repository candidate", () => {
+  const shared = read("docs/agents/references/tracker-only-completion.md");
+  const execute = readExecuteIssueContract();
+  const close = readCloseIssueContract();
+  const records = read("skills/personal/run-issue-workflow/scripts/gitlab-workflow-records.mjs");
+  const validator = read("skills/personal/run-issue-workflow/scripts/tracker-only-completion.mjs");
+  const executeDocs = read("docs/engineering/execute-issue.md");
+  const closeDocs = read("docs/engineering/close-issue.md");
+  const router = readAskMattContract();
+  const routerDocs = read("docs/engineering/ask-matt.md");
+  const context = read("CONTEXT.md");
+  const decision = read("docs/adr/0083-complete-explicit-tracker-only-issues-with-one-prose-bound-note.md");
+
+  assert.match(shared, /published Single-Issue Spec.*one tracker outcome.*exactly one final evidence note.*no repository candidate.*documentation-only Seal candidate.*not applicable/isu);
+  assert.match(shared, /complete human-readable outcome.*exactly one `workflow-record`.*`implementation_complete`.*`completionMode`.*`tracker_only:v1`/isu);
+  assert.match(shared, /proseSha256.*SHA-256.*UTF-8.*trim\(\).*excluding.*fenced record/isu);
+  assert.match(shared, /no topic branch, Issue worktree, commit, or candidate.*no legacy compatibility adoption.*one-note scope writes no adoption notes/isu);
+  assert.match(shared, /close the Issue and read it back.*no merge, integration verification, worktree removal, target mutation, or candidate-reachability claim.*writes no second/isu);
+  assert.match(shared, /Stop without mutation.*missing or ambiguous.*repository contribution.*candidate.*prose digest differs/isu);
+
+  assert.match(execute, /published Single-Issue Spec.*tracker-only, single-note, no-candidate.*read \[tracker-only completion\].*exact match.*instead of the remaining repository-backed sections/isu);
+  assert.match(shared, /one final note.*complete human-readable outcome.*`tracker_only:v1`/isu);
+  assert.match(shared, /append once.*read back.*exact body SHA-256.*prose SHA-256/isu);
+  assert.match(close, /completionMode: "tracker_only:v1".*never infer.*missing candidate.*Tracker-only closeout has one action.*close.*read it back.*no merge.*target mutation.*does not acquire the target mutation writer.*same exact tracker-only completion note.*no second/isu);
+  assert.match(close, /tracker-only closeout.*withTrackerOnlyCloseLease.*does not acquire the target mutation writer/isu);
+  assert.match(records, /workflowNoteProseDigest.*renderWorkflowNote.*proseSha256/isu);
+  assert.match(validator, /assertTrackerOnlyCompletion.*deriveExecuteIssueOperationIdentity.*baseline.*candidate.*topic.*worktree.*reviewBasis.*must be null/isu);
+
+  for (const page of [executeDocs, closeDocs]) {
+    assert.match(page, /tracker-only.*single-note.*no-candidate|tracker_only:v1/isu);
+  }
+  for (const surface of [router, routerDocs]) {
+    assert.match(surface, /tracker-only.*single-note.*no-candidate.*execute-issue.*close-issue|execute-issue.*tracker-only.*close-issue/isu);
+  }
+  for (const path of ["README.md", "skills/engineering/README.md"]) {
+    assert.match(read(path), /execute-issue.*tracker-only.*close-issue.*tracker-only/isu);
+  }
+  assert.match(context, /\*\*Tracker-only completion\*\*.*exactly one final tracker evidence note.*no repository candidate.*prose-digest-bound.*no branch, worktree, commit, adoption note/isu);
+  assert.match(decision, /^status: accepted$/mu);
+  assert.match(decision, /direct human.*execute-issue.*exactly one.*same note.*close-issue.*repository close lease.*not the target mutation writer/isu);
+});
+
 test("Issue delivery uses Matt specs and separate execution and closeout", () => {
   const execute = readExecuteIssueContract();
   const executeMetadata = read("skills/engineering/execute-issue/agents/openai.yaml");
@@ -2035,6 +2081,7 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(close, /`implementation_complete` note/iu);
   assert.match(close, /recorded Issue target branch.*never infer.*current checkout.*substitute/isu);
   assert.match(close, /sole owner.*repository close lease.*before.*target mutation writer.*direct human.*DAG/isu);
+  assert.match(close, /Tracker-only closeout.*withTrackerOnlyCloseLease.*does not acquire the target mutation writer/isu);
   assert.match(close, /scripts\/close-lease\.mjs/iu);
   assert.ok(
     closeLease.indexOf("store.acquireRepositoryCloseLease")
@@ -3383,8 +3430,8 @@ test("router exposes the Issue worktree flow and independent controls", () => {
 
   for (const path of ["README.md", "skills/engineering/README.md"]) {
     const readme = read(path);
-    assert.match(readme, /execute-issue.*preserving completion across recorded-target movement/iu);
-    assert.match(readme, /close-issue.*three idempotent actions.*recorded target.*Multi-Issue parent/iu);
+    assert.match(readme, /execute-issue.*repository-backed.*tracker-only.*workflowArtifacts/iu);
+    assert.match(readme, /close-issue.*repository-backed actions.*tracker-only close.*Multi-Issue parent/iu);
   }
 
   const context = read("CONTEXT.md");
@@ -3585,6 +3632,7 @@ test("changed delivery documentation remains structurally valid", () => {
     "skills/engineering/execute-issue/SKILL.md",
     "skills/engineering/execute-issue/references/manual-prerequisites.md",
     "skills/engineering/execute-issue/references/completion-evidence.md",
+    "docs/agents/references/tracker-only-completion.md",
     "skills/engineering/close-issue/SKILL.md",
     "skills/engineering/verify-target-before-push/SKILL.md",
     "skills/engineering/push-target/SKILL.md",
@@ -3597,6 +3645,7 @@ test("changed delivery documentation remains structurally valid", () => {
     "docs/adr/0021-focus-ron-on-local-issue-delivery.md",
     "docs/adr/0022-use-issue-native-execution-and-closeout.md",
     "docs/adr/0023-integrate-issues-independently-and-verify-before-push.md",
+    "docs/adr/0083-complete-explicit-tracker-only-issues-with-one-prose-bound-note.md",
     "skills/personal/run-issue-workflow/SKILL.md",
     "skills/personal/run-issue-workflow/references/run-ready-handoff.md",
     "skills/personal/run-issue-workflow/references/coordinator-lifecycle.md",

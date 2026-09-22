@@ -77,8 +77,12 @@ A narrow formal review mode in which a non-empty Planning Seal itself delivered 
 _Avoid_: Empty commit, inferred docs-only scope, workflow artifact declaration
 
 **Execution completion note**:
-The compact human-readable terminal execution state written after one `execute-issue` candidate passes Standards, Spec, and verification. It names the Issue and linked Spec, **Issue target branch**, worktree, topic branch, attempt baseline, final candidate, verification results, and repair-wave count so `close-issue` can resume separately. Target-branch movement alone does not supersede it; a later successful explicit attempt publishes the new current note.
+The mode-specific terminal execution state written by `execute-issue` and consumed by `close-issue`. A repository-backed note names the Issue and linked Spec, **Issue target branch**, worktree, topic branch, attempt baseline, final candidate, verification results, and repair-wave count after Standards, Spec, and verification pass. A **Tracker-only completion** instead binds the entire human-readable outcome to one explicit no-candidate `implementation_complete` record in the same note. Target-branch movement alone does not supersede a repository-backed completion; a later successful explicit attempt publishes the new current note.
 _Avoid_: Hashed envelope, per-wave checkpoint, full conversation transcript
+
+**Tracker-only completion**:
+The narrow Single-Issue mode in which the published Spec requires exactly one final tracker evidence note, no repository candidate, and no Documentation-only Seal review. Its note carries the complete outcome plus one prose-digest-bound `tracker_only:v1` workflow record; `execute-issue` creates no branch, worktree, commit, adoption note, or repository review claim, and `close-issue` closes the Issue under only the repository close lease without target mutation.
+_Avoid_: Empty repository candidate, documentation-only Seal candidate, prose-only completion, ordinary implementation shortcut
 
 **Native task observation receipt**:
 The immutable producer-owned account of one bounded native task observation, binding its request, task, and workflow scope before it crosses the host boundary. It is settlement evidence, not task authority by itself.
@@ -93,7 +97,7 @@ The independently observable sequence from completion publication through native
 _Avoid_: Aggregate completion timestamp, inferred close latency, Run heartbeat
 
 **Issue contribution**:
-The exact commit range from one **Execution baseline** to the reviewed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored.
+The exact commit range from one **Execution baseline** to the reviewed repository-backed candidate bound to an Issue by its **Execution completion note**. Git SHA and ancestry define the mapping; valid contribution ranges may overlap, and commit-message text is ignored. A **Tracker-only completion** has no Issue contribution.
 _Avoid_: Commit-message tag, merge-message ownership, guessed Issue mapping
 
 **Workflow-required documentation artifact**:
@@ -696,6 +700,7 @@ An Issue-owned local commit made after one coherent vertical slice or review rep
 - `/to-tickets` reports the dependency-ready frontier without asking the human to execute individual children, then outputs one `/run-issue-workflow <Spec-ID>` command for the reconciled parent; the Run alone dispatches ready children
 - A **DAG Run Grant** authorizes one **DAG Run** to dispatch every dependency-ready Issue, invoke `close-issue` after valid `implementation_complete`, and continue without per-Issue approval while its bound Spec, any required decomposition record, target, and scope remain unchanged
 - A Single-Issue **Tracker Spec** is a one-node **DAG Run**: the coordinator invokes `execute-issue`, validates `implementation_complete`, invokes `close-issue`, and requires **DAG node success** without a **Decomposition publication record**
+- An explicitly published **Tracker-only completion** may instead use direct human `/execute-issue <Issue-ID>` followed by `/close-issue <Issue-ID>`: execution writes the complete prose and one `tracker_only:v1` receipt in the same sole note, and closeout performs only tracker closure under the repository close lease; neither leaf creates or claims repository candidate state
 - A child releases its outgoing blocker edges only after **DAG node success**; a coordinator recomputes the dependency-ready frontier from read-back tracker and Git evidence rather than trusting worker or UI state
 - A **DAG run state** remains `RUNNING` while any unaffected legal execution or closeout can progress, even when other nodes are `BLOCKED` or `FAILED`; it becomes `BLOCKED` only when unfinished nodes remain and no legal work is active or available
 - `PAUSING`, `PAUSED`, `STOPPING`, and `STOPPED` never overwrite a node's **DAG node state**; `SUCCEEDED` at either level requires authoritative Git, worktree, and tracker read-back rather than a worker or UI declaration

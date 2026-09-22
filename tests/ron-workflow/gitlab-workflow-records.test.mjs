@@ -11,7 +11,9 @@ import {
   bodyDigest,
   legacyCompletionAllowed,
   readWorkflowRecords,
+  renderWorkflowNote,
   renderWorkflowRecord,
+  workflowNoteProseDigest,
   workflowRecordKey,
 } from "../../skills/personal/run-issue-workflow/scripts/gitlab-workflow-records.mjs";
 
@@ -97,6 +99,18 @@ test("a malformed, duplicated, foreign or changed record stops the read", async 
   await assert.rejects(() => read([note(47, completionRecord())], {
     reReadNote: async () => ({ id: 47, body: "changed after the list read" }),
   }), /changed during read-back/u);
+  await assert.rejects(
+    () => read([note(49, completionRecord(), { body: `${renderWorkflowRecord(completionRecord())}\nTrailing outcome.` })]),
+    /final body content/u,
+  );
+  const jsonBody = renderWorkflowRecord(completionRecord()).replace("```workflow-record", "```json");
+  await assert.rejects(
+    () => read([note(50, completionRecord(), { body: `${jsonBody}\nTrailing outcome.` })]),
+    /final body content/u,
+  );
+  assert.deepEqual(await read([note(51, completionRecord(), {
+    body: "```json\n{\"example\":true}\n```\nTrailing prose.",
+  })]), []);
   await assert.rejects(() => read([{ id: 48, system: false, author: { id: developer.id }, body: renderWorkflowRecord(completionRecord()), noteable_iid: 170, noteable_type: "Issue" }]),
     /another noteable/u);
   await assert.rejects(() => read([{ system: false, noteable_iid: ISSUE_IID, noteable_type: "Issue", author: { id: developer.id }, body: renderWorkflowRecord(completionRecord()) }]),
@@ -108,6 +122,16 @@ test("the renderer writes the existing fence and refuses an unknown kind", () =>
   assert.match(rendered, /^```workflow-record\n\{/u);
   assert.match(rendered, /\n```$/u);
   assert.throws(() => renderWorkflowRecord({ kind: "invented" }), /Unsupported workflow record kind/u);
+});
+
+test("one note binds trimmed human-readable prose to one workflow record", async () => {
+  const record = completionRecord();
+  const prose = "  Final authority and drift register.  \n";
+  const body = renderWorkflowNote(record, prose);
+  assert.equal(body, `Final authority and drift register.\n\n${renderWorkflowRecord(record)}`);
+  const [parsed] = await read([note(49, record, { body })]);
+  assert.equal(parsed.proseSha256, workflowNoteProseDigest(prose));
+  assert.throws(() => renderWorkflowNote(record, "text\n```workflow-record\n{}\n```"), /another workflow record/u);
 });
 
 test("the legacy frontier admits only its exact listed evidence", () => {
@@ -147,16 +171,33 @@ test("an append proves its own native note read-back and reuses an identical rec
     },
   };
   const record = completionRecord();
-  const first = await appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record });
+  const prose = "Final authority and drift register.";
+  const mismatchedTrackerRecord = completionRecord({
+    completionMode: "tracker_only:v1",
+    trackerOutcome: { kind: "authority_drift_register:v1", proseSha256: workflowNoteProseDigest("Expected prose.") },
+  });
+  await assert.rejects(
+    () => appendWorkflowRecord({
+      connection,
+      issueIid: ISSUE_IID,
+      issueIdentity: ISSUE_IDENTITY,
+      record: mismatchedTrackerRecord,
+      prose,
+    }),
+    /prose digest differs/u,
+  );
+  assert.equal(notes.length, 0, "a mismatched tracker-only digest must stop before publication");
+  const first = await appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record, prose });
   assert.equal(first.state, "APPENDED");
   assert.equal(first.identity, `${ISSUE_IDENTITY}#note_100`);
-  assert.equal(first.bodySha256, bodyDigest(renderWorkflowRecord(record)));
+  assert.equal(first.bodySha256, bodyDigest(renderWorkflowNote(record, prose)));
+  assert.equal(first.proseSha256, workflowNoteProseDigest(prose));
   assert.equal(notes.length, 1);
-  const again = await appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record });
-  assert.equal(again.identity, first.identity, "an identical record is reused, not appended twice");
+  const again = await appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record, prose });
+  assert.equal(again.identity, first.identity, "an identical note is reused, not appended twice");
   assert.equal(notes.length, 1);
   await assert.rejects(
-    () => appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record: completionRecord({ target: "other" }) }),
+    () => appendWorkflowRecord({ connection, issueIid: ISSUE_IID, issueIdentity: ISSUE_IDENTITY, record, prose: "Different final register." }),
     /differs/u,
   );
 });
