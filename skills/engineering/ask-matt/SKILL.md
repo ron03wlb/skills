@@ -38,7 +38,7 @@ Use `/tdd` directly for one test-first behavior and `/code-review` for a fixed-p
 
 - `/wiki` manages repository Wiki work; `/remove-ron` removes only the retired repository-local Ron footprint.
 - `/confirm-understanding` calibrates a mental model against specified evidence; `/explain-decision` compares one live choice; `/grilling` pressure-tests unresolved material decisions within the agreed scope. `/clarify-needs` settles vague needs through first-principles comparison. These conversations create no new execution authority.
-- `/to-questionnaire`, `/wait-what`, `/handoff`, `/teach`, handle their named collaboration need. `/writing-for-agents` handles substantive instruction, structure, or routing changes; simple wording edits stay inline. `/resolving-merge-conflicts` handles an in-progress merge or rebase conflict.
+- `/to-questionnaire`, `/wait-what`, `/handoff`, and `/teach` handle collaboration. `/skill-gardener` audits the skill catalog without changing it; `/writing-for-agents` handles approved instruction, structure, or routing changes. Simple wording edits stay inline. `/resolving-merge-conflicts` handles an in-progress merge or rebase conflict.
 
 Use `/setup-matt-pocock-skills` when tracker, labels, or domain-doc layout is not configured.
 

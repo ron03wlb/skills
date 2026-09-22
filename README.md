@@ -224,4 +224,5 @@ General workflow tools, not code-specific.
 - **[clarify-needs](./skills/productivity/clarify-needs/SKILL.md)** — Clarify vague needs through first-principles conversation, compare proposals, and converge on a reviewable needs summary.
 - **[grilling](./skills/productivity/grilling/SKILL.md)** — Apply caller-defined decision apertures, resolve delegated choices, and ask about reserved or costly commitments. The shared decision policy behind `grill-me` and `grill-with-docs`.
 - **[explain-decision](./skills/productivity/explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
+- **[skill-gardener](./skills/productivity/skill-gardener/SKILL.md)** — Audit a skill catalog and classify every skill as keep, optimize, investigate, or remove without changing it.
 - **[writing-for-agents](./skills/productivity/writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.

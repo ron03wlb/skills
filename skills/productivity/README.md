@@ -20,4 +20,5 @@ Model- or user-reachable (rich trigger phrasing so the model can reach for them)
 - **[clarify-needs](./clarify-needs/SKILL.md)** — Clarify vague needs through first-principles conversation, compare proposals, and converge on a reviewable needs summary.
 - **[grilling](./grilling/SKILL.md)** — Apply caller-defined decision apertures, resolve delegated choices, and ask about reserved or costly commitments.
 - **[explain-decision](./explain-decision/SKILL.md)** — Explain one live choice in a bounded read-only sidecar without changing workflow state.
+- **[skill-gardener](./skill-gardener/SKILL.md)** — Audit a skill catalog and classify every skill as keep, optimize, investigate, or remove without changing it.
 - **[writing-for-agents](./writing-for-agents/SKILL.md)** — Shape substantive agent instructions, document structure, and skill routing; simple wording edits stay inline.

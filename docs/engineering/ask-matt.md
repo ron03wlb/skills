@@ -43,7 +43,8 @@ Material security, data, concurrency, migration, contract, or cross-module risk 
 
 The independent [wiki](https://aihero.dev/skills-wiki) and [remove-ron](https://aihero.dev/skills-remove-ron) controls remain outside Issue delivery. Use [confirm-understanding](https://aihero.dev/skills-confirm-understanding) to calibrate a mental model against named evidence, [explain-decision](https://aihero.dev/skills-explain-decision) for a read-only option comparison, and [grilling](https://aihero.dev/skills-grilling) to pressure-test a plan without creating docs. Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing knowledge, [wait-what](https://aihero.dev/skills-wait-what) when the last message did not land.
 
-- Substantive instruction, structure, or routing changes: [writing-for-agents](https://aihero.dev/skills-writing-for-agents).
+- Skill-catalog maintenance and retirement candidates: [skill-gardener](https://aihero.dev/skills-skill-gardener) for a read-only audit.
+- Approved instruction, structure, or routing changes: [writing-for-agents](https://aihero.dev/skills-writing-for-agents).
 - Simple wording edits: edit directly.
 
 
@@ -82,7 +83,7 @@ For a new software project without a governing Spec, the personal `/start-projec
 
 For a personal daily reflection, use `/daily-journal`; it keeps reflection voice-first and adds compact English practice after completion.
 
-Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [writing-for-agents](https://aihero.dev/skills-writing-for-agents) governs substantive instruction, structure, and routing changes.
+Use [to-questionnaire](https://aihero.dev/skills-to-questionnaire) when another person holds the missing decision, [wizard](https://aihero.dev/skills-wizard) for human-only dashboard or credential steps, and [wait-what](https://aihero.dev/skills-wait-what) when the last explanation needs a clearer second pass. [skill-gardener](https://aihero.dev/skills-skill-gardener) audits the skill catalog; [writing-for-agents](https://aihero.dev/skills-writing-for-agents) governs the approved instruction, structure, and routing changes that follow.
 
 At a phase boundary, choose whether to continue, clear, create a [handoff](https://aihero.dev/skills-handoff), delegate a bounded subtask, or compact. Do not switch context strategies mid-phase unless the remaining work can be split cleanly.
 

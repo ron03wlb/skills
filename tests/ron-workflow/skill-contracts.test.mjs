@@ -463,6 +463,23 @@ test("promoted skills, docs, READMEs, and plugin manifest stay in parity", () =>
   }
 });
 
+test("skill-gardener is a read-only full-catalog audit with a high removal bar", () => {
+  const skill = read("skills/productivity/skill-gardener/SKILL.md");
+  const docs = read("docs/productivity/skill-gardener.md");
+  const metadata = read("skills/productivity/skill-gardener/agents/openai.yaml");
+
+  assert.doesNotMatch(skill, /^disable-model-invocation:/mu);
+  assert.doesNotMatch(metadata, /^policy:/mu);
+  assert.match(skill, /every discovered skill.*identity, invocation mode, lifecycle bucket.*companion surfaces/isu);
+  assert.match(skill, /Use exactly one verdict.*`Keep`.*`Optimize`.*`Investigate`.*`Remove`/isu);
+  assert.match(skill, /removal invariant.*deleting this exact skill preserves every supported job/isu);
+  assert.match(skill, /Age, low edit frequency, low reference count, length, or apparent non-use never proves/isu);
+  assert.match(skill, /Remain read-only.*Do not edit, deprecate, move, or delete skills/isu);
+  assert.match(docs, /periodic maintenance/iu);
+  assert.match(docs, /removal invariant/iu);
+  assert.match(read("skills/engineering/ask-matt/SKILL.md"), /`\/skill-gardener` audits the skill catalog without changing it/iu);
+});
+
 test("dependency loading separates host mechanism from invocation and selected-source authority", () => {
   const convention = read(".agents/invocation.md");
   assert.match(convention, /generic Skill tool.*available.*use it/isu);
