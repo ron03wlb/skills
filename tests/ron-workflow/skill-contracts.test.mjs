@@ -94,6 +94,7 @@ test("Router and Operational Skill entry word budgets name every exact file and 
 
 test("Wayfinder routes a cleared decision map without granting execution authority", () => {
   const wayfinder = read("skills/engineering/wayfinder/SKILL.md");
+  const lifecycle = read("skills/engineering/wayfinder/references/decision-ticket-lifecycle.md");
   const toSpec = read("skills/engineering/to-spec/SKILL.md");
   const askMatt = read("skills/engineering/ask-matt/SKILL.md");
   const wayfinderDocs = read("docs/engineering/wayfinder.md");
@@ -109,6 +110,10 @@ test("Wayfinder routes a cleared decision map without granting execution authori
   assert.match(wayfinder, /Do not call `\/execute-issue`, `\/run-issue-workflow`, or `\/implement` from a map/isu);
   assert.match(wayfinder, /Decision-ticket lifecycle.*local-provider readiness.*attributable blocked outcomes.*no-delivery close boundary/isu);
   assert.match(wayfinder, /Only `READY`.*missing or ambiguous decision evidence keeps the ticket open.*named next owner/isu);
+  assert.match(lifecycle, /ordinary research, grilling, and decision-only tickets do not/iu);
+  assert.match(lifecycle, /provider-seam receipt, not setup's aggregate health.*`PRESENT`, `MISSING`, or `UNKNOWN`.*`READY`/isu);
+  assert.match(lifecycle, /resolution comment.*settled decision.*evidence.*affected tickets\/fog.*delivery route remains valid/isu);
+  assert.match(lifecycle, /no Run, Grant, delivery lane, worktree, candidate, or implementation authority/iu);
   assert.match(wayfinder, /resolution comment.*close.*no Run, Grant, delivery lane, worktree, candidate, or implementation authority/isu);
   assert.match(wayfinder, /mark any Delivery route invalid.*apply.*Route a cleared map/isu);
   assert.match(toSpec, /Consume either a Planning handoff packet or a cleared `wayfinder:map`/isu);
