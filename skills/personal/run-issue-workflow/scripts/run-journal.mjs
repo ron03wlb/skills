@@ -55,6 +55,12 @@ export const RUN_EVENT_TYPES = Object.freeze([
   "run.superseded",
   "pause.transitioned",
   "stop.transitioned",
+  "revision.activated",
+  "revision.pause_requested",
+  "revision.lane_paused",
+  "revision.scope_detached",
+  "successor.grant_recorded",
+  "revision.adoption_recorded",
 ]);
 
 const controlCommands = new Set(CONTROL_COMMANDS);
@@ -65,6 +71,7 @@ const immutableRunIdentityKeys = Object.freeze([
   "target",
   "classification",
   "decompositionIdentity",
+  "revisionIdentity",
 ]);
 const eventFields = new Map([
   ["recovery.intent", new Set(["type", "at", "issueId", "failure", "phase", "wave", "originalTaskRef", "requestIdentity"])],
@@ -105,6 +112,12 @@ const eventFields = new Map([
   ["run.superseded", new Set(["type", "at", "supersededHostRunId", "reason", "evidence"])],
   ["pause.transitioned", new Set(["type", "at", "revision"])],
   ["stop.transitioned", new Set(["type", "at", "revision"])],
+  ["revision.activated", new Set(["type", "at", "revisionIdentity", "impactClosureIssueIds"])],
+  ["revision.pause_requested", new Set(["type", "at", "issueId", "revisionIdentity", "laneRef", "requestIdentity", "nativeGeneration"])],
+  ["revision.lane_paused", new Set(["type", "at", "issueId", "revisionIdentity", "laneRef", "requestIdentity", "nativeGeneration", "progressIdentity", "candidate", "worktree"])],
+  ["revision.scope_detached", new Set(["type", "at", "issueId", "revisionIdentity"])],
+  ["successor.grant_recorded", new Set(["type", "at", "revisionIdentity", "successorRunId", "impactClosureIssueIds"])],
+  ["revision.adoption_recorded", new Set(["type", "at", "issueId", "revisionIdentity", "completionIdentity", "childContractDigest", "integrationEvidenceIdentity"])],
 ]);
 
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -257,6 +270,9 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
       } else if (event.runIdentity.decompositionIdentity !== null) {
         throw new TypeError("A SINGLE Run must bind decompositionIdentity as null");
       }
+      if (event.runIdentity.revisionIdentity !== undefined && !/^sha256:[a-f0-9]{64}$/u.test(event.runIdentity.revisionIdentity)) {
+        throw new TypeError("grant runIdentity.revisionIdentity must be one local revision identity");
+      }
       if (event.maxParallel !== undefined) requirePositiveInteger(event.maxParallel, "maxParallel");
       if (event.workflowVersion !== undefined) validateWorkflowVersion(event.workflowVersion);
       if (event.modelPolicy !== undefined) validateModelPolicy(event.modelPolicy, event.runIdentity);
@@ -372,6 +388,41 @@ export function validateEventDraft(event, { allowLegacyRemediation = false } = {
     case "stop.transitioned":
       requirePositiveInteger(event.revision, "transition revision");
       break;
+    case "revision.activated":
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)
+        || !Array.isArray(event.impactClosureIssueIds) || event.impactClosureIssueIds.length === 0
+        || !event.impactClosureIssueIds.every((issueId) => typeof issueId === "string" && issueId.length > 0)
+        || new Set(event.impactClosureIssueIds).size !== event.impactClosureIssueIds.length) {
+        throw new TypeError("Revision activation requires one immutable identity and non-empty affected closure");
+      }
+      break;
+    case "revision.pause_requested":
+      requireText(event.issueId, "revision pause Issue");
+      requireText(event.laneRef, "revision pause laneRef");
+      requireText(event.requestIdentity, "revision pause requestIdentity");
+      requireText(event.nativeGeneration, "revision pause nativeGeneration");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)) throw new TypeError("Revision pause identity is invalid");
+      break;
+    case "revision.lane_paused":
+      for (const key of ["issueId", "laneRef", "requestIdentity", "nativeGeneration", "progressIdentity", "candidate", "worktree"]) requireText(event[key], `revision lane pause ${key}`);
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)) throw new TypeError("Revision lane pause identity is invalid");
+      break;
+    case "revision.scope_detached":
+      requireText(event.issueId, "revision detached Issue");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)) throw new TypeError("Revision detached identity is invalid");
+      break;
+    case "successor.grant_recorded":
+      requireText(event.successorRunId, "successor Run id");
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)
+        || !Array.isArray(event.impactClosureIssueIds) || event.impactClosureIssueIds.length === 0
+        || !event.impactClosureIssueIds.every((issueId) => typeof issueId === "string" && issueId.length > 0)) throw new TypeError("Successor Grant is invalid");
+      break;
+    case "revision.adoption_recorded":
+      for (const key of ["issueId", "completionIdentity", "childContractDigest", "integrationEvidenceIdentity"]) requireText(event[key], `revision adoption ${key}`);
+      if (!/^sha256:[a-f0-9]{64}$/u.test(event.revisionIdentity)
+        || !/^sha256:[a-f0-9]{64}$/u.test(event.childContractDigest)
+        || !/^sha256:[a-f0-9]{64}$/u.test(event.integrationEvidenceIdentity)) throw new TypeError("Revision adoption identity is invalid");
+      break;
     case "run.superseded":
       requireText(event.supersededHostRunId, "superseded host Run id");
       if (!RUN_SUPERSEDED_REASONS.includes(event.reason)) throw new TypeError("Unsupported host Run supersession reason");
@@ -424,6 +475,44 @@ export function validateEventSemantics(events, event, { storageRunId } = {}) {
         throw new TypeError("A renewed grant must preserve its workflow version");
       }
       if (JSON.stringify(previous.modelPolicy) !== JSON.stringify(event.modelPolicy)) throw new TypeError("A renewed grant must preserve model policy membership");
+    }
+  }
+  const revisionActivation = events.findLast((item) => item.type === "revision.activated");
+  const belongsToActivatedClosure = (candidate) => revisionActivation !== undefined
+    && candidate.revisionIdentity === revisionActivation.revisionIdentity
+    && revisionActivation.impactClosureIssueIds.includes(candidate.issueId);
+  if (event.type === "revision.activated") {
+    if (events.some((item) => item.type === "revision.activated")) {
+      throw new TypeError("A predecessor Run may bind exactly one active revision");
+    }
+  }
+  if (["revision.pause_requested", "revision.scope_detached", "revision.adoption_recorded"].includes(event.type)
+    && !belongsToActivatedClosure(event)) {
+    throw new TypeError("Revision event is not bound to the activated affected closure");
+  }
+  if (event.type === "revision.lane_paused") {
+    const request = events.findLast((item) => item.type === "revision.pause_requested"
+      && item.revisionIdentity === event.revisionIdentity && item.issueId === event.issueId
+      && item.laneRef === event.laneRef && item.requestIdentity === event.requestIdentity
+      && item.nativeGeneration === event.nativeGeneration);
+    if (!request || events.some((item) => item.type === "revision.lane_paused"
+      && item.revisionIdentity === event.revisionIdentity && item.issueId === event.issueId
+      && item.laneRef === event.laneRef && item.requestIdentity === event.requestIdentity)) {
+      throw new TypeError("Revision lane pause must acknowledge one exact pause request once");
+    }
+  }
+  if (event.type === "successor.grant_recorded") {
+    if (revisionActivation === undefined || event.revisionIdentity !== revisionActivation.revisionIdentity
+      || JSON.stringify(event.impactClosureIssueIds) !== JSON.stringify(revisionActivation.impactClosureIssueIds)
+      || events.some((item) => item.type === "successor.grant_recorded")) {
+      throw new TypeError("Successor Grant must bind the activated closure exactly once");
+    }
+    for (const issueId of event.impactClosureIssueIds) {
+      const detached = events.some((item) => item.type === "revision.scope_detached" && item.issueId === issueId
+        && item.revisionIdentity === event.revisionIdentity);
+      const paused = events.some((item) => item.type === "revision.lane_paused" && item.issueId === issueId
+        && item.revisionIdentity === event.revisionIdentity);
+      if (!detached && !paused) throw new TypeError("Successor Grant requires every affected Issue to detach or acknowledge pause");
     }
   }
   if (event.type === "model.acceptance" && !events.find(item => item.type === "grant.recorded")?.modelPolicy) {

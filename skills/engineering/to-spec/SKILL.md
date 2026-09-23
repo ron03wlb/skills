@@ -6,15 +6,13 @@ disable-model-invocation: true
 
 # To Spec
 
-Publish one settled scope; do not restart discovery. Use repository evidence, established domain vocabulary, and the highest practical verification seam.
-
-The configured tracker and triage labels must exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. Checkpoint profiles and concrete adapters require installation. For GitLab publication, read [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md) and its registered-document writer. Setup cannot repair these seams. Accepted glossary or ADR writes require the shared Target mutation writer.
+Require configured tracker/triage labels and installed adapters; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills`. GitLab publication reads [the producer binding](../../personal/run-issue-workflow/references/gitlab-producer-adapters.md). Accepted glossary or ADR writes require the shared Target mutation writer.
 
 ## 1. Consume a settled planning source
 
 Consume either a Planning handoff packet or a cleared `wayfinder:map`. Both sources must provide settled scope, repository, proposed or existing Tracker Spec identity, target, relevant source facts, decision bases, and exact non-ADR behavior, exclusions, and verification assumptions. A tracker-only publication with an empty list of accepted changes needs no planning worktree or lane handoff. Missing or conflicting source, version, or identity stops before mutation.
 
-A cleared map is a valid direct source only when every child decision is closed, **Not yet specified** is empty, **Delivery context** names the repository and target branch, each decision remains reachable through its resolution, and its **Delivery route** selects Tracker delivery with `/to-spec <map URL>`. It records no Git baseline: this skill reads the Planning baseline later. A map with remaining fog or impact returns to Wayfinder; a missing reserved design decision, target, or accepted glossary/ADR change returns to `/grill-with-docs` for its Planning handoff packet. Never infer either branch, repair the map, or create a planning lane from a direct map.
+A cleared map is a valid direct source only when every child decision is closed, **Not yet specified** is empty, **Delivery context** names the repository and target branch, each decision remains reachable through its resolution, and its **Delivery route** selects Tracker delivery with `/to-spec <map URL>`. A map with remaining fog or impact returns to Wayfinder; a missing reserved design decision, target, or accepted glossary/ADR change returns to `/grill-with-docs` for its Planning handoff packet. Never infer either branch, repair the map, or create a planning lane from a direct map.
 
 Retain the handoff's inherited, human-confirmed, or delegated basis and source per decision. A choice within the recorded delegation needs no individual or blanket reconfirmation; a missing basis or changed scope returns only the affected decision to planning. Preserve exact non-ADR behavior, numeric defaults, exclusions, and verification assumptions in the Spec. Carry prior SQL approval and preparation-before-dependent-implementation ordering; design or artifact approval never becomes database execution authority.
 
@@ -24,7 +22,7 @@ Before Run-ready, follow [Run preparation](../../../docs/agents/run-preparation.
 
 ## 2. Select the classified contract
 
-`to-spec` is sole authority for **Single-Issue** and **Multi-Issue** classification. A Single-Issue outcome fits one worktree, reviewed candidate, and closeout. A Multi-Issue outcome has independent executable outcomes or blocker edges. Size and risk alone never decide. Resolve automatically from repository evidence and settled requirements; only material route ambiguity permits one blocking question with a recommendation.
+`to-spec` is sole authority for **Single-Issue** and **Multi-Issue** classification. A Single-Issue outcome fits one worktree, reviewed candidate, and closeout. A Multi-Issue outcome has independent executable outcomes or blocker edges. Size and risk alone never decide. From repository evidence and settled requirements, resolve automatically; only material route ambiguity permits one blocking question with a recommendation.
 
 User Outcomes (at most three) are context, never done authority. A Single-Issue Spec owns stable `AC-n` criteria: every Acceptance Criterion maps to an Implementation Plan step and Verification item, and every Implementation Plan step covers an Acceptance Criterion. Use inline `Covers: AC-n`; stop on missing, unexpected, or orphan mappings. A Multi-Issue parent owns only outcome, cross-Issue constraints, decomposition rationale, exclusions, and the `/to-tickets` handoff—never child acceptance, plan, touchpoints, or verification.
 
@@ -38,7 +36,7 @@ With no accepted delta, reuse the latest baseline as Planning Seal and create no
 
 ## 4. Start or resume the Spec producer transaction
 
-The [spec publication interfaces](references/spec-publication-interfaces.md) exclusively own current planning, checkpoint, tracker, and handoff adapter contracts; execute their ordered read-back stages and never reconstruct another adapter's result. One existing valid incomplete `transaction-v1`/`to-spec@v1` frozen transaction has an exact resume at its first unsatisfied stage; no migration, regeneration, rewrite, overwrite, or recreation. Only one exact matching transaction may resume at the first unsatisfied stage; a mismatch stops without duplicate attribution of unrelated state. The current profile is `to-spec@v2`; target dirt is preserved, and only identity conflicts that can misdirect mutation are Hard gates.
+[Spec publication interfaces](references/spec-publication-interfaces.md) own current planning, checkpoint, tracker, and handoff contracts; execute their ordered read-backs without reconstructing another adapter's result. An existing valid incomplete `transaction-v1`/`to-spec@v1` frozen transaction has an exact resume at its first unsatisfied stage; no migration, regeneration, rewrite, overwrite, or recreation. Only one exact matching transaction may resume at the first unsatisfied stage; a mismatch stops without duplicate attribution of unrelated state. The current profile is `to-spec@v2`; target dirt is preserved, and identity conflicts that could misdirect mutation are Hard gates.
 
 ## 5. Publish and complete the handoff
 
@@ -46,4 +44,4 @@ Publish only the tracker identity and version token bound by transaction. Primar
 
 ## 6. Stop safely
 
-A Hard gate protects target or durable attribution: wrong target, duplicate or misattributed publication, conflicting lane/tracker identity, or ambiguous state. A Recoverable blocker names the readable owner, evidence, preserved stages, and same retry. An advisory remains visible but never changes authority. On partial failure report the exact identities and first unsatisfied stage; preserve an owned planning worktree until successful handoff read-back. This skill authorizes publication only—not execution, integration, push, deployment, rollback, or another lane's mutation.
+A Hard gate stops wrong target, duplicate or misattributed publication before corrupting durable state. A Recoverable blocker names owner, evidence, preserved stages, and retry. An advisory remains visible and never blocks. On partial failure report exact identities and first unsatisfied stage; preserve the owned worktree until handoff read-back. This skill authorizes publication only.

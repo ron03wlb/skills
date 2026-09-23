@@ -758,6 +758,10 @@ export function reduceRun(input) {
       return blockedResult(input, REASON_CODES.unknownBlocker, [`Issue ${issueId} references unknown blocker ${unknown}.`], [issueId]);
     }
   }
+  const revisionActivation = input.journal.findLast((event) => event.type === "revision.activated");
+  if (revisionActivation && revisionActivation.impactClosureIssueIds.some((issueId) => !seen.has(issueId))) {
+    return blockedResult(input, REASON_CODES.journalScopeConflict, ["Revision activation references an Issue outside the predecessor Run scope."]);
+  }
   const dependencyCycle = findDependencyCycle(input.nodes);
   if (dependencyCycle) {
     return blockedResult(input, REASON_CODES.dependencyCycle, [`Issue ${dependencyCycle} participates in a blocker cycle.`], [dependencyCycle]);
@@ -1219,11 +1223,44 @@ export function reduceRun(input) {
     attempt: (dispatchAttemptsByIssue.get(issueId) ?? 0) + 1,
   }));
   normalActions.push(...dispatchActions);
-  const executionActionsScheduled = upgrades.length > 0 || repairs.length > 0 || remediations.length > 0 || dispatchActions.length > 0;
-  if (!executionActionsScheduled && closeoutAvailable && closeable.some(id => !byId.get(id).closeConflict && !byId.get(id).recovery)) {
-    normalActions.push({ type: "close_issue", issueId: closeable.find(id => !byId.get(id).closeConflict && !byId.get(id).recovery) });
+  // A local revision is a selective predecessor barrier, never the global PAUSE command. It removes
+  // only the immutable closure from ordinary dispatch and closeout; independent siblings retain their
+  // normal actions. Active lanes receive an explicit per-lane pause request, while unstarted nodes are
+  // detached without deleting their prior evidence.
+  const revisionAffected = new Set(revisionActivation?.impactClosureIssueIds ?? []);
+  if (revisionActivation) {
+    const pauseActions = [];
+    for (const issueId of revisionActivation.impactClosureIssueIds) {
+      const node = byId.get(issueId);
+      const dispatched = latestDispatchByIssue.get(issueId);
+      const detached = input.journal.some((event) => event.type === "revision.scope_detached"
+        && event.revisionIdentity === revisionActivation.revisionIdentity && event.issueId === issueId);
+      const paused = input.journal.some((event) => event.type === "revision.lane_paused"
+        && event.revisionIdentity === revisionActivation.revisionIdentity && event.issueId === issueId);
+      if (detached || paused) continue;
+      if (["DISPATCHED", "EXECUTING"].includes(node.taskState)) {
+        if (!dispatched) return blockedResult(input, REASON_CODES.insufficientEvidence,
+          [`Affected Issue ${issueId} is active without one exact dispatch lane reference.`], [issueId]);
+        const requested = input.journal.findLast((event) => event.type === "revision.pause_requested"
+          && event.revisionIdentity === revisionActivation.revisionIdentity && event.issueId === issueId);
+        pauseActions.push(requested
+          ? { type: "observe_revision_pause", issueId, laneRef: requested.laneRef,
+            revisionIdentity: revisionActivation.revisionIdentity, requestIdentity: requested.requestIdentity }
+          : { type: "pause_revision_lane", issueId, laneRef: dispatched.taskRef.threadId,
+            revisionIdentity: revisionActivation.revisionIdentity });
+      } else {
+        pauseActions.push({ type: "detach_revision_scope", issueId, revisionIdentity: revisionActivation.revisionIdentity });
+      }
+    }
+    const unaffectedActions = normalActions.filter((action) => !revisionAffected.has(action.issueId));
+    normalActions.splice(0, normalActions.length, ...pauseActions, ...unaffectedActions);
   }
-  const needsParentClose = allSucceeded && input.run.classification === "MULTI"
+  const executionActionsScheduled = normalActions.some((action) => ["dispatch_issue", "recover_issue", "repair_issue", "upgrade_issue", "remediate_environment"].includes(action.type));
+  const revisionCloseable = closeable.filter((issueId) => !revisionAffected.has(issueId));
+  if (!executionActionsScheduled && closeoutAvailable && revisionCloseable.some(id => !byId.get(id).closeConflict && !byId.get(id).recovery)) {
+    normalActions.push({ type: "close_issue", issueId: revisionCloseable.find(id => !byId.get(id).closeConflict && !byId.get(id).recovery) });
+  }
+  const needsParentClose = !revisionActivation && allSucceeded && input.run.classification === "MULTI"
     && input.run.parentTrackerState === "OPEN";
   if (!executionActionsScheduled && needsParentClose && closeoutAvailable) {
     normalActions.push({ type: "close_parent", issueId: input.run.specId });
@@ -1240,7 +1277,7 @@ export function reduceRun(input) {
       candidate.type === "target-writer-wait.settled" && candidate.waitSequence === event.sequence
     ))
   ));
-  const waitingIssueId = closeable[0] ?? (needsParentClose ? input.run.specId : null);
+  const waitingIssueId = revisionCloseable[0] ?? (needsParentClose ? input.run.specId : null);
   const preWaitEvidence = createCloseWaitEvidence({
     runIdentity: input.run,
     grant,

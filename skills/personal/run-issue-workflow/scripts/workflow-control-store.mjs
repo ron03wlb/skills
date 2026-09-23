@@ -584,6 +584,12 @@ export function createWorkflowControlStore({ gitCommonDir, legacyCompatibility =
     }
 
     const identity = normalizeIdentity(inputIdentity);
+    // `to-spec@v3` is reserved for the terminal DECISION_ONLY publication path. Reject every
+    // other fresh v3 request before a same-scope v2 receipt turns that caller error into an
+    // unrelated identity-conflict result.
+    if (identity.profileVersion === "v3" && identity.bindings.classification !== "DECISION_ONLY") {
+      throw new TypeError("Unsupported workflow checkpoint profile");
+    }
     const observed = readCurrentCheckpoint(identity);
     if (observed) return observed;
     if (identity.profileVersion === "v1") {

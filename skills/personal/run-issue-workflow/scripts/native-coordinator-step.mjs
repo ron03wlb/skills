@@ -179,13 +179,18 @@ export function planNativeCoordinatorStep({
   for (const item of hostOperations) {
     if (!isRecord(item)) throw new TypeError("Native coordinator host operation must be an object");
     const laneRef = requireText(item.laneRef ?? item.id, "Native coordinator host operation identity");
-    const control = /pause|stop/iu.test(`${item.actionType ?? ""} ${item.id ?? ""}`);
-    const type = control ? "settle_control" : "return_to_entry";
+    let revisionType = null;
+    if (item.actionType === "pause_revision_lane") revisionType = "pause_revision_lane";
+    else if (item.actionType === "observe_revision_pause") revisionType = "observe_revision_pause";
+    else if (item.actionType === "detach_revision_scope") revisionType = "detach_revision_scope";
+    const control = /pause|stop/iu.test(`${item.actionType ?? ""} ${item.id ?? ""}`) && revisionType === null;
+    const type = revisionType ?? (control ? "settle_control" : "return_to_entry");
     actions.push(freezeAction({
       id: actionIdentity(runId, type, item), type, runId, laneRef,
       issueId: item.issueId ?? null, skill: null, mode: item.execution ?? null,
       tools: Object.freeze([]), prompt: "", requestIdentity: item.requestIdentity ?? null,
       decision: null, nativeGeneration: null,
+      ...(revisionType === null ? {} : { revisionIdentity: item.revisionIdentity ?? null }),
     }));
   }
   if (new Set(actions.map(({ id }) => id)).size !== actions.length) {

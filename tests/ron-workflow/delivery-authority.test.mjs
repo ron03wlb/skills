@@ -24,6 +24,7 @@ const expectedAuthorityModules = [
   "run-journal.mjs",
   "run-stale-proof.mjs",
   "run-target-writer-wait.mjs",
+  "spec-revision-ledger.mjs",
   "workflow-operation-identity.mjs",
 ];
 
@@ -52,6 +53,7 @@ const authorityClosure = () => {
 test("every listed authority semantic names authority modules that the entry reaches", () => {
   const closure = authorityClosure();
   assert.deepEqual(Object.keys(authority.AUTHORITY_SURFACE).sort(), [
+    "append-only-local-spec-revision",
     "approved-scope-and-decomposition",
     "closeout-authority-and-writer-serialization",
     "cooperative-pause-graceful-stop-and-diagnosis",

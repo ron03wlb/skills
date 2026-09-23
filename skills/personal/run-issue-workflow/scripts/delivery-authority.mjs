@@ -19,9 +19,11 @@ export const AUTHORITY_SURFACE = Object.freeze({
   "material-repair-budget-and-model-policy": ["recovery-evidence.mjs", "model-repair-evidence.mjs", "issue-model-policy.mjs"],
   "closeout-authority-and-writer-serialization": ["run-target-writer-wait.mjs", "run-stale-proof.mjs", "close-continuation.mjs"],
   "cooperative-pause-graceful-stop-and-diagnosis": ["run-core.mjs", "recovery-compatibility.mjs"],
+  "append-only-local-spec-revision": ["spec-revision-ledger.mjs", "run-journal.mjs", "run-core.mjs"],
 });
 
 export * from "./run-authority-adapters.mjs";
+export * from "./spec-revision-ledger.mjs";
 export * from "./run-core.mjs";
 export * from "./workflow-operation-identity.mjs";
 export * from "./issue-execution-budget.mjs";

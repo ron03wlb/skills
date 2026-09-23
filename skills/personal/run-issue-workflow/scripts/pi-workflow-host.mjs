@@ -93,6 +93,11 @@ export const HOST_ACTION_POLICY = Object.freeze({
   wait_target_writer: Object.freeze({ kind: "host", operation: "wait_target_writer", execution: "wait" }),
   settle_pause: Object.freeze({ kind: "host", operation: "settle_pause", execution: "settle" }),
   settle_stop: Object.freeze({ kind: "host", operation: "settle_stop", execution: "settle" }),
+  // Revision pause is deliberately distinct from global PAUSE: it names one reducer-selected lane
+  // and cannot be used by a host to choose an Issue or mint a successor Run.
+  pause_revision_lane: Object.freeze({ kind: "host", operation: "pause_revision_lane", execution: "revision-pause" }),
+  observe_revision_pause: Object.freeze({ kind: "host", operation: "observe_revision_pause", execution: "revision-observe" }),
+  detach_revision_scope: Object.freeze({ kind: "host", operation: "detach_revision_scope", execution: "revision-detach" }),
 });
 
 const HOST_RUN_STATE_SET = new Set(HOST_RUN_STATES);
@@ -173,6 +178,11 @@ export function hostActionIdentity(action) {
     case "settle_pause":
     case "settle_stop":
       return `${action.type}_${taskIdPart(action.revision)}`;
+    case "pause_revision_lane":
+    case "observe_revision_pause":
+      return `${action.type}_${issue()}_${taskIdPart(action.laneRef)}_${taskIdPart(action.revisionIdentity)}`;
+    case "detach_revision_scope":
+      return `${action.type}_${issue()}_${taskIdPart(action.revisionIdentity)}`;
     default:
       throw new TypeError(`Unsupported reducer action ${String(action.type)}`);
   }
@@ -218,6 +228,12 @@ const materialization = (action) => {
         preWaitEvidence: action.preWaitEvidence,
       } : {}),
       ...(policy.execution === "settle" ? { revision: action.revision } : {}),
+      ...(["revision-pause", "revision-observe"].includes(policy.execution) ? {
+        laneRef: action.laneRef,
+        revisionIdentity: action.revisionIdentity,
+        ...(action.requestIdentity === undefined ? {} : { requestIdentity: action.requestIdentity }),
+      } : {}),
+      ...(policy.execution === "revision-detach" ? { revisionIdentity: action.revisionIdentity } : {}),
       ...(policy.tools === undefined ? {} : { tools: [...policy.tools] }),
     });
   }
