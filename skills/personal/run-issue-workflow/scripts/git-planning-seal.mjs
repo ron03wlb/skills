@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createRunStore } from "./run-store.mjs";
@@ -114,6 +114,20 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     return record;
   };
   const readAllocation = allocationId => nativeAllocation(allocationRecord(allocationId));
+  const assertAllocationRequest = (record, request) => {
+    if (record.requestBaseline !== request.baseline || !same(record.requestedRelevantFacts, request.relevantFacts)) {
+      throw conflict("Planning allocation scope or baseline differs");
+    }
+    return record;
+  };
+  const allocationForProposedSpec = proposedSpecIdentity => {
+    if (!existsSync(allocationsRoot)) return null;
+    const matches = readdirSync(allocationsRoot).filter(name => name.endsWith(".json"))
+      .map(name => readOwnerJson(join(allocationsRoot, name), "Planning allocation is unreadable"))
+      .filter(record => record?.binding?.repositoryId === repositoryId && record.binding?.proposedSpecIdentity === proposedSpecIdentity);
+    if (matches.length > 1) throw conflict("Planning allocation identity is ambiguous");
+    return matches[0] ?? null;
+  };
   const materializeAllocation = record => {
     if (!existsSync(record.worktree)) {
       const entries = git(repository, ["worktree", "list", "--porcelain", "-z"]).split("\0");
@@ -150,11 +164,11 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const binding = allocationBinding(proposedSpecIdentity);
     const allocationId = digest(JSON.stringify(binding));
     const path = allocationPath(allocationId);
+    const prior = allocationForProposedSpec(proposedSpecIdentity);
+    if (prior && prior.binding?.target !== target) throw conflict("Planning allocation target differs");
     if (existsSync(path)) {
-      const existing = materializeAllocation(allocationRecord(allocationId));
-      if (existing.requestBaseline !== request.baseline || !same(existing.requestedRelevantFacts, request.relevantFacts)) {
-        throw conflict("Planning allocation scope or baseline differs");
-      }
+      const existing = assertAllocationRequest(materializeAllocation(allocationRecord(allocationId)), request);
+      if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before retrying");
       if (existing.baseline !== current) {
         ancestor(existing.baseline, current);
         if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before rebinding its baseline");
@@ -172,7 +186,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
       requestBaseline: request.baseline, requestedRelevantFacts: request.relevantFacts, baseline: current, relevantFacts: observed };
     try { saveNew(path, record); }
     catch (error) {
-      if (error?.code === "EEXIST") return { disposition: "ALLOCATED", ...materializeAllocation(allocationRecord(allocationId)) };
+      if (error?.code === "EEXIST") {
+        return { disposition: "ALLOCATED", ...materializeAllocation(assertAllocationRequest(allocationRecord(allocationId), request)) };
+      }
       throw error;
     }
     try { return { disposition: "ALLOCATED", ...materializeAllocation(record) }; }

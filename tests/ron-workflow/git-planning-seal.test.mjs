@@ -41,6 +41,7 @@ function fixture(t) {
 test("adapter allocation issues one opaque task identity and rebinds only a clean compatible lane", t => {
   const f = fixture(t);
   assert.match(f.allocation.taskId, /^[0-9a-f-]{36}$/u);
+  f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
   const retry = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
     relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } };
   assert.deepEqual(f.owner.allocateLane(retry).allocationId, f.allocation.allocationId);
@@ -55,10 +56,14 @@ test("adapter allocation issues one opaque task identity and rebinds only a clea
   assert.throws(() => f.owner.allocateLane({ ...retry, relevantFacts: {} }), /scope or baseline differs/u);
   writeFileSync(join(f.repository, "other.txt"), "compatible target movement\n");
   f.git(f.repository, "add", "other.txt"); f.git(f.repository, "commit", "-m", "compatible movement");
+  writeFileSync(join(f.worktree, "scratch.txt"), "unaccepted draft\n");
   const reboundRequest = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
     relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } };
   assert.throws(() => f.owner.allocateLane({ ...reboundRequest, baseline: f.git(f.repository, "rev-parse", "HEAD") }), /scope or baseline differs/u);
-  assert.throws(() => f.owner.allocateLane(reboundRequest), /dirty.*rebinding/u);
+  assert.throws(() => f.owner.allocateLane(reboundRequest), /dirty.*retrying/u);
+  f.git(f.repository, "branch", "other-target", f.baseline);
+  const otherTarget = createGitPlanningSeal({ ...f.options, target: "other-target" });
+  assert.throws(() => otherTarget.allocateLane(reboundRequest), /target differs/u);
   f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
   const rebound = f.owner.allocateLane(reboundRequest);
   assert.equal(rebound.baseline, f.git(f.repository, "rev-parse", "HEAD"));
