@@ -975,8 +975,10 @@ export async function createGitHubToTicketsAdapters(options) {
     if (!publication || publication.record.kind !== "spec_publication" || !handoff || handoff.record.kind !== "producer_handoff"
       || publication.record.authority?.specId !== parentIdentity || publication.record.authority?.target !== target
       || publication.record.authority?.classification !== "MULTI"
+      || publication.record.authority?.planningSeal !== identity.bindings.planningSeal
       || handoff.record.producerCommand !== "to-spec" || handoff.record.specId !== parentIdentity
       || handoff.record.target !== target || handoff.record.classification !== "MULTI"
+      || handoff.record.planningSeal !== identity.bindings.planningSeal
       || handoff.record.publicationIdentity !== publication.identity || handoff.record.publicationDigest !== publication.bodySha256) {
       throw conflict("Previous partial child publication lineage differs");
     }
@@ -988,10 +990,12 @@ export async function createGitHubToTicketsAdapters(options) {
       || specIdentity.specId !== parentIdentity || specIdentity.producerCommand !== "to-spec" || specIdentity.target !== target
       || specIdentity.bindings?.classification !== "MULTI" || specIdentity.bindings?.trackerIdentity !== parentIdentity
       || specIdentity.bindings?.approvedScopeIdentity !== identity.bindings.approvedScopeIdentity
+      || specIdentity.bindings?.planningSeal !== identity.bindings.planningSeal
       || specTransaction?.schema !== "workflow-checkpoint-transaction:v2" || specTransaction.state !== "COMPLETED"
       || specTransaction.transactionId !== publication.record.transactionIdentity
       || handoff.record.transactionIdentity !== specTransaction.transactionId
       || publication.record.operationKey !== specIdentity.operationId || handoff.record.operationKey !== specIdentity.operationId
+      || specTransaction.progress[0]?.receipt?.planningSeal !== identity.bindings.planningSeal
       || specTransaction.progress[1]?.receipt?.publicationIdentity !== publication.identity
       || specTransaction.progress[1]?.receipt?.publicationDigest !== publication.bodySha256
       || specTransaction.progress[2]?.receipt?.handoffIdentity !== handoff.identity

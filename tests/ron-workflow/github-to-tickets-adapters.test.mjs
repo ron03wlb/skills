@@ -680,9 +680,9 @@ function addPriorDecomposition(f, { key, childNumber, body }) {
   return { identity, publication: priorPublication, specHandoff: priorSpecHandoff, decomposition, handoff, mapping };
 }
 
-function addPartialDecomposition(f, { key, title, body, completedSpec = true }) {
+function addPartialDecomposition(f, { key, title, body, completedSpec = true, lineageSeal = f.seal }) {
   const approvedScopeIdentity = digest(`partial:${key}`);
-  const authority = { specId: parentIdentity, target: "target", planningSeal: f.seal,
+  const authority = { specId: parentIdentity, target: "target", planningSeal: lineageSeal,
     classification: "MULTI", approvedScopeHash: digest(`partial scope:${key}`), decompositionIdentity: null };
   const specIdentity = bindProducerCheckpointOperationIdentity({ repositoryId, specId: parentIdentity,
     producerCommand: "to-spec", profileVersion: "v2", target: "target", baseline: f.seal,
@@ -701,7 +701,7 @@ function addPartialDecomposition(f, { key, title, body, completedSpec = true }) 
     stage: "publication.read_back", receipt: publicationReceipt });
   const handoff = f.addRecord(parentNumber, { kind: "producer_handoff", repositoryId,
     operationKey: specIdentity.operationId, producerCommand: "to-spec", specId: parentIdentity,
-    target: "target", planningSeal: f.seal, classification: "MULTI", approvedScopeHash: authority.approvedScopeHash,
+    target: "target", planningSeal: lineageSeal, classification: "MULTI", approvedScopeHash: authority.approvedScopeHash,
     decompositionIdentity: null, checkpointIdentity: specIdentity, transactionIdentity: specTransaction.transactionId,
     publicationIdentity: publication.identity, publicationDigest: publication.bodySha256, trackerIdentity: parentIdentity,
     recordIdentities: [publication.identity], preparation: null });
@@ -764,6 +764,22 @@ test("a partial child without a completed prior Spec transaction remains fail-cl
   const key = "169/01";
   const oldBody = childBody({ key, seal: f.seal });
   const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody, completedSpec: false });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  await assert.rejects(() => context.adapter.tracker.updateChild({ identity: context.identity,
+    child: { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, "Deliver revised child.") }, previous, preflight }),
+  { code: "GITHUB_PRODUCER_CONFLICT" });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, 0);
+});
+
+test("a partial child with mismatched prior planning lineage remains fail-closed", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody, lineageSeal: "other-seal" });
   const context = await start(f);
   const preflight = await preflightFor(context, [key]);
   const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
