@@ -126,6 +126,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     return nativeAllocation(record);
   };
   const allocateLane = request => {
+    for (const field of ["planningAdapterEndpoint", "provider", "remoteProvider", "credentials", "credential"]) {
+      if (request?.[field] !== undefined) throw conflict("Planning lanes use the bundled local provider only");
+    }
     const proposedSpecIdentity = text(request?.proposedSpecIdentity, "proposed Spec identity");
     if (!sha(request?.baseline)) throw conflict("Planning baseline is required");
     if (!request.relevantFacts || typeof request.relevantFacts !== "object" || Array.isArray(request.relevantFacts)) {

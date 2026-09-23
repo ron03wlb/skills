@@ -41,8 +41,12 @@ function fixture(t) {
 test("adapter allocation issues one opaque task identity and rebinds only a clean compatible lane", t => {
   const f = fixture(t);
   assert.match(f.allocation.taskId, /^[0-9a-f-]{36}$/u);
-  assert.deepEqual(f.owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline: f.baseline,
-    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } }).allocationId, f.allocation.allocationId);
+  const retry = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
+    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } };
+  assert.deepEqual(f.owner.allocateLane(retry).allocationId, f.allocation.allocationId);
+  for (const extra of [{ planningAdapterEndpoint: "https://planning.example/mcp" }, { provider: "remote" }, { credentials: "secret" }]) {
+    assert.throws(() => f.owner.allocateLane({ ...retry, ...extra }), /bundled local provider/u);
+  }
   f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
   writeFileSync(join(f.repository, "other.txt"), "compatible target movement\n");
   f.git(f.repository, "add", "other.txt"); f.git(f.repository, "commit", "-m", "compatible movement");

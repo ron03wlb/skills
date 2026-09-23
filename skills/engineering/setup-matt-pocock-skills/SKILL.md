@@ -11,7 +11,7 @@ Scaffold the per-repo configuration that the engineering skills assume:
 - **Issue tracker**: where issues live (GitHub by default; local markdown is also supported out of the box)
 - **Triage labels**: the strings used for the five canonical triage roles
 - **Domain docs**: where `CONTEXT.md` and ADRs live, and the consumer rules for reading them
-- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, the GitLab **Tracker project binding** that makes a configured GitLab project Run-ready, and the lane worker agent the selected substrate resolves
+- **Installed workflow diagnostics**: read-only discovery of the configured tracker, public skills, the bundled local Planning Lane Provider, deterministic operation identity, repository close lease, per-Run execution capacity, the selected delivery substrate's lane settlement, separately installed producer/Run adapter seams, the GitLab **Tracker project binding** that makes a configured GitLab project Run-ready, and the lane worker agent the selected substrate resolves
 
 This is a prompt-driven skill, not a deterministic script. Explore, settle the sections with the user, present one bounded plan, and write only after it is accepted.
 

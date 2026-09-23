@@ -531,7 +531,7 @@ test("grill-with-docs metadata and docs preserve both planning branches and the 
   const metadata = read("skills/engineering/grill-with-docs/agents/openai.yaml");
   const docs = read("docs/engineering/grill-with-docs.md");
   assert.match(skill, /Read-only exploration and tracker-only settled scope need no worktree/u);
-  assert.match(skill, /planning-adapter preflight.*before emitting or calling `lane-allocate`/isu);
+  assert.match(skill, /Planning-lane preflight.*before allocation.*bundled local Planning Lane Provider/isu);
   assert.match(skill, /selected source and invocation restrictions.*same settled scope.*same lane identity/isu);
   assert.match(skill, /handoff packet containing the adapter-issued opaque `taskId` and allocation ID for a document-writing lane, the proposed Spec, target, current baseline.*empty change list.*owned worktree.*every accepted glossary or ADR path or hunk.*content identity/isu);
   assert.match(skill, /partial publication, uncommitted accepted decision, identity mismatch, or failed read-back preserves it/u);
@@ -548,16 +548,14 @@ test("planning-adapter preflight fails closed and resumes accepted decisions", (
   const preflight = read("skills/engineering/grill-with-docs/references/planning-adapter-preflight.md");
   const docs = read("docs/engineering/grill-with-docs.md");
 
-  assert.match(preflight, /`trackerIssueUrl`.*`planningAdapterEndpoint`.*`planningAdapterCapability`/su);
-  assert.match(preflight, /Reject an endpoint.*tracker Issue URL.*Issue.*merge-request.*project.*tracker-web route/isu);
-  assert.match(preflight, /`registry_empty`, `adapter_missing`, `adapter_disconnected`, `capability_missing`, and `ready`/u);
-  assert.match(preflight, /registry counts.*missing adapter or capability.*adapter-registration remedy.*GitLab Issue URL.*not.*MCP endpoint/isu);
-  assert.match(preflight, /Do not install an arbitrary GitLab URL.*guess an endpoint.*unbound\/manual lane/isu);
-  assert.match(preflight, /resume the preserved checkpoint directly at allocation.*do not re-grill.*already accepted decisions/isu);
-  assert.match(preflight, /#189.*`feature\/ron\/#24846`.*ADR-0386/isu);
-  assert.match(preflight, /returned allocation ID, opaque task ID, worktree, and revalidated baseline.*`lane_allocated`/isu);
-  assert.match(docs, /Tracker or web URL is rejected as an adapter endpoint/iu);
-  assert.match(docs, /never installs the Issue URL.*guesses an endpoint.*unbound manual lane/isu);
+  assert.match(preflight, /bundled local Planning Lane Provider.*only allocator/isu);
+  assert.match(preflight, /opaque task ID, allocation ID, branch, and isolated worktree/isu);
+  assert.match(preflight, /endpoints, remote-provider selection, and credential fields.*not part of this interface/isu);
+  assert.match(preflight, /compatible retry.*same allocation and task identity/isu);
+  assert.match(preflight, /changed fact.*mismatched binding.*missing native worktree.*dirty lane.*preserve the allocation/isu);
+  assert.match(preflight, /does not create a second worktree/iu);
+  assert.match(docs, /bundled local Planning Lane Provider/iu);
+  assert.match(docs, /Endpoint, remote-provider, and credential fields.*fail closed/isu);
 });
 
 test("planning lanes use adapter-issued opaque task identity and leave Tracker publication to to-spec", () => {
@@ -569,8 +567,8 @@ test("planning lanes use adapter-issued opaque task identity and leave Tracker p
   const domainDocs = read("docs/engineering/domain-modeling.md");
   const specDocs = read("docs/engineering/to-spec.md");
 
-  assert.match(grill, /planning-adapter preflight.*before emitting or calling `lane-allocate`.*stable opaque `taskId`.*never ask a human/isu);
-  assert.match(grill, /ancestor baseline automatically rebinds.*every cited fact still matches/isu);
+  assert.match(grill, /Planning-lane preflight.*before allocation.*opaque `taskId`.*never ask a human/isu);
+  assert.match(grill, /ancestor baseline rebinds only after every cited fact still matches/isu);
   assert.match(grill, /never reserves or publishes a Tracker Spec or Issue.*`\/to-spec` alone owns Tracker reservation and publication/isu);
   assert.match(domain, /adapter-issued opaque `taskId`, allocation ID.*Never accept.*human.*Tracker ID/isu);
   assert.match(domain, /missing or mismatched allocation stops before the write and preserves the settled design/isu);
@@ -578,7 +576,7 @@ test("planning lanes use adapter-issued opaque task identity and leave Tracker p
   assert.match(interfaces, /`planning\.allocateLane`.*adapter-issued opaque `taskId`.*worktree/isu);
   assert.match(interfaces, /adapter\.readLane.*allocation.*equality.*exact accepted content/isu);
   assert.match(spec + interfaces, /Only `to-spec`.*`tracker\.reserve`/isu);
-  assert.match(grillDocs, /adapter automatically allocates.*opaque task identity.*never provide or confirm.*not an Issue ID/isu);
+  assert.match(grillDocs, /bundled local Planning Lane Provider.*opaque task identity.*never provide or confirm.*not an Issue ID/isu);
   assert.match(domainDocs, /opaque identity and allocation are supplied by the planning adapter.*never by you.*not Tracker IDs/isu);
   assert.match(specDocs, /opaque task identity and allocation issued by the planning adapter.*never supplied by a human.*interpreted as an Issue ID/isu);
 });
@@ -808,11 +806,11 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   const domainDocs = read("docs/engineering/domain-modeling.md");
   const interfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
 
-  assert.match(grill, /adapter-allocated identity.*one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
+  assert.match(grill, /One allocation owns one proposed Tracker Spec.*one target.*isolated planning worktree/isu);
   assert.match(grill, /same target.*without.*shared planning checkout.*global workflow lock.*cross-lane.*mutation/isu);
   assert.match(grill, /Load "grilling" and "domain-modeling" as separate named skills.*generic Skill tool.*otherwise.*host-supported.*SKILL\.md.*same lane identity/isu);
   assert.match(grill, /handoff packet.*tell the human to run `\/to-spec`.*dispose.*exact.*clean.*planning worktree.*successful.*handoff.*read-back/isu);
-  assert.match(grill, /Recoverable blocker.*registry.*observed evidence.*smallest human action.*preserved stages.*same `\/grill-with-docs`/isu);
+  assert.match(grill, /Recoverable blocker.*preserved checkpoint.*same `\/grill-with-docs`/isu);
   assert.match(domain, /active Spec workflow lane.*accepted.*CONTEXT\.md.*ADR.*only.*planning worktree/isu);
   assert.match(domain, /lane identity.*mismatch.*Hard gate.*stop.*target checkout.*other lane/isu);
   assert.match(grillDocs + domainDocs, /one proposed (?:Tracker )?Spec.*target.*isolated planning worktree/isu);
