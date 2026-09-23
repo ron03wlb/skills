@@ -107,12 +107,16 @@ test("Wayfinder routes a cleared decision map without granting execution authori
   assert.match(wayfinder, /Continue decisions.*Design handoff.*Tracker delivery.*Decision complete/isu);
   assert.match(wayfinder, /`\/grill-with-docs <map URL>`.*`\/to-spec <map URL>`/isu);
   assert.match(wayfinder, /Do not call `\/execute-issue`, `\/run-issue-workflow`, or `\/implement` from a map/isu);
+  assert.match(wayfinder, /Decision-ticket lifecycle.*local-provider readiness.*attributable blocked outcomes.*no-delivery close boundary/isu);
+  assert.match(wayfinder, /Only `READY`.*missing or ambiguous decision evidence keeps the ticket open.*named next owner/isu);
+  assert.match(wayfinder, /resolution comment.*close.*no Run, Grant, delivery lane, worktree, candidate, or implementation authority/isu);
   assert.match(wayfinder, /mark any Delivery route invalid.*apply.*Route a cleared map/isu);
   assert.match(toSpec, /Consume either a Planning handoff packet or a cleared `wayfinder:map`/isu);
   assert.match(toSpec, /every child decision is closed.*Not yet specified.*Delivery context.*Delivery route.*Tracker delivery/isu);
   assert.match(toSpec, /remaining fog or impact returns to Wayfinder.*accepted glossary\/ADR change returns to `\/grill-with-docs`/isu);
   assert.match(askMatt, /clear map.*`\/grill-with-docs <map URL>`.*`\/to-spec <map URL>`.*Only `to-spec` classifies delivery.*maps never start leaves/isu);
   assert.match(wayfinderDocs, /delivery route.*one next command/isu);
+  assert.match(wayfinderDocs, /bundled local provider readiness.*only `READY`.*attributable next owner.*without creating a Run, Grant, delivery lane, worktree, or candidate/isu);
   assert.match(wayfinderDocs, /delivery-ready map says `\/to-spec <map URL>`.*Single-Issue.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*to-tickets/isu);
   assert.match(toSpecDocs, /cleared.*wayfinder.*map.*delivery route says `\/to-spec <map URL>`/isu);
   assert.match(askMattDocs, /cleared.*wayfinder.*exactly one recorded delivery route/isu);

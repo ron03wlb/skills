@@ -2,7 +2,7 @@
 
 `wayfinder` takes an effort too big for one agent [session](https://www.aihero.dev/ai-coding-dictionary/session): an idea whose **destination** you can name but whose route you cannot yet see, and charts it as a shared **map** of **decision tickets** on your issue tracker, then resolves them one at a time until the way is clear.
 
-It plans, it does not do. Every ticket holds a question whose resolution is a decision, not a slice of a build to execute. When the map clears, Wayfinder writes one **delivery route** with one next command; it does not carry on into code or leave the next skill to guess.
+It plans, it does not do. Every ticket holds a question whose resolution is a decision, not a slice of a build to execute. Before a ticket that needs planning preparation is claimed, Wayfinder consumes the setup-owned bundled local provider readiness: only `READY` continues; missing or ambiguous evidence stays open with its attributable next owner. A settled ticket records its decision and evidence in one resolution comment, then closes without creating a Run, Grant, delivery lane, worktree, or candidate. When the map clears, Wayfinder writes one **delivery route** with one next command; it does not carry on into code or leave the next skill to guess.
 
 ## When to reach for it
 

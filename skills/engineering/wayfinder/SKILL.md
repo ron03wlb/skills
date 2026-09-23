@@ -99,6 +99,8 @@ Blocking uses the tracker's **native** dependency relationship: essential becaus
 
 The answer isn't part of the body; it's recorded on resolution (see [Work through the map](#work-through-the-map)). Assets created while resolving a ticket are linked from the issue, not pasted in.
 
+Read and follow [Decision-ticket lifecycle](references/decision-ticket-lifecycle.md) before claiming, preparing, or resolving a ticket. It owns local-provider readiness, attributable blocked outcomes, resolution evidence, and the no-delivery close boundary. Only `READY` permits preparation; missing or ambiguous decision evidence keeps the ticket open with its named next owner.
+
 ## Ticket Types
 
 Every ticket is either **HITL** (human in the loop, worked _with_ a human who speaks for themselves) or **AFK**, driven by the agent alone. A HITL ticket only resolves through that live exchange; the agent never stands in for the human's side of it (a grilling agent that answers its own questions has broken this).
@@ -150,9 +152,9 @@ User invokes with a loose idea.
 User invokes with a map (URL or number). A ticket is **optional**: without one, you pick the next decision, not the user.
 
 1. Load the **map**: the low-res view, not every ticket body.
-2. Choose the ticket. If the user named one, use it. Otherwise take the first frontier ticket in order. **Claim it**: assign it to yourself before any work.
-3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for "grilling" and "domain-modeling".
-4. Record the resolution: post the answer as a **resolution comment**, **close** the issue, and **append a context pointer** to the map's Decisions-so-far.
+2. Choose the ticket. If the user named one, use it. Otherwise take the first frontier ticket in order. Read [Decision-ticket lifecycle](references/decision-ticket-lifecycle.md), consume its required local-provider readiness, then **claim it**: assign it to yourself before any work.
+3. Resolve it. **Zoom as needed**: fetch the full body of any related or closed ticket on demand; call the Skill tool for whichever skills the `## Notes` block names. If in doubt, call the Skill tool twice, for "grilling" and "domain-modeling". Missing readiness or ambiguous decision evidence keeps it open with the named next owner.
+4. Record the resolution: post the lifecycle's exact **resolution comment**, **close** the settled issue, and **append a context pointer** to the map's Decisions-so-far. This creates no Run, Grant, delivery lane, worktree, candidate, or implementation authority.
 5. Add newly-surfaced tickets (create-then-wire); graduate any fog the answer has made specifiable, clearing each graduated patch from **Not yet specified** so it lives only as its new ticket. If the answer reveals that a ticket (this one or another) sits beyond the destination, **rule it out of scope** rather than resolving it on the route. If the decision invalidates other parts of the map, update or delete those tickets and mark any Delivery route invalid.
 6. When no decision ticket, fog patch, or impact remains, apply [Route a cleared map](#route-a-cleared-map). Write the low-resolution route under **Delivery route**, return the delivery route card, and stop. Do not call `/execute-issue`, `/run-issue-workflow`, or `/implement` from a map; only the recorded next command owns the next transition.
 
