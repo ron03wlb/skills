@@ -82,6 +82,7 @@ test("AC-1: every re-derived criterion names the prerequisite it depends on and 
   assert.match(requiredObservations, /Installed host entry and retained version \|[\s\S]*?never a readiness prerequisite/iu);
   assert.match(requiredObservations, /Lane worker agent \|[\s\S]*?substrate's own read-back[\s\S]*?`MISSING`[\s\S]*?`UNKNOWN`/iu);
   assert.match(requiredObservations, /Lane worker agent \|[\s\S]*?agents\/worker\.md/u);
+  assert.match(requiredObservations, /Bundled local Planning Lane Provider \|[\s\S]*?git-planning-seal\.mjs[\s\S]*?no endpoint, remote-provider, or credential configuration surface/iu);
 
   // `gh api --paginate --slurp` survives, with the owning source that proves it.
   assert.match(criteria, /github-producer-transport\.mjs/u);

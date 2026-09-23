@@ -44,14 +44,17 @@ test("adapter allocation issues one opaque task identity and rebinds only a clea
   const retry = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
     relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } };
   assert.deepEqual(f.owner.allocateLane(retry).allocationId, f.allocation.allocationId);
-  for (const extra of [{ planningAdapterEndpoint: "https://planning.example/mcp" }, { provider: "remote" }, { credentials: "secret" }]) {
+  for (const extra of [{ planningAdapterEndpoint: "https://planning.example/mcp" }, { provider: "remote" }, { credentials: "secret" },
+    { endpoint: "https://planning.example/mcp" }, { remote: true }, { token: "secret" }]) {
     assert.throws(() => f.owner.allocateLane({ ...retry, ...extra }), /bundled local provider/u);
   }
-  f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
   writeFileSync(join(f.repository, "other.txt"), "compatible target movement\n");
   f.git(f.repository, "add", "other.txt"); f.git(f.repository, "commit", "-m", "compatible movement");
-  const rebound = f.owner.allocateLane({ proposedSpecIdentity: "spec-142", baseline: f.baseline,
-    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } });
+  const reboundRequest = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
+    relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } };
+  assert.throws(() => f.owner.allocateLane(reboundRequest), /dirty.*rebinding/u);
+  f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
+  const rebound = f.owner.allocateLane(reboundRequest);
   assert.equal(rebound.baseline, f.git(f.repository, "rev-parse", "HEAD"));
   assert.equal(f.git(f.worktree, "rev-parse", "HEAD"), rebound.baseline);
   writeFileSync(join(f.repository, "CONTEXT.md"), "Changed fact\n");
