@@ -976,9 +976,11 @@ export async function createGitHubToTicketsAdapters(options) {
       || publication.record.authority?.specId !== parentIdentity || publication.record.authority?.target !== target
       || publication.record.authority?.classification !== "MULTI"
       || publication.record.authority?.planningSeal !== identity.bindings.planningSeal
+      || publication.record.authority?.approvedScopeHash !== identity.bindings.approvedScopeIdentity
       || handoff.record.producerCommand !== "to-spec" || handoff.record.specId !== parentIdentity
       || handoff.record.target !== target || handoff.record.classification !== "MULTI"
       || handoff.record.planningSeal !== identity.bindings.planningSeal
+      || handoff.record.approvedScopeHash !== identity.bindings.approvedScopeIdentity
       || handoff.record.publicationIdentity !== publication.identity || handoff.record.publicationDigest !== publication.bodySha256) {
       throw conflict("Previous partial child publication lineage differs");
     }
@@ -989,7 +991,6 @@ export async function createGitHubToTicketsAdapters(options) {
     if (!same(specIdentity, handoff.record.checkpointIdentity) || specIdentity.repositoryId !== repositoryId
       || specIdentity.specId !== parentIdentity || specIdentity.producerCommand !== "to-spec" || specIdentity.target !== target
       || specIdentity.bindings?.classification !== "MULTI" || specIdentity.bindings?.trackerIdentity !== parentIdentity
-      || specIdentity.bindings?.approvedScopeIdentity !== identity.bindings.approvedScopeIdentity
       || specIdentity.bindings?.planningSeal !== identity.bindings.planningSeal
       || specTransaction?.schema !== "workflow-checkpoint-transaction:v2" || specTransaction.state !== "COMPLETED"
       || specTransaction.transactionId !== publication.record.transactionIdentity
