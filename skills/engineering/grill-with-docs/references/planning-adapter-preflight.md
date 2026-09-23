@@ -25,7 +25,7 @@ Provider endpoints, remote-provider selection, and credential fields are not par
 1. Call the bundled provider once with the exact binding.
 2. On a first call, it durably records one allocation and materializes its isolated Git worktree.
 3. On a compatible retry, it returns the same allocation and task identity. It may rebind an ancestor baseline only after every relevant fact still matches and the lane is clean.
-4. On a changed fact, mismatched binding, missing native worktree, or dirty lane, preserve the allocation and stop before document writes.
+4. On a changed fact, mismatched binding, or dirty lane, preserve the allocation and stop before document writes. If its exact registered worktree is absent, the provider may re-materialize only that durable allocation; it never creates a second allocation or worktree identity.
 5. Register accepted document bytes only after human acceptance, then re-read the registration through the provider before `to-spec` seals it.
 
 The outcomes are `ALLOCATED` and `DRIFTED`, plus attributable fail-closed errors. A retry reads or completes only the durable exact allocation; it does not create a second worktree.

@@ -552,7 +552,7 @@ test("planning-adapter preflight fails closed and resumes accepted decisions", (
   assert.match(preflight, /opaque task ID, allocation ID, branch, and isolated worktree/isu);
   assert.match(preflight, /endpoints, remote-provider selection, and credential fields.*not part of this interface/isu);
   assert.match(preflight, /compatible retry.*same allocation and task identity/isu);
-  assert.match(preflight, /changed fact.*mismatched binding.*missing native worktree.*dirty lane.*preserve the allocation/isu);
+  assert.match(preflight, /changed fact.*mismatched binding.*dirty lane.*preserve the allocation.*re-materialize only that durable allocation/isu);
   assert.match(preflight, /does not create a second worktree/iu);
   assert.match(docs, /bundled local Planning Lane Provider/iu);
   assert.match(docs, /Endpoint, remote-provider, and credential fields.*fail closed/isu);

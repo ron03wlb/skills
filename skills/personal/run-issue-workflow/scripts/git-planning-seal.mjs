@@ -167,7 +167,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const prior = allocationForProposedSpec(proposedSpecIdentity);
     if (prior && prior.binding?.target !== target) throw conflict("Planning allocation target differs");
     if (existsSync(path)) {
-      const existing = assertAllocationRequest(materializeAllocation(allocationRecord(allocationId)), request);
+      const existing = materializeAllocation(assertAllocationRequest(allocationRecord(allocationId), request));
       if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before retrying");
       if (existing.baseline !== current) {
         ancestor(existing.baseline, current);
@@ -187,7 +187,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     try { saveNew(path, record); }
     catch (error) {
       if (error?.code === "EEXIST") {
-        return { disposition: "ALLOCATED", ...materializeAllocation(assertAllocationRequest(allocationRecord(allocationId), request)) };
+        const existing = materializeAllocation(assertAllocationRequest(allocationRecord(allocationId), request));
+        if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before retrying");
+        return { disposition: "ALLOCATED", ...existing };
       }
       throw error;
     }
