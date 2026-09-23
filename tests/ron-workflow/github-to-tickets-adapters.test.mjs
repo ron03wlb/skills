@@ -818,7 +818,7 @@ test("a partial child with a prior Run Grant remains fail-closed", async t => {
   const writer = runs.acquireWriter("partial_grant");
   try {
     writer.append({ type: "grant.recorded", at: "2026-09-12T00:00:00.000Z", runIdentity: {
-      runId: "partial_grant", specId: parentIdentity, approvedScopeHash: digest("prior grant"), target: "target",
+      runId: "partial_grant", specId: parentIdentity, approvedScopeHash: f.approvedScopeHash, target: "target",
       classification: "MULTI", decompositionIdentity: "D_prior" }, maxParallel: 3,
     workflowVersion: { id: "a".repeat(64), sourceCommit: "b".repeat(40), sourceRepository: repositoryId, protocolVersion: 1 } });
   } finally { writer.release(); }
