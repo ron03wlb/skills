@@ -84,7 +84,7 @@ function fixture(t) {
         result = created;
       } else result = [...issues.values()].map(current => structuredClone(current));
     } else {
-      const match = route.match(new RegExp(`^/repos/${REPOSITORY}/issues/(\\d+)(/comments|/parent|/sub_issues|/dependencies/blocked_by)?$`, "u"));
+      const match = route.match(new RegExp(`^/repos/${REPOSITORY}/issues/(\\d+)(/comments|/parent|/sub_issues|/dependencies/(?:blocked_by|blocking))?$`, "u"));
       if (!match) throw new Error(`Unexpected fixture request ${method} ${path}`);
       const number = Number(match[1]);
       const current = issues.get(number);
@@ -131,6 +131,8 @@ function fixture(t) {
           parents.set(child.number, number);
           result = child;
         } else result = rowsOf([...parents.entries()].filter(([, parent]) => parent === number).map(([child]) => child));
+      } else if (sub === "/dependencies/blocking") {
+        result = rowsOf([...dependencies.entries()].filter(([, blockers]) => blockers.includes(number)).map(([child]) => child));
       } else if (method === "POST") {
         if (failures.rejectNextDependency) {
           failures.rejectNextDependency = false;
@@ -678,18 +680,33 @@ function addPriorDecomposition(f, { key, childNumber, body }) {
   return { identity, publication: priorPublication, specHandoff: priorSpecHandoff, decomposition, handoff, mapping };
 }
 
-function addPartialDecomposition(f, { key, title, body }) {
+function addPartialDecomposition(f, { key, title, body, completedSpec = true }) {
   const approvedScopeIdentity = digest(`partial:${key}`);
   const authority = { specId: parentIdentity, target: "target", planningSeal: f.seal,
     classification: "MULTI", approvedScopeHash: digest(`partial scope:${key}`), decompositionIdentity: null };
+  const specIdentity = bindProducerCheckpointOperationIdentity({ repositoryId, specId: parentIdentity,
+    producerCommand: "to-spec", profileVersion: "v2", target: "target", baseline: f.seal,
+    bindings: { planningSeal: f.seal, classification: "MULTI", approvedScopeIdentity,
+      trackerIdentity: parentIdentity, relevantFacts: {} } });
+  let specTransaction = createProducerOperationCheckpoint({ store: f.store, identity: specIdentity });
+  if (completedSpec) specTransaction = f.store.advanceCheckpoint({ identity: specIdentity, stage: "planning_seal.read_back",
+    receipt: { planningSeal: f.seal, state: "reused", target: "target" } });
   const publication = f.addRecord(parentNumber, { kind: "spec_publication", repositoryId,
-    operationKey: digest(`partial publication:${key}`), authority, trackerIdentity: parentIdentity,
-    transactionIdentity: digest(`partial transaction:${key}`), version: digest(`partial version:${key}`), labels: [] });
+    operationKey: specIdentity.operationId, authority, trackerIdentity: parentIdentity,
+    transactionIdentity: specTransaction.transactionId, version: digest(`partial version:${key}`), labels: [] });
+  const publicationReceipt = { publicationIdentity: publication.identity, publicationDigest: publication.bodySha256,
+    trackerIdentity: parentIdentity, version: digest(`partial version:${key}`), approvedScopeIdentity,
+    target: "target", planningSeal: f.seal, classification: "MULTI" };
+  if (completedSpec) specTransaction = f.store.advanceCheckpoint({ identity: specIdentity,
+    stage: "publication.read_back", receipt: publicationReceipt });
   const handoff = f.addRecord(parentNumber, { kind: "producer_handoff", repositoryId,
-    operationKey: digest(`partial handoff:${key}`), producerCommand: "to-spec", specId: parentIdentity,
-    target: "target", classification: "MULTI", publicationIdentity: publication.identity,
-    publicationDigest: publication.bodySha256,
-    checkpointIdentity: { bindings: { approvedScopeIdentity } } });
+    operationKey: specIdentity.operationId, producerCommand: "to-spec", specId: parentIdentity,
+    target: "target", planningSeal: f.seal, classification: "MULTI", approvedScopeHash: authority.approvedScopeHash,
+    decompositionIdentity: null, checkpointIdentity: specIdentity, transactionIdentity: specTransaction.transactionId,
+    publicationIdentity: publication.identity, publicationDigest: publication.bodySha256, trackerIdentity: parentIdentity,
+    recordIdentities: [publication.identity], preparation: null });
+  if (completedSpec) f.store.advanceCheckpoint({ identity: specIdentity, stage: "handoff.completed",
+    receipt: { handoffIdentity: handoff.identity, handoffDigest: handoff.bodySha256 } });
   const identity = bindProducerCheckpointOperationIdentity({ repositoryId, specId: parentIdentity,
     producerCommand: "to-tickets", profileVersion: "v2", target: "target", baseline: f.seal,
     bindings: { planningSeal: f.seal, classification: "MULTI", approvedScopeIdentity,
@@ -742,12 +759,46 @@ test("an exact unstarted partial child recovers once after a lost replacement re
   assert.equal(decomposition.decompositionIdentity, decomposition.decompositionIdentity);
 });
 
+test("a partial child without a completed prior Spec transaction remains fail-closed", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody, completedSpec: false });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  await assert.rejects(() => context.adapter.tracker.updateChild({ identity: context.identity,
+    child: { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, "Deliver revised child.") }, previous, preflight }),
+  { code: "GITHUB_PRODUCER_CONFLICT" });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, 0);
+});
+
 test("a partial child with lifecycle drift remains fail-closed", async t => {
   const f = fixture(t);
   const key = "169/01";
   const oldBody = childBody({ key, seal: f.seal });
   const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
   f.addRecord(partial.child.number, { kind: "implementation_blocked", reasonCode: "scope_revision_required" });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  await assert.rejects(() => context.adapter.tracker.updateChild({ identity: context.identity,
+    child: { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, "Deliver revised child.") }, previous, preflight }),
+  { code: "GITHUB_PRODUCER_CONFLICT" });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, 0);
+});
+
+test("a partial child with an outbound native dependency remains fail-closed", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
+  const dependent = f.addChild(181, { title: "Dependent", body: "unrelated" });
+  f.dependencies.set(dependent.number, [partial.child.number]);
   const context = await start(f);
   const preflight = await preflightFor(context, [key]);
   const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,

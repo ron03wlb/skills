@@ -376,9 +376,13 @@ export async function createGitHubToTicketsAdapters(options) {
     if (!row) return null;
     return validateIssue(row);
   };
-  const nativeBlockerRows = async childNumber => (await list(`repos/${repositoryName}/issues/${childNumber}/dependencies/blocked_by`))
+    const nativeBlockerRows = async childNumber => (await list(`repos/${repositoryName}/issues/${childNumber}/dependencies/blocked_by`))
     .map(validateIssue);
-  const nativeBlockersFor = async childNumber => (await nativeBlockerRows(childNumber)).map(row => row.node_id).sort();
+    const nativeBlockersFor = async childNumber => (await nativeBlockerRows(childNumber)).map(row => row.node_id).sort();
+    const nativeBlockingFor = async childNumber => (await list(`repos/${repositoryName}/issues/${childNumber}/dependencies/blocking`))
+        .map(validateIssue).map(row => row.node_id).sort();
+    const nativeChildrenFor = async childNumber => (await list(`repos/${repositoryName}/issues/${childNumber}/sub_issues`))
+        .map(validateIssue).map(row => row.node_id).sort();
 
   const readChildContract = async (child, { planningSeal = upstream.publication.planningSeal, native = "evidence" } = {}) => {
     const expected = validateChild(child, planningSeal);
@@ -973,14 +977,33 @@ export async function createGitHubToTicketsAdapters(options) {
       || publication.record.authority?.classification !== "MULTI"
       || handoff.record.producerCommand !== "to-spec" || handoff.record.specId !== parentIdentity
       || handoff.record.target !== target || handoff.record.classification !== "MULTI"
-      || handoff.record.publicationIdentity !== publication.identity || handoff.record.publicationDigest !== publication.bodySha256
-      || handoff.record.checkpointIdentity?.bindings?.approvedScopeIdentity !== identity.bindings.approvedScopeIdentity) {
+      || handoff.record.publicationIdentity !== publication.identity || handoff.record.publicationDigest !== publication.bodySha256) {
       throw conflict("Previous partial child publication lineage differs");
+    }
+    let specIdentity;
+    try { specIdentity = bindProducerCheckpointOperationIdentity(handoff.record.checkpointIdentity); }
+    catch { throw conflict("Previous partial Spec checkpoint identity is malformed"); }
+    const specTransaction = checkpoints.readCheckpoint(specIdentity);
+    if (!same(specIdentity, handoff.record.checkpointIdentity) || specIdentity.repositoryId !== repositoryId
+      || specIdentity.specId !== parentIdentity || specIdentity.producerCommand !== "to-spec" || specIdentity.target !== target
+      || specIdentity.bindings?.classification !== "MULTI" || specIdentity.bindings?.trackerIdentity !== parentIdentity
+      || specIdentity.bindings?.approvedScopeIdentity !== identity.bindings.approvedScopeIdentity
+      || specTransaction?.schema !== "workflow-checkpoint-transaction:v2" || specTransaction.state !== "COMPLETED"
+      || specTransaction.transactionId !== publication.record.transactionIdentity
+      || handoff.record.transactionIdentity !== specTransaction.transactionId
+      || publication.record.operationKey !== specIdentity.operationId || handoff.record.operationKey !== specIdentity.operationId
+      || specTransaction.progress[1]?.receipt?.publicationIdentity !== publication.identity
+      || specTransaction.progress[1]?.receipt?.publicationDigest !== publication.bodySha256
+      || specTransaction.progress[2]?.receipt?.handoffIdentity !== handoff.identity
+      || specTransaction.progress[2]?.receipt?.handoffDigest !== handoff.bodySha256) {
+      throw conflict("Previous partial Spec transaction is incomplete or differs");
     }
     if (previous.trackerIdentity !== current.trackerIdentity || previous.version !== current.version
       || previous.body !== current.body || previous.title !== current.title || current.state !== "open"
       || current.labels.length !== 0 || (await nativeParent(current.nativeIssueNumber)) !== null
-      || (await nativeBlockersFor(current.nativeIssueNumber)).length !== 0) {
+      || (await nativeBlockersFor(current.nativeIssueNumber)).length !== 0
+      || (await nativeBlockingFor(current.nativeIssueNumber)).length !== 0
+      || (await nativeChildrenFor(current.nativeIssueNumber)).length !== 0) {
       throw conflict("Previous partial child body, version, lifecycle, or relationship state changed");
     }
     const parsed = parseChild({ key: expected.key, title: previous.title, body: previous.body });
