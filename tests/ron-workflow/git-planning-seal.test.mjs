@@ -48,10 +48,16 @@ test("adapter allocation issues one opaque task identity and rebinds only a clea
     { endpoint: "https://planning.example/mcp" }, { remote: true }, { token: "secret" }]) {
     assert.throws(() => f.owner.allocateLane({ ...retry, ...extra }), /bundled local provider/u);
   }
+  const nonEnumerableEndpoint = { ...retry };
+  Object.defineProperty(nonEnumerableEndpoint, "endpoint", { value: "https://planning.example/mcp" });
+  assert.throws(() => f.owner.allocateLane(nonEnumerableEndpoint), /bundled local provider/u);
+  assert.throws(() => f.owner.allocateLane(Object.assign(Object.create(retry), {})), /bundled local provider/u);
+  assert.throws(() => f.owner.allocateLane({ ...retry, relevantFacts: {} }), /scope or baseline differs/u);
   writeFileSync(join(f.repository, "other.txt"), "compatible target movement\n");
   f.git(f.repository, "add", "other.txt"); f.git(f.repository, "commit", "-m", "compatible movement");
   const reboundRequest = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
     relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", `${f.baseline}:CONTEXT.md`)}` } };
+  assert.throws(() => f.owner.allocateLane({ ...reboundRequest, baseline: f.git(f.repository, "rev-parse", "HEAD") }), /scope or baseline differs/u);
   assert.throws(() => f.owner.allocateLane(reboundRequest), /dirty.*rebinding/u);
   f.git(f.worktree, "reset", "--hard"); f.git(f.worktree, "clean", "-fd");
   const rebound = f.owner.allocateLane(reboundRequest);

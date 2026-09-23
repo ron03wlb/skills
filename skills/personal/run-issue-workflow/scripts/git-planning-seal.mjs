@@ -106,7 +106,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const record = readOwnerJson(allocationPath(allocationId), "Planning allocation is unreadable");
     if (record.schema !== "planning-lane-allocation:v1" || record.allocationId !== allocationId
       || !same(record.binding, allocationBinding(record.binding?.proposedSpecIdentity)) || !sha(record.baseline)
-      || typeof record.taskId !== "string" || !record.taskId || typeof record.worktree !== "string" || typeof record.branch !== "string") {
+      || !sha(record.requestBaseline) || !record.requestedRelevantFacts || typeof record.requestedRelevantFacts !== "object"
+      || Array.isArray(record.requestedRelevantFacts) || typeof record.taskId !== "string" || !record.taskId
+      || typeof record.worktree !== "string" || typeof record.branch !== "string") {
       throw conflict("Planning allocation differs");
     }
     return record;
@@ -127,8 +129,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
   };
   const allocateLane = request => {
     const allowed = new Set(["proposedSpecIdentity", "baseline", "relevantFacts"]);
-    if (!request || typeof request !== "object" || Array.isArray(request)
-      || Object.keys(request).some(field => !allowed.has(field))) {
+    if (!request || typeof request !== "object" || Array.isArray(request) || Object.getPrototypeOf(request) !== Object.prototype
+      || Object.getOwnPropertyNames(request).some(field => !allowed.has(field))
+      || Object.getOwnPropertySymbols(request).length) {
       throw conflict("Planning lanes use the bundled local provider only");
     }
     const proposedSpecIdentity = text(request.proposedSpecIdentity, "proposed Spec identity");
@@ -149,6 +152,9 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const path = allocationPath(allocationId);
     if (existsSync(path)) {
       const existing = materializeAllocation(allocationRecord(allocationId));
+      if (existing.requestBaseline !== request.baseline || !same(existing.requestedRelevantFacts, request.relevantFacts)) {
+        throw conflict("Planning allocation scope or baseline differs");
+      }
       if (existing.baseline !== current) {
         ancestor(existing.baseline, current);
         if (git(existing.worktree, ["status", "--porcelain"])) throw conflict("Allocated planning lane is dirty; preserve it before rebinding its baseline");
@@ -163,7 +169,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
     const worktree = join(dirname(repository), ".matt-planning-lanes", allocationId.slice(7));
     const branch = `planning/${allocationId.slice(7, 19)}`;
     const record = { schema: "planning-lane-allocation:v1", allocationId, binding, taskId, worktree, branch,
-      baseline: current, relevantFacts: observed };
+      requestBaseline: request.baseline, requestedRelevantFacts: request.relevantFacts, baseline: current, relevantFacts: observed };
     try { saveNew(path, record); }
     catch (error) {
       if (error?.code === "EEXIST") return { disposition: "ALLOCATED", ...materializeAllocation(allocationRecord(allocationId)) };
