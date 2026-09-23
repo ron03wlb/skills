@@ -6,48 +6,38 @@ disable-model-invocation: true
 
 # To Tickets
 
-Consume one completed `/to-spec` handoff and its published classification; never reclassify delivery shape. `to-tickets` accepts only a Multi-Issue Spec. For a Single-Issue Spec, stop without mutation and report its published `/run-issue-workflow <Spec-ID>` route. For a Multi-Issue Spec, read its full body and comments and decompose only its approved scope.
+Consume one completed `/to-spec` handoff and its published classification; never reclassify delivery shape. This skill accepts only a Multi-Issue Spec. For a Single-Issue Spec, stop without mutation and report `/run-issue-workflow <Spec-ID>`.
 
-The configured issue tracker, triage labels, current Workflow checkpoint profiles, and concrete upstream, checkpoint, tracker, and handoff adapters must already exist; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's explicitly documented workflow setup. A frozen legacy or profile-v1 resume also requires its existing shared Target mutation writer. Never create or repair those authority seams here.
+Configured tracker/triage labels and concrete upstream, checkpoint, tracker, and handoff adapters are prerequisites; otherwise stop and tell the human to invoke `/setup-matt-pocock-skills` or the repository's documented workflow setup.
 
-## 1. Consume the completed to-spec handoff
+## 1. Bind the upstream publication
 
-Read the exact completed `to-spec` `handoff.completed` result through the upstream adapter once. Require its producer, parent and tracker identity, target, Planning Seal, Multi-Issue classification, approved-scope identity, transaction identity, publication identity, and next command to match the current parent body, ordered comments, local target, and approved scope. Read the upstream publication and handoff identities back from their owning sources once; never rerun `to-spec` generation, review, validation, or publication logic, and never treat a cached summary or durable plan as authority.
+Read the exact completed upstream `to-spec` `handoff.completed` and publication through their owning source once. Read the exact `to-tickets` operation only; unrelated operations on the same target neither conflict nor block. Require producer, parent/tracker identity, target, Planning Seal, Multi-Issue classification, approved scope, transaction, publication, and next command to match the current parent and target. Missing, stale, contradictory, or ambiguous evidence stops before mutation; never rerun upstream generation, planning, review, validation, or publication.
 
-Read the exact `to-tickets` operation only. Unrelated operations on the same target neither conflict nor block. Target-checkout dirt and unrelated staged, unstaged, untracked, modified, or mixed work are preserved and are not transaction authority because fresh decomposition performs no target write and requires no planning worktree. Accepted glossary or ADR writes return to `to-spec` and its isolated write lane. Missing, stale, contradictory, legacy plan-only, or ambiguous upstream or operation state stops before child, relation, label, or parent-comment mutation; never synthesize a handoff, infer ownership, or repair another operation.
+Fresh decomposition is tracker-only and requires no planning worktree: target dirt is preserved and never becomes transaction authority, and accepted glossary or ADR writes return to `/to-spec`. Before ready state, consume [Run preparation](../../../docs/agents/run-preparation.md); it reuses approvals, prepares only declared SQL prerequisites through `pre-execute-issue`, and neither creates a Run Grant nor executes a prerequisite.
 
-Before publishing a Run-ready result, consume [Run preparation](../../../docs/agents/run-preparation.md). Read prior human approvals, prepare exact missing operations and read-only capability probes, then ask once for only the missing scope. Carry the actual inventory in the existing publication/handoff. After the exact Issue identities are published, call the Skill tool with "pre-execute-issue" for declared SQL prerequisites before their ready-state and final handoff read-backs. Reuse its one prepared task/worktree and exact human outcome; no SQL is N/A. Preparation never creates a Run Grant, executes SQL or authorizes deployment.
+## 2. Draft the executable children
 
-## 2. Draft independent children
+Create independently verifiable vertical slices. Every child has an immutable `<Spec-ID>/<NN>` Decomposition key, stable `AC-n` Acceptance Criteria, source-grounded Implementation Plan, Verification, blockers, target, and Planning baseline. Issue IDs are public execution/closeout inputs; titles are never identity. Every criterion, plan step, and verification item maps through inline `Covers: AC-n`.
 
-Create narrow vertical slices whose behavior is independently verifiable. Give every child one immutable `<Spec-ID>/<NN>` Decomposition key plus its own stable `AC-n` Acceptance Criteria, source-grounded Implementation Plan, Verification, blockers, target, and Planning baseline. The key resolves its parent; tracker Issue IDs remain the public execution and closeout inputs, and titles are never identity. Expected paths and symbols are non-exhaustive. Every criterion must be covered by a plan step and verification item, and every step must cover a criterion through inline `Covers: AC-n` references.
+The parent retains only outcome, cross-Issue constraints, decomposition rationale, and the handoff. A child does not need to know whether siblings execute concurrently. Validate the owned blocker graph is acyclic before mutation. An External blocker is existing readable evidence only. Prefer tracer-bullet slices; use expand-contract only when a wide mechanical refactor cannot stay green per slice.
 
-The parent keeps only the overall outcome, cross-Issue constraints, and decomposition rationale. A child does not need to know whether siblings execute concurrently; it depends only on explicit blockers and shared parent constraints. Validate that the owned blocker graph is acyclic before any mutation. An External blocker must be an existing readable Issue; `/to-tickets` never creates, edits, closes, or assumes ownership of it.
+When rendering or validating a child, read [the canonical child contract](references/canonical-child-contract.md). When selecting provider relation representation, reconciling tracker identities, or recovering partial child/relation publication, read [relation reconciliation](references/decomposition-reconciliation.md). Do not load either reference for an upstream-only stop.
 
-Prefer tracer-bullet vertical slices. For one wide mechanical refactor that cannot stay green per slice, use expand-contract: expand, independently green migration batches, then contract after all migrations.
+## 3. Validate the published Planning Seal
 
-Generate the exact decomposition in memory from the approved parent, expected canonical child contracts, owned blocker graph, External blockers, publication order, and verification. It is producer input, not a repository artifact: never write or commit a target operational plan for a fresh operation.
+Require the completed `to-spec` Seal to exist locally, be an ancestor of target `HEAD`, and still match parent body, target, classification, and approved scope. Missing or unreachable lineage is a Hard gate that returns to `/to-spec`. This skill neither reruns upstream planning nor creates a successor Seal. A changed public behavior, acceptance, target, or exclusion is a Spec revision: stop, do not modify the parent, report the exact consumed Seal, and tell the human to invoke `/to-spec`.
 
-## 3. Validate the consumed Planning Seal
+## 4. Run the decomposition producer
 
-Consume the exact Planning Seal from the completed `to-spec` read-back. Require its full commit to exist locally and be an ancestor of the target `HEAD`; require the parent body, target, Multi-Issue classification, and approved-scope identity to remain the same publication. Missing or unreachable lineage is a Hard gate and returns to `/to-spec`.
+Before transaction creation or tracker mutation, read [decomposition publication interfaces](references/decomposition-publication-interfaces.md); it owns adapter payloads and source read-backs. Then read [the current decomposition contract](references/decomposition-contract.md) when starting, resuming, reconciling, or completing the current producer transaction. For an existing incomplete `transaction-v1` or `to-tickets@v1` receipt, read [frozen v1 resume](references/decomposition-legacy-v1.md) and continue only its exact historical stages.
 
-`to-tickets` does not rerun upstream planning generation, review, or validation and does not create a successor Planning Seal. Exact approved glossary or ADR changes require a renewed `to-spec` publication rather than a downstream planning write.
-
-New public behavior, acceptance, target, or exclusion is a Spec revision: stop, tell the human to invoke `/to-spec`, and do not modify or silently expand the parent. Preserve any existing partial publication and report the exact consumed seal.
-
-## 4. Start or resume the decomposition producer transaction
-
-Before transaction creation or tracker mutation, read [`references/decomposition-publication-interfaces.md`](references/decomposition-publication-interfaces.md) and use only its upstream, checkpoint, tracker, and handoff adapters. Then read [the decomposition contract](references/decomposition-contract.md) only when starting, resuming, reconciling, or completing the producer transaction. That reference solely owns transaction profiles and stages, compatibility branches, publication payloads, and recovery matrices.
-
-Use its exact adapter-bound operation and continue only from the first valid unsatisfied stage. Any authority, identity, ordering, or adapter ambiguity is a Hard gate before the next mutation; preserve completed receipts and partial state.
+Continue only from the first valid unsatisfied stage. Authority, identity, ordering, or adapter ambiguity is a Hard gate before the next mutation; completed receipts and partial state remain preserved.
 
 ## 5. Reconcile and Publish Executable Issues
 
-Apply its preflight before mutation, then perform its child, relation, parent-record, ready-state, and handoff read-backs in order through the adapters above. A Hard gate stops before the next mutation; a Recoverable blocker reports the owning source, observed evidence, smallest human action, preserved stages, and the same `/to-tickets` retry. Advisories never change authority.
+Apply the contract preflight, then perform child, relation, parent-record, ready-state, and handoff read-backs in owner order. A Hard gate stops before the next mutation; a Recoverable blocker names its source, evidence, smallest human action, preserved stages, and the same `/to-tickets` retry. Advisories remain visible without changing authority.
 
-## 6. Complete
+Only after decomposition and ready-state receipts read back may the transaction advance `handoff.completed`. Report the dependency-ready frontier without a child `/execute-issue` command and end exactly with `/run-issue-workflow <Spec-ID>`.
 
-Only after the contract's decomposition and ready-state receipts read back may the transaction advance `handoff.completed`. Report the dependency-ready frontier without a child `/execute-issue` command and end exactly with `/run-issue-workflow <Spec-ID>`.
-
-This skill never schedules product execution, starts a Run, implements, closes, integrates, pushes, deploys, rolls back, or silently repairs evidence.
+This skill publishes decomposition only: it never starts a Run, implements, closes, integrates, pushes, deploys, rolls back, or silently repairs evidence.

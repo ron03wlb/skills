@@ -1,21 +1,15 @@
 # Execute Issue operation identity
 
-Load this interface for a fresh execution attempt or any retry whose operation evidence is missing, duplicated, mismatched, or ambiguous.
+Load this interface for a fresh execution attempt or retry whose current operation evidence is missing, duplicated, mismatched, or ambiguous.
 
 ## Owner and key
 
 `execute-issue` is the implementation receipt owner. Derive its versioned operation identity with producer `execute-issue` and stage `implementation` from the canonical repository identity, parent or linked Spec identity, approved publication identity or hash, and stable Issue identity. A caller task, thread, Run correlation value, branch name, or worktree path is diagnostic only and never defines authority.
 
-Identical immutable inputs select the same Issue lane, topic branch, and worktree and resume the first unfinished execution stage. An evidence-bound technical recovery may transfer exclusive ownership to a separate task while retaining this operation, original task history and cumulative repair budget; task identity is not operation identity. A different repository, Spec, approved revision, producer, stage, or Issue selects a different operation and may execute concurrently.
+Identical immutable inputs select the same Issue lane, topic branch, and worktree and resume the first unfinished execution stage. An evidence-bound technical recovery may transfer exclusive ownership to a separate task while retaining this operation, original task history, and cumulative repair budget; task identity is not operation identity. A different repository, Spec, approved revision, producer, stage, or Issue selects a different operation and may execute concurrently.
 
 ## Immediate receipt
 
-Direct entry consumes the exact human invocation plus current tracker and Git read-back. DAG entry consumes one read-back Run Grant that binds this Issue and Spec. Validate only that authority receipt's identity, content hash, freshness, and the current Issue, dependency, target, branch, and worktree preconditions. `execute-issue` does not rerun Run dispatch or reconciliation semantics.
+Direct entry consumes the exact human invocation plus current tracker and Git read-back. DAG entry consumes one read-back Run Grant that binds this Issue and Spec. Validate only that authority receipt's identity, content hash, freshness, and current Issue, dependency, target, branch, and worktree preconditions. `execute-issue` does not rerun Run dispatch or reconciliation semantics.
 
 The terminal owner-produced receipt is the exact read-back `implementation_complete` note. Its `operationIdentity` is the full `workflow-operation-identity:v1` receipt. For repository-backed completion, the approved publication identity and stable Issue inputs bind the reviewed candidate and verification evidence for `close-issue`; `tracker_only:v1` instead binds the prose-backed tracker outcome and explicit no-candidate state under its shared contract. Downstream closeout does not rerun implementation, Standards or Spec review, or execution verification.
-
-Before the first prospective repository-backed completion in one exact repository, tracker, Spec, and Issue-target scope, append or reuse one logical `workflow_operation_identity_contract_adopted:v1` record in the parent or linked Spec. Its frozen `legacyCompletionFrontier` lists every already valid field-less completion by exact Issue, immutable tracker evidence identity or durable local locator, and SHA-256 of its exact body. Payload-identical physical records collapse; malformed, conflicting, duplicate-entry, unreadable, mismatched, or digest-mismatched evidence stops. After adoption, only an exact frontier member may omit `operationIdentity`; a truly unadopted scope retains its original legacy contract. A current `tracker_only:v1` completion carries the full operation identity in its sole authorized note and follows the shared tracker-only contract, so it writes no legacy-adoption note. This compatibility record grants no implementation, review, close, verification, push, or deployment authority.
-
-## Compatibility and stops
-
-An existing valid completion or active legacy execution lane that predates this receipt contract retains its recorded identity without a synthetic field. Never migrate, overwrite, delete, or recreate it. Missing, duplicate, mismatched, stale, out-of-order, or ambiguous current evidence stops before implementation or tracker mutation and reports the conflicting identities.

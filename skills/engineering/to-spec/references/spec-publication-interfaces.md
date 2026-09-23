@@ -17,7 +17,7 @@ Only Seal writing needs the shared Target writer; tracker-only publication reuse
 - `checkpoint.create` persists and re-reads one `workflow-operation-envelope:v1` keyed by that identity. Its canonical intent contains title, UTF-8 body and digest, content type, and effects before tracker or target mutation; retries reuse it. It then resumes an exact transaction or creates only `to-spec@v2`. Bindings carry Seal, classification, approved scope, and owner-derived operation receipt. The ordered stages are `planning_seal.read_back`, `publication.read_back`, and `handoff.completed`; each owner receipt is appended to the envelope.
 - `checkpoint.advance` appends and reads back one exact stage receipt. The same receipt is idempotent; changed or out-of-order receipts are Hard gates.
 
-A valid incomplete transaction-v1 or `to-spec@v1` stays frozen: resume its exact stages without v1 creation, v2 migration, regeneration, or rewrite.
+An existing valid incomplete transaction-v1 or `to-spec@v1` stays frozen: exact resume only, with no migration, regeneration, rewrite, overwrite, or recreation.
 
 ## Tracker adapter
 

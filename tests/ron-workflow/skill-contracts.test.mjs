@@ -25,17 +25,22 @@ const readAskMattContract = () => [
 const readToTicketsContract = () => [
   read("skills/engineering/to-tickets/SKILL.md"),
   read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md"),
+  read("skills/engineering/to-tickets/references/canonical-child-contract.md"),
+  read("skills/engineering/to-tickets/references/decomposition-reconciliation.md"),
   read("skills/engineering/to-tickets/references/decomposition-contract.md"),
+  read("skills/engineering/to-tickets/references/decomposition-legacy-v1.md"),
 ].join("\n");
 const readRunIssueWorkflowContract = () => [
   read("skills/personal/run-issue-workflow/SKILL.md"),
   read("skills/personal/run-issue-workflow/references/run-ready-handoff.md"),
+  read("skills/personal/run-issue-workflow/references/delivery-host.md"),
   read("skills/personal/run-issue-workflow/references/coordinator-lifecycle.md"),
   read("skills/personal/run-issue-workflow/references/recovery.md"),
 ].join("\n");
 const readExecuteIssueContract = () => [
   read("skills/engineering/execute-issue/SKILL.md"),
   read("skills/engineering/execute-issue/references/operation-identity.md"),
+  read("skills/engineering/execute-issue/references/legacy-operation-identity.md"),
   read("skills/engineering/execute-issue/references/manual-prerequisites.md"),
   read("skills/engineering/execute-issue/references/completion-evidence.md"),
   read("docs/agents/references/tracker-only-completion.md"),
@@ -58,22 +63,12 @@ const readCloseIssueContract = () => [
 ].join("\n");
 
 const workflowEntryBudgets = Object.freeze([
-  {
-    role: "Router",
-    maxWords: 700,
-    paths: ["skills/engineering/ask-matt/SKILL.md"],
-  },
-  {
-    role: "Operational",
-    maxWords: 1_500,
-    paths: [
-      "skills/engineering/to-spec/SKILL.md",
-      "skills/engineering/to-tickets/SKILL.md",
-      "skills/personal/run-issue-workflow/SKILL.md",
-      "skills/engineering/execute-issue/SKILL.md",
-      "skills/engineering/close-issue/SKILL.md",
-    ],
-  },
+  { role: "Router", maxWords: 550, paths: ["skills/engineering/ask-matt/SKILL.md"] },
+  { role: "Planning", maxWords: 1_200, paths: ["skills/engineering/to-spec/SKILL.md"] },
+  { role: "Decomposition", maxWords: 1_100, paths: ["skills/engineering/to-tickets/SKILL.md"] },
+  { role: "Delivery", maxWords: 1_200, paths: ["skills/personal/run-issue-workflow/SKILL.md"] },
+  { role: "Execution", maxWords: 1_300, paths: ["skills/engineering/execute-issue/SKILL.md"] },
+  { role: "Closeout", maxWords: 900, paths: ["skills/engineering/close-issue/SKILL.md"] },
 ]);
 
 test("Router and Operational Skill entry word budgets name every exact file and count", () => {
@@ -137,13 +132,18 @@ test("moved workflow detail has an exact conditional owner-local reference and s
     },
     {
       entry: "skills/engineering/to-tickets/SKILL.md",
-      references: ["skills/engineering/to-tickets/references/decomposition-contract.md"],
-      trigger: /read \[the decomposition contract\]\(references\/decomposition-contract\.md\) only when starting, resuming, reconciling/iu,
+      references: [
+        "skills/engineering/to-tickets/references/decomposition-contract.md",
+        "skills/engineering/to-tickets/references/canonical-child-contract.md",
+        "skills/engineering/to-tickets/references/decomposition-reconciliation.md",
+        "skills/engineering/to-tickets/references/decomposition-legacy-v1.md",
+      ],
+      trigger: /(?=\s*[\s\S]*When rendering or validating a child.*canonical child contract)(?=\s*[\s\S]*When selecting provider relation representation.*relation reconciliation)(?=\s*[\s\S]*read \[the current decomposition contract\]\(references\/decomposition-contract\.md\) when starting, resuming, reconciling)(?=\s*[\s\S]*existing incomplete `transaction-v1` or `to-tickets@v1`.*frozen v1 resume)/isu,
     },
     {
       entry: "skills/engineering/to-spec/SKILL.md",
       references: ["skills/engineering/to-spec/references/spec-publication-interfaces.md"],
-      trigger: /Before the first `readPlanningBaseline`, read \[spec publication interfaces\]\(references\/spec-publication-interfaces\.md\).*primary mode.*`tracker\.reserve`.*revision mode.*`tracker\.read`/isu,
+      trigger: /Before the first `readPlanningBaseline`, read \[spec publication interfaces\]\(references\/spec-publication-interfaces\.md\).*owns reservation, revision, checkpoint, CAS, adapter receipt, and tracker-version detail/isu,
     },
     {
       entry: "skills/personal/run-issue-workflow/SKILL.md",
@@ -152,17 +152,18 @@ test("moved workflow detail has an exact conditional owner-local reference and s
         "skills/personal/run-issue-workflow/references/delivery-host.md",
         "skills/personal/run-issue-workflow/references/recovery.md",
       ],
-      trigger: /read \[the Run-ready handoff contract\]\(references\/run-ready-handoff\.md\).*Only `READY` may continue.*read \[the delivery host contract\]\(references\/delivery-host\.md\) only when.*Read \[Run recovery\]\(references\/recovery\.md\) only after/isu,
+      trigger: /read \[the Run-ready handoff contract\]\(references\/run-ready-handoff\.md\).*Only `READY` continues.*Read \[the delivery host contract\]\(references\/delivery-host\.md\) only when.*Read \[Run recovery\]\(references\/recovery\.md\) only after/isu,
     },
     {
       entry: "skills/engineering/execute-issue/SKILL.md",
       references: [
         "skills/engineering/execute-issue/references/operation-identity.md",
+        "skills/engineering/execute-issue/references/legacy-operation-identity.md",
         "skills/engineering/execute-issue/references/manual-prerequisites.md",
         "skills/engineering/execute-issue/references/completion-evidence.md",
         "docs/agents/references/tracker-only-completion.md",
       ],
-      trigger: /Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane.*read \[tracker-only completion\]\(\.\.\/\.\.\/\.\.\/docs\/agents\/references\/tracker-only-completion\.md\).*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only when.*read \[implementation completion evidence\]\(references\/completion-evidence\.md\) only when/isu,
+      trigger: /(?=\s*[\s\S]*Read \[`references\/operation-identity\.md`\]\(references\/operation-identity\.md\) for every fresh or retried lane)(?=\s*[\s\S]*historical completion is field-less.*legacy operation identity.*ordinary current re-entry does not load that branch)(?=\s*[\s\S]*tracker-only completion)(?=\s*[\s\S]*Read \[Manual prerequisites\]\(references\/manual-prerequisites\.md\) only for)(?=\s*[\s\S]*implementation completion evidence.*only when)/isu,
     },
     {
       entry: "skills/engineering/close-issue/SKILL.md",
@@ -196,8 +197,8 @@ test("moved workflow detail has an exact conditional owner-local reference and s
       detail: "With no current record, write exactly one",
     },
     {
-      owner: "skills/engineering/to-tickets/references/decomposition-contract.md",
-      detail: "First search the exact operation for an existing valid incomplete transaction-v1 or `to-tickets@v1` receipt",
+      owner: "skills/engineering/to-tickets/references/decomposition-legacy-v1.md",
+      detail: "Continue an existing valid incomplete `transaction-v1` or `to-tickets@v1` plan, checkpoint commit, attestation, decomposition, ready-state, and handoff",
     },
     {
       owner: "skills/engineering/to-tickets/references/decomposition-publication-interfaces.md",
@@ -216,8 +217,8 @@ test("moved workflow detail has an exact conditional owner-local reference and s
       detail: "Concurrent first `workflow_artifacts_contract_adopted:v1` completions may publish multiple payload-identical physical adoption records",
     },
     {
-      owner: "skills/engineering/execute-issue/references/operation-identity.md",
-      detail: "Before the first prospective repository-backed completion in one exact repository, tracker, Spec, and Issue-target scope",
+      owner: "skills/engineering/execute-issue/references/legacy-operation-identity.md",
+      detail: "Before that first prospective completion, append or reuse one logical `workflow_operation_identity_contract_adopted:v1` record",
     },
   ]) {
     const observedOwners = contractPaths.filter((path) => read(path).includes(detail));
@@ -287,6 +288,7 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   const specInterfaces = read("skills/engineering/to-spec/references/spec-publication-interfaces.md");
   const ticketInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
   const executionInterfaces = read("skills/engineering/execute-issue/references/operation-identity.md");
+  const executionLegacyInterfaces = read("skills/engineering/execute-issue/references/legacy-operation-identity.md");
   const closeInterfaces = read("skills/engineering/close-issue/references/operation-identity.md");
   const aggregateInterfaces = read("skills/engineering/verify-target-before-push/references/operation-identity.md");
   const run = readRunIssueWorkflowContract();
@@ -326,7 +328,7 @@ test("deterministic operation identity and receipt ownership stay synchronized a
   assert.match(execute, /completion note.*operationIdentity.*canonical repository.*approved publication.*stable Issue/isu);
   assert.match(close, /implementation_complete.*current receipt.*operationIdentity.*approved publication/isu);
   assert.match(verify, /current completion.*operationIdentity.*approved publication/isu);
-  for (const contract of [execute, executionInterfaces, close, closeInterfaces, verify, aggregateInterfaces]) {
+  for (const contract of [execute, executionLegacyInterfaces, close, closeInterfaces, verify, aggregateInterfaces]) {
     assert.match(contract, /workflow_operation_identity_contract_adopted:v1.*legacyCompletionFrontier/isu);
   }
 
@@ -834,8 +836,8 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   assert.match(spec, /one exact accepted delta.*shared writer.*one scoped seal/isu);
   assert.match(spec, /no accepted.*delta.*reuse.*latest baseline.*no empty commit/isu);
   assert.doesNotMatch(spec, /operational plan.*commit only.*exact plan/isu);
-  assert.match(spec, /revision mode.*tracker.read.*existing Spec.*version token/isu);
-  assert.match(spec, /revision mode updates the same existing Spec.*Neither mode creates a replacement Spec/isu);
+  assert.match(interfaces, /tracker\.reserve.*`primary` or `revision`.*tracker\.read.*body.*version token/isu);
+  assert.match(interfaces, /tracker\.reserve.*`primary` or `revision`.*Revision requires the existing Spec/isu);
   assert.match(specDocs, /compatible target movement.*latest baseline.*semantic drift.*same `\/to-spec`/isu);
   assert.match(interfaces, /checkpoint adapter.*to-spec@v2.*planning_seal\.read_back.*publication\.read_back.*handoff\.completed/isu);
   assert.match(interfaces, /tracker adapter.*reserve.*read.*publish/isu);
@@ -861,11 +863,11 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
 
   const ticketsInterfaces = read("skills/engineering/to-tickets/references/decomposition-publication-interfaces.md");
   const ticketsContract = read("skills/engineering/to-tickets/references/decomposition-contract.md");
-  const ticketsSeal = tickets.indexOf("Validate the consumed Planning Seal");
+  const ticketsSeal = tickets.indexOf("Validate the published Planning Seal");
   const ticketsPublish = tickets.indexOf("Publish Executable Issues", ticketsSeal);
   assert.equal(ticketsSeal !== -1 && ticketsPublish > ticketsSeal, true, "to-tickets must validate its consumed seal before publish");
-  assert.match(tickets, /consume.*exact Planning Seal.*to-spec.*read-back.*exist locally.*ancestor.*target/isu);
-  assert.match(tickets, /does not rerun.*planning.*generation.*review.*validation.*does not create.*successor Planning Seal/isu);
+  assert.match(tickets, /completed `to-spec` Seal.*exist locally.*ancestor.*target `HEAD`/isu);
+  assert.match(tickets, /neither reruns upstream planning nor creates a successor Seal/isu);
   assert.match(tickets, /public behavior, acceptance, target, or exclusion.*stop.*tell the human to invoke `\/to-spec`/isu);
   assert.match(tickets, /do not modify.*parent/isu);
   assert.match(ticketsInterfaces, /upstream adapter.*checkpoint adapter.*tracker adapter.*handoff adapter/isu);
@@ -888,10 +890,10 @@ test("planning lanes revalidate relevant facts before tracker work becomes execu
   const issueReadBack = tickets.indexOf("Read each published Issue back");
   assert.equal(issueReadBack > realTrackerPublish, true, "to-tickets must read back after selecting the publication mode");
 
-  assert.match(execute, /Planning Seal.*ancestor of the execution baseline/isu);
-  assert.match(execute, /seal-currency check.*not scope authority/isu);
-  assert.match(execute, /never creates or repairs a Planning Seal/iu);
-  assert.match(execute, /stop.*tell the human to invoke `\/to-spec` or `\/to-tickets`/isu);
+  assert.match(execute, /Planning Seal locally.*ancestral to the baseline/isu);
+  assert.match(execute, /current for Issue-owned planning delta/isu);
+  assert.match(execute, /never repairs a Seal/iu);
+  assert.match(execute, /planning evidence stops for `\/to-spec` or `\/to-tickets`/isu);
   assert.match(context, /new seal commit.*only approved.*no relevant planning-artifact delta.*reuse/isu);
 
   const prerequisites = specDocs.match(/## Prerequisites\s+(.*?)\n## /su)?.[1] ?? "";
@@ -1001,12 +1003,12 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
   assert.match(spec, /existing valid incomplete.*transaction-v1.*`to-spec@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
   assert.match(spec, /only one exact matching.*transaction.*resume.*first unsatisfied stage.*mismatch.*stop.*without.*duplicate.*attribut.*unrelated/isu);
 
-  assert.match(spec, /primary mode.*`tracker\.reserve`.*read.*draft tracker identity.*version token.*retry.*revision mode.*`tracker\.read`.*existing Spec.*version token.*Bind.*tracker identity.*transaction.*publication/isu);
-  assert.match(spec, /Publish only.*tracker identity.*version token.*bound.*transaction.*Primary mode.*reserved draft.*revision mode.*same existing Spec.*Neither.*replacement Spec/isu);
-  assert.match(spec, /read back.*body.*classification.*Planning Seal.*target.*template.*label.*tracker identity/isu);
+  assert.match(spec, /spec publication interfaces.*owns reservation, revision, checkpoint, CAS.*bind.*read-back identity.*transaction.*publication/isu);
+  assert.match(spec, /Publish only.*tracker identity.*bound by transaction.*primary.*reserved draft.*revision.*same Spec/isu);
+  assert.match(spec, /Read back the canonical body, classification, Planning Seal, target, template, publication identity, approved scope, and next command/isu);
   assert.match(spec, /Recoverable blocker.*owning source.*observed evidence.*smallest human action.*preserved stages.*same `\/to-spec` retry/isu);
 
-  assert.match(spec, /append.*one immutable `handoff\.completed`.*producer.*Spec.*target.*Planning Seal.*transaction identity.*publication identity.*classification.*approved-scope identity/isu);
+  assert.match(spec, /Append and read back `publication\.read_back`, then immutable `handoff\.completed`/isu);
   assert.match(spec, /Single-Issue.*only.*`\/run-issue-workflow <Spec-ID>`.*Multi-Issue.*only.*`\/to-tickets <Spec-ID>`/isu);
   assert.doesNotMatch(spec + docs + template, /\/execute-issue <Spec-ID>/u);
   assert.doesNotMatch(matt + mattDocs, /Single-Issue Tracker Spec (?:→|uses) (?:\[execute-issue|`\/execute-issue)/iu);
@@ -1027,8 +1029,8 @@ test("to-spec owns minimal operation-scoped publication and Single-Issue Run han
 test("to-tickets consumes the completed to-spec handoff through a minimal current producer", () => {
   const tickets = readToTicketsContract();
 
-  const upstream = tickets.indexOf("Consume the completed to-spec handoff");
-  const checkpoint = tickets.indexOf("Start or resume the decomposition producer transaction", upstream);
+  const upstream = tickets.indexOf("Bind the upstream publication");
+  const checkpoint = tickets.indexOf("Run the decomposition producer", upstream);
   const publication = tickets.indexOf("Reconcile and Publish Executable Issues", checkpoint);
   assert.equal(
     upstream !== -1 && checkpoint > upstream && publication > checkpoint,
@@ -1038,7 +1040,7 @@ test("to-tickets consumes the completed to-spec handoff through a minimal curren
 
   assert.match(tickets, /completed `to-spec`.*handoff.*producer.*parent.*tracker identity.*target.*Planning Seal.*classification.*approved-scope identity.*publication identity/isu);
   assert.match(tickets, /read.*upstream.*owning source.*once.*never rerun.*generation.*review.*validation/isu);
-  assert.match(tickets, /fresh ordinary decomposition.*`to-tickets@v2`.*owner-derived operation identity receipt.*tracker identity.*profile `v2`.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*handoff/isu);
+  assert.match(tickets, /current operation.*owner-derived operation identity receipt.*`to-tickets@v2`.*tracker identity.*target.*baseline.*Planning Seal.*Multi-Issue.*approved-scope.*upstream publication.*upstream handoff/isu);
   assert.match(tickets, /ordered stages.*`decomposition\.read_back`.*`ready_state\.read_back`.*`handoff\.completed`/isu);
   assert.match(tickets, /no target operational-plan.*file.*commit.*prospective `direct_target_contribution:v1`/isu);
   assert.match(tickets, /existing valid incomplete.*transaction-v1.*`to-tickets@v1`.*frozen.*exact resume.*no.*migrat.*rewrite/isu);
@@ -1055,7 +1057,7 @@ test("to-tickets reconciles one Issue decomposition before tracker mutation", ()
   assert.equal(discovery !== -1 && mutation > discovery, true, "identity discovery must finish before publication mutation");
   assert.match(tickets, /## 5\. Reconcile and Publish Executable Issues/u);
   assert.match(tickets, /zero matches.*create exactly one.*one matching Issue.*reuse.*more than one.*stop without mutation/isu);
-  assert.match(tickets, /body parent.*target.*Planning Seal.*executable contract.*native blocking relation.*must all agree.*proven native hierarchy.*native parent evidence/isu);
+  assert.match(tickets, /Body parent.*target.*Planning Seal.*executable contract.*must all agree.*proven native hierarchy.*matching native parent evidence/isu);
   assert.match(tickets, /conflict.*stop without mutation.*never automatically repair/isu);
   assert.match(tickets, /owned blocker graph.*acyclic.*before any mutation/isu);
   assert.match(tickets, /External blocker.*readable.*never creates, edits, closes, or assumes ownership/isu);
@@ -1084,7 +1086,7 @@ test("to-tickets keeps GitLab blocker representation portable and fail-closed", 
   assert.match(interfaces, /Ordinary child read-back.*canonical body blocker edges.*stable tracker-identity order.*`native`.*native blocking relation evidence/isu);
   assert.match(tickets, /canonical child body.*`## Blocked by`.*`body` or `native`.*`blocked` label.*`relates_to`.*`ready-for-agent`.*published logical graph/isu);
   assert.match(childContract, /Render one stable Issue reference per bullet in canonical tracker-identity order.*With no blocker, render exactly:\s+None\./isu);
-  assert.match(tickets, /newly configured `body` representation.*only before `decomposition\.read_back`.*prior partial native failure.*child identity.*Decomposition key.*canonical body.*expected logical blocker edge.*no conflicting native relation.*no `decomposition:v1` record/isu);
+  assert.match(tickets, /retry may adopt newly configured `body` representation.*only before `decomposition\.read_back`.*prior partial native failure.*bound child identity.*Decomposition key.*canonical body.*expected logical blocker edge.*conflicting native relation.*`decomposition:v1` record/isu);
   assert.match(tickets, /Completed-stage adoption.*missing bound evidence.*body or edge mismatch.*conflicting native relation.*parent-record evidence.*stops without repair or duplicate mutation/isu);
   assert.match(tickets, /`body` representation.*no native blocking relation.*`native` representation.*native blocking relation/isu);
   assert.match(tickets, /canonical body edges and `decomposition:v1`.*complete directed graph.*both representations.*native evidence.*additional only in `native`/isu);
@@ -1112,7 +1114,8 @@ test("to-tickets publishes one recoverable decomposition record and the exact re
   assert.match(tickets, /decomposition:v1.*parent.*Planning Seal.*target.*key-to-Issue mapping.*blocker edges/isu);
   assert.match(tickets, /no current record.*write exactly one.*one matching record.*reuse.*conflicting or multiple records.*stop without mutation/isu);
   assert.match(tickets, /record.*completeness.*never.*child identity/isu);
-  assert.match(tickets, /failure before or during record publication.*recoverable partial publication by key.*fresh.*retry.*exact consumed Planning Seal.*frozen legacy.*profile-v1.*existing bound successor.*never.*cross.*operation/isu);
+  assert.match(tickets, /failure before or during record publication.*recoverable partial publication by key.*fresh.*retry.*exact consumed Planning Seal.*never cross-select.*another operation/isu);
+  assert.match(tickets, /frozen decomposition legacy resume.*existing bound successor Planning Seal.*never cross-select/isu);
   assert.match(tickets, /bootstrap rerun.*reuse.*matching children.*publish only the missing parent record/isu);
   assert.match(tickets, /open child.*every owned and External blocker.*closed.*dependency-ready frontier/isu);
   assert.match(tickets, /blocked or closed children.*no ready label/isu);
@@ -2108,8 +2111,8 @@ test("Issue delivery uses Matt specs and separate execution and closeout", () =>
   assert.match(execute, /Issue target branch.*only default merge destination/isu);
   assert.match(execute, /Any number of Issue worktrees may execute concurrently/iu);
   assert.match(execute, /target movement alone.*does not supersede.*`implementation_complete`/isu);
-  assert.match(execute, /blocked state supersedes completion only when.*invalidates.*candidate.*implementation.*Standards.*Spec.*verification/isu);
-  assert.match(execute, /dirty target.*partial close.*not.*conflict-resolution rerun.*cheap read-only.*identity.*evidence.*do not run.*baseline.*focused.*final.*full suite.*review.*commit.*tracker note.*`\/close-issue <Issue-ID>`/isu);
+  assert.match(execute, /only evidence invalidating implementation, review, or verification/isu);
+  assert.match(execute, /dirty target stop.*partial close.*not a conflict-resolution rerun.*cheap read-only identity\/evidence.*do not rerun verification\/review.*commit\/note.*`\/close-issue <Issue-ID>`/isu);
   assert.match(execute, /explicit conflict-resolution or technical-failure recovery.*same topic branch.*Issue worktree.*latest target.*new attempt baseline.*merge.*baseline.*topic branch.*without rebasing or resetting.*Acceptance Criteria.*unchanged.*new candidate.*contain.*baseline.*new `implementation_complete`.*current/isu);
   assert.doesNotMatch(execute, /any blocked exit.*supersedes older successful execution evidence/isu);
   assert.match(execute, /completion note/iu);
@@ -3443,7 +3446,7 @@ test("installed route diagnostics expose owning seams without setup authority", 
   assert.equal(existsSync("skills/personal/run-issue-workflow/scripts/gitlab-to-tickets-adapters.mjs"), true);
   assert.match(read("skills/engineering/setup-matt-pocock-skills/issue-tracker-gitlab.md"),
     /tracker-only `to-tickets@v2`.*gitlab-to-tickets-entry\.mjs.*read-only `inspect`.*`Blocking representation`.*package-installation repair.*configuration `UNKNOWN`.*never calls `invoke`/isu);
-  assert.match(read("skills/personal/run-issue-workflow/SKILL.md"), /run-authority-adapters\.mjs.*pi-workflow-host\.mjs/isu);
+  assert.match(read("skills/personal/run-issue-workflow/references/delivery-host.md"), /run-authority-adapters\.mjs.*pi-workflow-host\.mjs/isu);
   assert.match(read("skills/engineering/verify-target-before-push/SKILL.md"), /references\/aggregate-verification-interfaces\.md/u);
   assert.match(read("skills/engineering/push-target/SKILL.md"), /references\/push-delivery-interfaces\.md/u);
   assert.match(read("skills/engineering/ask-matt/SKILL.md"), /grill-with-docs.*to-spec.*to-tickets.*run-issue-workflow.*verify-target-before-push.*push-target/isu);
@@ -3568,17 +3571,18 @@ test("delivery host is explicit personal only", () => {
   assert.match(skillEntry, /`\/run-issue-workflow <Spec-ID>`.*exact Spec.*no-argument.*one unique non-terminal Run.*otherwise.*no workflow action/isu);
   assert.match(skillEntry, /immutable Run identity.*exact Spec.*target.*classification.*approved scope.*decomposition identity/isu);
   assert.match(skillEntry, /DAG Run Grant.*`max_parallel`.*default three/isu);
-  assert.match(skillEntry, /Domain action reducer.*append-only Run journal own legal actions.*grants.*six-hour Issue budgets.*ten-wave material repair limits/isu);
+  assert.match(skill, /Domain action reducer.*computes.*legal action set/isu);
+  assert.match(skill, /per-Run journal owns grants.*execution budgets/isu);
   assert.match(skillEntry, /Read \[the delivery host contract\]\(references\/delivery-host\.md\) only when/isu);
-  assert.match(skillEntry, /`run-authority-adapters\.mjs` reduces owning facts.*`pi-workflow-host\.mjs` plans exactly the legal actions/isu);
-  assert.match(skillEntry, /stateless native stepper.*reconstructs the round.*bounded action metadata.*artifact reference/isu);
-  assert.match(skillEntry, /`create_lane`.*fresh native subagent run.*`resume_lane`.*exact previous native generation.*`observe_lane`.*read-only/isu);
-  assert.match(skillEntry, /`implementation_complete`.*serialize `close-issue`/isu);
-  assert.match(skillEntry, /Release dependants only after.*blocker is closed.*candidate is reachable from target.*exact worktree is absent/isu);
-  assert.match(skillEntry, /Close a Multi-Issue parent only after every child reaches node success/isu);
+  assert.match(skill, /pi-workflow-host\.mjs` plans exactly the legal actions.*run-authority-adapters\.mjs` reduces the tracker/isu);
+  assert.match(skill, /native-coordinator-step\.mjs.*stateless coordinator boundary.*bounded.*artifact reference/isu);
+  assert.match(skill, /one native subagent lane per authorized action/isu);
+  assert.match(skillEntry, /`implementation_complete`.*permits serialized `close-issue`/isu);
+  assert.match(skillEntry, /Dependants release only after their blocker is closed, candidate-reachable from target, and worktree-absent/isu);
+  assert.match(skillEntry, /A Multi-Issue parent closes after every child reaches node success/isu);
   assert.match(skillEntry, /Only `close-issue` acquires the repository close lease and target writer/isu);
   assert.match(skillEntry, /six-hour Issue budgets/isu);
-  assert.match(skillEntry, /Explicit Spec or batch selection includes matching completed Runs.*cached `SUCCEEDED`.*no execution, verification or close replay/isu);
+  assert.match(skillEntry, /Matching completed Runs still reconcile canonical identity.*cached `SUCCEEDED`.*never replays execution, verification, or closeout/isu);
 
   assert.match(host, /HOST_ACTION_POLICY.*dispatch_issue.*close_issue/isu);
   assert.match(host, /planHostActions.*planHostRound/isu);
