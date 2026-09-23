@@ -10,6 +10,7 @@ import { inspectGitHubToTickets, invokeGitHubToTickets } from "../../skills/pers
 import { digest, createGhTransport } from "../../skills/personal/run-issue-workflow/scripts/github-producer-transport.mjs";
 import { bodyDigest, readWorkflowRecords } from "../../skills/personal/run-issue-workflow/scripts/github-workflow-records.mjs";
 import { createWorkflowControlStore } from "../../skills/personal/run-issue-workflow/scripts/workflow-control-store.mjs";
+import { createRunStore } from "../../skills/personal/run-issue-workflow/scripts/run-store.mjs";
 import { bindProducerCheckpointOperationIdentity, createProducerOperationCheckpoint,
   deriveExecuteIssueOperationIdentity } from "../../skills/personal/run-issue-workflow/scripts/workflow-operation-identity.mjs";
 
@@ -797,6 +798,30 @@ test("a partial child with lifecycle drift remains fail-closed", async t => {
   const oldBody = childBody({ key, seal: f.seal });
   const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
   f.addRecord(partial.child.number, { kind: "implementation_blocked", reasonCode: "scope_revision_required" });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  await assert.rejects(() => context.adapter.tracker.updateChild({ identity: context.identity,
+    child: { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, "Deliver revised child.") }, previous, preflight }),
+  { code: "GITHUB_PRODUCER_CONFLICT" });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, 0);
+});
+
+test("a partial child with a prior Run Grant remains fail-closed", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
+  const runs = createRunStore({ gitCommonDir: f.gitCommonDir });
+  const writer = runs.acquireWriter("partial_grant");
+  try {
+    writer.append({ type: "grant.recorded", at: "2026-09-12T00:00:00.000Z", runIdentity: {
+      runId: "partial_grant", specId: parentIdentity, approvedScopeHash: digest("prior grant"), target: "target",
+      classification: "MULTI", decompositionIdentity: "D_prior" }, maxParallel: 3,
+    workflowVersion: { id: "a".repeat(64), sourceCommit: "b".repeat(40), sourceRepository: repositoryId, protocolVersion: 1 } });
+  } finally { writer.release(); }
   const context = await start(f);
   const preflight = await preflightFor(context, [key]);
   const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,

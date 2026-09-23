@@ -1024,9 +1024,8 @@ export async function createGitHubToTicketsAdapters(options) {
     for (const runId of runs.listRunIds()) {
       const events = runs.readEvents(runId);
       const grant = events.findLast(event => event.type === "grant.recorded")?.runIdentity;
-      if (grant?.specId === parentIdentity && events.some(event => event.type === "dispatch.recorded"
-        && event.issueId === current.trackerIdentity)) {
-        throw conflict("Previous partial child retains a Run dispatch owner");
+      if (grant?.specId === parentIdentity) {
+        throw conflict("Previous partial child retains a Run Grant or dispatch owner");
       }
     }
     return identity;
