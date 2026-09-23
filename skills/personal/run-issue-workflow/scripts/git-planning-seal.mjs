@@ -6,6 +6,11 @@ import { createRunStore } from "./run-store.mjs";
 import { conflict, digest } from "./gitlab-producer-transport.mjs";
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const sameFacts = (left, right) => {
+  if (!left || !right || typeof left !== "object" || typeof right !== "object" || Array.isArray(left) || Array.isArray(right)) return false;
+  const leftKeys = Object.keys(left).sort(); const rightKeys = Object.keys(right).sort();
+  return same(leftKeys, rightKeys) && leftKeys.every(key => left[key] === right[key]);
+};
 const sha = value => /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(value ?? "");
 const hash = value => /^sha256:[a-f0-9]{64}$/u.test(value ?? "");
 const text = (value, name) => { if (typeof value !== "string" || !value.trim()) throw conflict(`${name} is required`); return value; };
@@ -115,7 +120,7 @@ export function createGitPlanningSeal({ repository, repositoryId, specId, target
   };
   const readAllocation = allocationId => nativeAllocation(allocationRecord(allocationId));
   const assertAllocationRequest = (record, request) => {
-    if (record.requestBaseline !== request.baseline || !same(record.requestedRelevantFacts, request.relevantFacts)) {
+    if (record.requestBaseline !== request.baseline || !sameFacts(record.requestedRelevantFacts, request.relevantFacts)) {
       throw conflict("Planning allocation scope or baseline differs");
     }
     return record;

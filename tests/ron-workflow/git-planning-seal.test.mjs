@@ -45,6 +45,11 @@ test("adapter allocation issues one opaque task identity and rebinds only a clea
   const retry = { proposedSpecIdentity: "spec-142", baseline: f.baseline,
     relevantFacts: { "CONTEXT.md": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:CONTEXT.md")}` } };
   assert.deepEqual(f.owner.allocateLane(retry).allocationId, f.allocation.allocationId);
+  const facts = { "CONTEXT.md": retry.relevantFacts["CONTEXT.md"],
+    "other.txt": `git-blob:${f.git(f.repository, "rev-parse", "HEAD:other.txt")}` };
+  const ordered = f.owner.allocateLane({ proposedSpecIdentity: "spec-ordered-facts", baseline: f.baseline, relevantFacts: facts });
+  assert.equal(f.owner.allocateLane({ proposedSpecIdentity: "spec-ordered-facts", baseline: f.baseline,
+    relevantFacts: { "other.txt": facts["other.txt"], "CONTEXT.md": facts["CONTEXT.md"] } }).allocationId, ordered.allocationId);
   for (const extra of [{ planningAdapterEndpoint: "https://planning.example/mcp" }, { provider: "remote" }, { credentials: "secret" },
     { endpoint: "https://planning.example/mcp" }, { remote: true }, { token: "secret" }]) {
     assert.throws(() => f.owner.allocateLane({ ...retry, ...extra }), /bundled local provider/u);
