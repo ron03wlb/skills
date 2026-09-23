@@ -543,7 +543,12 @@ export async function createGitHubToTicketsAdapters(options) {
     key: `${input.operationId}:child-update:${expected.key}`,
     payload: { key: expected.key, trackerIdentity: previous.trackerIdentity,
       previousVersion: previous.version, previousBodyDigest: bodyDigest(previous.body),
-      replacementBodyDigest: expected.bodyDigest, decompositionIdentity: previous.decompositionIdentity },
+      replacementBodyDigest: expected.bodyDigest,
+      ...(previous.decompositionIdentity
+        ? { decompositionIdentity: previous.decompositionIdentity }
+        : { partialOperationId: previous.partialCheckpointIdentity.operationId,
+          partialTransactionId: previous.partialTransactionId }),
+    },
   });
   const updateChild = async ({ identity: input, child, previous, preflight,
     retryRejected = false }) => withProducerLock(connection, parentIdentity, async () => {
@@ -563,16 +568,18 @@ export async function createGitHubToTicketsAdapters(options) {
       observe: async () => {
         const current = await snapshot(previous.trackerIdentity);
         if (bodyMatches(current.body, expected.body)) {
-          return readChild({ ...expected, trackerIdentity: current.trackerIdentity });
+          return previous.decompositionIdentity
+            ? readChild({ ...expected, trackerIdentity: current.trackerIdentity })
+            : readChildContract({ ...expected, trackerIdentity: current.trackerIdentity }, { native: "none" });
         }
-        await validateRevisionEvidence({ previous, expected, current, preflight });
+        await validateRevisionEvidence({ input, previous, expected, current, preflight });
         return null;
       },
       write: async () => {
         assertDecompositionOpen(input);
         await validatePreflight(preflight, { keys, blockers });
         const current = await snapshot(previous.trackerIdentity);
-        await validateRevisionEvidence({ previous, expected, current, preflight });
+        await validateRevisionEvidence({ input, previous, expected, current, preflight });
         await api(`repos/${repositoryName}/issues/${current.nativeIssueNumber}`, "PATCH", { body: expected.body });
       },
     });
@@ -906,10 +913,14 @@ export async function createGitHubToTicketsAdapters(options) {
     }
   };
   const validatePreviousRevisionInput = previous => {
-    const fields = ["body", "decompositionIdentity", "trackerIdentity", "version"].sort();
-    if (!previous || typeof previous !== "object" || Array.isArray(previous)
-      || !same(Object.keys(previous).sort(), fields)
-      || fields.some(field => typeof previous[field] !== "string" || !previous[field])) {
+    const completedFields = ["body", "decompositionIdentity", "trackerIdentity", "version"].sort();
+    const partialFields = ["body", "partialCheckpointIdentity", "partialTransactionId", "title", "trackerIdentity", "version"].sort();
+    if (!previous || typeof previous !== "object" || Array.isArray(previous)) {
+      throw conflict("Previous child revision evidence is malformed");
+    }
+    const fields = Object.keys(previous).sort();
+    if ((!same(fields, completedFields) && !same(fields, partialFields))
+      || ["body", "trackerIdentity", "version"].some(field => typeof previous[field] !== "string" || !previous[field])) {
       throw conflict("Previous child revision evidence is malformed");
     }
     if (!/^sha256:[a-f0-9]{64}$/u.test(previous.version)) {
@@ -918,13 +929,86 @@ export async function createGitHubToTicketsAdapters(options) {
     if (!nodeIdPattern.test(previous.trackerIdentity)) {
       throw conflict("Previous child revision identity is malformed");
     }
-    if (typeof previous.decompositionIdentity !== "string" || !previous.decompositionIdentity) {
+    if (same(fields, completedFields) && (typeof previous.decompositionIdentity !== "string" || !previous.decompositionIdentity)) {
       throw conflict("Previous child revision Decomposition identity is malformed");
+    }
+    if (same(fields, partialFields) && (typeof previous.title !== "string" || !previous.title
+      || typeof previous.partialTransactionId !== "string" || !sha256Pattern.test(previous.partialTransactionId)
+      || !previous.partialCheckpointIdentity || typeof previous.partialCheckpointIdentity !== "object"
+      || Array.isArray(previous.partialCheckpointIdentity))) {
+      throw conflict("Previous partial child revision evidence is malformed");
     }
     return previous;
   };
-  const validateRevisionEvidence = async ({ previous, expected, current, preflight }) => {
+  const validatePartialRevisionEvidence = async ({ input, previous, expected, current }) => {
+    let identity;
+    try { identity = bindProducerCheckpointOperationIdentity(previous.partialCheckpointIdentity); }
+    catch { throw conflict("Previous partial child checkpoint identity is malformed"); }
+    if (!same(identity, previous.partialCheckpointIdentity)
+      || identity.operationId === input.operationId || identity.repositoryId !== repositoryId
+      || identity.specId !== parentIdentity || identity.producerCommand !== "to-tickets"
+      || identity.target !== target || identity.bindings?.classification !== "MULTI"
+      || identity.bindings?.trackerIdentity !== parentIdentity
+      || identity.bindings?.approvedScopeIdentity === upstream.publication.approvedScopeIdentity
+      || !identity.bindings?.upstream?.publicationIdentity || !identity.bindings?.upstream?.handoffIdentity) {
+      throw conflict("Previous partial child checkpoint is outside the superseded parent scope");
+    }
+    const transaction = checkpoints.readCheckpoint(identity);
+    if (!transaction || transaction.schema !== "workflow-checkpoint-transaction:v2"
+      || transaction.transactionId !== previous.partialTransactionId || transaction.state !== "INCOMPLETE"
+      || transaction.nextStage !== "decomposition.read_back" || transaction.progress.length !== 0) {
+      throw conflict("Previous partial child transaction is not an unstarted decomposition");
+    }
+    if (await findRecord("decomposition:v1", identity.operationId)
+      || await findRecord("producer_handoff", identity.operationId)) {
+      throw conflict("Previous partial child already has parent decomposition evidence");
+    }
+    const entries = await commentEntries(parentNumber);
+    const publication = oneEntry(entries, entry => entry.identity === identity.bindings.upstream.publicationIdentity,
+      "the previous partial Spec publication");
+    const handoff = oneEntry(entries, entry => entry.identity === identity.bindings.upstream.handoffIdentity,
+      "the previous partial Spec handoff");
+    if (!publication || publication.record.kind !== "spec_publication" || !handoff || handoff.record.kind !== "producer_handoff"
+      || publication.record.authority?.specId !== parentIdentity || publication.record.authority?.target !== target
+      || publication.record.authority?.classification !== "MULTI"
+      || handoff.record.producerCommand !== "to-spec" || handoff.record.specId !== parentIdentity
+      || handoff.record.target !== target || handoff.record.classification !== "MULTI"
+      || handoff.record.publicationIdentity !== publication.identity || handoff.record.publicationDigest !== publication.bodySha256
+      || handoff.record.checkpointIdentity?.bindings?.approvedScopeIdentity !== identity.bindings.approvedScopeIdentity) {
+      throw conflict("Previous partial child publication lineage differs");
+    }
+    if (previous.trackerIdentity !== current.trackerIdentity || previous.version !== current.version
+      || previous.body !== current.body || previous.title !== current.title || current.state !== "open"
+      || current.labels.length !== 0 || (await nativeParent(current.nativeIssueNumber)) !== null
+      || (await nativeBlockersFor(current.nativeIssueNumber)).length !== 0) {
+      throw conflict("Previous partial child body, version, lifecycle, or relationship state changed");
+    }
+    const parsed = parseChild({ key: expected.key, title: previous.title, body: previous.body });
+    if (parsed.planningSeal !== identity.bindings.planningSeal) {
+      throw conflict("Previous partial child Planning baseline differs from its transaction");
+    }
+    const mutation = readMutation(connection, childDescriptor(identity, { key: expected.key, title: previous.title,
+      body: previous.body }));
+    if (mutation.state !== "ACKNOWLEDGED") {
+      throw conflict("Previous partial child creation mutation is missing or unresolved");
+    }
+    const lifecycle = (await commentEntries(current.nativeIssueNumber)).filter(item => item.record.kind.startsWith("implementation_"));
+    if (lifecycle.length !== 0) throw conflict("Previous partial child has execution lifecycle evidence");
+    for (const runId of runs.listRunIds()) {
+      const events = runs.readEvents(runId);
+      const grant = events.findLast(event => event.type === "grant.recorded")?.runIdentity;
+      if (grant?.specId === parentIdentity && events.some(event => event.type === "dispatch.recorded"
+        && event.issueId === current.trackerIdentity)) {
+        throw conflict("Previous partial child retains a Run dispatch owner");
+      }
+    }
+    return identity;
+  };
+  const validateRevisionEvidence = async ({ input, previous, expected, current, preflight }) => {
     validatePreviousRevisionInput(previous);
+    if (!previous.decompositionIdentity) {
+      return validatePartialRevisionEvidence({ input, previous, expected, current });
+    }
     if (previous.trackerIdentity !== current.trackerIdentity
       || previous.version !== current.version || previous.body !== current.body || current.state !== "open") {
       throw conflict("Previous child body, version, identity, or open state changed");

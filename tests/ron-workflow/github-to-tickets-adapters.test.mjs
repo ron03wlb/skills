@@ -678,6 +678,87 @@ function addPriorDecomposition(f, { key, childNumber, body }) {
   return { identity, publication: priorPublication, specHandoff: priorSpecHandoff, decomposition, handoff, mapping };
 }
 
+function addPartialDecomposition(f, { key, title, body }) {
+  const approvedScopeIdentity = digest(`partial:${key}`);
+  const authority = { specId: parentIdentity, target: "target", planningSeal: f.seal,
+    classification: "MULTI", approvedScopeHash: digest(`partial scope:${key}`), decompositionIdentity: null };
+  const publication = f.addRecord(parentNumber, { kind: "spec_publication", repositoryId,
+    operationKey: digest(`partial publication:${key}`), authority, trackerIdentity: parentIdentity,
+    transactionIdentity: digest(`partial transaction:${key}`), version: digest(`partial version:${key}`), labels: [] });
+  const handoff = f.addRecord(parentNumber, { kind: "producer_handoff", repositoryId,
+    operationKey: digest(`partial handoff:${key}`), producerCommand: "to-spec", specId: parentIdentity,
+    target: "target", classification: "MULTI", publicationIdentity: publication.identity,
+    publicationDigest: publication.bodySha256,
+    checkpointIdentity: { bindings: { approvedScopeIdentity } } });
+  const identity = bindProducerCheckpointOperationIdentity({ repositoryId, specId: parentIdentity,
+    producerCommand: "to-tickets", profileVersion: "v2", target: "target", baseline: f.seal,
+    bindings: { planningSeal: f.seal, classification: "MULTI", approvedScopeIdentity,
+      trackerIdentity: parentIdentity, upstream: { publicationIdentity: publication.identity,
+        handoffIdentity: handoff.identity }, readyLabel } });
+  const transaction = createProducerOperationCheckpoint({ store: f.store, identity });
+  const child = f.addChild(180, { title, body });
+  const payload = { key, title, body, parent: parentIdentity };
+  const mutationKey = `${identity.operationId}:child:${key}`;
+  const fingerprint = digest(JSON.stringify(payload));
+  const root = join(f.gitCommonDir, "matt-workflow-control", "github-producer-intents");
+  const stem = join(root, digest(`${repositoryId}:${mutationKey}`).slice(7));
+  mkdirSync(root, { recursive: true });
+  writeFileSync(`${stem}.json`, JSON.stringify({ schema: "github-producer-intent:v1", key: mutationKey, fingerprint }));
+  mkdirSync(`${stem}.attempts`);
+  writeFileSync(join(`${stem}.attempts`, "000001.attempt.json"), JSON.stringify({
+    schema: "github-producer-attempt:v1", key: mutationKey, fingerprint, attempt: 1 }));
+  writeFileSync(join(`${stem}.attempts`, "000001.result.json"), JSON.stringify({
+    schema: "github-producer-result:v1", key: mutationKey, fingerprint, attempt: 1,
+    state: "ACKNOWLEDGED", httpStatus: 201, requestId: "fixture-partial" }));
+  return { child, identity, transaction, publication, handoff };
+}
+
+test("an exact unstarted partial child recovers once after a lost replacement response", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  const replacement = { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, `Deliver revised ${key}.`) };
+  const before = f.writes().filter(call => call.method === "PATCH").length;
+  f.failures.failAfterWrite = true;
+  const updated = await context.adapter.tracker.updateChild({ identity: context.identity, child: replacement,
+    previous, preflight });
+  assert.equal(updated.trackerIdentity, partial.child.node_id);
+  assert.equal(f.issues.get(partial.child.number).body, replacement.body);
+  await context.adapter.tracker.updateChild({ identity: context.identity, child: replacement, previous,
+    preflight: await preflightFor(context, [key]) });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, before + 1,
+    "exact read-back reconciles a lost response without a duplicate update");
+  await context.adapter.tracker.publishRelation({ identity: context.identity,
+    relation: { kind: "parent", child: partial.child.node_id }, preflight: await preflightFor(context, [key]) });
+  const decomposition = await context.adapter.tracker.publishDecomposition({ identity: context.identity,
+    decompositionMapping: { [key]: partial.child.node_id }, blockerEdges: [], children: [replacement],
+    preflight: await preflightFor(context, [key]) });
+  assert.equal(decomposition.decompositionIdentity, decomposition.decompositionIdentity);
+});
+
+test("a partial child with lifecycle drift remains fail-closed", async t => {
+  const f = fixture(t);
+  const key = "169/01";
+  const oldBody = childBody({ key, seal: f.seal });
+  const partial = addPartialDecomposition(f, { key, title: "Partial child", body: oldBody });
+  f.addRecord(partial.child.number, { kind: "implementation_blocked", reasonCode: "scope_revision_required" });
+  const context = await start(f);
+  const preflight = await preflightFor(context, [key]);
+  const previous = { trackerIdentity: partial.child.node_id, title: partial.child.title, body: oldBody,
+    version: preflight.matches[key][0].version, partialCheckpointIdentity: partial.identity,
+    partialTransactionId: partial.transaction.transactionId };
+  await assert.rejects(() => context.adapter.tracker.updateChild({ identity: context.identity,
+    child: { key, title: "Revised child", body: oldBody.replace(`Deliver ${key}.`, "Deliver revised child.") }, previous, preflight }),
+  { code: "GITHUB_PRODUCER_CONFLICT" });
+  assert.equal(f.writes().filter(call => call.method === "PATCH").length, 0);
+});
+
 test("an approved unfinished child revision replaces only the exact old body and version", async t => {
   const f = fixture(t);
   const key = "169/01";
