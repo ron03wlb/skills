@@ -9,6 +9,7 @@ npx skills@latest add mattpocock/skills --skill=<name>
 ```
 
 - **[batch-grill-me](./batch-grill-me/SKILL.md)** — Relentless interview that asks the whole currently answerable decision frontier in each round. User-invoked.
+- **[gitlab-batch](./gitlab-batch/SKILL.md)** — Independent Pi trial: deliver one GitLab batch in one Orca worktree across bounded sessions, with whole-batch review and human-confirmed local integration; macOS/Linux/WSL, no push. User-invoked.
 - **[loop-me](./loop-me/SKILL.md)**: Grill yourself into implementable workflow specs over multiple sessions, using the current directory as a stateful workspace. User-invoked.
 - **[writing-beats](./writing-beats/SKILL.md)**: Shape an article as a journey of beats, choose-your-own-adventure style. Pick a starting beat, write only that beat, then pivot to the next, until the article reaches a natural end.
 - **[writing-fragments](./writing-fragments/SKILL.md)**: Grilling session that mines you for fragments (heterogeneous nuggets of writing) and appends them to a single document as raw material for a future article.

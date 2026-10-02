@@ -2,7 +2,7 @@
 
 `ask-matt` is the concise router over this skill set. It tells you which flow and next command fit; it does no planning, implementation, integration, or push itself.
 
-The router does not re-decide delivery shape. [to-spec](https://aihero.dev/skills-to-spec) is the sole authority for Single-Issue versus Multi-Issue Tracker [Specs](https://www.aihero.dev/ai-coding-dictionary/spec), so every downstream skill consumes one published route.
+The router does not re-decide delivery shape. Within the existing Spec/Run flow, [to-spec](https://aihero.dev/skills-to-spec) is the sole authority for Single-Issue versus Multi-Issue Tracker [Specs](https://www.aihero.dev/ai-coding-dictionary/spec), so every downstream skill consumes one published route.
 
 ## When to reach for it
 
@@ -56,10 +56,20 @@ Known permissions and SQL prerequisites belong before Run-ready, through plannin
 - Failed integration keeps the merge, worktree and completion history until the exact changed inputs pass verification.
 - Governing-workflow defects use a scoped source maintenance task and verified installation before same-Run reconciliation.
 
+## Independent GitLab batch trial
+
+For newly planned GitLab work, the in-progress `gitlab-batch` trial is a separate, human-chosen route. Type `/skill:gitlab-batch plan <requirement>` in Pi, then confirm publication and start. One batch retains one Orca worktree while bounded work segments use successive sessions in the same terminal. Whole-batch verification and restricted independent review precede separately confirmed local integration; nothing is pushed.
+
+- New independent batch on macOS, Linux or WSL: explicitly load its skill and session-handoff extension using the instructions in the repository's [in-progress bucket](https://github.com/ron03wlb/skills/tree/features/ron/skills/in-progress). The extension's `/gitlab-batch-next <root-issue-ref>` asks whether to continue in a fresh session or pause.
+- Existing Spec, Run or Issue delivery: keep its published route above. The trial does not migrate or adopt old work, call old planning/closeout owners, or replace their setup/install process.
+- Production readiness: mock tests and dual-platform CI do not establish real Orca or interactive Pi smoke. Check the trial's recorded platform evidence before relying on it.
+
+The trial is not promoted or shipped in the Claude plugin, and it has no published skill docs page. You learn one skill, not separate planning, execution and close skills.
+
 ## It's working if
 
 - You get one route for the exact work in front of you, with the reason its authority and lifecycle fit.
-- Tracker work stays on the published Spec and Issue path, while standalone work stays on the direct `implement` path.
+- Existing tracker work stays on the published Spec and Issue path, while standalone work stays on the direct `implement` path; a deliberately selected new GitLab batch stays in its independent trial.
 - Helpers and closeout steps appear only where their prerequisites and authority are already established.
 
 ## Other routes and phase boundaries

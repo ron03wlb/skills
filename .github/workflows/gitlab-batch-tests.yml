@@ -1,0 +1,38 @@
+name: GitLab batch trial contracts
+
+on:
+  push:
+    paths:
+      - 'skills/in-progress/gitlab-batch/**'
+      - 'tests/gitlab-batch/**'
+      - 'skills/engineering/ask-matt/**'
+      - 'docs/engineering/ask-matt.md'
+      - '.github/workflows/gitlab-batch-tests.yml'
+  pull_request:
+    paths:
+      - 'skills/in-progress/gitlab-batch/**'
+      - 'tests/gitlab-batch/**'
+      - 'skills/engineering/ask-matt/**'
+      - 'docs/engineering/ask-matt.md'
+      - '.github/workflows/gitlab-batch-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+      - name: Independent batch and extension tests (no credentials)
+        run: node --test tests/gitlab-batch/*.test.mjs
+      - name: Existing packaging and routing contracts
+        run: node --test tests/ron-workflow/skill-contracts.test.mjs
