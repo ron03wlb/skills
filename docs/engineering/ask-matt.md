@@ -11,6 +11,7 @@ You invoke this by typing `/ask-matt`; the agent won't reach for it on its own.
 | Your situation | What the router gives back |
 | --- | --- |
 | An idea, and no idea where to start | The head of the main flow, and whether the build is small enough to skip the spec |
+| Confusing issues or questions you need to answer | [explain](https://aihero.dev/skills-explain), for a read-only explanation of all the problems, alternatives, and expected effects before you decide |
 | Bugs and requests arriving from other people | The [triage](https://aihero.dev/skills-triage) on-ramp, and why [tickets](https://www.aihero.dev/ai-coding-dictionary/ticket) you generated yourself don't belong on it |
 | Two skills that look interchangeable | The line between them, and it is usually one concrete test rather than a matter of taste. [grill-me](https://aihero.dev/skills-grill-me) or [grill-with-docs](https://aihero.dev/skills-grill-with-docs) turns on whether you are in a working directory; [grill-with-docs](https://aihero.dev/skills-grill-with-docs) or [wayfinder](https://aihero.dev/skills-wayfinder) turns on whether the effort fits one session |
 | A long session and a decision about the [context](https://www.aihero.dev/ai-coding-dictionary/context) | The ordered tree over the five options at a phase boundary |

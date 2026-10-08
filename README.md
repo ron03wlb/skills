@@ -229,6 +229,7 @@ General workflow tools, not code-specific.
 
 **User-invoked**
 
+- **[explain](./skills/productivity/explain/SKILL.md)**: Understand confusing issues and decision questions with causes, alternatives, and expected effects. Read-only, in Traditional Chinese by default.
 - **[grill-me](./skills/productivity/grill-me/SKILL.md)**: Get relentlessly interviewed about a plan or design until every branch of the design tree is resolved.
 - **[handoff](./skills/productivity/handoff/SKILL.md)**: Compact the current conversation into a handoff document so another agent can continue the work.
 - **[teach](./skills/productivity/teach/SKILL.md)**: Teach the user a new skill or concept over multiple sessions, using the current directory as a stateful teaching workspace.
