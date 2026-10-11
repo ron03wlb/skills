@@ -32,6 +32,18 @@ DESTS=("$HOME/.claude/skills" "$HOME/.agents/skills")
 # destination.
 RESERVED=("run-issue-workflow")
 
+# Skills retired from local use but kept in the repo because promoted contracts
+# and tests still reference them. Never linked into any destination.
+EXCLUDED=("execute-issue" "close-issue" "pre-execute-issue")
+
+is_excluded() {
+  local candidate="$1" name
+  for name in "${EXCLUDED[@]}"; do
+    [ "$name" = "$candidate" ] && return 0
+  done
+  return 1
+}
+
 is_reserved() {
   local candidate="$1" name
   for name in "${RESERVED[@]}"; do
@@ -74,7 +86,25 @@ for DEST in "${DESTS[@]}"; do
       continue
     fi
 
+    if is_excluded "$name"; then
+      echo "excluded $name -> retired from local use, not linked ($DEST)"
+      continue
+    fi
+
     target="$DEST/$name"
+
+    # An entry linked by another installer (e.g. the upstream Matt Pocock
+    # package) is owned there; replacing it would silently downgrade to this
+    # repo's fork.
+    if [ -L "$target" ]; then
+      case "$(readlink "$target")" in
+        "$REPO"/*) ;;
+        *)
+          echo "skipped $name -> owned by $(readlink "$target") ($DEST)"
+          continue
+          ;;
+      esac
+    fi
 
     if [ -e "$target" ] && [ ! -L "$target" ]; then
       rm -rf "$target"
