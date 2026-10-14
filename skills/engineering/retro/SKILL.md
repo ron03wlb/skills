@@ -24,6 +24,8 @@ The user has asked for a **retrospective**. You are suggesting improvements to t
 
 4. Present these candidates to the user, in order of severity.
 
+5. When the user adopts candidates, check for **concurrent edits** before writing each one: other sessions run retros on the same repo. For every file you will change, list other worktrees' unmerged changes (`git worktree list`, then `git diff --name-only <integration>...<branch>` and `git -C <path> status --porcelain`) and the integration branch's commits since your base (`git log <base>..<integration> -- <file>`). A hit on the same file or topic means build on it or drop yours; never land a duplicate. Recheck right before merging.
+
 ## Reference
 
 ### Implementation vs Review
