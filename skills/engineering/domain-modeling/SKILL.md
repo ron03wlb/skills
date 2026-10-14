@@ -37,6 +37,8 @@ If a `GLOSSARY-MAP.md` exists at the root, the repo has multiple contexts. The m
 │       └── docs/adr/
 ```
 
+Some repos define their own ADR layout (for example, concept files with one section per ADR and an index in `docs/adr/README.md`); follow it as described in [ADR-FORMAT.md](./ADR-FORMAT.md).
+
 Create files lazily: only when you have something to write. If no `GLOSSARY.md` exists, create one when the first term is resolved. If no `docs/adr/` exists, create it when the first ADR is needed.
 
 ## During the session

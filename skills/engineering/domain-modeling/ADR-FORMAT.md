@@ -2,6 +2,8 @@
 
 ADRs live in `docs/adr/` and use sequential numbering: `0001-slug.md`, `0002-slug.md`, etc.
 
+A repo's own ADR layout overrides this one. When `docs/adr/README.md` or the repo's agent instructions define the layout (for example, one file per concept where each ADR is an anchored, numbered section appended to the concept file that owns it), follow that layout for file placement, headings, numbering, and index updates; this file then supplies only the content guidance.
+
 Create the `docs/adr/` directory lazily: only when the first ADR is needed.
 
 ## Template
@@ -24,7 +26,7 @@ Only include these when they add genuine value. Most ADRs won't need them.
 
 ## Numbering
 
-Scan `docs/adr/` for the highest existing number and increment by one.
+Scan `docs/adr/` for the highest existing number and increment by one. When the repo keeps an ADR index that records the next available number, take the number from it and update the index in the same change instead.
 
 ## When to offer an ADR
 
